@@ -1,0 +1,360 @@
+/* =============================================================================
+   CONDORFINDER — ESTILOS GLOBALES
+   Archivo principal de estilos del sistema de unificación de imágenes aéreas.
+   Utiliza Tailwind CSS v4 con variables CSS personalizadas para el sistema
+   de diseño y tokens de color.
+   ============================================================================= */
+
+
+/* =============================================================================
+   FUENTES
+   Se importan desde Google Fonts:
+   - Shrikhand: usada en el logotipo "CondorFinder" del header
+   - Montserrat: fuente global del sistema (body, textos generales)
+   - Futura: usada en el título principal de cada página
+   ============================================================================= */
+@import url("https://fonts.googleapis.com/css2?family=Shrikhand&family=Montserrat:wght@300;400;500;600;700;800;900&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Futura:wght@300;400;700;900&display=swap");
+
+
+/* =============================================================================
+   TAILWIND CSS v4
+   - "source(none)" desactiva el escaneo automático de clases
+   - "@source" indica manualmente la carpeta a escanear (src/)
+   - "tw-animate-css" agrega animaciones utilitarias adicionales
+   ============================================================================= */
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+
+/* =============================================================================
+   VARIANTE DARK
+   Define cómo Tailwind detecta el modo oscuro.
+   Se activa cuando un ancestro tiene la clase ".dark" en el DOM.
+   El toggle de tema en el header agrega/quita esta clase en <html>.
+   ============================================================================= */
+@custom-variant dark (&:is(.dark *));
+
+
+/* =============================================================================
+   TEMA — TOKENS DE DISEÑO
+   Mapea las variables CSS del sistema de diseño a tokens de Tailwind.
+   Permite usar clases como "bg-primary", "text-destructive", etc.
+   Incluye también los alias de fuentes personalizadas para uso con
+   clases como "font-shrikhand", "font-montserrat", "font-Futura".
+   ============================================================================= */
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ring-offset-background: var(--background);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-info: var(--info);
+
+  /* Fuentes personalizadas registradas como tokens de Tailwind */
+  --font-shrikhand: "Shrikhand", cursive;
+  --font-montserrat: "Montserrat", sans-serif;
+  --font-Futura: "Futura", sans-serif;
+}
+
+
+/* =============================================================================
+   VARIABLES CSS — MODO CLARO (por defecto)
+   Define la paleta de colores base del sistema en modo oscuro por defecto,
+   ya que CondorFinder usa un tema oscuro como base principal.
+
+   Paleta principal:
+   - background: #151414 (gris muy oscuro, casi negro)
+   - primary: #22d3ee (cyan eléctrico — color de acento principal)
+   - success: #34d399 (verde — estados aprobados)
+   - warning: #fbbf24 (amarillo — estados insuficientes)
+   - destructive: #ef4444 (rojo — errores y rechazos)
+   ============================================================================= */
+:root {
+  --radius: 0.625rem;                  /* Radio de borde global para componentes */
+
+  /* Fondos */
+  --background: #151414;
+  --foreground: #ffffff;
+
+  /* Tarjetas y paneles */
+  --card: #1e1e1e;
+  --card-foreground: #ffffff;
+
+  /* Color principal del sistema (cyan) */
+  --primary: #22d3ee;
+  --primary-foreground: #151414;
+
+  /* Color secundario (gris oscuro) */
+  --secondary: #2a2a2a;
+  --secondary-foreground: #ffffff;
+
+  /* Elementos atenuados / textos secundarios */
+  --muted: #2a2a2a;
+  --muted-foreground: #9ca3af;
+
+  /* Acento — igual que primary en este tema */
+  --accent: #22d3ee;
+  --accent-foreground: #151414;
+
+  /* Error / archivos rechazados / solapamiento insuficiente */
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+
+  /* Bordes e inputs */
+  --border: #333333;
+  --input: #333333;
+  --ring: #22d3ee;
+
+  /* Advertencia — cantidad insuficiente de imágenes */
+  --warning: #fbbf24;
+  --warning-foreground: #151414;
+
+  /* Éxito — validaciones aprobadas */
+  --success: #34d399;
+}
+
+
+/* =============================================================================
+   VARIABLES CSS — MODO OSCURO ALTERNATIVO
+   Variables oklch para el modo .dark activado por el toggle del header.
+   Nota: actualmente el sistema usa el modo :root como base oscura,
+   por lo que este bloque aplica solo si se activa la clase .dark en <html>.
+   ============================================================================= */
+.dark {
+  --background: oklch(0.16 0.025 185);
+  --foreground: oklch(0.96 0.008 190);
+  --card: oklch(0.22 0.03 185 / 0.9);
+  --card-foreground: oklch(0.96 0.008 190);
+  --popover: oklch(0.22 0.03 185);
+  --popover-foreground: oklch(0.96 0.008 190);
+  --primary: oklch(0.72 0.13 170);
+  --primary-foreground: oklch(0.12 0.03 175);
+  --secondary: oklch(0.26 0.03 190);
+  --secondary-foreground: oklch(0.96 0.008 190);
+  --muted: oklch(0.25 0.025 190);
+  --muted-foreground: oklch(0.74 0.03 190);
+  --accent: oklch(0.3 0.055 145);
+  --accent-foreground: oklch(0.96 0.008 190);
+  --destructive: oklch(0.7 0.22 25);
+  --destructive-foreground: oklch(0.99 0.005 0);
+  --warning: oklch(0.82 0.17 88);
+  --warning-foreground: oklch(0.18 0.04 80);
+  --success: oklch(0.72 0.18 152);
+  --success-foreground: oklch(0.12 0.04 160);
+  --info: oklch(0.72 0.13 220);
+  --border: oklch(0.75 0.035 180 / 0.18);
+  --input: oklch(1 0 0 / 0.08);
+  --ring: oklch(0.72 0.13 170);
+  --chart-1: oklch(0.72 0.13 170);
+  --chart-2: oklch(0.72 0.18 152);
+  --chart-3: oklch(0.82 0.17 88);
+  --chart-4: oklch(0.7 0.22 25);
+  --chart-5: oklch(0.6 0.05 245);
+  --sidebar: oklch(0.18 0.025 185);
+  --sidebar-foreground: oklch(0.96 0.008 190);
+  --sidebar-primary: oklch(0.72 0.13 170);
+  --sidebar-primary-foreground: oklch(0.12 0.03 175);
+  --sidebar-accent: oklch(0.26 0.03 190);
+  --sidebar-accent-foreground: oklch(0.96 0.008 190);
+  --sidebar-border: oklch(0.75 0.035 180 / 0.18);
+  --sidebar-ring: oklch(0.72 0.13 170);
+
+  /* Color de las líneas de la grilla GIS en modo oscuro */
+  --grid-color: oklch(0.8 0.08 170 / 0.065);
+
+  /* Sombra de brillo para elementos primarios destacados */
+  --glow-primary:
+    0 0 0 1px oklch(0.72 0.13 170 / 0.35), 0 12px 48px -12px oklch(0.72 0.13 170 / 0.4);
+}
+
+
+/* =============================================================================
+   ESTILOS BASE GLOBALES
+   Aplica estilos fundamentales a todos los elementos del documento.
+   ============================================================================= */
+@layer base {
+  /* Todos los elementos heredan el color de borde del sistema de diseño */
+  * {
+    border-color: var(--color-border);
+  }
+
+  /* Fondo, color de texto y fuente global del body */
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-montserrat); /* Fuente global: Montserrat */
+  }
+}
+
+
+/* =============================================================================
+   CLASE: .gis-grid
+   Fondo de cuadrícula tipo GIS que cubre toda la página.
+   Simula una grilla cartográfica con dos niveles de detalle:
+   - Grilla mayor: 96x96px (líneas principales de referencia)
+   - Grilla menor: 16x16px (subdivisiones detalladas)
+   El color de las líneas usa la variable --grid-color con opacidad baja
+   para no interferir con el contenido principal.
+   ============================================================================= */
+.gis-grid {
+  background-image:
+    linear-gradient(var(--grid-color) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-color) 1px, transparent 1px),
+    linear-gradient(var(--grid-color) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
+  background-size:
+    96px 96px,
+    96px 96px,
+    16px 16px,
+    16px 16px;
+  background-position:
+    -1px -1px,
+    -1px -1px,
+    -1px -1px,
+    -1px -1px;
+}
+
+
+/* =============================================================================
+   CLASE: .gis-radial
+   Añade gradientes radiales decorativos sobre el fondo de la página.
+   - Gradiente superior izquierdo: tono cyan/verde (color primario)
+   - Gradiente inferior derecho: tono amarillo/cálido (color warning)
+   Ambos tienen baja opacidad para actuar como iluminación ambiental sutil.
+   Se combina con .gis-grid en el contenedor raíz de la página.
+   ============================================================================= */
+.gis-radial {
+  background:
+    radial-gradient(ellipse at 18% 0%, oklch(0.72 0.13 170 / 0.12), transparent 55%),
+    radial-gradient(ellipse at 92% 100%, oklch(0.82 0.17 88 / 0.08), transparent 55%);
+}
+
+
+/* =============================================================================
+   CLASE: .panel
+   Estilo base para todos los bloques/tarjetas del sistema (secciones principales).
+   Características:
+   - Fondo de color card con blur para efecto glassmorphism
+   - Borde sutil definido por --border
+   - Sombra interior blanca muy tenue (efecto de profundidad)
+   - Sombra exterior negra para separar el panel del fondo
+   Usada en: instrucciones, carga de imágenes, imágenes adjuntas,
+             revisión técnica y mapa unificado.
+   ============================================================================= */
+.panel {
+  background-color: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  backdrop-filter: blur(8px);
+  box-shadow:
+    0 1px 0 0 oklch(1 0 0 / 0.04) inset,   /* Brillo interior sutil */
+    0 8px 24px -12px oklch(0 0 0 / 0.5);    /* Sombra exterior */
+}
+
+
+/* =============================================================================
+   CLASE: .mono
+   Aplica fuente monoespaciada con tracking ligeramente expandido.
+   Usada en etiquetas técnicas, contadores, porcentajes, estados del proceso
+   y cualquier texto que requiera alineación de columnas o estética de código.
+   ============================================================================= */
+.mono {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  letter-spacing: 0.02em;
+}
+
+
+/* =============================================================================
+   ANIMACIÓN: scan
+   Animación de línea de escaneo vertical que recorre un contenedor de arriba
+   a abajo en bucle. Usada en el estado de procesamiento del mapa unificado
+   para indicar visualmente que el sistema está analizando las imágenes.
+   ============================================================================= */
+@keyframes scan {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(100%);
+  }
+}
+
+/* =============================================================================
+   CLASE: .scan-line
+   Aplica la animación "scan" mediante un pseudo-elemento ::after.
+   El gradiente semitransparente simula un haz de luz que barre la superficie.
+   Requiere que el contenedor tenga position: relative y overflow: hidden.
+   ============================================================================= */
+.scan-line::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent, oklch(0.7 0.18 240 / 0.35), transparent);
+  animation: scan 2s linear infinite;
+  pointer-events: none; /* No intercepta clics */
+}
+
+
+/* =============================================================================
+   ANIMACIÓN: pulse-dot
+   Animación de pulso suave para indicadores de estado activo.
+   Alterna entre opacidad completa y reducida, y escala ligeramente
+   el elemento para simular un latido. Actualmente disponible como
+   utilidad, no usada activamente en la UI principal.
+   ============================================================================= */
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(0.85);
+  }
+}
+
+.pulse-dot {
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
