@@ -72,6 +72,7 @@ cd condorfinder
 
 # 2. Instalar dependencias
 pnpm install
+pnpm.cmd approve-builds
 
 # 3. Iniciar el servidor de desarrollo
 pnpm dev
