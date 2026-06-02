@@ -16,7 +16,7 @@
 // definida en src/lib/unify.ts.
 // =============================================================================
 
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Upload,
@@ -42,7 +42,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { unifyImages } from "@/lib/unify";
-import unifiedMapImg from "@/assets/unified-map.jpg";
+import unifiedMapPreview from "@/assets/unified-map-preview.webp";
+import unifiedMapTechnicalDownload from "@/assets/unified-map-simulation.png";
 
 // Registro de la ruta raíz "/" en TanStack Router.
 // "head" define los metadatos HTML de la página (título, descripción, OG tags).
@@ -203,8 +204,14 @@ function Page() {
   /** Porcentaje de solapamiento calculado por el backend (null si aún no se calculó) */
   const [overlap, setOverlap] = useState<number | null>(null);
 
-  /** URL del mapa generado (blob: URL del backend o imagen placeholder) */
+  /** URL del preview web del mapa generado (WEBP en simulacion, backend en produccion) */
   const [resultUrl, setResultUrl] = useState<string | null>(null);
+
+  /** URL de descarga tecnica del mapa generado (TIF/PNG segun backend; PNG en simulacion) */
+  const [technicalDownloadUrl, setTechnicalDownloadUrl] = useState<string | null>(null);
+
+  /** Formato de descarga tecnica mostrado al usuario */
+  const [technicalDownloadFormat, setTechnicalDownloadFormat] = useState<"TIF" | "PNG" | "WEBP">("PNG");
 
   /** Mensaje de error detallado para mostrar al usuario cuando el proceso falla */
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -356,6 +363,8 @@ function Page() {
     setProgress(0);
     setOverlap(null);
     setResultUrl(null);
+    setTechnicalDownloadUrl(null);
+    setTechnicalDownloadFormat("PNG");
     setErrorMsg(null);
   };
 
@@ -416,7 +425,9 @@ function Page() {
       }
       setOverlap(res.overlap);
       setPhase("generating_map"); setProgress(85); await sleep(900);
-      setResultUrl(res.mapUrl || unifiedMapImg);
+      setResultUrl(res.mapUrl || unifiedMapPreview);
+      setTechnicalDownloadUrl(res.technicalDownloadUrl || unifiedMapTechnicalDownload);
+      setTechnicalDownloadFormat(res.technicalDownloadFormat || "PNG");
       setProgress(100); setPhase("done");
     } catch {
       setPhase("error");
@@ -690,14 +701,27 @@ function Page() {
               </div>
             </div>
 
-            {/* Contenedor cuadrado del mapa con estados visuales */}
-            <div className="relative w-full aspect-square overflow-hidden bg-[oklch(0.18_0.04_258)]">
+            {/* Visor del mapa con estados visuales. Usa object-contain para respetar la forma irregular de la ortofoto. */}
+            <div className="relative h-[min(68vh,760px)] min-h-[420px] w-full overflow-hidden bg-[#1d1d1d]">
               <div className="absolute inset-0 opacity-60" style={{
                 backgroundImage: "linear-gradient(var(--grid-color) 1px, transparent 1px), linear-gradient(90deg, var(--grid-color) 1px, transparent 1px)",
                 backgroundSize: "32px 32px",
               }} />
               {phase === "done" && resultUrl ? (
-                <img src={resultUrl} alt="Mapa unificado generado a partir de las imagenes aereas" className="relative h-full w-full object-cover" />
+                <Link
+                  to="/analysis"
+                  className="group relative block h-full w-full cursor-pointer"
+                  title="Abrir analisis de volumen"
+                >
+                  <img
+                    src={resultUrl}
+                    alt="Mapa unificado generado a partir de las imagenes aereas"
+                    className="relative h-full w-full object-contain p-3 transition duration-200 group-hover:brightness-110"
+                  />
+                  <div className="absolute bottom-4 left-1/2 z-10 -translate-x-1/2 rounded-md border border-border bg-card/90 px-3 py-2 text-xs font-medium text-foreground opacity-0 shadow-xl backdrop-blur transition group-hover:opacity-100">
+                    Click para analizar volumen
+                  </div>
+                </Link>
               ) : processing ? (
                 <div className="relative flex h-full w-full flex-col items-center justify-center gap-3">
                   <div className="scan-line relative h-24 w-24 overflow-hidden rounded-md border border-primary/40 bg-primary/10">
@@ -726,20 +750,21 @@ function Page() {
             </div>
 
             {/* Metadatos del mapa */}
-            <div className="grid grid-cols-4 divide-x divide-border border-t border-border bg-card/40">
+            <div className="grid grid-cols-5 divide-x divide-border border-t border-border bg-card/40">
               <MetaCell label="Estado" value={phase === "done" ? "Completado" : phase === "error" ? "Error" : processing ? "Procesando" : "En espera"} />
               <MetaCell label="Imagenes" value={`${validCount} / ${items.length}`} />
               <MetaCell label="Solapamiento" value={overlap == null ? "-" : `${overlap}%`} tone={overlap == null ? undefined : overlap >= MIN_OVERLAP ? "ok" : "error"} />
-              <MetaCell label="Formato" value="JPG" />
+              <MetaCell label="Origen" value={phase === "done" ? "TIF" : "-"} />
+              <MetaCell label="Preview" value={phase === "done" ? "WEBP" : "-"} />
             </div>
 
             {/* Boton de descarga, visible solo cuando el mapa esta listo */}
             {phase === "done" && (
               <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-border">
-                <Button size="sm" onClick={() => { const a = document.createElement("a"); a.href = resultUrl || unifiedMapImg; a.download = "mapa-unificado.jpg"; a.click(); }} className="h-8 px-3 text-xs">
-                  <Download className="mr-1.5 h-3.5 w-3.5" /> Descargar mapa
+                <Button size="sm" onClick={() => { const a = document.createElement("a"); a.href = technicalDownloadUrl || unifiedMapTechnicalDownload; a.download = `mapa-unificado.${technicalDownloadFormat.toLowerCase()}`; a.click(); }} className="h-8 px-3 text-xs">
+                  <Download className="mr-1.5 h-3.5 w-3.5" /> Descargar salida tecnica
                 </Button>
-                <p className="text-xs text-success font-medium">Mapa generado exitosamente</p>
+                <p className="text-xs text-success font-medium">Preview WEBP generado exitosamente</p>
               </div>
             )}
           </section>

@@ -10,6 +10,7 @@ is `src/routes/__root.tsx`.
 | File                     | URL                                                     |
 | ------------------------ | ------------------------------------------------------- |
 | `index.tsx`              | `/`                                                     |
+| `analysis.tsx`           | `/analysis`                                             |
 | `about.tsx`              | `/about`                                                |
 | `users/index.tsx`        | `/users`                                                |
 | `users/$id.tsx`          | `/users/:id` (dynamic — bare `$`, no curly braces)      |
@@ -19,3 +20,10 @@ is `src/routes/__root.tsx`.
 | `__root.tsx`             | app shell — wraps every page; preserve `<Outlet />`     |
 
 `routeTree.gen.ts` is auto-generated. Don't edit it by hand.
+
+## CondorFinder PMV routes
+
+| Route       | Purpose                                                                                   | Status                                           |
+| ----------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| `/`         | HDU1: carga de imagenes JPG, validacion y generacion simulada del mapa unificado.         | Frontend implementado, backend pendiente.        |
+| `/analysis` | HDU2/HDU3 parcial: analisis simulado de volumen, poligonos y resumen de areas detectadas. | Frontend simulado, modelo/backend/GIS pendiente. |

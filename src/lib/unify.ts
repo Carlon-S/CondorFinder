@@ -25,12 +25,16 @@
  *
  * @property status   - Siempre "success" para identificar el tipo de respuesta
  * @property overlap  - Porcentaje de solapamiento calculado entre las imágenes (0-100)
- * @property mapUrl   - URL de la imagen del mapa unificado generado por el backend
+ * @property mapUrl                  - URL del preview web del mapa unificado (idealmente WEBP)
+ * @property technicalDownloadUrl    - URL opcional de la salida tecnica completa (TIF o PNG)
+ * @property technicalDownloadFormat - Formato opcional de la salida tecnica
  */
 export interface UnifySuccess {
   status: "success";
   overlap: number;
   mapUrl: string;
+  technicalDownloadUrl?: string;
+  technicalDownloadFormat?: "TIF" | "PNG" | "WEBP";
 }
 
 /**
@@ -92,7 +96,7 @@ export interface UnifyOptions {
  * - Espera 800ms para simular latencia de red
  * - Si forceLowOverlap es true, retorna error de solapamiento (42%)
  * - En caso contrario, retorna éxito con solapamiento simulado de 64%
- *   y mapUrl vacío (el frontend usa la imagen placeholder en ese caso)
+ *   y mapUrl vacío (el frontend usa el preview simulado en ese caso)
  *
  * @param files   - Array de objetos File con las imágenes JPG a procesar
  * @param options - Opciones adicionales (ver UnifyOptions)
@@ -123,11 +127,14 @@ export async function unifyImages(
     };
   }
 
-  // Simula una respuesta exitosa con solapamiento del 64% (supera el mínimo de 60%)
-  // mapUrl vacío → el frontend usará la imagen placeholder (unified-map.jpg)
+  // Simula una respuesta exitosa con solapamiento del 64% (supera el mínimo de 60%).
+  // mapUrl vacio -> el frontend usara unified-map-preview.webp.
+  // technicalDownloadUrl vacio -> el frontend usara unified-map-simulation.png.
   return {
     status: "success",
     overlap: 64,
     mapUrl: "",
+    technicalDownloadUrl: "",
+    technicalDownloadFormat: "PNG",
   };
 }
