@@ -4,25 +4,23 @@
 //
 // Ruta: /analysis
 //
-// Implementa el frontend de HDU2 y una primera visualizacion parcial de HDU3:
+// Implementa el frontend de HDU2:
 // - Ejecutar analisis de volumen sobre el mapa unificado.
-// - Mostrar volumen, area y categoria por poligono detectado.
+// - Mostrar volumen por poligono detectado.
 // - Mostrar resumen total del analisis.
 // - Cubrir el caso "No hay basura detectada en el area".
 //
 // Estado actual: SIMULADO
 // Esta vista no ejecuta vision computacional, no calcula volumen real y no usa
-// coordenadas geoespaciales. Consume `src/lib/analysis.ts`, que retorna poligonos
+// coordenadas geoespaciales. Consume `src/lib/analysis.ts`, que retorna volumenes
 // predefinidos para validar el flujo de frontend antes de integrar backend.
 //
 // Consideraciones para continuar:
-// 1. Reemplazar el asset local por el mapa generado/persistido en HDU1.
-// 2. Reemplazar poligonos SVG porcentuales por geometria real del backend.
-// 3. Integrar mapa GIS real si HDU3 requiere coordenadas, capas o historial.
-// 4. Ocultar controles de simulacion antes de entregar una version productiva.
+// 1. Reemplazar los volumenes simulados por resultados reales del backend.
+// 2. Ocultar controles de simulacion antes de entregar una version productiva.
 // =============================================================================
 
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import {
   BarChart3,
@@ -42,7 +40,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { analyzeUnifiedMap, type WastePolygon } from "@/lib/analysis";
-import unifiedMapPreview from "@/assets/unified-map-preview.webp";
+import { loadMapUrl } from "@/lib/mapState";
+import { AppNavbar } from "@/components/AppNavbar";
+import unifiedMapPreviewFallback from "@/assets/unified-map-preview.webp";
 
 export const Route = createFileRoute("/analysis")({
   head: () => ({
@@ -61,6 +61,16 @@ export const Route = createFileRoute("/analysis")({
 type AnalysisStatus = "idle" | "running" | "done" | "empty" | "error";
 
 function AnalysisPage() {
+  /**
+ * URL del mapa a analizar.
+ * Recupera el mapa generado en HDU1 desde sessionStorage.
+ * Si el usuario llega directamente a /analysis sin haber generado un mapa,
+ * usa el asset local como fallback para que la vista sea funcional.
+ */
+const mapUrl = loadMapUrl() ?? unifiedMapPreviewFallback;
+
+/** true si existe un mapa generado en HDU1 disponible en sessionStorage */
+const usingGeneratedMap = loadMapUrl() !== null;
   // Estado principal de la demo de analisis. Cuando exista backend, estos estados
   // pueden mantenerse, pero los datos deberian venir de una respuesta real.
   const [status, setStatus] = useState<AnalysisStatus>("idle");
@@ -73,10 +83,9 @@ function AnalysisPage() {
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
   const dragStart = useRef({ x: 0, y: 0, offsetX: 0, offsetY: 0 });
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  // Ejecuta una secuencia de progreso visual y luego consulta el servicio
-  // simulado. En produccion, `unifiedMapPreview` deberia reemplazarse por el ID,
-  // URL o referencia persistida del mapa generado en HDU1.
+  // Ejecuta una secuencia de progreso visual y luego consulta el servicio simulado.
   const runAnalysis = async () => {
     setStatus("running");
     setProgress(0);
@@ -88,7 +97,7 @@ function AnalysisPage() {
       setProgress(value);
     }
     try {
-      const response = await analyzeUnifiedMap(unifiedMapPreview, { forceEmpty: simulateEmpty });
+      const response = await analyzeUnifiedMap(mapUrl, { forceEmpty: simulateEmpty });
       setProgress(100);
       if (response.status === "success") {
         setPolygons(response.polygons);
@@ -115,13 +124,36 @@ function AnalysisPage() {
     setOffset({ x: 0, y: 0 });
   };
 
-  // Zoom y paneo locales para inspeccionar la ortofoto simulada. Esta interaccion
-  // es util para el PMV, pero puede ser reemplazada por Leaflet/MapLibre u otra
-  // libreria GIS cuando se incorporen coordenadas reales.
+  // ---------------------------------------------------------------------------
+  // ZOOM CENTRADO EN EL CURSOR
+  // Calcula el punto del mapa bajo el cursor antes del zoom y ajusta el offset
+  // para que ese punto permanezca fijo en pantalla después del cambio de escala.
+  // Requiere transformOrigin "0 0" en el elemento escalado para que el sistema
+  // de coordenadas del offset sea coherente con la posición del cursor.
+  // ---------------------------------------------------------------------------
   const onWheel = (event: React.WheelEvent<HTMLDivElement>) => {
     event.preventDefault();
+    const container = containerRef.current;
+    if (!container) return;
+
+    const rect = container.getBoundingClientRect();
+    const px = event.clientX - rect.left;
+    const py = event.clientY - rect.top;
+
+    // Punto en el mapa antes del zoom
+    const mapX = (px - offset.x) / scale;
+    const mapY = (py - offset.y) / scale;
+
+    // Nueva escala
     const next = Math.min(4, Math.max(0.7, scale + (event.deltaY < 0 ? 0.14 : -0.14)));
-    setScale(Number(next.toFixed(2)));
+    const newScale = Number(next.toFixed(2));
+
+    // Nuevo offset para mantener el punto bajo el cursor
+    setOffset({
+      x: px - mapX * newScale,
+      y: py - mapY * newScale,
+    });
+    setScale(newScale);
   };
 
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -150,28 +182,13 @@ function AnalysisPage() {
   };
 
   return (
-    <div className="h-screen overflow-hidden bg-background text-foreground gis-grid gis-radial">
-      <header className="h-20 border-b border-white bg-[#151414] text-white shadow-lg">
-        <div className="mx-auto flex h-full max-w-[1600px] items-center justify-between px-6">
-          <Link to="/" className="text-3xl font-shrikhand tracking-tight text-white md:text-4xl">
-            CondorFinder
-          </Link>
-          <nav className="ml-auto hidden items-center gap-8 text-sm font-medium md:flex">
-            <Link to="/" className="text-white transition-colors hover:text-white/80">
-              Carga
-            </Link>
-            <Link to="/analysis" className="text-primary transition-colors hover:text-primary/80">
-              Analisis
-            </Link>
-            <a href="#dashboard" className="text-white transition-colors hover:text-white/80">
-              Volumen
-            </a>
-          </nav>
-        </div>
-      </header>
-
-      <main className="grid h-[calc(100vh-5rem)] grid-cols-[360px_1fr] overflow-hidden">
-        <aside id="dashboard" className="border-r border-border bg-card/95 p-4 shadow-2xl">
+    <div
+      className="flex flex-col h-screen overflow-hidden bg-background text-foreground gis-gradient-bg"
+      style={{ "--scrollbar-compensation": "15px" } as React.CSSProperties}
+    >
+      <AppNavbar />
+      <main className="grid flex-1 grid-cols-[360px_1fr] min-h-0">
+        <aside id="dashboard" className="border-r border-border bg-card/95 backdrop-blur p-4 shadow-2xl">
           <div className="flex h-full flex-col gap-4">
             <div>
               <div className="flex items-center gap-2">
@@ -180,13 +197,22 @@ function AnalysisPage() {
                 </span>
                 <div>
                   <h1 className="text-lg font-semibold">Analisis de volumen</h1>
-                  <p className="text-xs text-muted-foreground">HDU2 - simulacion frontend</p>
                 </div>
               </div>
               <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
                 Ejecuta el analisis sobre el mapa unificado para estimar el volumen asociado a cada
                 poligono detectado.
               </p>
+              <div className={`mt-3 flex items-center gap-2 rounded-md border px-3 py-2 text-[11px] ${
+                usingGeneratedMap
+                  ? "border-success/30 bg-success/10 text-success"
+                  : "border-border bg-background/40 text-muted-foreground"
+              }`}>
+                <MapIcon className="h-3.5 w-3.5 flex-shrink-0" />
+                {usingGeneratedMap
+                  ? "Usando el mapa generado en Carga"
+                  : "Usando mapa de referencia (sin mapa generado aún)"}
+              </div>
             </div>
 
             <div className="rounded-md border border-border bg-background/40 p-3">
@@ -280,17 +306,11 @@ function AnalysisPage() {
                     <ul className="h-full overflow-y-auto pb-8">
                       {polygons.map((polygon) => (
                         <li key={polygon.id} className="border-b border-border p-3">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <p className="truncate text-xs font-semibold">{polygon.name}</p>
-                              <p className="text-[10px] text-muted-foreground">
-                                {polygon.category}
-                              </p>
-                            </div>
-                            <span
-                              className="mt-0.5 h-2.5 w-2.5 flex-shrink-0 rounded-full"
-                              style={{ backgroundColor: polygon.color }}
-                            />
+                          <div className="min-w-0">
+                            <p className="truncate text-xs font-semibold">{polygon.name}</p>
+                            <p className="text-[10px] text-muted-foreground">
+                              Resultado simulado de volumen
+                            </p>
                           </div>
                           <div className="mt-2 grid grid-cols-3 gap-2 text-[10px]">
                             <MiniStat label="Vol." value={`${polygon.volumeM3} m3`} />
@@ -329,6 +349,7 @@ function AnalysisPage() {
           </Button>
 
           <div
+            ref={containerRef}
             role="presentation"
             onWheel={onWheel}
             onPointerDown={onPointerDown}
@@ -343,46 +364,16 @@ function AnalysisPage() {
               className="relative h-full w-full"
               style={{
                 transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
-                transformOrigin: "center center",
+                transformOrigin: "0 0",
                 transition: dragging ? "none" : "transform 120ms ease-out",
               }}
             >
               <img
-                src={unifiedMapPreview}
+                src={mapUrl}
                 alt="Mapa unificado para analisis de volumen"
                 className="h-full w-full object-contain p-4"
                 draggable={false}
               />
-              {status === "done" && (
-                <svg
-                  className="pointer-events-none absolute inset-0 h-full w-full p-4"
-                  viewBox="0 0 100 100"
-                  preserveAspectRatio="none"
-                >
-                  {polygons.map((polygon) => (
-                    <g key={polygon.id}>
-                      <polygon
-                        points={polygon.points}
-                        fill={`${polygon.color}55`}
-                        stroke={polygon.color}
-                        strokeWidth="0.6"
-                      />
-                      <text
-                        x={polygon.points.split(" ")[0].split(",")[0]}
-                        y={polygon.points.split(" ")[0].split(",")[1]}
-                        fill="#ffffff"
-                        fontSize="2.2"
-                        fontWeight="700"
-                        paintOrder="stroke"
-                        stroke="#111111"
-                        strokeWidth="0.6"
-                      >
-                        {polygon.volumeM3} m3
-                      </text>
-                    </g>
-                  ))}
-                </svg>
-              )}
             </div>
           </div>
         </section>

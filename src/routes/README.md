@@ -23,7 +23,7 @@ is `src/routes/__root.tsx`.
 
 ## CondorFinder PMV routes
 
-| Route       | Purpose                                                                                   | Status                                           |
-| ----------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------ |
-| `/`         | HDU1: carga de imagenes JPG, validacion y generacion simulada del mapa unificado.         | Frontend implementado, backend pendiente.        |
-| `/analysis` | HDU2/HDU3 parcial: analisis simulado de volumen, poligonos y resumen de areas detectadas. | Frontend simulado, modelo/backend/GIS pendiente. |
+| Route       | Purpose                                                                           | Status                                       |
+| ----------- | --------------------------------------------------------------------------------- | -------------------------------------------- |
+| `/`         | HDU1: carga de imagenes JPG, validacion y generacion simulada del mapa unificado. | Frontend implementado, backend pendiente.    |
+| `/analysis` | HDU2: analisis simulado de volumen por poligono y resumen total.                  | Frontend simulado, modelo/backend pendiente. |

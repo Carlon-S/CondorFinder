@@ -11,32 +11,26 @@
 //
 // Contexto PMV:
 // - HDU2 pide calcular volumen por poligono desde un mapa/imagen unificada.
-// - HDU3 pide visualizar zonas detectadas con area, volumen y tipo de residuo.
 // - DroneWaste se considera referencia futura para deteccion/clasificacion de
 //   residuos, pero este archivo no usa el dataset ni ejecuta modelos.
 //
 // Pendiente para backend/modelo:
 // 1. Definir endpoint real para analizar el mapa unificado.
-// 2. Reemplazar puntos SVG normalizados por geometria real (idealmente GeoJSON).
-// 3. Definir metodo de volumen validado: altura estimada, fotogrametria, DEM/DSM
+// 2. Definir metodo de volumen validado: altura estimada, fotogrametria, DEM/DSM
 //    u otra aproximacion aceptada por el equipo municipal.
-// 4. Conectar categorias reales de residuo y confianza del modelo.
+// 3. Conectar la deteccion real de basura solo como insumo para calcular volumen.
 // =============================================================================
 
-// Representa una zona de basura detectada. Hoy la geometria se guarda en
-// `points` como coordenadas porcentuales para dibujar un <polygon> SVG sobre la
-// imagen simulada. En produccion conviene reemplazarlo por GeoJSON o por un
-// contrato geoespacial explicitamente documentado.
+// Representa el resultado de volumen asociado a un poligono detectado. Este
+// contrato no incluye geometria ni estilos de visualizacion, porque este corte
+// del frontend solo cubre calculo y resumen de volumen.
 export interface WastePolygon {
   id: string;
   name: string;
-  category: string;
-  color: string;
   areaM2: number;
   heightM: number;
   volumeM3: number;
   confidence: number;
-  points: string;
 }
 
 // Caso exitoso: el backend/modelo encontro una o mas zonas de basura y retorna
@@ -82,46 +76,34 @@ const SIMULATED_POLYGONS: WastePolygon[] = [
   {
     id: "P-01",
     name: "Acopio norte",
-    category: "Construction and demolition materials",
-    color: "#f59e0b",
     areaM2: 186,
     heightM: 1.35,
     volumeM3: 251,
     confidence: 88,
-    points: "54,33 61,34 63,40 58,45 51,43 49,37",
   },
   {
     id: "P-02",
     name: "Zona mixta central",
-    category: "Mixed items",
-    color: "#22d3ee",
     areaM2: 128,
     heightM: 0.95,
     volumeM3: 122,
     confidence: 81,
-    points: "47,48 54,49 56,55 52,60 45,58 43,52",
   },
   {
     id: "P-03",
-    name: "Chatarra y pallets",
-    category: "Scrap / Pallets",
-    color: "#34d399",
+    name: "Acopio oeste",
     areaM2: 76,
     heightM: 1.1,
     volumeM3: 84,
     confidence: 79,
-    points: "64,55 70,56 72,61 68,66 62,64 60,59",
   },
   {
     id: "P-04",
-    name: "Neumaticos dispersos",
-    category: "Tyres",
-    color: "#a78bfa",
+    name: "Acopio sur",
     areaM2: 42,
     heightM: 0.65,
     volumeM3: 27,
     confidence: 74,
-    points: "70,68 75,69 76,73 73,77 68,76 67,72",
   },
 ];
 

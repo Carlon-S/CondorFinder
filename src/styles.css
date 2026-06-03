@@ -112,6 +112,7 @@
    ============================================================================= */
 :root {
   --radius: 0.625rem;                  /* Radio de borde global para componentes */
+  --grid-color: oklch(0.6 0.04 170 / 0.03);
 
   /* Fondos */
   --background: #151414;
@@ -228,48 +229,21 @@
 }
 
 
-/* =============================================================================
-   CLASE: .gis-grid
-   Fondo de cuadrícula tipo GIS que cubre toda la página.
-   Simula una grilla cartográfica con dos niveles de detalle:
-   - Grilla mayor: 96x96px (líneas principales de referencia)
-   - Grilla menor: 16x16px (subdivisiones detalladas)
-   El color de las líneas usa la variable --grid-color con opacidad baja
-   para no interferir con el contenido principal.
-   ============================================================================= */
-.gis-grid {
-  background-image:
-    linear-gradient(var(--grid-color) 1px, transparent 1px),
-    linear-gradient(90deg, var(--grid-color) 1px, transparent 1px),
-    linear-gradient(var(--grid-color) 1px, transparent 1px),
-    linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
-  background-size:
-    96px 96px,
-    96px 96px,
-    16px 16px,
-    16px 16px;
-  background-position:
-    -1px -1px,
-    -1px -1px,
-    -1px -1px,
-    -1px -1px;
-}
-
 
 /* =============================================================================
-   CLASE: .gis-radial
-   Añade gradientes radiales decorativos sobre el fondo de la página.
-   - Gradiente superior izquierdo: tono cyan/verde (color primario)
-   - Gradiente inferior derecho: tono amarillo/cálido (color warning)
-   Ambos tienen baja opacidad para actuar como iluminación ambiental sutil.
-   Se combina con .gis-grid en el contenedor raíz de la página.
+   CLASE: .gis-gradient-bg
+   Fondo con degradado de negros profundos para el sistema CondorFinder.
    ============================================================================= */
-.gis-radial {
-  background:
-    radial-gradient(ellipse at 18% 0%, oklch(0.72 0.13 170 / 0.12), transparent 55%),
-    radial-gradient(ellipse at 92% 100%, oklch(0.82 0.17 88 / 0.08), transparent 55%);
+.gis-gradient-bg {
+  background: linear-gradient(
+    135deg,
+    #0a0a0a 0%,
+    #0f0f0f 35%,
+    #141414 65%,
+    #0a0a0a 100%
+  );
+  background-attachment: fixed;
 }
-
 
 /* =============================================================================
    CLASE: .panel

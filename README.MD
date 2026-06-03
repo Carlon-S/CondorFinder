@@ -11,8 +11,7 @@ CondorFinder busca apoyar a la Direccion de Aseo, Ornato y Gestion Ambiental de 
 La solucion propuesta se organiza en tres componentes:
 
 1. **Carga y unificacion de imagenes aereas**: el trabajador municipal sube fotografias JPG tomadas con drone y el sistema genera un mapa unificado de la zona.
-2. **Analisis con vision computacional**: deteccion de focos de basura, clasificacion de tipos de residuo y estimacion de volumen por poligono.
-3. **Visualizacion y planificacion**: mapa interactivo para priorizar zonas, comparar volumenes y, en una etapa posterior, conectar recursos logisticos como tolvas, camiones y rutas.
+2. **Analisis de volumen**: el sistema estima el volumen asociado a los poligonos detectados sobre el mapa unificado.
 
 ---
 
@@ -22,11 +21,10 @@ El repositorio contiene actualmente el **frontend del Prototipo Minimo Viable (P
 
 Estado por historia:
 
-| Historia                             | Alcance PMV                                                                          | Estado actual                                                                                                            |
-| ------------------------------------ | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
-| HDU1 - Unificacion de imagenes       | Cargar JPG, validar cantidad minima, simular solapamiento y mostrar mapa unificado   | Frontend completo con servicio simulado en `src/lib/unify.ts`                                                            |
-| HDU2 - Calculo de volumen            | Ejecutar analisis sobre mapa unificado, mostrar volumen por poligono y resumen total | Frontend implementado de forma simulada en `src/routes/analysis.tsx` y `src/lib/analysis.ts`                             |
-| HDU3 - Visualizar areas de basurales | Mostrar zonas detectadas con area, volumen y tipo de residuo para priorizacion       | Parcial: la vista de analisis ya dibuja poligonos y metricas simuladas; falta mapa geoespacial real y datos persistentes |
+| Historia                       | Alcance PMV                                                                          | Estado actual                                                                                |
+| ------------------------------ | ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| HDU1 - Unificacion de imagenes | Cargar JPG, validar cantidad minima, simular solapamiento y mostrar mapa unificado   | Frontend completo con servicio simulado en `src/lib/unify.ts`                                |
+| HDU2 - Calculo de volumen      | Ejecutar analisis sobre mapa unificado, mostrar volumen por poligono y resumen total | Frontend implementado de forma simulada en `src/routes/analysis.tsx` y `src/lib/analysis.ts` |
 
 ---
 
@@ -35,7 +33,7 @@ Estado por historia:
 Se consideraron dos documentos externos del proyecto:
 
 - `G14_Historias_CondorFinder_VF.pdf`: define el problema, actores, cliente, PMV y las tres historias principales.
-- `DroneWaste_preprint.pdf`: referencia tecnica para la futura deteccion/clasificacion de residuos. El paper presenta DroneWaste, un dataset de 4.993 imagenes extraidas de ortomosaicos de 17 vertederos con 20 tipos de materiales. Es relevante para entrenar o evaluar modelos de object detection, pero aun no esta integrado al codigo.
+- `DroneWaste_preprint.pdf`: referencia tecnica para una futura etapa de deteccion/clasificacion de residuos. El paper presenta DroneWaste, un dataset de 4.993 imagenes extraidas de ortomosaicos de 17 vertederos con 20 tipos de materiales. Es relevante para entrenar o evaluar modelos de object detection, pero no forma parte del alcance frontend actual.
 
 Consideracion importante: el uso de DroneWaste queda como **insumo futuro para backend/modelo**, no como dependencia del frontend actual.
 
@@ -72,7 +70,7 @@ src/
 ├── routes/
 │   ├── __root.tsx                          # Layout raiz
 │   ├── index.tsx                           # Vista principal de carga/unificacion (HDU1)
-│   └── analysis.tsx                        # Vista de analisis de volumen y poligonos (HDU2/HDU3 parcial)
+│   └── analysis.tsx                        # Vista de analisis de volumen (HDU2)
 ├── routeTree.gen.ts                        # Generado por TanStack Router
 ├── router.tsx                              # Configuracion del router
 └── styles.css                              # Estilos globales y tokens visuales
@@ -141,19 +139,9 @@ pnpm format       # Formatear con Prettier
 - Boton para ejecutar analisis de volumen simulado.
 - Progreso visual del analisis.
 - Resumen de volumen total, area total, cantidad de poligonos y formato de preview.
-- Listado de poligonos detectados con categoria, area, volumen y confianza.
-- Dibujo de poligonos sobre la imagen del mapa mediante SVG.
+- Listado de poligonos detectados con area, altura estimada, volumen y confianza.
 - Zoom con rueda del mouse y paneo con click sostenido.
 - Estado alternativo para simular que no hay basura detectada.
-
-### HDU3 - Visualizacion de areas
-
-La implementacion actual cubre parcialmente esta historia:
-
-- Los poligonos se visualizan sobre el mapa.
-- Cada zona tiene volumen, area, categoria y color.
-- Las zonas se diferencian visualmente.
-- Falta reemplazar la simulacion por geometria y datos reales provenientes del backend/modelo.
 
 ---
 
@@ -235,7 +223,7 @@ type AnalyzeResponse =
     };
 ```
 
-Cada `WastePolygon` debe incluir identificador, nombre, categoria/tipo de residuo, color o severidad visual, area, altura estimada, volumen, confianza y geometria. Hoy la geometria usa puntos SVG porcentuales solo para la demo; en produccion deberia venir en un formato geoespacial consistente, por ejemplo GeoJSON o coordenadas normalizadas documentadas.
+Cada `WastePolygon` debe incluir identificador, nombre, area, altura estimada, volumen y confianza del calculo/deteccion. No se incluyen geometria, colores ni categorias visuales porque este corte del frontend solo cubre calculo y resumen de volumen.
 
 ---
 
@@ -243,12 +231,13 @@ Cada `WastePolygon` debe incluir identificador, nombre, categoria/tipo de residu
 
 - El frontend esta preparado para escalar, pero no procesa imagenes realmente.
 - La validacion de formato y cantidad ocurre en cliente; el backend debe repetirla por seguridad.
-- El solapamiento, el mapa unificado, los poligonos, las categorias y los volumenes son simulados.
+- El solapamiento, el mapa unificado, los poligonos y los volumenes son simulados.
 - Los controles de simulacion (`forceLowOverlap`, `forceEmpty`) son utiles para demo/testing y deben eliminarse o esconderse en produccion.
 - Los assets tecnicos pesados, como TIF, no se versionan en el frontend. El repositorio conserva previews livianos y la salida tecnica debe generarse o almacenarse fuera del bundle web.
 - `src/routeTree.gen.ts` es autogenerado por TanStack Router. No deberia editarse manualmente.
 - No existe autenticacion, persistencia, historial, reportes ni administracion de recursos logisticos.
-- No hay integracion aun con DroneWaste, YOLO, Python, Agisoft Metashape, GIS real ni base de datos.
+- No hay integracion aun con YOLO, Python, Agisoft Metashape, GIS real ni base de datos.
+- No se dibujan areas, no se clasifican tipos de basura y no hay priorizacion visual de zonas en este corte del frontend.
 
 ---
 
@@ -256,16 +245,13 @@ Cada `WastePolygon` debe incluir identificador, nombre, categoria/tipo de residu
 
 1. Implementar backend para recibir imagenes JPG, validar insumos y ejecutar la unificacion.
 2. Definir el pipeline real de ortomosaico/salida tecnica y generacion de preview WEBP.
-3. Integrar modelo de deteccion/clasificacion de residuos, usando DroneWaste como referencia de dataset.
+3. Integrar modelo de deteccion de residuos como insumo para calcular volumen.
 4. Definir como se calculara volumen: datos de altura, nube de puntos, DEM/DSM, fotogrametria o aproximacion operacional validada.
-5. Reemplazar poligonos SVG simulados por geometria real, idealmente GeoJSON.
-6. Implementar mapa geoespacial interactivo real para HDU3.
-7. Agregar persistencia de analisis, historial por zona y comparacion temporal.
-8. Agregar autenticacion y autorizacion para usuarios municipales.
-9. Crear endpoints para reportes, exportacion y trazabilidad.
-10. Conectar recursos logisticos: tolvas, camiones, rutas, frecuencias y priorizacion.
-11. Agregar pruebas unitarias/integracion para servicios simulados, validaciones y flujos principales.
-12. Revisar accesibilidad y comportamiento responsive de `/analysis`, que hoy prioriza escritorio.
+5. Agregar persistencia de analisis e historial de resultados.
+6. Agregar autenticacion y autorizacion para usuarios municipales.
+7. Crear endpoints para reportes, exportacion y trazabilidad.
+8. Agregar pruebas unitarias/integracion para servicios simulados, validaciones y flujos principales.
+9. Revisar accesibilidad y comportamiento responsive de `/analysis`, que hoy prioriza escritorio.
 
 ---
 
