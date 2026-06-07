@@ -30,3 +30,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+backendModel/.venv/
+backendModel/training/
+backendModel/output/*
+backendModel/joining/finals/*
+backendModel/joining/images/*
+backendModel/joining/output/*

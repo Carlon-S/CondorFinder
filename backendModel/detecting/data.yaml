@@ -1,0 +1,6 @@
+path: ./dataset
+train: images/train
+val: images/val
+
+nc: 7
+names: ["construction_waste", "furniture", "metal", "plastic", "organic_waste", "tyres", "other"]
