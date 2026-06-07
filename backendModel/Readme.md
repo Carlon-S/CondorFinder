@@ -1,0 +1,100 @@
+
+1. **Joining** — Carga las imágenes del dron a un nodo local de OpenDroneMap (ODM), espera a que se procesen y guarda el archivo ortomosaico resultante `.tif`.
+2. **Detecting** — Divide el ortomosaico en secciones utilizando SAHI, ejecuta un modelo YOLOv8 para detectar categorías de basura y guarda una imagen de vista previa anotada.
+
+## Requerimientos
+
+- [Python 3.12+](https://www.python.org/downloads/)
+- [Docker](https://docs.docker.com/get-docker/)
+
+> Solo lo he probado en linux, asique windows probablemnte sea distinto
+
+---
+
+## Setup
+
+### 1. Inicia el nodo de ODM
+
+```bash
+docker run -ti -p 3000:3000 webodm/nodeodm
+```
+
+Mantén esto ejecutándose en una terminal separada. El paso de joining se conecta a ella en `localhost:3000`.
+
+### 2. Crea un ambiente de maquina virtual
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+### 3. Instala requerimientos
+
+```bash
+pip install -r requirements.txt
+```
+
+> Va a tomar un rato instalar todos los requisitos. Solo hay que hacer esto una vez.
+
+---
+
+## Uso temportal (Hay que actualizarlo para que funcione con el front end, por ahora solo se ejecuta con un archivo bash.
+
+### 1. Añade las imagenes
+
+Coloca las imagenes (`.jpg`) en:
+
+```
+joining/images/
+```
+
+### 2. Ejecuta el bash
+
+```bash
+bash run.sh <0|1>
+```
+
+| Argument | Preset | Description |
+|---|---|---|
+| `0` | Fast | Mas rapido, peor resolucion (~10 min) |
+| `1` | Quality | Mas lento y mejor resulicion. Es lo mejor que se podia mi pc (~40 min) |
+
+**Example:**
+```bash
+bash run.sh 0
+```
+
+### 3. Final
+
+La imagen con las annotaciones se guarda en:
+```
+detecting/output/
+```
+
+---
+
+## Estructura
+
+```
+project-root/
+├── joining/
+│   ├── images/          ← Imagenes. Solo puede haber un grupo de imagenes por ejecucion. 
+│   ├── finals/          ← El orthomosaico se guarda aqui.
+│   └── joinOrtho.py
+├── detecting/
+│   ├── model/
+│   │   └── best.pt      ← YOLOv8 pesos
+│   ├── output/          ← Las imagenes anotadas se gaurdan aqui.
+│   └── detectingOrtho.py
+├── .venv/
+├── requirements.txt
+├── run.sh
+└── README.md
+```
+
+---
+
+## Notas
+- El paso de deteccion por default usa la CPU. Para usar la GPU, cambiar `device="cpu"` a `device="cuda"` en `detecting/detectingOrtho.py`.
+- Si el ODM (Docker) no esta funcionando, el programa crashea.
+- Hay un ejemplo en la carpeta de detecting/output para comparar. Esta hecho en el setup de baja calidad, por lo que no es muy presiso.
