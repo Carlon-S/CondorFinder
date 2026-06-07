@@ -58,7 +58,7 @@ bash run.sh <0|1>
 | Argumento | Preset | Descripcion |
 |---|---|---|
 | `0` | Rapido | Mas rapido, peor resolucion (~10 min) |
-| `1` | Calida | Mas lento y mejor resulicion. Es lo mejor que se podia mi pc (~40 min) |
+| `1` | Calida | Mas lento y mejor resolucion. Es lo mejor que se podia mi pc (~40 min) |
 
 **Ejemplo:**
 ```bash
