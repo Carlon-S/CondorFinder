@@ -99,3 +99,11 @@ project-root/
 - El paso de deteccion por default usa la CPU. Para usar la GPU, cambiar `device="cpu"` a `device="cuda"` en `detecting/detectingOrtho.py`.
 - Si el ODM (Docker) no esta funcionando, el programa crashea.
 - Hay un ejemplo en la carpeta de detecting/output para comparar. Esta hecho en el setup de baja calidad, por lo que no es muy precsiso.
+---
+## Que falta por hacer
+
+1. Conectar el front-end y el backend. Por ahora la forma de ejecutar es un sh.run que solo se ejecuta una vez. Habria que cambiarlo a un python que se conecta al front que espera request.
+2. Refinar mas el model, pero eso siempre se espera
+3. Crear el mapa interactivo con las anotaciones. Hay un ejemplo vivecodeado en el detectingOrtho.py, pero no me gusto mucho.
+4. Calcular el volumen de basura que hay.
+---
