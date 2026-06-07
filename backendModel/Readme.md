@@ -1,3 +1,4 @@
+## Grupos archivos
 
 1. **Joining** — Carga las imágenes del dron a un nodo local de OpenDroneMap (ODM), espera a que se procesen y guarda el archivo ortomosaico resultante `.tif`.
 2. **Detecting** — Divide el ortomosaico en secciones utilizando SAHI, ejecuta un modelo YOLOv8 para detectar categorías de basura y guarda una imagen de vista previa anotada.
@@ -7,7 +8,7 @@
 - [Python 3.12+](https://www.python.org/downloads/)
 - [Docker](https://docs.docker.com/get-docker/)
 
-> Solo lo he probado en linux, asique windows probablemnte sea distinto
+> Solo lo he probado en linux, asique windows probablemente sea distinto
 
 ---
 
