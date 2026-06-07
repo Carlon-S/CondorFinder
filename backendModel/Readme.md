@@ -1,7 +1,7 @@
 ## Grupos archivos
 
 1. **Joining** — Carga las imágenes del dron a un nodo local de OpenDroneMap (ODM), espera a que se procesen y guarda el archivo ortomosaico resultante `.tif`.
-2. **Detecting** — Divide el ortomosaico en secciones utilizando SAHI, ejecuta un modelo YOLOv8 para detectar categorías de basura y guarda una imagen de vista previa anotada.
+2. **Detecting** — Divide el ortomosaico en secciones, ejecuta un modelo YOLOv8 para detectar categorías de basura y guarda una imagen de vista previa anotada.
 
 ## Requerimientos
 
