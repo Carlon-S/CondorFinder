@@ -33,7 +33,7 @@ dist-ssr
 
 backendModel/.venv/
 backendModel/training/
-backendModel/output/*
+backendModel/detecting/output/*
 backendModel/joining/finals/*
 backendModel/joining/images/*
 backendModel/joining/output/*
