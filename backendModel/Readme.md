@@ -98,4 +98,4 @@ project-root/
 ## Notas
 - El paso de deteccion por default usa la CPU. Para usar la GPU, cambiar `device="cpu"` a `device="cuda"` en `detecting/detectingOrtho.py`.
 - Si el ODM (Docker) no esta funcionando, el programa crashea.
-- Hay un ejemplo en la carpeta de detecting/output para comparar. Esta hecho en el setup de baja calidad, por lo que no es muy presiso.
+- Hay un ejemplo en la carpeta de detecting/output para comparar. Esta hecho en el setup de baja calidad, por lo que no es muy precsiso.
