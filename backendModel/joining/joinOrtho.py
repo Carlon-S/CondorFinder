@@ -77,7 +77,8 @@ def main(opc: int) -> str:
 
     print(f"Orthomosaic guardado en ./finals/ortho_{task.uuid}", file=sys.stderr)
 
-    return f"{task.uuid}.tif" """Probablmente este se tiene que cambiar al archivo en si en vez del nombre? Funciona asi pero podria ser nesesario"""
+    """Probablmente este se tiene que cambiar al archivo en si en vez del nombre? Funciona asi pero podria ser nesesario"""
+    return f"{task.uuid}.tif"
 
 
 if __name__ == "__main__":
