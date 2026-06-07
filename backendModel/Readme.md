@@ -85,7 +85,7 @@ project-root/
 ├── detecting/
 │   ├── model/
 │   │   └── best.pt      ← YOLOv8 pesos
-│   ├── output/          ← Las imagenes anotadas se gaurdan aqui.
+│   ├── output/          ← Las imagenes anotadas se guardan aqui.
 │   └── detectingOrtho.py
 ├── .venv/
 ├── requirements.txt
