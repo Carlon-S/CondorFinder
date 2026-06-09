@@ -103,7 +103,7 @@ El sistema requiere **tres terminales corriendo simultáneamente**.
 ### Terminal 1 — NodeODM (WSL)
 
 ```bash
-docker run -ti -p 3000:3000 webodm/nodeodm
+docker run -ti -p 3000:3000 --gpus all webodm/nodeodm 
 ```
 
 Espera hasta ver:
