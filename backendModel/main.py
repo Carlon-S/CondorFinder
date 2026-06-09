@@ -9,8 +9,8 @@ def main():
 
     filename = joinOrtho.join(opc)
     fileplace = f"joining/finals/{filename}"
-    detectingOrtho.detect(fileplace)
-    return
+    final = detectingOrtho.detect(fileplace)
+    return final
 
 if __name__ == "__main__":
     main()

@@ -89,6 +89,9 @@ def detect(file_name: str):
     preview.save(f"{final}.jpg", quality=90)
     print(f"Archivo Final en {final}.jpg")
 
+    return final
+
+
     """
 
     ///
