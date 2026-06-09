@@ -62,9 +62,11 @@ cd CondorFinder
 En Windows (PowerShell), dentro de la raíz del proyecto:
 
 ```powershell
-pnpm install
-pnpm approve-builds
+pnpm.cmd install
+pnpm.cmd approve-builds
+# se debe seleccionar true con space (se debera ver el circulo "encendido/lleno") al lado de esbuild
 ```
+
 
 ### 3. Crea el entorno virtual del backend
 
