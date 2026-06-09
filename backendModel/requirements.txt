@@ -67,3 +67,7 @@ ultralytics==8.4.62
 ultralytics-thop==2.0.20
 urllib3==2.7.0
 xyzservices==2026.3.0
+fastapi
+uvicorn
+python-multipart
+requests
