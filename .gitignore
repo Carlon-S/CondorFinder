@@ -34,6 +34,8 @@ dist-ssr
 backendModel/.venv/
 backendModel/training/
 backendModel/detecting/output/*
+backendModel/detecting/__pycache__
 backendModel/joining/finals/*
+backendModel/joining/__pycache__
 backendModel/joining/images/*
 backendModel/joining/output/*

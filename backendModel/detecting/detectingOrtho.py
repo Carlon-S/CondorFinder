@@ -39,11 +39,17 @@ COLORS_MAP = {
     "other": "purple",
 }
 
-def main(file_name: str):
+def detect(file_name: str):
     print("Ejecutando deteccion")
 
-    ORTHO_PATH = file_name
-    FILE_NAME , _ = os.path.basename(file_name).split(".")
+    ORTHO_PATH =  file_name
+
+    FILE_NAME = os.path.splitext(os.path.basename(file_name))[0]
+
+    with rasterio.open(ORTHO_PATH) as src:
+        geo_transform = src.transform
+        src_crs = src.crs
+        img_array = src.read([1, 2, 3])
 
     model = AutoDetectionModel.from_pretrained(
         model_type="yolov8",
@@ -51,11 +57,6 @@ def main(file_name: str):
         confidence_threshold=CONF,
         device="cpu",  # cambiar a "cuda" para usar gpu Nvidia, aunque este paso no es muy lento
     )
-
-    with rasterio.open(ORTHO_PATH) as src:
-        geo_transform = src.transform
-        src_crs = src.crs
-        img_array = src.read([1, 2, 3])
 
     img_array = np.moveaxis(img_array, 0, -1)
     image = Image.fromarray(img_array.astype(np.uint8))
@@ -149,7 +150,3 @@ def main(file_name: str):
     else:
         print("No detections found, map not generated.")"""
     
-if __name__ == "__main__":
-    print(sys.argv[1])
-
-    main(sys.argv[1])

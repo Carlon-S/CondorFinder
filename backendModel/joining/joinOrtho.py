@@ -18,7 +18,8 @@ presethigh = {
         'pc-quality': 'medium'
     }
 
-def main(opc: int) -> str:
+def join(opc: int) -> str:
+    opc = int(sys.argv[1])
 
     if opc == 0:
         setting = presetfast
@@ -78,14 +79,4 @@ def main(opc: int) -> str:
     print(f"Orthomosaic guardado en ./finals/ortho_{task.uuid}", file=sys.stderr)
 
     """Probablmente este se tiene que cambiar al archivo en si en vez del nombre? Funciona asi pero podria ser nesesario"""
-    return f"{task.uuid}.tif"
-
-
-if __name__ == "__main__":
-    if len(sys.argv) != 2 or sys.argv[1] not in ("0", "1"):
-        print("Recibe solo 0 o 1", file=sys.stderr)
-        sys.exit(1)
-
-    mode = int(sys.argv[1])
-    result = main(mode)
-    print(result)
+    return f"ortho_{task.uuid}.tif"

@@ -39,7 +39,7 @@ pip install -r requirements.txt
 
 ---
 
-## Uso temportal (Hay que actualizarlo para que funcione con el front end, por ahora solo se ejecuta con un archivo bash.
+## Uso temportal (Hay que actualizarlo para que funcione con el front end, por ahora solo se ejecuta con un archivo bash)
 
 ### 1. Añade las imagenes
 
