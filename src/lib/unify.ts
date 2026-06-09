@@ -59,16 +59,9 @@ export async function unifyImages(
   options: UnifyOptions = {},
 ): Promise<UnifyResponse> {
 
-  // --- Llamada real al backend (descomentar cuando el API esté disponible) ---
-  // const formData = new FormData();
-  // files.forEach((f) => formData.append("images", f));
-  // const res = await fetch("/api/images/unify", { method: "POST", body: formData });
-  // return (await res.json()) as UnifyResponse;
-
-  // --- Respuesta simulada (eliminar cuando el backend esté disponible) ---
-  await new Promise((r) => setTimeout(r, 800));
-
+  // Simulación de solapamiento bajo (solo desarrollo)
   if (options.forceLowOverlap) {
+    await new Promise((r) => setTimeout(r, 800));
     return {
       status: "error",
       reason: "overlap_too_low",
@@ -77,13 +70,47 @@ export async function unifyImages(
     };
   }
 
-  return {
-    status: "success",
-    overlap: 64,
-    mapUrl: "",
-    technicalDownloadUrl: "",
-    technicalDownloadFormat: "PNG",
-  };
+  // Inicia el pipeline en el backend y obtiene task_id
+  const startRes = await fetch(`${BACKEND_URL}/generate`, { method: "POST" });
+  const startData = await startRes.json();
+
+  if (startData.status === "error") {
+    return {
+      status: "error",
+      reason: "backend_error",
+      message: startData.message,
+    };
+  }
+
+  const taskId = startData.task_id;
+
+  // Polling cada 5 segundos hasta que el backend termine
+  while (true) {
+    await new Promise((r) => setTimeout(r, 5000));
+
+    const statusRes = await fetch(`${BACKEND_URL}/status/${taskId}`);
+    const statusData = await statusRes.json();
+
+    if (statusData.status === "done") {
+      return {
+        status: "success",
+        overlap: 100, // El solapamiento real lo valida ODM internamente
+        mapUrl: statusData.result_url,
+        technicalDownloadUrl: statusData.result_url,
+        technicalDownloadFormat: "PNG",
+      };
+    }
+
+    if (statusData.status === "error") {
+      return {
+        status: "error",
+        reason: "pipeline_error",
+        message: statusData.message,
+      };
+    }
+
+    // Si es "joining" o "detecting", continúa el polling
+  }
 }
 
 

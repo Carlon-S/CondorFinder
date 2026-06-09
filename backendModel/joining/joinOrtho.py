@@ -19,7 +19,6 @@ presethigh = {
     }
 
 def join(opc: int) -> str:
-    opc = int(sys.argv[1])
 
     if opc == 0:
         setting = presetfast

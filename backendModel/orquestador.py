@@ -1,8 +1,20 @@
+import os
+import sys
+import uuid
+import threading
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from typing import List
 import shutil
-import os
+import requests
+
+# Agrega los paths para poder importar los módulos del compañero
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, BASE_DIR)
+
+from joining import joinOrtho
+from detecting import detectingOrtho
 
 app = FastAPI()
 
@@ -14,17 +26,51 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "joining/images")
+# =============================================================================
+# DIRECTORIOS
+# =============================================================================
+
+UPLOAD_DIR  = os.path.join(BASE_DIR, "joining", "images")
+FINALS_DIR  = os.path.join(BASE_DIR, "joining", "finals")
+OUTPUT_DIR  = os.path.join(BASE_DIR, "detecting", "output")
+
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(FINALS_DIR, exist_ok=True)
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+# =============================================================================
+# ESTADO DE TAREAS EN MEMORIA
+# Estructura: { task_id: { "status": str, "message": str, "result_url": str } }
+# Estados posibles: "running", "done", "error"
+# =============================================================================
+
+tasks: dict[str, dict] = {}
+
+
+# =============================================================================
+# UTILIDADES
+# =============================================================================
 
 def is_jpg(filename: str) -> bool:
     return filename.lower().endswith((".jpg", ".jpeg"))
+
+def check_odm_running() -> bool:
+    """Verifica que el nodo ODM de Docker esté corriendo en localhost:3000."""
+    try:
+        r = requests.get("http://localhost:3000/info", timeout=3)
+        return r.status_code == 200
+    except Exception:
+        return False
+
+
+# =============================================================================
+# ENDPOINTS DE CARGA DE IMÁGENES (lógica existente, sin cambios)
+# =============================================================================
 
 @app.post("/upload")
 async def upload_images(images: List[UploadFile] = File(...)):
     saved_files = []
     rejected_files = []
-
     for image in images:
         if not is_jpg(image.filename):
             rejected_files.append(image.filename)
@@ -33,7 +79,6 @@ async def upload_images(images: List[UploadFile] = File(...)):
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(image.file, buffer)
         saved_files.append(image.filename)
-
     return {
         "message": f"Subidas {len(saved_files)} imágenes",
         "archivos": saved_files,
@@ -56,3 +101,98 @@ async def delete_all_images():
             os.remove(os.path.join(UPLOAD_DIR, fname))
             deleted.append(fname)
     return {"message": f"Eliminadas {len(deleted)} imágenes", "archivos": deleted}
+
+
+# =============================================================================
+# ENDPOINT: INICIAR GENERACIÓN DEL MAPA
+# Responde inmediatamente con un task_id.
+# El proceso real (join + detect) corre en un hilo separado.
+# =============================================================================
+
+def run_pipeline(task_id: str, opc: int):
+    """Ejecuta join() y detect() en un hilo separado."""
+    try:
+        tasks[task_id]["status"] = "joining"
+        tasks[task_id]["message"] = "Unificando imágenes con ODM..."
+
+        filename = joinOrtho.join(opc)
+        fileplace = os.path.join(FINALS_DIR, filename)
+
+        tasks[task_id]["status"] = "detecting"
+        tasks[task_id]["message"] = "Detectando basura con YOLOv8..."
+
+        final = detectingOrtho.detect(fileplace)
+        result_filename = os.path.basename(final) + ".jpg"
+
+        tasks[task_id]["status"] = "done"
+        tasks[task_id]["message"] = "Proceso completado"
+        tasks[task_id]["result_filename"] = result_filename
+
+    except Exception as e:
+        tasks[task_id]["status"] = "error"
+        tasks[task_id]["message"] = str(e)
+
+
+@app.post("/generate")
+async def generate_map():
+    """
+    Inicia el pipeline join + detect en background.
+    Verifica que ODM esté corriendo antes de iniciar.
+    Retorna un task_id para consultar el estado.
+    Preset fijo: 0 (rápido).
+    """
+    if not check_odm_running():
+        return {
+            "status": "error",
+            "message": "El nodo ODM no está corriendo. Inicia Docker con: docker run -ti -p 3000:3000 webodm/nodeodm"
+        }
+
+    task_id = str(uuid.uuid4())
+    tasks[task_id] = {
+        "status": "running",
+        "message": "Iniciando pipeline...",
+        "result_filename": None,
+    }
+
+    thread = threading.Thread(target=run_pipeline, args=(task_id, 0), daemon=True)
+    thread.start()
+
+    return {"task_id": task_id, "status": "running"}
+
+
+# =============================================================================
+# ENDPOINT: CONSULTAR ESTADO DE UNA TAREA
+# =============================================================================
+
+@app.get("/status/{task_id}")
+async def get_status(task_id: str):
+    """
+    El frontend consulta este endpoint cada N segundos.
+    Cuando status = "done", result_url contiene la URL de la imagen anotada.
+    """
+    task = tasks.get(task_id)
+    if not task:
+        return {"status": "error", "message": "Tarea no encontrada"}
+
+    response = {
+        "status": task["status"],
+        "message": task["message"],
+    }
+
+    if task["status"] == "done" and task["result_filename"]:
+        response["result_url"] = f"http://localhost:8000/result/{task['result_filename']}"
+
+    return response
+
+
+# =============================================================================
+# ENDPOINT: SERVIR LA IMAGEN RESULTADO
+# =============================================================================
+
+@app.get("/result/{filename}")
+async def get_result(filename: str):
+    """Sirve la imagen anotada generada por detectingOrtho."""
+    file_path = os.path.join(OUTPUT_DIR, filename)
+    if not os.path.exists(file_path):
+        return {"status": "error", "message": "Archivo no encontrado"}
+    return FileResponse(file_path, media_type="image/jpeg")
