@@ -153,6 +153,20 @@ export async function uploadImages(
 }
 
 /**
+ * Consulta al backend qué imágenes están actualmente en images/.
+ * Retorna un array de nombres de archivo.
+ */
+export async function listUploadedImages(): Promise<string[]> {
+  try {
+    const res = await fetch(`${BACKEND_URL}/upload`);
+    const data = await res.json();
+    return data.archivos ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Elimina una imagen del backend por nombre de archivo.
  * Se llama cuando el usuario elimina una imagen individual del frontend.
  */

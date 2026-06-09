@@ -85,6 +85,12 @@ async def upload_images(images: List[UploadFile] = File(...)):
         "rechazados": rejected_files,
     }
 
+@app.get("/upload")
+async def list_images():
+    """Retorna la lista de archivos actualmente en images/."""
+    files = [f for f in os.listdir(UPLOAD_DIR) if is_jpg(f)]
+    return {"archivos": files}
+
 @app.delete("/upload/{filename}")
 async def delete_image(filename: str):
     file_path = os.path.join(UPLOAD_DIR, filename)

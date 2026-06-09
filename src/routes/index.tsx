@@ -8,12 +8,9 @@
 //
 // Criterios de aceptación cubiertos (frontend):
 //   1. Verificación de formato JPG al cargar archivos
-//   2. Validación de cantidad mínima (16 imágenes) y solapamiento (≥ 60%)
+//   2. Validación de cantidad mínima (16 imágenes)
 //   3. Generación y visualización del mapa unificado
 //
-// Nota: El procesamiento real (algoritmo de unificación, cálculo de solapamiento)
-// es responsabilidad del backend. Actualmente se utiliza una respuesta simulada
-// definida en src/lib/unify.ts.
 // =============================================================================
 
 
@@ -29,23 +26,26 @@ import {
   RotateCcw,
   Trash2,
   Loader2,
-  FileWarning,
-  Sun,
-  Moon,
   Layers,
   Info,
   ListChecks,
   ImageIcon,
   Clock,
   FileCheck,
-  Percent,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { unifyImages, uploadImages, deleteImage, deleteAllImages } from "@/lib/unify";
+import { unifyImages, uploadImages, deleteImage, deleteAllImages, listUploadedImages } from "@/lib/unify";
 import unifiedMapImg from "@/assets/unified-map-simulation.png";
 import { saveMapUrl, clearMapUrl } from "@/lib/mapState";
 import { AppNavbar } from "@/components/AppNavbar";
+import {
+  saveItems, loadItems, saveUploadDone, loadUploadDone,
+  savePhase, loadPhase, saveResultUrl, loadResultUrl,
+  clearImageState, type PersistedFileItem,
+} from "@/lib/imageState";
+
+import { useNavigate } from "@tanstack/react-router";
 
 // Registro de la ruta raíz "/" en TanStack Router.
 // "head" define los metadatos HTML de la página (título, descripción, OG tags).
@@ -76,10 +76,6 @@ export const Route = createFileRoute("/")({
 
 /** Cantidad mínima de imágenes JPG requeridas para iniciar el procesamiento */
 const MIN_IMAGES = 16;
-
-/** Porcentaje mínimo de solapamiento entre imágenes para generar el mapa */
-const MIN_OVERLAP = 60;
-
 
 // =============================================================================
 // TIPOS E INTERFACES
@@ -112,7 +108,6 @@ interface FileItem {
  * - idle               → estado inicial, sin procesamiento activo
  * - validating_format  → verificando que los archivos sean JPG
  * - checking_count     → verificando que haya al menos MIN_IMAGES imágenes
- * - analyzing_overlap  → calculando solapamiento entre imágenes (backend)
  * - generating_map     → generando el mapa unificado (backend)
  * - done               → proceso completado exitosamente
  * - error              → proceso detenido por un error
@@ -121,7 +116,6 @@ type Phase =
   | "idle"
   | "validating_format"
   | "checking_count"
-  | "analyzing_overlap"
   | "generating_map"
   | "done"
   | "error";
@@ -191,32 +185,14 @@ function Page() {
   // ESTADO DEL COMPONENTE
   // ---------------------------------------------------------------------------
 
-  /** Lista de archivos cargados por el usuario (válidos e inválidos) */
-  const [items, setItems] = useState<FileItem[]>([]);
-
   /** Indica si el usuario está arrastrando archivos sobre la zona de drop */
   const [dragOver, setDragOver] = useState(false);
-
-  /** Fase actual del proceso de generación del mapa */
-  const [phase, setPhase] = useState<Phase>("idle");
 
   /** Porcentaje de progreso del proceso (0-100) */
   const [progress, setProgress] = useState(0);
 
-  /** Porcentaje de solapamiento calculado por el backend (null si aún no se calculó) */
-  const [overlap, setOverlap] = useState<number | null>(null);
-
-  /** URL del mapa generado (blob: URL del backend o imagen placeholder) */
-  const [resultUrl, setResultUrl] = useState<string | null>(null);
-
   /** Mensaje de error detallado para mostrar al usuario cuando el proceso falla */
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-  /**
-   * Activa la simulación de error de solapamiento insuficiente (42%).
-   * Solo para desarrollo/testing. Debe eliminarse en producción.
-   */
-  const [simulateLow, setSimulateLow] = useState(false);
 
   /** Progreso de subida al backend (0-100), null si no hay subida en curso */
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
@@ -224,11 +200,30 @@ function Page() {
   /** true si hay una subida de imágenes en curso */
   const [uploading, setUploading] = useState(false);
 
-  /** true si todas las imágenes válidas actuales están subidas al backend */
-  const [uploadDone, setUploadDone] = useState(false);
-
   /** Referencia al input de tipo file (oculto), activado por el botón de carga */
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const [items, setItems] = useState<FileItem[]>(() => {
+    return loadItems().map((p) => ({
+      id: p.id,
+      file: new File([], p.name), // File vacío — solo para mostrar nombre/tamaño
+      status: p.status,
+      reason: p.reason,
+      preview: p.preview,
+    }));
+  });
+
+  const navigate = useNavigate();
+
+  const [phase, setPhase] = useState<Phase>(() => {
+    const saved = loadPhase() as Phase;
+    // Si estaba procesando al recargar, vuelve a idle
+    return saved === "done" || saved === "error" ? saved : "idle";
+  });
+
+  const [resultUrl, setResultUrl] = useState<string | null>(() => loadResultUrl());
+
+  const [uploadDone, setUploadDone] = useState<boolean>(() => loadUploadDone());
 
   // ---------------------------------------------------------------------------
   // LIMPIEZA DE MEMORIA AL DESMONTAR
@@ -241,6 +236,49 @@ function Page() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+  const persisted: PersistedFileItem[] = items
+    .filter((i) => i.preview.startsWith("data:"))
+    .map((i) => ({
+      id: i.id,
+      name: i.file.name,
+      size: i.file.size,
+      status: i.status,
+      reason: i.reason,
+      preview: i.preview,
+    }));
+  saveItems(persisted);
+}, [items]);
+
+useEffect(() => { saveUploadDone(uploadDone); }, [uploadDone]);
+useEffect(() => { savePhase(phase); }, [phase]);
+useEffect(() => { if (resultUrl) saveResultUrl(resultUrl); }, [resultUrl]);
+
+// Al montar, verifica qué archivos están realmente en el backend
+// y reconcilia con los items persistidos en sessionStorage
+useEffect(() => {
+  if (items.length === 0) return;
+
+  listUploadedImages().then((serverFiles) => {
+    const serverSet = new Set(serverFiles);
+    const validItems = items.filter((i) => i.status === "valid");
+
+    // Si todos los items válidos están en el servidor, uploadDone = true
+    const allPresent = validItems.length > 0 &&
+      validItems.every((i) => serverSet.has(i.file.name));
+
+    if (allPresent) {
+      setUploadDone(true);
+    } else if (validItems.length > 0) {
+      // Hay items válidos pero no están en el servidor — hay que re-subirlos
+      // Pero como File está vacío, solo podemos marcar como no listo
+      setUploadDone(false);
+    }
+  });
+  // Solo al montar
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, []);
 
   // ---------------------------------------------------------------------------
   // VALORES DERIVADOS DEL ESTADO
@@ -276,16 +314,6 @@ function Page() {
 
   /** Estado del check "Cantidad mínima" */
   const countState: TriState = items.length === 0 ? "pending" : enoughImages ? "ok" : "warn";
-
-  /** Estado del check "Solapamiento >= 60%" */
-  const overlapState: TriState =
-    phase === "analyzing_overlap"
-      ? "running"
-      : overlap == null
-        ? "pending"
-        : overlap >= MIN_OVERLAP
-          ? "ok"
-          : "error";
 
   /** Estado del check "Generación de mapa" */
   const mapState: TriState =
@@ -410,7 +438,6 @@ function Page() {
   const resetProcess = () => {
     setPhase("idle");
     setProgress(0);
-    setOverlap(null);
     setResultUrl(null);
     setErrorMsg(null);
   };
@@ -424,6 +451,7 @@ function Page() {
     deleteAllImages().catch(() => {});
     setUploadDone(false);
     setUploadProgress(null);
+    clearImageState();
   };
 
   /** Elimina solo los archivos rechazados, conservando los JPG válidos */
@@ -446,7 +474,6 @@ function Page() {
   /**
    * Ejecuta el proceso secuencial de generación del mapa.
    * Las fases de formato y cantidad son validadas en el frontend.
-   * Las fases de solapamiento y generación dependen del backend (unify.ts).
    */
   const generate = async () => {
     if (!canGenerate) return;
@@ -454,28 +481,17 @@ function Page() {
     const validFiles = items.filter((i) => i.status === "valid").map((i) => i.file);
     setPhase("validating_format"); setProgress(10); await sleep(400);
     setPhase("checking_count"); setProgress(25); await sleep(400);
-
-    setPhase("analyzing_overlap"); setProgress(55); await sleep(1400);
+    setPhase("generating_map"); setProgress(55);
 
     try {
-      const res = await unifyImages(validFiles, { forceLowOverlap: simulateLow });
+      const res = await unifyImages(validFiles, {});
       if (res.status === "error") {
-        setOverlap(res.overlap ?? 0);
         setPhase("error");
         setProgress(100);
-        if (res.reason === "overlap_too_low") {
-          setErrorMsg(
-            `Las imagenes no se solapan lo suficiente entre si (${res.overlap}% de superposicion, minimo requerido: 60%). ` +
-            "Esto significa que hay zonas del terreno sin cobertura entre una foto y la siguiente. " +
-            "Para solucionarlo, sube mas imagenes de la misma zona asegurandote de que cada foto comparta al menos un 60% de area con las fotos adyacentes.",
-          );
-        } else {
-          setErrorMsg(res.message || "No se pudo generar el mapa. Intenta nuevamente.");
-        }
+        setErrorMsg(res.message || "No se pudo generar el mapa. Intenta nuevamente.");
         return;
       }
-      setOverlap(res.overlap);
-      setPhase("generating_map"); setProgress(85); await sleep(900);
+      setProgress(85); await sleep(900);
       const finalUrl = res.mapUrl || unifiedMapImg;
       setResultUrl(finalUrl);
       saveMapUrl(finalUrl);
@@ -491,7 +507,6 @@ function Page() {
     idle: "Listo para procesar",
     validating_format: "Validando formato JPG...",
     checking_count: "Revisando cantidad de imagenes...",
-    analyzing_overlap: "Analizando superposicion entre imagenes...",
     generating_map: "Generando mapa unificado...",
     done: "Mapa generado exitosamente",
     error: "Proceso detenido por error",
@@ -529,7 +544,7 @@ function Page() {
           <ol className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <GuideStep number="1" title="Selecciona la zona" text="Usa imagenes tomadas en un mismo sector para que el mapa final sea coherente y continuo." />
             <GuideStep number="2" title="Carga archivos JPG" text="Arrastra las fotografias o seleccionalas desde tu equipo. Solo se aceptan archivos en formato JPG o JPEG." />
-            <GuideStep number="3" title="Verifica los requisitos" text={`Necesitas al menos ${MIN_IMAGES} imagenes JPG validas. Cada foto debe compartir al menos un 60% de area con las fotos vecinas (solapamiento).`} />
+            <GuideStep number="3" title="Verificar requisito" text={`Se necesitan al menos ${MIN_IMAGES} imagenes JPG validas.`} />
             <GuideStep number="4" title="Genera el mapa" text='Cuando todo este aprobado, presiona el boton para iniciar el procesamiento y obtener el mapa unificado de la zona.' />
           </ol>
         </section>
@@ -638,13 +653,6 @@ function Page() {
                 </p>
               </div>
             )}            
-            {/* Checkbox de simulacion de error (solo desarrollo) */}
-            <div className="flex justify-end mt-auto">
-              <label className="flex items-center gap-2 rounded border border-border bg-background/40 px-2 py-1.5 text-[11px] text-muted-foreground cursor-pointer">
-                <input type="checkbox" checked={simulateLow} onChange={(e) => setSimulateLow(e.target.checked)} disabled={processing} className="h-3 w-3 accent-[var(--primary)]" />
-                Simular error de superposicion (42%)
-              </label>
-            </div>
           </section>
         </div>
 
@@ -707,11 +715,6 @@ function Page() {
                 hint={countState === "ok" ? `${validCount} imagenes JPG cargadas (minimo requerido: ${MIN_IMAGES})`
                   : countState === "warn" ? `Faltan ${MIN_IMAGES - validCount} imagen(es) para alcanzar el minimo de ${MIN_IMAGES}`
                   : `Se requieren al menos ${MIN_IMAGES} imagenes JPG validas`} />
-              <CheckRow label="Solapamiento >= 60%" state={overlapState}
-                hint={overlapState === "running" ? "Analizando el solapamiento entre imagenes..."
-                  : overlap == null ? "Se verificara al generar el mapa"
-                  : overlap >= MIN_OVERLAP ? `Las fotos se solapan correctamente (${overlap}%)`
-                  : `Solapamiento insuficiente entre fotos (${overlap}% - minimo 60%)`} />
               <CheckRow label="Generacion de mapa" state={mapState}
                 hint={mapState === "running" ? "Procesando y unificando imagenes..."
                   : mapState === "ok" ? "Mapa generado y disponible para descarga"
@@ -726,23 +729,7 @@ function Page() {
                 <InfoTile icon={<ImageIcon className="h-3.5 w-3.5" />} label="Total imagenes" value={String(items.length)} />
                 <InfoTile icon={<FileCheck className="h-3.5 w-3.5" />} label="JPG cargadas" value={String(validCount)} tone={validCount >= MIN_IMAGES ? "ok" : undefined} />
                 <InfoTile icon={<XCircle className="h-3.5 w-3.5" />} label="Con error" value={String(invalidCount)} tone={invalidCount > 0 ? "error" : undefined} />
-                <InfoTile icon={<Percent className="h-3.5 w-3.5" />} label="Solapamiento" value={overlap == null ? "-" : `${overlap}%`}
-                  tone={overlap == null ? undefined : overlap >= MIN_OVERLAP ? "ok" : "error"} />
               </div>
-            </div>
-
-            {/* Explicacion del solapamiento en lenguaje simple */}
-            <div className="rounded-md border border-border bg-background/30 p-3 space-y-1.5">
-              <p className="mono text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Que es el solapamiento?</p>
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                El solapamiento es el porcentaje de area que comparten dos fotografias aereas consecutivas.
-                Un solapamiento minimo del <span className="font-semibold text-foreground">60%</span> garantiza
-                que el sistema pueda unir las imagenes sin dejar zonas sin cobertura en el mapa final.
-              </p>
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                Si el solapamiento es insuficiente, sube mas fotografias de la misma zona, asegurandote
-                de que cada foto capture parte del area ya fotografiada por las fotos vecinas.
-              </p>
             </div>
 
             {/* Indicador de fase actual con barra de progreso */}
@@ -777,12 +764,25 @@ function Page() {
             <div className="relative h-[min(68vh,760px)] min-h-[420px] w-full overflow-hidden bg-[#1d1d1d]">
               
               {phase === "done" && resultUrl ? (
-                <img
-                  src={resultUrl}
-                  alt="Mapa unificado generado a partir de las imagenes aereas"
-                  className="relative h-full w-full object-contain p-3"
-                />
-              ) : processing ? (
+                  <button
+                    type="button"
+                    onClick={() => navigate({ to: "/analysis" })}
+                    className="relative h-full w-full cursor-pointer group"
+                    title="Ver análisis de detección"
+                  >
+                    <img
+                      src={resultUrl}
+                      alt="Mapa unificado generado a partir de las imagenes aereas"
+                      className="h-full w-full object-contain p-3 transition-opacity group-hover:opacity-80"
+                    />
+                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex items-center gap-2 rounded-md bg-background/85 px-4 py-2 shadow-xl backdrop-blur">
+                        <MapIcon className="h-4 w-4 text-primary" />
+                        <span className="text-sm font-semibold text-foreground">Ver análisis de detección</span>
+                      </div>
+                    </div>
+                  </button>
+                ) : processing ? (
                 <div className="relative flex h-full w-full flex-col items-center justify-center gap-3">
                   <div className="scan-line relative h-24 w-24 overflow-hidden rounded-md border border-primary/40 bg-primary/10">
                     <Loader2 className="absolute left-1/2 top-1/2 h-8 w-8 -translate-x-1/2 -translate-y-1/2 animate-spin text-primary" />
@@ -810,11 +810,10 @@ function Page() {
             </div>
 
             {/* Metadatos del mapa */}
-            <div className="grid grid-cols-4 divide-x divide-border border-t border-border bg-card/40">
+            <div className="grid grid-cols-3 divide-x divide-border border-t border-border bg-card/40">
               <MetaCell label="Estado" value={phase === "done" ? "Completado" : phase === "error" ? "Error" : processing ? "Procesando" : "En espera"} />
               <MetaCell label="Imagenes" value={`${validCount} / ${items.length}`} />
-              <MetaCell label="Solapamiento" value={overlap == null ? "-" : `${overlap}%`} tone={overlap == null ? undefined : overlap >= MIN_OVERLAP ? "ok" : "error"} />
-              <MetaCell label="Salida generada" value="PNG" />
+              <MetaCell label="Salida generada" value="JPG" />
             </div>
 
             {/* Boton de descarga, visible solo cuando el mapa esta listo */}
