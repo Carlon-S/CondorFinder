@@ -128,7 +128,7 @@ def run_pipeline(task_id: str, opc: int):
         tasks[task_id]["message"] = "Detectando basura con YOLOv8..."
 
         final = detectingOrtho.detect(fileplace)
-        result_filename = os.path.basename(final) + ".jpg"
+        result_filename = os.path.basename(final) + ".png"
 
         tasks[task_id]["status"] = "done"
         tasks[task_id]["message"] = "Proceso completado"
@@ -201,4 +201,4 @@ async def get_result(filename: str):
     file_path = os.path.join(OUTPUT_DIR, filename)
     if not os.path.exists(file_path):
         return {"status": "error", "message": "Archivo no encontrado"}
-    return FileResponse(file_path, media_type="image/jpeg")
+    return FileResponse(file_path, media_type="image/png")

@@ -371,8 +371,9 @@ const usingGeneratedMap = loadMapUrl() !== null;
               <img
                 src={mapUrl}
                 alt="Mapa unificado para analisis de volumen"
-                className="h-full w-full object-contain p-4"
+                className="h-full w-full object-contain p-4 pointer-events-none"
                 draggable={false}
+                onDragStart={(e) => e.preventDefault()}
               />
             </div>
           </div>

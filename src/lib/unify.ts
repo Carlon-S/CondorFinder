@@ -31,6 +31,11 @@ export interface UnifyError {
   message: string;
 }
 
+export interface UnifyProgress {
+  status: "joining" | "detecting";
+  backendStatus: string;
+}
+
 export type UnifyResponse = UnifySuccess | UnifyError;
 
 
@@ -57,6 +62,7 @@ const BACKEND_URL = "http://localhost:8000";
 export async function unifyImages(
   files: File[],
   options: UnifyOptions = {},
+  onProgress?: (stage: "joining" | "detecting") => void,
 ): Promise<UnifyResponse> {
 
   // Simulación de solapamiento bajo (solo desarrollo)
@@ -94,7 +100,7 @@ export async function unifyImages(
     if (statusData.status === "done") {
       return {
         status: "success",
-        overlap: 100, // El solapamiento real lo valida ODM internamente
+        overlap: 100,
         mapUrl: statusData.result_url,
         technicalDownloadUrl: statusData.result_url,
         technicalDownloadFormat: "PNG",
@@ -109,7 +115,12 @@ export async function unifyImages(
       };
     }
 
-    // Si es "joining" o "detecting", continúa el polling
+    if (
+      (statusData.status === "joining" || statusData.status === "detecting") &&
+      onProgress
+    ) {
+      onProgress(statusData.status);
+    }
   }
 }
 

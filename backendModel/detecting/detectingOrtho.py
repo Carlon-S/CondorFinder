@@ -49,7 +49,13 @@ def detect(file_name: str):
     with rasterio.open(ORTHO_PATH) as src:
         geo_transform = src.transform
         src_crs = src.crs
-        img_array = src.read([1, 2, 3])
+        band_count = src.count
+        if band_count >= 4:
+            img_array = src.read([1, 2, 3])
+            alpha = src.read(4)
+        else:
+            img_array = src.read([1, 2, 3])
+        alpha = None
 
     model = AutoDetectionModel.from_pretrained(
         model_type="yolov8",
@@ -59,7 +65,11 @@ def detect(file_name: str):
     )
 
     img_array = np.moveaxis(img_array, 0, -1)
-    image = Image.fromarray(img_array.astype(np.uint8))
+    if alpha is not None:
+        rgba = np.dstack([img_array.astype(np.uint8), alpha.astype(np.uint8)])
+        image = Image.fromarray(rgba, mode="RGBA")
+    else:
+        image = Image.fromarray(img_array.astype(np.uint8), mode="RGB")
     print(f"Tamaño orthomosaico: {image.size}")
 
     result = get_sliced_prediction(
@@ -86,8 +96,8 @@ def detect(file_name: str):
     scale = min(1.0, 10000 / max(w, h))
     preview = image.resize((int(w * scale), int(h * scale)))
     final = os.path.join(OUTPUT_PATH, FILE_NAME)
-    preview.save(f"{final}.jpg", quality=90)
-    print(f"Archivo Final en {final}.jpg")
+    preview.save(f"{final}.png")
+    print(f"Archivo Final en {final}.png")
 
     return final
 

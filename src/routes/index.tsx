@@ -213,6 +213,8 @@ function Page() {
     }));
   });
 
+  const [backendStage, setBackendStage] = useState<"joining" | "detecting" | null>(null);
+
   const navigate = useNavigate();
 
   const [phase, setPhase] = useState<Phase>(() => {
@@ -440,6 +442,7 @@ useEffect(() => {
     setProgress(0);
     setResultUrl(null);
     setErrorMsg(null);
+    setBackendStage(null);
   };
 
   /** Elimina todas las imágenes y reinicia el proceso */
@@ -481,10 +484,14 @@ useEffect(() => {
     const validFiles = items.filter((i) => i.status === "valid").map((i) => i.file);
     setPhase("validating_format"); setProgress(10); await sleep(400);
     setPhase("checking_count"); setProgress(25); await sleep(400);
-    setPhase("generating_map"); setProgress(55);
+    setPhase("generating_map"); setProgress(40);
+    setBackendStage(null);
 
     try {
-      const res = await unifyImages(validFiles, {});
+      const res = await unifyImages(validFiles, {}, (stage) => {
+        setBackendStage(stage);
+        setProgress(stage === "joining" ? 55 : 75);
+      });
       if (res.status === "error") {
         setPhase("error");
         setProgress(100);
@@ -503,14 +510,22 @@ useEffect(() => {
   };
 
   /** Etiquetas descriptivas para cada fase del proceso */
-  const phaseLabel: Record<Phase, string> = {
-    idle: "Listo para procesar",
-    validating_format: "Validando formato JPG...",
-    checking_count: "Revisando cantidad de imagenes...",
-    generating_map: "Generando mapa unificado...",
-    done: "Mapa generado exitosamente",
-    error: "Proceso detenido por error",
-  };
+    function getPhaseLabel(phase: Phase, backendStage: "joining" | "detecting" | null): string {
+    if (phase === "generating_map") {
+      if (backendStage === "joining") return "Unificando imágenes con ODM...";
+      if (backendStage === "detecting") return "Detectando basura con YOLOv8...";
+      return "Iniciando pipeline...";
+    }
+    const labels: Record<Phase, string> = {
+      idle: "Listo para procesar",
+      validating_format: "Validando formato JPG...",
+      checking_count: "Revisando cantidad de imágenes...",
+      generating_map: "Iniciando pipeline...",
+      done: "Mapa generado exitosamente",
+      error: "Proceso detenido por error",
+    };
+    return labels[phase];
+  }
 
   /**
    * Estado del tooltip del boton principal.
@@ -737,7 +752,7 @@ useEffect(() => {
               <p className="mono text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Estado del proceso</p>
               <div className="flex items-center gap-2">
                 <Clock className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
-                <p className="text-xs text-foreground font-medium">{phaseLabel[phase]}</p>
+                <p className="text-xs text-foreground font-medium">{getPhaseLabel(phase, backendStage)}</p>
               </div>
               <Progress value={progress} className="h-1" />
               <p className="mono text-[10px] text-muted-foreground">{progress}% completado</p>
@@ -787,7 +802,7 @@ useEffect(() => {
                   <div className="scan-line relative h-24 w-24 overflow-hidden rounded-md border border-primary/40 bg-primary/10">
                     <Loader2 className="absolute left-1/2 top-1/2 h-8 w-8 -translate-x-1/2 -translate-y-1/2 animate-spin text-primary" />
                   </div>
-                  <p className="mono text-[11px] uppercase tracking-wider text-primary">{phaseLabel[phase]}</p>
+                  <p className="mono text-[11px] uppercase tracking-wider text-primary">{getPhaseLabel(phase, backendStage)}</p>
                   <div className="w-64"><Progress value={progress} className="h-1" /></div>
                 </div>
               ) : phase === "error" ? (
