@@ -42,7 +42,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { unifyImages } from "@/lib/unify";
+import { unifyImages, uploadImages, deleteImage, deleteAllImages } from "@/lib/unify";
 import unifiedMapImg from "@/assets/unified-map-simulation.png";
 import { saveMapUrl, clearMapUrl } from "@/lib/mapState";
 import { AppNavbar } from "@/components/AppNavbar";
@@ -218,6 +218,15 @@ function Page() {
    */
   const [simulateLow, setSimulateLow] = useState(false);
 
+  /** Progreso de subida al backend (0-100), null si no hay subida en curso */
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+
+  /** true si hay una subida de imágenes en curso */
+  const [uploading, setUploading] = useState(false);
+
+  /** true si todas las imágenes válidas actuales están subidas al backend */
+  const [uploadDone, setUploadDone] = useState(false);
+
   /** Referencia al input de tipo file (oculto), activado por el botón de carga */
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -256,7 +265,7 @@ function Page() {
    * true si el botón "Generar mapa" debe estar habilitado.
    * Requiere: al menos un archivo, ninguno inválido, cantidad suficiente y no procesando.
    */
-  const canGenerate = items.length > 0 && !hasInvalid && enoughImages && !processing;
+  const canGenerate = items.length > 0 && !hasInvalid && enoughImages && !processing && uploadDone && !uploading;
 
   // ---------------------------------------------------------------------------
   // ESTADOS DE LA REVISIÓN TÉCNICA
@@ -304,54 +313,98 @@ function Page() {
    *
    * El objeto File original se conserva para enviarlo al backend.
    */
-  const addFiles = useCallback((files: FileList | File[]) => {
+  const addFiles = useCallback(async (files: FileList | File[]) => {
+    if (uploading) return;
+
+    const newItems: FileItem[] = [];
+    const validFiles: File[] = [];
+
     Array.from(files).forEach((file) => {
       const ok = isJpg(file);
       const id = `${file.name}-${file.size}-${Math.random().toString(36).slice(2, 8)}`;
       const blobUrl = URL.createObjectURL(file);
-
-      // Paso 1: mostrar inmediatamente con blob URL
-      setItems((prev) => [
-        ...prev,
-        {
-          id,
-          file,
-          status: ok ? "valid" : "invalid",
-          reason: ok ? undefined : "Solo se aceptan archivos JPG o JPEG.",
-          preview: blobUrl,
-        },
-      ]);
-
-      if (!ok) return;
-
-      // Paso 2: generar thumbnail optimizado en segundo plano
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        const MAX = 300;
-        const ratio = Math.min(MAX / img.width, MAX / img.height);
-        canvas.width = img.width * ratio;
-        canvas.height = img.height * ratio;
-        const ctx = canvas.getContext("2d");
-        ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
-        const thumbnail = canvas.toDataURL("image/jpeg", 0.7);
-        URL.revokeObjectURL(blobUrl);
-        setItems((prev) =>
-          prev.map((item) => item.id === id ? { ...item, preview: thumbnail } : item)
-        );
-      };
-      img.src = blobUrl;
+      newItems.push({
+        id,
+        file,
+        status: ok ? "valid" : "invalid",
+        reason: ok ? undefined : "Solo se aceptan archivos JPG o JPEG.",
+        preview: blobUrl,
+      });
+      if (ok) validFiles.push(file);
     });
-  }, []);
+
+    setItems((prev) => [...prev, ...newItems]);
+    setUploadDone(false);
+
+    if (validFiles.length === 0) return;
+
+    // Primero subir al backend
+    setUploading(true);
+    setUploadProgress(0);
+    try {
+      await uploadImages(validFiles, (pct) => setUploadProgress(pct));
+      setUploadDone(true);
+    } catch {
+      setUploadDone(false);
+    } finally {
+      setUploading(false);
+      setUploadProgress(null);
+    }
+
+    // Recién después generar thumbnails, con un pequeño delay entre cada uno
+    // para no bloquear el hilo principal de golpe
+    for (const item of newItems) {
+      if (item.status !== "valid") continue;
+      await new Promise<void>((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement("canvas");
+          const MAX = 300;
+          const ratio = Math.min(MAX / img.width, MAX / img.height);
+          canvas.width = img.width * ratio;
+          canvas.height = img.height * ratio;
+          const ctx = canvas.getContext("2d");
+          ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
+          const thumbnail = canvas.toDataURL("image/jpeg", 0.7);
+          URL.revokeObjectURL(item.preview);
+          setItems((prev) =>
+            prev.map((i) => i.id === item.id ? { ...i, preview: thumbnail } : i)
+          );
+          resolve();
+        };
+        img.onerror = () => resolve(); // si falla, continúa igual
+        img.src = item.preview;
+      });
+      // Cede el hilo entre cada thumbnail para no congelar la UI
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  }, [uploading]);
 
   /** Elimina un archivo individual y libera su memoria */
   const removeItem = (id: string) => {
     setItems((prev) => {
       const target = prev.find((i) => i.id === id);
-      if (target) URL.revokeObjectURL(target.preview);
+      if (target) {
+        URL.revokeObjectURL(target.preview);
+        // Eliminar del backend si era válida (solo las válidas se subieron)
+        if (target.status === "valid") {
+          deleteImage(target.file.name).catch(() => {
+            // Fallo silencioso: el archivo simplemente no se borra del disco
+          });
+        }
+      }
       return prev.filter((i) => i.id !== id);
     });
   };
+  
+  const uploadLabel: Record<string, string> = {
+    idle: "Listo para procesar",
+    uploading: "Subiendo imágenes al servidor...",
+    done: "Imágenes listas",
+    error: "Error al subir imágenes",
+  };
+
+  const uploadPhase = uploading ? "uploading" : uploadDone ? "done" : "idle";
 
   /** Reinicia el proceso sin borrar las imágenes cargadas */
   const resetProcess = () => {
@@ -368,6 +421,9 @@ function Page() {
     setItems([]);
     clearMapUrl();
     resetProcess();
+    deleteAllImages().catch(() => {});
+    setUploadDone(false);
+    setUploadProgress(null);
   };
 
   /** Elimina solo los archivos rechazados, conservando los JPG válidos */
@@ -396,9 +452,9 @@ function Page() {
     if (!canGenerate) return;
     resetProcess();
     const validFiles = items.filter((i) => i.status === "valid").map((i) => i.file);
-
     setPhase("validating_format"); setProgress(10); await sleep(400);
     setPhase("checking_count"); setProgress(25); await sleep(400);
+
     setPhase("analyzing_overlap"); setProgress(55); await sleep(1400);
 
     try {
@@ -486,7 +542,7 @@ function Page() {
             <PanelHeader icon={<Upload className="h-3.5 w-3.5" />} title="Carga de imagenes" />
             <button
               type="button"
-              onClick={() => inputRef.current?.click()}
+              onClick={() => !uploading && inputRef.current?.click()}
               onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
               onDragLeave={() => setDragOver(false)}
               onDrop={onDrop}
@@ -503,6 +559,7 @@ function Page() {
                 Solo JPG · JPEG · Minimo {MIN_IMAGES} imagenes
               </p>
               <input ref={inputRef} type="file" accept="image/jpeg,.jpg,.jpeg" multiple className="hidden"
+                disabled={uploading}
                 onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }}
               />
             </button>
@@ -531,7 +588,19 @@ function Page() {
 
             {/* Grid 3 columnas con scroll vertical optimizado para rendimiento */}
             {items.length > 0 ? (
-              <ul className="flex flex-wrap items-start gap-2 h-[340px] overflow-y-auto overflow-x-hidden pb-1 pr-1 will-change-scroll" style={{ contain: "strict" }}>
+              <div className="relative h-[340px]">
+                {uploading && (
+                  <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 rounded-md bg-background/80 backdrop-blur-sm">
+                    <div className="scan-line relative h-24 w-24 overflow-hidden rounded-md border border-primary/40 bg-primary/10">
+                      <Loader2 className="absolute left-1/2 top-1/2 h-8 w-8 -translate-x-1/2 -translate-y-1/2 animate-spin text-primary" />
+                    </div>
+                    <p className="mono text-[11px] uppercase tracking-wider text-primary">
+                      Subiendo imagenes al servidor...
+                    </p>
+                  </div>
+                )}
+                <ul className="flex flex-wrap items-start gap-2 h-full overflow-y-auto overflow-x-hidden pb-1 pr-1 will-change-scroll" style={{ contain: "strict" }}>
+              
                 {items.map((it) => (
                   <li key={it.id}
                     className={`w-[calc(33.333%-6px)] flex-shrink-0 overflow-hidden rounded-md border bg-background/40 transform-gpu ${
@@ -552,12 +621,23 @@ function Page() {
                   </li>
                 ))}
               </ul>
+              </div>
             ) : (
               <div className="flex h-[340px] items-center justify-center rounded-md border border-dashed border-border bg-background/30 text-center text-xs text-muted-foreground">
                 Las imagenes seleccionadas apareceran aqui.
               </div>
             )}
-
+            {/* Loading overlay de subida — visible solo mientras se sube o justo al terminar */}
+            {(uploading) && (
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 rounded-md bg-background/80 backdrop-blur-sm">
+                <div className="scan-line relative h-24 w-24 overflow-hidden rounded-md border border-primary/40 bg-primary/10">
+                  <Loader2 className="absolute left-1/2 top-1/2 h-8 w-8 -translate-x-1/2 -translate-y-1/2 animate-spin text-primary" />
+                </div>
+                <p className="mono text-[11px] uppercase tracking-wider text-primary">
+                  {uploadLabel[uploadPhase]}
+                </p>
+              </div>
+            )}            
             {/* Checkbox de simulacion de error (solo desarrollo) */}
             <div className="flex justify-end mt-auto">
               <label className="flex items-center gap-2 rounded border border-border bg-background/40 px-2 py-1.5 text-[11px] text-muted-foreground cursor-pointer">
@@ -674,6 +754,13 @@ function Page() {
               </div>
               <Progress value={progress} className="h-1" />
               <p className="mono text-[10px] text-muted-foreground">{progress}% completado</p>
+              {uploadProgress !== null && (
+                <div className="mt-2 space-y-1">
+                  <p className="mono text-[10px] uppercase tracking-wider text-primary font-semibold">Subiendo imágenes al servidor...</p>
+                  <Progress value={uploadProgress} className="h-1" />
+                  <p className="mono text-[10px] text-muted-foreground">{uploadProgress}% subido</p>
+                </div>
+              )}
             </div>
           </section>
 

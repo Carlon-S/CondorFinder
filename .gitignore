@@ -39,3 +39,10 @@ backendModel/joining/finals/*
 backendModel/joining/__pycache__
 backendModel/joining/images/*
 backendModel/joining/output/*
+
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+*.egg-info/
