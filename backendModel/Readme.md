@@ -73,11 +73,16 @@ El orquestador verifica automáticamente que ODM esté corriendo antes de inicia
 
 ### Paso 2 — Levanta el orquestador
 
-Desde la raíz del proyecto con el venv activado:
+Abre una nueva terminal WSL, navega a la raíz del proyecto y ejecuta:
 
 ```bash
 source backendModel/joining/venv/bin/activate
-uvicorn backendModel.orquestador:app --reload --port 8000
+backendModel/joining/venv/bin/uvicorn backendModel.orquestador:app --reload --port 8000
+```
+
+Espera hasta ver:
+```
+INFO: Application startup complete.
 ```
 
 ---

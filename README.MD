@@ -38,7 +38,7 @@ sudo systemctl start docker
 sudo usermod -aG docker $USER
 ```
 
-Cierra y vuelve a abrir WSL para que el grupo `docker` tome efecto. Verificar con:
+Cierra y vuelve a abrir WSL para que el grupo `docker` tome efecto. Verifica con:
 
 ```bash
 docker --version
@@ -62,11 +62,16 @@ cd CondorFinder
 En Windows (PowerShell), dentro de la raíz del proyecto:
 
 ```powershell
-pnpm.cmd install o pnpm install
-pnpm.cmd approve-builds o pnpm approve-builds
-# Seleccionar "esbuild" presionando Space y luego Enter para aprobar la compilación.
+pnpm.cmd install
 ```
 
+Luego ejecuta:
+
+```powershell
+pnpm.cmd approve-builds
+```
+
+Se abrirá un selector interactivo. Usa `Space` para seleccionar `esbuild` (el círculo debe verse relleno `●`) y luego presiona `Enter`. Cuando pregunte `Do you approve? (y/N)`, escribe `y` y presiona `Enter`.
 
 ### 3. Crea el entorno virtual del backend
 
@@ -75,6 +80,9 @@ Abre WSL y navega a la raíz del proyecto:
 ```bash
 cd /mnt/c/ruta/al/proyecto/CondorFinder
 ```
+
+> Reemplaza `ruta/al/proyecto` con la ruta real en tu equipo. Por ejemplo:
+> `cd /mnt/c/Users/tuusuario/Desktop/CondorFinder`
 
 Crea el entorno virtual e instala dependencias:
 
@@ -103,15 +111,15 @@ Espera hasta ver:
 info: Server has started on port 3000
 ```
 
-Mantener esta terminal abierta durante todo el uso del sistema.
+Mantén esta terminal abierta durante todo el uso del sistema.
 
 ### Terminal 2 — Backend (WSL)
 
-Desde la raíz del proyecto con el venv activado:
+Abre una nueva terminal WSL, navega a la raíz del proyecto y ejecuta:
 
 ```bash
 source backendModel/joining/venv/bin/activate
-uvicorn backendModel.orquestador:app --reload --port 8000
+backendModel/joining/venv/bin/uvicorn backendModel.orquestador:app --reload --port 8000
 ```
 
 Espera hasta ver:
@@ -124,7 +132,7 @@ INFO: Application startup complete.
 Desde la raíz del proyecto:
 
 ```powershell
-pnpm.cmd dev o pnpm dev
+pnpm.cmd dev
 ```
 
 La aplicación estará disponible en **http://localhost:8080**
@@ -133,11 +141,11 @@ La aplicación estará disponible en **http://localhost:8080**
 
 ## Uso
 
-1. Abrir http://localhost:8080 en el navegador
-2. En la vista **Unificación de imágenes**, se pueden arrastrar o seleccionar las imagenes JPG tomadas mediante Drone
-3. Esperar a que las imágenes se suban al servidor
-4. Presionar **Generar mapa unificado** — el proceso toma tiempo.
-5. Una vez generado, se puede hacer clic en el mapa para ir a la vista de **Análisis de detección**
+1. Abre http://localhost:8080 en el navegador
+2. En la vista **Unificación de imágenes**, arrastra o selecciona las imágenes JPG tomadas con drone
+3. Espera a que las imágenes se suban al servidor
+4. Presiona **Generar mapa unificado** — el proceso toma tiempo dependiendo de la cantidad de imágenes
+5. Una vez generado, haz clic en el mapa para ir a la vista de **Análisis de detección**
 
 ---
 
