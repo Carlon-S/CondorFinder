@@ -62,9 +62,9 @@ cd CondorFinder
 En Windows (PowerShell), dentro de la raíz del proyecto:
 
 ```powershell
-pnpm.cmd install
-pnpm.cmd approve-builds
-# se debe seleccionar true con space (se debera ver el circulo "encendido/lleno") al lado de esbuild
+pnpm.cmd install o pnpm install
+pnpm.cmd approve-builds o pnpm approve-builds
+# Seleccionar "esbuild" presionando Space y luego Enter para aprobar la compilación.
 ```
 
 
@@ -124,7 +124,7 @@ INFO: Application startup complete.
 Desde la raíz del proyecto:
 
 ```powershell
-pnpm dev
+pnpm.cmd dev o pnpm dev
 ```
 
 La aplicación estará disponible en **http://localhost:8080**
