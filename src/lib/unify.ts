@@ -24,14 +24,23 @@ export interface UnifySuccess {
   technicalDownloadFormat?: "TIF" | "PNG" | "WEBP";
 }
 
+export interface OverlapPair {
+  imagen_1: string;
+  imagen_2: string;
+  solape: number;
+  distancia_m: number;
+}
+
 export interface UnifyError {
   status: "error";
   reason: string;
   message: string;
+  overlapDetail?: OverlapPair[];
+  overlapTotal?: number;
 }
 
 export interface UnifyProgress {
-  status: "joining" | "detecting";
+  status: "checking_overlap" | "joining" | "detecting";
   backendStatus: string;
 }
 
@@ -62,7 +71,7 @@ const POLLING_INTERVAL_MS = 5000;
 export async function unifyImages(
   files: File[],
   options: UnifyOptions = {},
-  onProgress?: (stage: "joining" | "detecting") => void,
+  onProgress?: (stage: "checking_overlap" | "joining" | "detecting") => void,
   onTaskCreated?: (taskId: string) => void,
 ): Promise<UnifyResponse> {
 
@@ -87,7 +96,7 @@ export async function unifyImages(
 
 export async function pollTask(
   taskId: string,
-  onProgress?: (stage: "joining" | "detecting") => void,
+  onProgress?: (stage: "checking_overlap" | "joining" | "detecting") => void,
   signal?: AbortSignal,
 ): Promise<UnifyResponse> {
   while (true) {
@@ -111,11 +120,15 @@ export async function pollTask(
         status: "error",
         reason: "pipeline_error",
         message: statusData.message,
+        overlapDetail: statusData.overlap_detail,
+        overlapTotal: statusData.overlap_total,
       };
     }
 
     if (
-      (statusData.status === "joining" || statusData.status === "detecting") &&
+      (statusData.status === "checking_overlap" ||
+        statusData.status === "joining" ||
+        statusData.status === "detecting") &&
       onProgress
     ) {
       onProgress(statusData.status);

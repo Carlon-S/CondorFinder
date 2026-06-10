@@ -3,9 +3,10 @@
 API REST que orquesta el pipeline completo de procesamiento:
 
 1. **Carga de imágenes** — recibe y persiste las imágenes JPG del drone en `joining/images/`
-2. **Unificación** (`joining/joinOrtho.py`) — genera un ortomosaico `.tif` usando OpenDroneMap
-3. **Detección** (`detecting/detectingOrtho.py`) — detecta categorías de basura con YOLOv8 + SAHI y genera una imagen anotada en `detecting/output/`
-4. **Resultado** — expone la imagen anotada y el conteo de detecciones al frontend
+2. **Verificación de solapamiento** (`joining/Reconociemiento_solapamiento.py`) — comprueba que cada par de imágenes consecutivas tenga al menos un 60% de solapamiento usando datos GPS EXIF y el FOV del drone (82.1°)
+3. **Unificación** (`joining/joinOrtho.py`) — genera un ortomosaico `.tif` usando OpenDroneMap
+4. **Detección** (`detecting/detectingOrtho.py`) — detecta categorías de basura con YOLOv8 + SAHI y genera una imagen anotada en `detecting/output/`
+5. **Resultado** — expone la imagen anotada y el conteo de detecciones al frontend
 
 ---
 
@@ -24,9 +25,10 @@ backendModel/
 ├── requirements.txt      ← Dependencias Python
 ├── main.py               ← Script CLI alternativo (uso directo sin API)
 ├── joining/
-│   ├── joinOrtho.py      ← Conecta con NodeODM y genera el ortomosaico
-│   ├── images/           ← Imágenes JPG de entrada
-│   └── finals/           ← Ortomosaico .tif de salida
+│   ├── joinOrtho.py                   ← Conecta con NodeODM y genera el ortomosaico
+│   ├── Reconociemiento_solapamiento.py ← Verifica solapamiento GPS entre imágenes
+│   ├── images/                        ← Imágenes JPG de entrada
+│   └── finals/                        ← Ortomosaico .tif de salida
 └── detecting/
     ├── detectingOrtho.py ← Ejecuta YOLOv8 + SAHI sobre el ortomosaico
     ├── model/
@@ -109,6 +111,7 @@ INFO: Application startup complete.
 | Estado | Descripción |
 |---|---|
 | `running` | Tarea creada, iniciando pipeline |
+| `checking_overlap` | Verificando solapamiento GPS entre imágenes consecutivas |
 | `joining` | Unificando imágenes con ODM (fase más lenta) |
 | `detecting` | Detectando basura con YOLOv8 + SAHI |
 | `done` | Proceso completado — `result_url` y `detection_count` disponibles |
@@ -127,6 +130,27 @@ INFO: Application startup complete.
 
 - `result_url`: URL de la imagen anotada con bounding boxes
 - `detection_count`: número de detecciones encontradas por YOLOv8. Si es `0`, el frontend muestra el aviso de "sin basura detectada" en ambas vistas (HDU2 CA3 y HDU3 CA2)
+
+### Respuesta cuando `status = "error"` por solapamiento insuficiente
+
+```json
+{
+  "status": "error",
+  "message": "Solapamiento insuficiente en 2 par(es) de imágenes.",
+  "overlap_detail": [
+    {
+      "imagen_1": "DJI_0001.JPG",
+      "imagen_2": "DJI_0002.JPG",
+      "solape": 42.3,
+      "distancia_m": 58.7
+    }
+  ],
+  "overlap_total": 5
+}
+```
+
+- `overlap_detail`: lista de pares de imágenes consecutivas con solapamiento inferior al umbral (60%). Presente solo cuando el error es de solapamiento.
+- `overlap_total`: total de pares evaluados con datos GPS válidos.
 
 ---
 

@@ -103,15 +103,15 @@ export function clearNoWasteDetected(): void {
 
 const KEY_BACKEND_STAGE = "condorfinder_backend_stage";
 
-export function saveBackendStage(stage: "joining" | "detecting"): void {
+export function saveBackendStage(stage: "checking_overlap" | "joining" | "detecting"): void {
   if (!isBrowser) return;
   sessionStorage.setItem(KEY_BACKEND_STAGE, stage);
 }
 
-export function loadBackendStage(): "joining" | "detecting" | null {
+export function loadBackendStage(): "checking_overlap" | "joining" | "detecting" | null {
   if (!isBrowser) return null;
   const val = sessionStorage.getItem(KEY_BACKEND_STAGE);
-  return val === "joining" || val === "detecting" ? val : null;
+  return val === "checking_overlap" || val === "joining" || val === "detecting" ? val : null;
 }
 
 export function clearBackendStage(): void {

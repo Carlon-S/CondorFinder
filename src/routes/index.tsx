@@ -35,7 +35,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { unifyImages, uploadImages, deleteImage, deleteAllImages, listUploadedImages, pollTask } from "@/lib/unify";
+import { unifyImages, uploadImages, deleteImage, deleteAllImages, listUploadedImages, pollTask, type OverlapPair } from "@/lib/unify";
 import unifiedMapImg from "@/assets/unified-map-simulation.png";
 import { saveMapUrl, clearMapUrl } from "@/lib/mapState";
 import { AppNavbar } from "@/components/AppNavbar";
@@ -219,7 +219,7 @@ function Page() {
     }));
   });
 
-  const [backendStage, setBackendStage] = useState<"joining" | "detecting" | null>(null);
+  const [backendStage, setBackendStage] = useState<"checking_overlap" | "joining" | "detecting" | null>(null);
 
   const navigate = useNavigate();
 
@@ -231,6 +231,8 @@ function Page() {
 
   const [resultUrl, setResultUrl] = useState<string | null>(() => loadResultUrl());
   const [noWasteDetected, setNoWasteDetected] = useState<boolean>(() => loadNoWasteDetected());
+  const [overlapDetail, setOverlapDetail] = useState<OverlapPair[]>([]);
+  const [errorStage, setErrorStage] = useState<"checking_overlap" | "joining" | "detecting" | null>(null);
 
   const [uploadDone, setUploadDone] = useState<boolean>(() => loadUploadDone());
 
@@ -335,14 +337,19 @@ function Page() {
     pollTask(savedTaskId, (stage) => {
       setBackendStage(stage);
       saveBackendStage(stage);
-      setProgress(stage === "joining" ? 55 : 75);
+      setProgress(stage === "checking_overlap" ? 45 : stage === "joining" ? 60 : 75);
     }, controller.signal).then((res) => {
+      const stageAtError = res.status === "error"
+        ? (res.overlapDetail !== undefined ? "checking_overlap" : loadBackendStage())
+        : null;
       clearTaskId();
       clearBackendStage();
       if (res.status === "error") {
         setPhase("error"); savePhase("error");
         setProgress(100);
         setErrorMsg(res.message || "No se pudo generar el mapa. Intenta nuevamente.");
+        setErrorStage(stageAtError);
+        if (res.overlapDetail) setOverlapDetail(res.overlapDetail);
         return;
       }
       setProgress(85);
@@ -404,15 +411,30 @@ function Page() {
   /** Estado del check "Cantidad mínima" */
   const countState: TriState = items.length === 0 ? "pending" : enoughImages ? "ok" : "warn";
 
-  /** Estado del check "Generación de mapa" */
-  const mapState: TriState =
-    phase === "generating_map"
-      ? "running"
-      : phase === "done"
-        ? "ok"
-        : phase === "error"
-          ? "error"
-          : "pending";
+  /** Estado del check "Solapamiento" */
+  const overlapState: TriState =
+    phase === "generating_map" && backendStage === "checking_overlap" ? "running"
+    : phase === "error" && errorStage === "checking_overlap" ? "error"
+    : phase === "done" ||
+      (phase === "generating_map" && (backendStage === "joining" || backendStage === "detecting")) ||
+      (phase === "error" && errorStage !== null && errorStage !== "checking_overlap") ? "ok"
+    : "pending";
+
+  /** Estado del check "Generación de mapa (ODM)" */
+  const joinState: TriState =
+    phase === "generating_map" && backendStage === "joining" ? "running"
+    : phase === "error" && errorStage === "joining" ? "error"
+    : phase === "done" ||
+      (phase === "generating_map" && backendStage === "detecting") ||
+      (phase === "error" && errorStage === "detecting") ? "ok"
+    : "pending";
+
+  /** Estado del check "Detección de basura" */
+  const detectState: TriState =
+    phase === "generating_map" && backendStage === "detecting" ? "running"
+    : phase === "error" && errorStage === "detecting" ? "error"
+    : phase === "done" ? "ok"
+    : "pending";
 
   // ---------------------------------------------------------------------------
   // MANEJO DE ARCHIVOS
@@ -544,6 +566,8 @@ function Page() {
     setBackendStage(null);
     setNoWasteDetected(false);
     clearNoWasteDetected();
+    setOverlapDetail([]);
+    setErrorStage(null);
   };
 
   /** Elimina todas las imágenes y reinicia el proceso */
@@ -593,16 +617,19 @@ function Page() {
       const res = await unifyImages(validFiles, {}, (stage) => {
         setBackendStage(stage);
         saveBackendStage(stage);
-        setProgress(stage === "joining" ? 55 : 75);
+        setProgress(stage === "checking_overlap" ? 45 : stage === "joining" ? 60 : 75);
       }, (taskId) => {
         saveTaskId(taskId);
       });
 
       if (res.status === "error") {
+        const stageAtError = res.overlapDetail !== undefined ? "checking_overlap" : loadBackendStage();
         clearTaskId(); clearBackendStage();
         setPhase("error"); savePhase("error");
         setProgress(100);
         setErrorMsg(res.message || "No se pudo generar el mapa. Intenta nuevamente.");
+        setErrorStage(stageAtError);
+        if (res.overlapDetail) setOverlapDetail(res.overlapDetail);
         return;
       }
 
@@ -624,8 +651,9 @@ function Page() {
   };
 
   /** Etiquetas descriptivas para cada fase del proceso */
-    function getPhaseLabel(phase: Phase, backendStage: "joining" | "detecting" | null): string {
+    function getPhaseLabel(phase: Phase, backendStage: "checking_overlap" | "joining" | "detecting" | null): string {
     if (phase === "generating_map") {
+      if (backendStage === "checking_overlap") return "Verificando solapamiento entre imágenes...";
       if (backendStage === "joining") return "Unificando imágenes con ODM...";
       if (backendStage === "detecting") return "Detectando basura con YOLOv8...";
       return "Iniciando pipeline...";
@@ -855,12 +883,43 @@ function Page() {
                 hint={countState === "ok" ? `${validCount} imagenes JPG cargadas (minimo requerido: ${MIN_IMAGES})`
                   : countState === "warn" ? `Faltan ${MIN_IMAGES - validCount} imagen(es) para alcanzar el minimo de ${MIN_IMAGES}`
                   : `Se requieren al menos ${MIN_IMAGES} imagenes JPG validas`} />
-              <CheckRow label="Generacion de mapa" state={mapState}
-                hint={mapState === "running" ? "Procesando y unificando imagenes..."
-                  : mapState === "ok" ? "Mapa generado y disponible para descarga"
-                  : mapState === "error" ? "El proceso fue interrumpido por un error"
-                  : "Pendiente: completa los pasos anteriores"} />
+              <CheckRow label="Solapamiento (~60%)" state={overlapState}
+                hint={overlapState === "running" ? "Verificando solapamiento entre imágenes consecutivas..."
+                  : overlapState === "ok" ? "Solapamiento entre imágenes aprobado"
+                  : overlapState === "error" ? (errorMsg ?? "Solapamiento insuficiente en uno o más pares")
+                  : "Pendiente: se verifica al iniciar la generación"} />
+              <CheckRow label="Generacion de mapa" state={joinState}
+                hint={joinState === "running" ? "Unificando imagenes con ODM..."
+                  : joinState === "ok" ? "Mapa unificado generado correctamente"
+                  : joinState === "error" ? "La unificacion de imagenes fallo"
+                  : "Pendiente: requiere solapamiento aprobado"} />
+              <CheckRow label="Deteccion de basura" state={detectState}
+                hint={detectState === "running" ? "Detectando basura con YOLOv8 + SAHI..."
+                  : detectState === "ok" ? "Deteccion completada"
+                  : detectState === "error" ? "La deteccion de basura fallo"
+                  : "Pendiente: requiere mapa unificado"} />
             </div>
+
+            {/* Panel de pares en conflicto de solapamiento */}
+            {overlapDetail.length > 0 && (
+              <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 space-y-2">
+                <p className="mono text-[10px] font-semibold uppercase tracking-wider text-destructive">
+                  Pares en conflicto ({overlapDetail.length})
+                </p>
+                <ul className="space-y-1.5">
+                  {overlapDetail.map((pair, i) => (
+                    <li key={i} className="rounded border border-destructive/20 bg-background/40 px-2 py-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="mono text-[10px] font-semibold text-destructive">{pair.solape}%</span>
+                        <span className="mono text-[9px] text-muted-foreground">{pair.distancia_m} m</span>
+                      </div>
+                      <p className="mono text-[9px] text-muted-foreground truncate mt-0.5" title={pair.imagen_1}>{pair.imagen_1}</p>
+                      <p className="mono text-[9px] text-muted-foreground truncate" title={pair.imagen_2}>{pair.imagen_2}</p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             {/* Resumen numerico de la carga actual */}
             <div className="rounded-md border border-border bg-background/30 p-3 space-y-3">

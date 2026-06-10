@@ -14,6 +14,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
 
 from joining import joinOrtho
+from joining import Reconociemiento_solapamiento as solapamiento
 from detecting import detectingOrtho
 
 app = FastAPI()
@@ -118,6 +119,23 @@ async def delete_all_images():
 def run_pipeline(task_id: str, opc: int):
     """Ejecuta join() y detect() en un hilo separado."""
     try:
+        tasks[task_id]["status"] = "checking_overlap"
+        tasks[task_id]["message"] = "Verificando solapamiento entre imágenes..."
+
+        resultado = solapamiento.verificar_set_vuelo(
+            UPLOAD_DIR,
+            fov_horizontal=82.1,
+            altitud_vuelo=50,
+            umbral_min_solape=60
+        )
+
+        if not resultado["aprobado"]:
+            tasks[task_id]["status"] = "error"
+            tasks[task_id]["message"] = resultado["mensaje"]
+            tasks[task_id]["overlap_detail"] = resultado["detalle"]
+            tasks[task_id]["overlap_total"] = resultado["total_pares"]
+            return
+        
         tasks[task_id]["status"] = "joining"
         tasks[task_id]["message"] = "Unificando imágenes con ODM..."
 
@@ -190,6 +208,10 @@ async def get_status(task_id: str):
     if task["status"] == "done" and task["result_filename"]:
         response["result_url"] = f"http://localhost:8000/result/{task['result_filename']}"
         response["detection_count"] = task.get("detection_count", 0)
+
+    if task["status"] == "error" and task.get("overlap_detail") is not None:
+        response["overlap_detail"] = task["overlap_detail"]
+        response["overlap_total"] = task.get("overlap_total", 0)
 
     return response
 

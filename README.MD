@@ -148,7 +148,7 @@ La aplicación estará disponible en **http://localhost:8080**
 1. Abre http://localhost:8080 en el navegador
 2. Arrastra o selecciona las imágenes JPG tomadas con drone (mínimo 16)
 3. El sistema valida el formato y la cantidad antes de habilitar la generación
-4. Presiona **Generar mapa unificado** — el proceso pasa por las fases: unificación con ODM y detección con YOLOv8
+4. Presiona **Generar mapa unificado** — el proceso pasa por tres fases secuenciales: verificación de solapamiento (~60%), unificación con ODM y detección con YOLOv8
 5. Al terminar, el mapa aparece en el visor:
    - Si se detectó basura: el mapa es clicable y navega a la vista de análisis
    - Si no se detectó basura: el mapa igual se muestra con un aviso informativo, y sigue siendo posible navegar al análisis
@@ -183,9 +183,10 @@ CondorFinder/
 │   ├── orquestador.py       ← API FastAPI (carga, generación, estado)
 │   ├── requirements.txt     ← Dependencias Python
 │   ├── joining/
-│   │   ├── joinOrtho.py     ← Unificación de imágenes con ODM
-│   │   ├── images/          ← Imágenes JPG cargadas por el usuario
-│   │   └── finals/          ← Ortomosaico .tif generado por ODM
+│   │   ├── joinOrtho.py                  ← Unificación de imágenes con ODM
+│   │   ├── Reconociemiento_solapamiento.py ← Verificación de solapamiento GPS
+│   │   ├── images/                       ← Imágenes JPG cargadas por el usuario
+│   │   └── finals/                       ← Ortomosaico .tif generado por ODM
 │   └── detecting/
 │       ├── detectingOrtho.py ← Detección de basura con YOLOv8 + SAHI
 │       ├── model/best.pt     ← Pesos del modelo entrenado
@@ -198,18 +199,18 @@ CondorFinder/
 
 ## Estado del MVP
 
-| Historia | Criterio | Estado |
+| Historia | Criterio de aceptación | Estado |
 |---|---|---|
-| HDU1 | Verificación de formato JPG | ✅ Implementado |
-| HDU1 | Cantidad mínima de imágenes (16) | ✅ Implementado |
-| HDU1 | Generación del mapa unificado | ✅ Implementado |
-| HDU2 | Aviso cuando no se detecta basura en el mapa | ✅ Implementado |
-| HDU2 | Cálculo de volumen por polígono | ⚠️ Simulado |
-| HDU2 | Resumen total de volumen estimado | ⚠️ Simulado |
-| HDU3 | Informar inmediatamente si no hay basura + deshabilitar análisis | ✅ Implementado |
-| HDU3 | Mostrar volumen, área y tipos de residuo por zona | ⚠️ Simulado |
-| HDU3 | Diferenciación visual por nivel de acumulación | ❌ Pendiente |
-| HDU3 | Mensaje "Tipo de basura indefinido" | ❌ Pendiente |
+| HDU1 | Se verifica que las imágenes sean del formato correcto (JPG) | ✅ Cumplido |
+| HDU1 | Se revisa si las imágenes entregadas son suficientes y/o cumplen un margen de superposición (~60% de solapamiento) | ✅ Cumplido |
+| HDU1 | El sistema genera un mapa unificando todas las imágenes | ✅ Cumplido |
+| HDU2 | El sistema calcula el volumen asociado a cada polígono | ⚠️ A medias |
+| HDU2 | Se muestra un resumen del volumen estimado total del área | ⚠️ A medias |
+| HDU2 | Se muestra un mensaje de "No hay basura detectada en el área" | ✅ Cumplido |
+| HDU3 | Se muestra un resumen relevante para el análisis: volumen estimado, área estimada y tipos de residuo | ⚠️ A medias |
+| HDU3 | El sistema informa que no se encontraron basurales registrados | ✅ Cumplido |
+| HDU3 | Se destaca visualmente la zona en base a su volumen estimado | ❌ Incumplido |
+| HDU3 | El sistema muestra un mensaje de "Tipo de basura indefinido" | ❌ Incumplido |
 
 
 ---

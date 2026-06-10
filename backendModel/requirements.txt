@@ -71,3 +71,5 @@ fastapi
 uvicorn
 python-multipart
 requests
+exif
+geopy
