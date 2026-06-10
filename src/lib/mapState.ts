@@ -23,9 +23,12 @@ const MAP_URL_KEY = "condorfinder:unified_map_url";
  *
  * @param url - URL del mapa (blob:, data:, https: o ruta local)
  */
+export const MAP_READY_EVENT = "condorfinder:map-ready";
+
 export function saveMapUrl(url: string): void {
   try {
     sessionStorage.setItem(MAP_URL_KEY, url);
+    window.dispatchEvent(new CustomEvent(MAP_READY_EVENT, { detail: { url } }));
   } catch {
     // sessionStorage puede fallar en modo privado con cuota llena.
     // Se ignora silenciosamente: analysis.tsx caerá al fallback local.

@@ -1,4 +1,3 @@
-
 import rasterio
 import os
 import sys
@@ -42,34 +41,26 @@ COLORS_MAP = {
 def detect(file_name: str):
     print("Ejecutando deteccion")
 
-    ORTHO_PATH =  file_name
-
+    ORTHO_PATH = file_name
     FILE_NAME = os.path.splitext(os.path.basename(file_name))[0]
 
     with rasterio.open(ORTHO_PATH) as src:
         geo_transform = src.transform
         src_crs = src.crs
         band_count = src.count
-        if band_count >= 4:
-            img_array = src.read([1, 2, 3])
-            alpha = src.read(4)
-        else:
-            img_array = src.read([1, 2, 3])
-        alpha = None
+        img_array = src.read([1, 2, 3])
+        nodata_mask = src.dataset_mask()  # shape (H, W): 255=válido, 0=sin datos
 
     model = AutoDetectionModel.from_pretrained(
         model_type="yolov8",
         model_path=MODEL_PATH,
         confidence_threshold=CONF,
-        device="cpu",  # cambiar a "cuda" para usar gpu Nvidia, aunque este paso no es muy lento
+        device="cpu",
     )
 
-    img_array = np.moveaxis(img_array, 0, -1)
-    if alpha is not None:
-        rgba = np.dstack([img_array.astype(np.uint8), alpha.astype(np.uint8)])
-        image = Image.fromarray(rgba, mode="RGBA")
-    else:
-        image = Image.fromarray(img_array.astype(np.uint8), mode="RGB")
+    # SAHI y YOLOv8 solo aceptan RGB — la transparencia se aplica al final
+    img_array = np.moveaxis(img_array, 0, -1).astype(np.uint8)
+    image = Image.fromarray(img_array, mode="RGB")
     print(f"Tamaño orthomosaico: {image.size}")
 
     result = get_sliced_prediction(
@@ -81,7 +72,6 @@ def detect(file_name: str):
         overlap_width_ratio=0.2,
     )
     print(f"Encontradas {len(result.object_prediction_list)} detecciones")
-
 
     draw = ImageDraw.Draw(image)
     for pred in result.object_prediction_list:
@@ -95,71 +85,15 @@ def detect(file_name: str):
     w, h = image.size
     scale = min(1.0, 10000 / max(w, h))
     preview = image.resize((int(w * scale), int(h * scale)))
+
+    # Redimensionar la máscara al mismo tamaño del preview y aplicarla como alpha
+    pw, ph = preview.size
+    mask_pil = Image.fromarray(nodata_mask, mode="L").resize((pw, ph), Image.NEAREST)
+    preview_rgba = preview.convert("RGBA")
+    preview_rgba.putalpha(mask_pil)
+
     final = os.path.join(OUTPUT_PATH, FILE_NAME)
-    preview.save(f"{final}.png")
+    preview_rgba.save(f"{final}.png")
     print(f"Archivo Final en {final}.png")
 
-    return final
-
-
-    """
-
-    ///
-    Este es un ejemplo vive-codeado de usar un mapa para generar una salida. No me gusto mucho, pero pueden verlo de ejemplo. Descomenta la seccion de abajo, y genera un ejemplo en un archivo html.
-    ///
-    WGS84    = CRS.from_epsg(4326)
-    features = []
-
-    print("Sample coordinates:")
-    for i, pred in enumerate(result.object_prediction_list):
-        box   = pred.bbox
-        cx_px = (box.minx + box.maxx) / 2
-        cy_px = (box.miny + box.maxy) / 2
-
-        # Pixel → UTM
-        utm_x, utm_y = rasterio.transform.xy(geo_transform, cy_px, cx_px)
-
-        # UTM → WGS84
-        lon, lat = rasterio_transform(src_crs, WGS84, [utm_x], [utm_y])
-        lon, lat = float(lon[0]), float(lat[0])
-
-        cls  = CLASSES[pred.category.id]
-        conf = round(float(pred.score.value), 3)
-
-        if i < 5:
-            print(f"  {cls}: lat={lat:.6f}, lon={lon:.6f}")
-
-        features.append({
-            "type": "Feature",
-            "geometry":   {"type": "Point", "coordinates": [lon, lat]},
-            "properties": {"class": cls, "confidence": conf},
-        })
-
-    with open("detections.geojson", "w") as f:
-        json.dump({"type": "FeatureCollection", "features": features}, f)
-    print("Saved detections.geojson")
-
-    if features:
-        center_lat = np.mean([f["geometry"]["coordinates"][1] for f in features])
-        center_lon = np.mean([f["geometry"]["coordinates"][0] for f in features])
-
-        m = folium.Map(location=[center_lat, center_lon], zoom_start=17)
-
-        for f in features:
-            lon, lat = f["geometry"]["coordinates"]
-            cls      = f["properties"]["class"]
-            conf     = f["properties"]["confidence"]
-            folium.CircleMarker(
-                location=[lat, lon],
-                radius=6,
-                color=COLORS_MAP.get(cls, "white"),
-                fill=True,
-                fill_opacity=0.8,
-                popup=f"{cls} ({conf})",
-            ).add_to(m)
-
-        m.save("detections_map.html")
-        print("Saved detections_map.html — open it in your browser!")
-    else:
-        print("No detections found, map not generated.")"""
-    
+    return final, len(result.object_prediction_list)

@@ -18,8 +18,8 @@
 
 export interface UnifySuccess {
   status: "success";
-  overlap: number;
   mapUrl: string;
+  detectionCount: number;
   technicalDownloadUrl?: string;
   technicalDownloadFormat?: "TIF" | "PNG" | "WEBP";
 }
@@ -27,7 +27,6 @@ export interface UnifySuccess {
 export interface UnifyError {
   status: "error";
   reason: string;
-  overlap?: number;
   message: string;
 }
 
@@ -53,6 +52,7 @@ export interface UnifyOptions {
 // =============================================================================
 
 const BACKEND_URL = "http://localhost:8000";
+const POLLING_INTERVAL_MS = 5000;
 
 
 // =============================================================================
@@ -63,18 +63,8 @@ export async function unifyImages(
   files: File[],
   options: UnifyOptions = {},
   onProgress?: (stage: "joining" | "detecting") => void,
+  onTaskCreated?: (taskId: string) => void,
 ): Promise<UnifyResponse> {
-
-  // Simulación de solapamiento bajo (solo desarrollo)
-  if (options.forceLowOverlap) {
-    await new Promise((r) => setTimeout(r, 800));
-    return {
-      status: "error",
-      reason: "overlap_too_low",
-      overlap: 42,
-      message: "Las imágenes no cumplen el mínimo de superposición.",
-    };
-  }
 
   // Inicia el pipeline en el backend y obtiene task_id
   const startRes = await fetch(`${BACKEND_URL}/generate`, { method: "POST" });
@@ -88,20 +78,29 @@ export async function unifyImages(
     };
   }
 
-  const taskId = startData.task_id;
+ const taskId = startData.task_id;
+  if (onTaskCreated) onTaskCreated(taskId);
 
-  // Polling cada 5 segundos hasta que el backend termine
+  return pollTask(taskId, onProgress);
+}
+
+
+export async function pollTask(
+  taskId: string,
+  onProgress?: (stage: "joining" | "detecting") => void,
+  signal?: AbortSignal,
+): Promise<UnifyResponse> {
   while (true) {
-    await new Promise((r) => setTimeout(r, 5000));
+    if (signal?.aborted) throw new DOMException("aborted", "AbortError");
 
-    const statusRes = await fetch(`${BACKEND_URL}/status/${taskId}`);
+    const statusRes = await fetch(`${BACKEND_URL}/status/${taskId}`, { signal });
     const statusData = await statusRes.json();
 
     if (statusData.status === "done") {
       return {
         status: "success",
-        overlap: 100,
         mapUrl: statusData.result_url,
+        detectionCount: statusData.detection_count ?? 0,
         technicalDownloadUrl: statusData.result_url,
         technicalDownloadFormat: "PNG",
       };
@@ -121,6 +120,15 @@ export async function unifyImages(
     ) {
       onProgress(statusData.status);
     }
+
+    // Espera DESPUÉS del chequeo: la primera iteración es siempre inmediata
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(resolve, POLLING_INTERVAL_MS);
+      signal?.addEventListener("abort", () => {
+        clearTimeout(timer);
+        reject(new DOMException("aborted", "AbortError"));
+      });
+    });
   }
 }
 
@@ -167,13 +175,14 @@ export async function uploadImages(
  * Consulta al backend qué imágenes están actualmente en images/.
  * Retorna un array de nombres de archivo.
  */
-export async function listUploadedImages(): Promise<string[]> {
+export async function listUploadedImages(): Promise<string[] | null> {
   try {
     const res = await fetch(`${BACKEND_URL}/upload`);
+    if (!res.ok) return null;
     const data = await res.json();
     return data.archivos ?? [];
   } catch {
-    return [];
+    return null;  // null = backend inalcanzable, [] = backend vacío
   }
 }
 
@@ -193,4 +202,12 @@ export async function deleteImage(filename: string): Promise<void> {
  */
 export async function deleteAllImages(): Promise<void> {
   await fetch(`${BACKEND_URL}/upload`, { method: "DELETE" });
+}
+
+/**
+ * Versión síncrona de deleteAllImages para usar en beforeunload.
+ * keepalive: true garantiza que el browser complete la petición aunque la página esté cerrando.
+ */
+export function deleteAllImagesSync(): void {
+  fetch(`${BACKEND_URL}/upload`, { method: "DELETE", keepalive: true });
 }

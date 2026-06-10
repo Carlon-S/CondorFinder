@@ -4,7 +4,8 @@ API REST que orquesta el pipeline completo de procesamiento:
 
 1. **Carga de imágenes** — recibe y persiste las imágenes JPG del drone en `joining/images/`
 2. **Unificación** (`joining/joinOrtho.py`) — genera un ortomosaico `.tif` usando OpenDroneMap
-3. **Detección** (`detecting/detectingOrtho.py`) — detecta categorías de basura con YOLOv8 y genera una imagen anotada en `detecting/output/`
+3. **Detección** (`detecting/detectingOrtho.py`) — detecta categorías de basura con YOLOv8 + SAHI y genera una imagen anotada en `detecting/output/`
+4. **Resultado** — expone la imagen anotada y el conteo de detecciones al frontend
 
 ---
 
@@ -27,7 +28,7 @@ backendModel/
 │   ├── images/           ← Imágenes JPG de entrada
 │   └── finals/           ← Ortomosaico .tif de salida
 └── detecting/
-    ├── detectingOrtho.py ← Ejecuta YOLOv8 sobre el ortomosaico
+    ├── detectingOrtho.py ← Ejecuta YOLOv8 + SAHI sobre el ortomosaico
     ├── model/
     │   └── best.pt       ← Pesos del modelo YOLOv8 entrenado
     └── output/           ← Imágenes anotadas con detecciones
@@ -77,8 +78,10 @@ Abre una nueva terminal WSL, navega a la raíz del proyecto y ejecuta:
 
 ```bash
 source backendModel/joining/venv/bin/activate
-backendModel/joining/venv/bin/uvicorn backendModel.orquestador:app --reload --port 8000
+backendModel/joining/venv/bin/uvicorn backendModel.orquestador:app --port 8000
 ```
+
+> **Importante:** no uses `--reload`. El flag de recarga automática reinicia el proceso al detectar cambios en archivos, lo que destruye el diccionario de tareas en memoria y hace que las tareas en ejecución retornen "Tarea no encontrada".
 
 Espera hasta ver:
 ```
@@ -99,15 +102,31 @@ INFO: Application startup complete.
 | `GET` | `/status/{task_id}` | Consulta el estado de una tarea en curso |
 | `GET` | `/result/{filename}` | Sirve la imagen anotada generada por YOLOv8 |
 
-### Estados de una tarea (`/status/{task_id}`)
+---
+
+## Estados de una tarea (`/status/{task_id}`)
 
 | Estado | Descripción |
 |---|---|
-| `running` | Iniciando pipeline |
-| `joining` | Unificando imágenes con ODM (toma tiempo) |
-| `detecting` | Detectando basura con YOLOv8 |
-| `done` | Proceso completado, `result_url` disponible |
-| `error` | El proceso falló, `message` contiene el detalle |
+| `running` | Tarea creada, iniciando pipeline |
+| `joining` | Unificando imágenes con ODM (fase más lenta) |
+| `detecting` | Detectando basura con YOLOv8 + SAHI |
+| `done` | Proceso completado — `result_url` y `detection_count` disponibles |
+| `error` | El proceso falló — `message` contiene el detalle |
+
+### Respuesta cuando `status = "done"`
+
+```json
+{
+  "status": "done",
+  "message": "Proceso completado",
+  "result_url": "http://localhost:8000/result/nombre_archivo.png",
+  "detection_count": 12
+}
+```
+
+- `result_url`: URL de la imagen anotada con bounding boxes
+- `detection_count`: número de detecciones encontradas por YOLOv8. Si es `0`, el frontend muestra el aviso de "sin basura detectada" en ambas vistas (HDU2 CA3 y HDU3 CA2)
 
 ---
 
@@ -128,3 +147,5 @@ INFO: Application startup complete.
 ## Notas
 
 - El venv está en `joining/venv/` y está excluido del repositorio vía `.gitignore`.
+- Las tareas se almacenan en memoria (`tasks: dict`) — se pierden al reiniciar uvicorn. Esto es esperado en el MVP; una versión futura debería persistirlas en base de datos.
+- Para forzar el escenario de "sin basura detectada" durante pruebas, se puede agregar temporalmente `detection_count = 0` después de la llamada a `detectingOrtho.detect()` en `run_pipeline`. 

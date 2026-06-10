@@ -12,7 +12,7 @@ export interface PersistedFileItem {
   size: number;
   status: "valid" | "invalid";
   reason?: string;
-  preview: string;
+  preview?: string;
 }
 
 const KEY_ITEMS       = "condorfinder_items";
@@ -67,10 +67,65 @@ export function loadResultUrl(): string | null {
   return sessionStorage.getItem(KEY_RESULT_URL);
 }
 
+const KEY_TASK_ID = "condorfinder_task_id";
+
+export function saveTaskId(taskId: string): void {
+  if (!isBrowser) return;
+  sessionStorage.setItem(KEY_TASK_ID, taskId);
+}
+
+export function loadTaskId(): string | null {
+  if (!isBrowser) return null;
+  return sessionStorage.getItem(KEY_TASK_ID);
+}
+
+export function clearTaskId(): void {
+  if (!isBrowser) return;
+  sessionStorage.removeItem(KEY_TASK_ID);
+}
+
+const KEY_NO_WASTE = "condorfinder_no_waste";
+
+export function saveNoWasteDetected(noWaste: boolean): void {
+  if (!isBrowser) return;
+  sessionStorage.setItem(KEY_NO_WASTE, String(noWaste));
+}
+
+export function loadNoWasteDetected(): boolean {
+  if (!isBrowser) return false;
+  return sessionStorage.getItem(KEY_NO_WASTE) === "true";
+}
+
+export function clearNoWasteDetected(): void {
+  if (!isBrowser) return;
+  sessionStorage.removeItem(KEY_NO_WASTE);
+}
+
+const KEY_BACKEND_STAGE = "condorfinder_backend_stage";
+
+export function saveBackendStage(stage: "joining" | "detecting"): void {
+  if (!isBrowser) return;
+  sessionStorage.setItem(KEY_BACKEND_STAGE, stage);
+}
+
+export function loadBackendStage(): "joining" | "detecting" | null {
+  if (!isBrowser) return null;
+  const val = sessionStorage.getItem(KEY_BACKEND_STAGE);
+  return val === "joining" || val === "detecting" ? val : null;
+}
+
+export function clearBackendStage(): void {
+  if (!isBrowser) return;
+  sessionStorage.removeItem(KEY_BACKEND_STAGE);
+}
+
 export function clearImageState(): void {
   if (!isBrowser) return;
   sessionStorage.removeItem(KEY_ITEMS);
   sessionStorage.removeItem(KEY_UPLOAD_DONE);
   sessionStorage.removeItem(KEY_PHASE);
   sessionStorage.removeItem(KEY_RESULT_URL);
+  sessionStorage.removeItem(KEY_TASK_ID);
+  sessionStorage.removeItem(KEY_NO_WASTE);
+  sessionStorage.removeItem(KEY_BACKEND_STAGE);
 }

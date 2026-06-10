@@ -35,13 +35,16 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { unifyImages, uploadImages, deleteImage, deleteAllImages, listUploadedImages } from "@/lib/unify";
+import { unifyImages, uploadImages, deleteImage, deleteAllImages, listUploadedImages, pollTask } from "@/lib/unify";
 import unifiedMapImg from "@/assets/unified-map-simulation.png";
 import { saveMapUrl, clearMapUrl } from "@/lib/mapState";
 import { AppNavbar } from "@/components/AppNavbar";
 import {
   saveItems, loadItems, saveUploadDone, loadUploadDone,
   savePhase, loadPhase, saveResultUrl, loadResultUrl,
+  saveTaskId, loadTaskId, clearTaskId,
+  saveBackendStage, loadBackendStage, clearBackendStage,
+  saveNoWasteDetected, loadNoWasteDetected, clearNoWasteDetected,
   clearImageState, type PersistedFileItem,
 } from "@/lib/imageState";
 
@@ -185,6 +188,9 @@ function Page() {
   // ESTADO DEL COMPONENTE
   // ---------------------------------------------------------------------------
 
+  const itemNamesRef = useRef<Set<string>>(new Set());
+  const [skippedCount, setSkippedCount] = useState(0);
+
   /** Indica si el usuario está arrastrando archivos sobre la zona de drop */
   const [dragOver, setDragOver] = useState(false);
 
@@ -206,10 +212,10 @@ function Page() {
   const [items, setItems] = useState<FileItem[]>(() => {
     return loadItems().map((p) => ({
       id: p.id,
-      file: new File([], p.name), // File vacío — solo para mostrar nombre/tamaño
+      file: new File([], p.name),
       status: p.status,
       reason: p.reason,
-      preview: p.preview,
+      preview: p.preview ?? "",
     }));
   });
 
@@ -219,11 +225,12 @@ function Page() {
 
   const [phase, setPhase] = useState<Phase>(() => {
     const saved = loadPhase() as Phase;
-    // Si estaba procesando al recargar, vuelve a idle
-    return saved === "done" || saved === "error" ? saved : "idle";
+    return saved === "done" || saved === "error" || saved === "generating_map" ? saved : "idle";
   });
 
+
   const [resultUrl, setResultUrl] = useState<string | null>(() => loadResultUrl());
+  const [noWasteDetected, setNoWasteDetected] = useState<boolean>(() => loadNoWasteDetected());
 
   const [uploadDone, setUploadDone] = useState<boolean>(() => loadUploadDone());
 
@@ -234,53 +241,133 @@ function Page() {
   // ---------------------------------------------------------------------------
   useEffect(() => {
     return () => {
-      items.forEach((i) => URL.revokeObjectURL(i.preview));
+      items.forEach((i) => {
+        if (i.preview.startsWith("blob:")) URL.revokeObjectURL(i.preview);
+      });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-  const persisted: PersistedFileItem[] = items
-    .filter((i) => i.preview.startsWith("data:"))
-    .map((i) => ({
+    const persisted: PersistedFileItem[] = items.map((i) => ({
       id: i.id,
       name: i.file.name,
       size: i.file.size,
       status: i.status,
       reason: i.reason,
-      preview: i.preview,
+      preview: i.preview.startsWith("data:") ? i.preview : undefined,
     }));
-  saveItems(persisted);
-}, [items]);
+    saveItems(persisted);
+  }, [items]);
 
-useEffect(() => { saveUploadDone(uploadDone); }, [uploadDone]);
-useEffect(() => { savePhase(phase); }, [phase]);
-useEffect(() => { if (resultUrl) saveResultUrl(resultUrl); }, [resultUrl]);
+  useEffect(() => { saveUploadDone(uploadDone); }, [uploadDone]);
+  useEffect(() => { savePhase(phase); }, [phase]);
+  useEffect(() => { if (resultUrl) saveResultUrl(resultUrl); }, [resultUrl]);
 
-// Al montar, verifica qué archivos están realmente en el backend
-// y reconcilia con los items persistidos en sessionStorage
-useEffect(() => {
-  if (items.length === 0) return;
+  // Al montar, verifica qué archivos están realmente en el backend
+  // y reconcilia con los items persistidos en sessionStorage
+  useEffect(() => {
+    const navType = (performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming)?.type;
+    const isReload = navType === "reload";
 
-  listUploadedImages().then((serverFiles) => {
-    const serverSet = new Set(serverFiles);
-    const validItems = items.filter((i) => i.status === "valid");
-
-    // Si todos los items válidos están en el servidor, uploadDone = true
-    const allPresent = validItems.length > 0 &&
-      validItems.every((i) => serverSet.has(i.file.name));
-
-    if (allPresent) {
-      setUploadDone(true);
-    } else if (validItems.length > 0) {
-      // Hay items válidos pero no están en el servidor — hay que re-subirlos
-      // Pero como File está vacío, solo podemos marcar como no listo
-      setUploadDone(false);
+    if (items.length === 0) {
+      // Solo limpiar el backend si es sesión nueva, no si es un reload
+      if (!isReload) {
+        deleteAllImages().catch(() => {});
+      }
+      return;
     }
-  });
-  // Solo al montar
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, []);
+
+    // Sesión con items: reconciliar con el backend
+    listUploadedImages().then((serverFiles) => {
+      if (serverFiles === null) return; // backend caído, no hacer nada
+
+      const serverSet = new Set(serverFiles);
+      const validItems = items.filter((i) => i.status === "valid");
+
+      const allPresent = validItems.length > 0 &&
+        validItems.every((i) => serverSet.has(i.file.name));
+
+      if (allPresent) {
+        setUploadDone(true);
+      } else if (validItems.length > 0) {
+        setUploadDone(false);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState !== "visible") return;
+      if (!uploadDone) return;
+
+      listUploadedImages().then((serverFiles) => {
+        if (serverFiles === null) return;
+        if (serverFiles.length === 0) {
+          clearAll();
+        }
+      });
+    };
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uploadDone]);
+
+  useEffect(() => {
+    const savedTaskId = loadTaskId();
+    if (!savedTaskId || phase !== "generating_map") return;
+
+    const controller = new AbortController();
+
+    // Restaurar stage guardado para evitar flash de "Iniciando pipeline..."
+    const savedStage = loadBackendStage();
+    if (savedStage) {
+      setBackendStage(savedStage);
+      setProgress(savedStage === "joining" ? 55 : 75);
+    } else {
+      setBackendStage(null);
+      setProgress(40);
+    }
+
+    pollTask(savedTaskId, (stage) => {
+      setBackendStage(stage);
+      saveBackendStage(stage);
+      setProgress(stage === "joining" ? 55 : 75);
+    }, controller.signal).then((res) => {
+      clearTaskId();
+      clearBackendStage();
+      if (res.status === "error") {
+        setPhase("error"); savePhase("error");
+        setProgress(100);
+        setErrorMsg(res.message || "No se pudo generar el mapa. Intenta nuevamente.");
+        return;
+      }
+      setProgress(85);
+      const finalUrl = res.mapUrl || unifiedMapImg;
+      const noWaste = res.detectionCount === 0;
+      setResultUrl(finalUrl); saveResultUrl(finalUrl);
+      setNoWasteDetected(noWaste); saveNoWasteDetected(noWaste);
+      saveMapUrl(finalUrl);
+      setProgress(100);
+      setPhase("done"); savePhase("done");
+    }).catch((err: unknown) => {
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      clearTaskId();
+      clearBackendStage();
+      setPhase("error"); savePhase("error");
+      setErrorMsg("No se pudo generar el mapa. Intenta nuevamente.");
+    });
+
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    itemNamesRef.current = new Set(items.map((i) => i.file.name));
+  }, [items]);
 
   // ---------------------------------------------------------------------------
   // VALORES DERIVADOS DEL ESTADO
@@ -348,8 +435,13 @@ useEffect(() => {
 
     const newItems: FileItem[] = [];
     const validFiles: File[] = [];
+    let skipped = 0;
 
     Array.from(files).forEach((file) => {
+      if (itemNamesRef.current.has(file.name)) {
+        skipped++;
+        return;
+      }
       const ok = isJpg(file);
       const id = `${file.name}-${file.size}-${Math.random().toString(36).slice(2, 8)}`;
       const blobUrl = URL.createObjectURL(file);
@@ -362,6 +454,13 @@ useEffect(() => {
       });
       if (ok) validFiles.push(file);
     });
+
+    if (skipped > 0) {
+      setSkippedCount(skipped);
+      setTimeout(() => setSkippedCount(0), 5000);
+    }
+
+    if (newItems.length === 0) return;
 
     setItems((prev) => [...prev, ...newItems]);
     setUploadDone(false);
@@ -402,7 +501,7 @@ useEffect(() => {
           );
           resolve();
         };
-        img.onerror = () => resolve(); // si falla, continúa igual
+        img.onerror = () => resolve();
         img.src = item.preview;
       });
       // Cede el hilo entre cada thumbnail para no congelar la UI
@@ -443,6 +542,8 @@ useEffect(() => {
     setResultUrl(null);
     setErrorMsg(null);
     setBackendStage(null);
+    setNoWasteDetected(false);
+    clearNoWasteDetected();
   };
 
   /** Elimina todas las imágenes y reinicia el proceso */
@@ -482,29 +583,42 @@ useEffect(() => {
     if (!canGenerate) return;
     resetProcess();
     const validFiles = items.filter((i) => i.status === "valid").map((i) => i.file);
-    setPhase("validating_format"); setProgress(10); await sleep(400);
-    setPhase("checking_count"); setProgress(25); await sleep(400);
+    setPhase("validating_format"); setProgress(10);
+    setPhase("checking_count"); setProgress(25);
     setPhase("generating_map"); setProgress(40);
     setBackendStage(null);
+    clearBackendStage();
 
     try {
       const res = await unifyImages(validFiles, {}, (stage) => {
         setBackendStage(stage);
+        saveBackendStage(stage);
         setProgress(stage === "joining" ? 55 : 75);
+      }, (taskId) => {
+        saveTaskId(taskId);
       });
+
       if (res.status === "error") {
-        setPhase("error");
+        clearTaskId(); clearBackendStage();
+        setPhase("error"); savePhase("error");
         setProgress(100);
         setErrorMsg(res.message || "No se pudo generar el mapa. Intenta nuevamente.");
         return;
       }
-      setProgress(85); await sleep(900);
+
+      setProgress(85);
       const finalUrl = res.mapUrl || unifiedMapImg;
-      setResultUrl(finalUrl);
+      const noWaste = res.detectionCount === 0;
+      setResultUrl(finalUrl); saveResultUrl(finalUrl);
+      setNoWasteDetected(noWaste); saveNoWasteDetected(noWaste);
       saveMapUrl(finalUrl);
-      setProgress(100); setPhase("done");
+      setProgress(100);
+      setPhase("done"); savePhase("done");
+      clearTaskId(); clearBackendStage();
+
     } catch {
-      setPhase("error");
+      clearTaskId(); clearBackendStage();
+      setPhase("error"); savePhase("error");
       setErrorMsg("No se pudo generar el mapa. Intenta nuevamente.");
     }
   };
@@ -601,6 +715,11 @@ useEffect(() => {
               <PanelHeader icon={<ImageIcon className="h-3.5 w-3.5" />} title="Imagenes adjuntas" />
               <div className="flex items-center gap-3">
                 <p className="mono text-[10px] text-muted-foreground">{validCount} JPG · {invalidCount} rechazadas</p>
+                {skippedCount > 0 && (
+                  <p className="mono text-[10px] rounded px-2 py-0.5 bg-warning/20 text-yellow-400 border border-warning/30">
+                    {skippedCount} archivo(s) omitido(s) — ya existen archivos cargados con ese nombre
+                  </p>
+                )}
                 {invalidCount > 0 && (
                   <Button variant="ghost" size="sm" onClick={clearInvalid} disabled={processing}
                     className="h-7 px-2 text-xs hover:bg-destructive/15 hover:text-destructive">
@@ -638,7 +757,13 @@ useEffect(() => {
                     }`}
                   >
                     <div className="relative h-28 w-full overflow-hidden bg-muted">
-                      <img src={it.preview} alt={it.file.name} className="h-full w-full object-cover" decoding="async" />
+                      {it.preview ? (
+                        <img src={it.preview} alt={it.file.name} className="h-full w-full object-cover" decoding="async" />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center">
+                          <ImageIcon className="h-6 w-6 text-muted-foreground/40" />
+                        </div>
+                      )}
                       <button type="button" aria-label="Eliminar" onClick={() => removeItem(it.id)} disabled={processing}
                         className="absolute right-1.5 top-1.5 rounded bg-background/85 p-1 text-muted-foreground shadow-sm backdrop-blur transition hover:bg-destructive/15 hover:text-destructive">
                         <Trash2 className="h-3 w-3" />
@@ -824,6 +949,16 @@ useEffect(() => {
               )}
             </div>
 
+            {/* HDU2 CA3: aviso cuando el mapa no tiene basura detectada */}
+            {phase === "done" && noWasteDetected && (
+              <div className="flex items-start gap-3 border-t border-warning/40 bg-warning/10 px-4 py-3">
+                <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-warning" />
+                <p className="text-xs leading-relaxed text-warning">
+                  No se detectó basura en el área procesada. El mapa está disponible para inspección visual, pero no se encontraron residuos con el nivel de confianza requerido.
+                </p>
+              </div>
+            )}
+
             {/* Metadatos del mapa */}
             <div className="grid grid-cols-3 divide-x divide-border border-t border-border bg-card/40">
               <MetaCell label="Estado" value={phase === "done" ? "Completado" : phase === "error" ? "Error" : processing ? "Procesando" : "En espera"} />
@@ -851,11 +986,6 @@ useEffect(() => {
 // =============================================================================
 // FUNCIONES Y COMPONENTES AUXILIARES
 // =============================================================================
-
-/** Pausa la ejecucion N milisegundos. Simula latencia de red entre fases. */
-function sleep(ms: number) {
-  return new Promise((r) => setTimeout(r, ms));
-}
 
 /** Encabezado estandar para cada panel del sistema */
 function PanelHeader({ icon, title, children }: { icon: React.ReactNode; title: string; children?: React.ReactNode; }) {

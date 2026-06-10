@@ -127,12 +127,14 @@ def run_pipeline(task_id: str, opc: int):
         tasks[task_id]["status"] = "detecting"
         tasks[task_id]["message"] = "Detectando basura con YOLOv8..."
 
-        final = detectingOrtho.detect(fileplace)
+        final, detection_count = detectingOrtho.detect(fileplace)
+        #detection_count = 0  # Esto fuerza que se pueda comprobar el caso en que no se detecte basura.
         result_filename = os.path.basename(final) + ".png"
 
         tasks[task_id]["status"] = "done"
         tasks[task_id]["message"] = "Proceso completado"
         tasks[task_id]["result_filename"] = result_filename
+        tasks[task_id]["detection_count"] = detection_count
 
     except Exception as e:
         tasks[task_id]["status"] = "error"
@@ -187,6 +189,7 @@ async def get_status(task_id: str):
 
     if task["status"] == "done" and task["result_filename"]:
         response["result_url"] = f"http://localhost:8000/result/{task['result_filename']}"
+        response["detection_count"] = task.get("detection_count", 0)
 
     return response
 
