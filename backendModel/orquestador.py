@@ -16,6 +16,7 @@ sys.path.insert(0, BASE_DIR)
 from joining import joinOrtho
 from joining import Reconociemiento_solapamiento as solapamiento
 from detecting import detectingOrtho
+from detecting import volumeCalc
 
 app = FastAPI()
 
@@ -34,6 +35,9 @@ app.add_middleware(
 UPLOAD_DIR  = os.path.join(BASE_DIR, "joining", "images")
 FINALS_DIR  = os.path.join(BASE_DIR, "joining", "finals")
 OUTPUT_DIR  = os.path.join(BASE_DIR, "detecting", "output")
+DSM_PATH   = os.path.join(BASE_DIR, "joining","output","odm_dem","dsm.tif")
+DTM_PATH   = os.path.join(BASE_DIR, "joining","output","odm_dem","dtm.tif")
+NDSM_PATH  = os.path.join(BASE_DIR, "joining","output","odm_dem","ndsm.tif")
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(FINALS_DIR, exist_ok=True)
@@ -145,11 +149,24 @@ def run_pipeline(task_id: str, opc: int):
         tasks[task_id]["status"] = "detecting"
         tasks[task_id]["message"] = "Detectando basura con YOLOv8..."
 
-        final, detection_count = detectingOrtho.detect(fileplace)
-        detection_count = 0  # Esto fuerza que se pueda comprobar el caso en que no se detecte basura.
+        final, detection_count, DETECTIONS_JSON = detectingOrtho.detect(fileplace)
+        #detection_count = 0  # Esto fuerza que se pueda comprobar el caso en que no se detecte basura.
         base = os.path.basename(final)
         result_filename = base + ".png"
         result_json_filename = base + ".json"
+
+        ENRICHED_JSON = os.path.join(BASE_DIR, f"{DETECTIONS_JSON}")
+
+        if not os.path.exists(NDSM_PATH):
+            volumeCalc.compute_ndsm(DSM_PATH, DTM_PATH, NDSM_PATH)
+
+        volumeCalc.enrich(
+            DETECTIONS_JSON,
+            fileplace,
+            NDSM_PATH,
+            ENRICHED_JSON,
+        )
+
 
         tasks[task_id]["status"] = "done"
         tasks[task_id]["message"] = "Proceso completado"
