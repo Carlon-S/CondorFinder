@@ -13,7 +13,7 @@ DENSITY_MAP = {
     "Residuo orgánico":        300,
     "Neumáticos":              400,
     "Muebles":                 200,
-    "Residuo de construcción": 800,
+    "Residuo de construcción": 400,
     "Tipo de basura indefinido": 200,
 }
 
