@@ -1,0 +1,88 @@
+{
+  "detections": [
+    {
+      "id": 0,
+      "class": "construction_waste",
+      "confidence": 0.561,
+      "bbox": {
+        "minx": 1711.3490600585938,
+        "miny": 709.0920715332031,
+        "maxx": 1800.733154296875,
+        "maxy": 844.7850646972656
+      },
+      "polygon": null
+    },
+    {
+      "id": 1,
+      "class": "metal",
+      "confidence": 0.802,
+      "bbox": {
+        "minx": 1275.0044555664062,
+        "miny": 763.555419921875,
+        "maxx": 1600.0,
+        "maxy": 967.0124816894531
+      },
+      "polygon": null
+    },
+    {
+      "id": 2,
+      "class": "plastic",
+      "confidence": 0.848,
+      "bbox": {
+        "minx": 1274.0492553710938,
+        "miny": 762.1421508789062,
+        "maxx": 1601.5360717773438,
+        "maxy": 966.79541015625
+      },
+      "polygon": null
+    },
+    {
+      "id": 3,
+      "class": "plastic",
+      "confidence": 0.442,
+      "bbox": {
+        "minx": 1095.80078125,
+        "miny": 824.7407836914062,
+        "maxx": 1152.0,
+        "maxy": 909.0084838867188
+      },
+      "polygon": null
+    },
+    {
+      "id": 4,
+      "class": "organic_waste",
+      "confidence": 0.52,
+      "bbox": {
+        "minx": 1139.8732299804688,
+        "miny": 792.2787475585938,
+        "maxx": 1151.8335571289062,
+        "maxy": 829.6356811523438
+      },
+      "polygon": null
+    },
+    {
+      "id": 5,
+      "class": "organic_waste",
+      "confidence": 0.362,
+      "bbox": {
+        "minx": 1980.4647827148438,
+        "miny": 1096.3663024902344,
+        "maxx": 2034.9451599121094,
+        "maxy": 1230.4839172363281
+      },
+      "polygon": null
+    },
+    {
+      "id": 6,
+      "class": "other",
+      "confidence": 0.892,
+      "bbox": {
+        "minx": 1711.732666015625,
+        "miny": 709.1818084716797,
+        "maxx": 1800.8264465332031,
+        "maxy": 844.3034057617188
+      },
+      "polygon": null
+    }
+  ]
+}
