@@ -151,7 +151,7 @@ def run_pipeline(task_id: str, opc: int):
         tasks[task_id]["message"] = "Detectando basura con YOLOv8..."
 
         final, detection_count, DETECTIONS_JSON = detectingOrtho.detect(fileplace)
-        detection_count = 0  # Fuerza el caso "sin basura detectada" para demo
+        #detection_count = 0  # Fuerza el caso "sin basura detectada" para demo
         with open(DETECTIONS_JSON, "w") as _f:
             json.dump({"detections": []}, _f)
         base = os.path.basename(final)
