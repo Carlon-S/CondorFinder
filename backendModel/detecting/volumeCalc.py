@@ -13,7 +13,7 @@ DENSITY_MAP = {
     "Residuo orgánico":        300,
     "Neumáticos":              400,
     "Muebles":                 200,
-    "Residuo de construcción": 800,
+    "Residuo de construcción": 400,
     "Tipo de basura indefinido": 200,
 }
 
@@ -138,6 +138,7 @@ def enrich(
             "volume_m3":     volume_m3,
             "density_kg_m3": density,
             "weight_kg":     weight_kg,
+            "color":         color
         })
 
         enriched.append(result)

@@ -725,8 +725,8 @@ function Page() {
     function getPhaseLabel(phase: Phase, backendStage: "checking_overlap" | "joining" | "detecting" | null): string {
     if (phase === "generating_map") {
       if (backendStage === "checking_overlap") return "Verificando solapamiento entre imágenes...";
-      if (backendStage === "joining") return "Unificando imágenes con ODM...";
-      if (backendStage === "detecting") return "Detectando basura con YOLOv8...";
+      if (backendStage === "joining") return "Unificando imágenes...";
+      if (backendStage === "detecting") return "Detectando basura...";
       return "Iniciando pipeline...";
     }
     const labels: Record<Phase, string> = {
@@ -960,12 +960,12 @@ function Page() {
                   : overlapState === "error" ? (errorMsg ?? "Solapamiento insuficiente en uno o más pares")
                   : "Pendiente: se verifica al iniciar la generación"} />
               <CheckRow label="Generacion de mapa" state={joinState}
-                hint={joinState === "running" ? "Unificando imagenes con ODM..."
+                hint={joinState === "running" ? "Unificando imagenes..."
                   : joinState === "ok" ? "Mapa unificado generado correctamente"
                   : joinState === "error" ? "La unificacion de imagenes fallo"
                   : "Pendiente: requiere solapamiento aprobado"} />
               <CheckRow label="Deteccion de basura" state={detectState}
-                hint={detectState === "running" ? "Detectando basura con YOLOv8 + SAHI..."
+                hint={detectState === "running" ? "Detectando basura..."
                   : detectState === "ok" ? "Deteccion completada"
                   : detectState === "error" ? "La deteccion de basura fallo"
                   : "Pendiente: requiere mapa unificado"} />
