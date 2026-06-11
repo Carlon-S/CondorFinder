@@ -2,6 +2,7 @@ import os
 import sys
 import uuid
 import threading
+import json
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -150,7 +151,9 @@ def run_pipeline(task_id: str, opc: int):
         tasks[task_id]["message"] = "Detectando basura con YOLOv8..."
 
         final, detection_count, DETECTIONS_JSON = detectingOrtho.detect(fileplace)
-        #detection_count = 0  # Esto fuerza que se pueda comprobar el caso en que no se detecte basura.
+        detection_count = 0  # Fuerza el caso "sin basura detectada" para demo
+        with open(DETECTIONS_JSON, "w") as _f:
+            json.dump({"detections": []}, _f)
         base = os.path.basename(final)
         result_filename = base + ".png"
         result_json_filename = base + ".json"

@@ -57,10 +57,13 @@ def compute_ndsm(dsm_path, dtm_path, ndsm_path):
         dtm_nodata = dtm_f.nodata
         dtm[dtm == dtm_nodata] = np.nan
 
-    ndsm = dsm - dtm
+    # ODM ocasionalmente genera DSM y DTM con 1 píxel de diferencia — recortar al mínimo común
+    rows = min(dsm.shape[0], dtm.shape[0])
+    cols = min(dsm.shape[1], dtm.shape[1])
+    ndsm = dsm[:rows, :cols] - dtm[:rows, :cols]
     ndsm = np.where(ndsm < 0, 0, ndsm)
 
-    profile.update(dtype=rasterio.float32, nodata=np.nan)
+    profile.update(dtype=rasterio.float32, nodata=np.nan, height=rows, width=cols)
     with rasterio.open(ndsm_path, "w", **profile) as out:
         out.write(ndsm.astype(np.float32), 1)
 
