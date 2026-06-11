@@ -10,7 +10,6 @@ from rasterio.warp import transform as rasterio_transform
 import folium
 import json
 from pathlib import Path
-from volumeCalc import enrich
 import cv2
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -107,7 +106,7 @@ def detect(file_name: str):
 
         detections.append(detection)
 
-    print("Saving file to:", os.path.abspath("detections.json"))
+    print("Guardando archivo:", os.path.abspath("detections.json"))
     JSON = os.path.join(OUTPUT_PATH, f"{FILE_NAME}.json")
     with open(JSON, "w") as f:
         json.dump({"detections": detections}, f, indent=2)
