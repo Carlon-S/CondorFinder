@@ -135,6 +135,7 @@ def enrich(
             "volume_m3":     volume_m3,
             "density_kg_m3": density,
             "weight_kg":     weight_kg,
+            "color":         color
         })
 
         enriched.append(result)
