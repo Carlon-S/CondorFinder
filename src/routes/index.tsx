@@ -134,6 +134,8 @@ type Phase =
  */
 type TriState = "pending" | "ok" | "warn" | "error" | "running";
 
+const WEIGHT_LIMIT_KG = 5000;
+
 interface Detection {
   id: number;
   class: string;
@@ -1056,6 +1058,7 @@ function Page() {
                             preserveAspectRatio="xMidYMid meet"
                           >
                             {detections
+                              .filter(d => !(d.weight_kg != null && d.weight_kg > WEIGHT_LIMIT_KG))
                               .map(d => {
                                 const color = classColor(d.class);
                                 const bw = d.bbox.maxx - d.bbox.minx;
