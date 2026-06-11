@@ -45,6 +45,7 @@ import {
   saveTaskId, loadTaskId, clearTaskId,
   saveBackendStage, loadBackendStage, clearBackendStage,
   saveNoWasteDetected, loadNoWasteDetected, clearNoWasteDetected,
+  saveDetectionJsonUrl, loadDetectionJsonUrl, clearDetectionJsonUrl,
   clearImageState, type PersistedFileItem,
 } from "@/lib/imageState";
 
@@ -133,6 +134,32 @@ type Phase =
  */
 type TriState = "pending" | "ok" | "warn" | "error" | "running";
 
+interface Detection {
+  id: number;
+  class: string;
+  confidence: number;
+  bbox: { minx: number; miny: number; maxx: number; maxy: number };
+  volume_m3: number;
+  weight_kg: number;
+}
+
+// Color fijo por tipo de basura — no se repiten
+const CLASS_COLORS: Record<string, string> = {
+  construction_waste: "#ef4444",
+  metal:              "#f97316",
+  plastic:            "#3b82f6",
+  organic_waste:      "#22c55e",
+  furniture:          "#a855f7",
+  tyres:              "#64748b",
+  other:              "#f59e0b",
+};
+
+function classColor(cls: string): string {
+  if (CLASS_COLORS[cls]) return CLASS_COLORS[cls];
+  let hash = 0;
+  for (let i = 0; i < cls.length; i++) hash = (hash * 31 + cls.charCodeAt(i)) | 0;
+  return `hsl(${Math.abs(hash) % 360},75%,55%)`;
+}
 
 // =============================================================================
 // FUNCIONES UTILITARIAS
@@ -233,6 +260,8 @@ function Page() {
   const [noWasteDetected, setNoWasteDetected] = useState<boolean>(() => loadNoWasteDetected());
   const [overlapDetail, setOverlapDetail] = useState<OverlapPair[]>([]);
   const [errorStage, setErrorStage] = useState<"checking_overlap" | "joining" | "detecting" | null>(null);
+  const [detections, setDetections] = useState<Detection[]>([]);
+  const [imgNaturalSize, setImgNaturalSize] = useState<{ w: number; h: number } | null>(null);
 
   const [uploadDone, setUploadDone] = useState<boolean>(() => loadUploadDone());
 
@@ -358,6 +387,13 @@ function Page() {
       setResultUrl(finalUrl); saveResultUrl(finalUrl);
       setNoWasteDetected(noWaste); saveNoWasteDetected(noWaste);
       saveMapUrl(finalUrl);
+      if (res.detectionJsonUrl) {
+        saveDetectionJsonUrl(res.detectionJsonUrl);
+        fetch(res.detectionJsonUrl)
+          .then(r => r.json())
+          .then(data => setDetections(data.detections ?? []))
+          .catch(() => {});
+      }
       setProgress(100);
       setPhase("done"); savePhase("done");
     }).catch((err: unknown) => {
@@ -375,6 +411,18 @@ function Page() {
   useEffect(() => {
     itemNamesRef.current = new Set(items.map((i) => i.file.name));
   }, [items]);
+
+  // Si la página se recarga con phase=done, re-fetch las detecciones desde sessionStorage
+  useEffect(() => {
+    if (phase !== "done") return;
+    const jsonUrl = loadDetectionJsonUrl();
+    if (!jsonUrl) return;
+    fetch(jsonUrl)
+      .then(r => r.json())
+      .then(data => setDetections(data.detections ?? []))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ---------------------------------------------------------------------------
   // VALORES DERIVADOS DEL ESTADO
@@ -568,6 +616,9 @@ function Page() {
     clearNoWasteDetected();
     setOverlapDetail([]);
     setErrorStage(null);
+    setDetections([]);
+    setImgNaturalSize(null);
+    clearDetectionJsonUrl();
   };
 
   /** Elimina todas las imágenes y reinicia el proceso */
@@ -639,6 +690,13 @@ function Page() {
       setResultUrl(finalUrl); saveResultUrl(finalUrl);
       setNoWasteDetected(noWaste); saveNoWasteDetected(noWaste);
       saveMapUrl(finalUrl);
+      if (res.detectionJsonUrl) {
+        saveDetectionJsonUrl(res.detectionJsonUrl);
+        fetch(res.detectionJsonUrl)
+          .then(r => r.json())
+          .then(data => setDetections(data.detections ?? []))
+          .catch(() => {});
+      }
       setProgress(100);
       setPhase("done"); savePhase("done");
       clearTaskId(); clearBackendStage();
@@ -969,11 +1027,64 @@ function Page() {
                     className="relative h-full w-full cursor-pointer group"
                     title="Ver análisis de detección"
                   >
-                    <img
-                      src={resultUrl}
-                      alt="Mapa unificado generado a partir de las imagenes aereas"
-                      className="h-full w-full object-contain p-3 transition-opacity group-hover:opacity-80"
-                    />
+                    {/* Contenedor de imagen + overlay — inset-3 replica el padding visual */}
+                    <div className="absolute inset-3 flex items-center justify-center">
+                      <div className="relative w-full h-full">
+                        <img
+                          src={resultUrl}
+                          alt="Mapa unificado generado a partir de las imagenes aereas"
+                          className="h-full w-full object-contain transition-opacity group-hover:opacity-80"
+                          onLoad={e => {
+                            const img = e.currentTarget;
+                            setImgNaturalSize({ w: img.naturalWidth, h: img.naturalHeight });
+                          }}
+                        />
+                        {imgNaturalSize && detections.length > 0 && (
+                          <svg
+                            viewBox={`0 0 ${imgNaturalSize.w} ${imgNaturalSize.h}`}
+                            className="absolute inset-0 w-full h-full pointer-events-none transition-opacity group-hover:opacity-80"
+                            preserveAspectRatio="xMidYMid meet"
+                          >
+                            {detections.map(d => {
+                              const color = classColor(d.class);
+                              const bw = d.bbox.maxx - d.bbox.minx;
+                              const bh = d.bbox.maxy - d.bbox.miny;
+                              const showLabel = bw >= 80 && bh >= 40;
+                              const LABEL_H = 34;
+                              const FONT = 24;
+                              return (
+                                <g key={d.id}>
+                                  <rect
+                                    x={d.bbox.minx} y={d.bbox.miny}
+                                    width={bw} height={bh}
+                                    fill={`${color}28`}
+                                    stroke={color}
+                                    strokeWidth={3}
+                                    strokeLinejoin="round"
+                                  />
+                                  {showLabel && (
+                                    <>
+                                      <rect
+                                        x={d.bbox.minx} y={d.bbox.miny}
+                                        width={bw} height={LABEL_H}
+                                        fill="rgba(0,0,0,0.68)"
+                                      />
+                                      <text
+                                        x={d.bbox.minx + 6} y={d.bbox.miny + FONT + 2}
+                                        fontSize={FONT} fill={color}
+                                        fontFamily="monospace" fontWeight="700"
+                                      >
+                                        {d.class}
+                                      </text>
+                                    </>
+                                  )}
+                                </g>
+                              );
+                            })}
+                          </svg>
+                        )}
+                      </div>
+                    </div>
                     <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                       <div className="flex items-center gap-2 rounded-md bg-background/85 px-4 py-2 shadow-xl backdrop-blur">
                         <MapIcon className="h-4 w-4 text-primary" />

@@ -20,6 +20,7 @@ export interface UnifySuccess {
   status: "success";
   mapUrl: string;
   detectionCount: number;
+  detectionJsonUrl?: string;
   technicalDownloadUrl?: string;
   technicalDownloadFormat?: "TIF" | "PNG" | "WEBP";
 }
@@ -110,6 +111,7 @@ export async function pollTask(
         status: "success",
         mapUrl: statusData.result_url,
         detectionCount: statusData.detection_count ?? 0,
+        detectionJsonUrl: statusData.result_json_url,
         technicalDownloadUrl: statusData.result_url,
         technicalDownloadFormat: "PNG",
       };

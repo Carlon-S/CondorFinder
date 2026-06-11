@@ -146,12 +146,15 @@ def run_pipeline(task_id: str, opc: int):
         tasks[task_id]["message"] = "Detectando basura con YOLOv8..."
 
         final, detection_count = detectingOrtho.detect(fileplace)
-        #detection_count = 0  # Esto fuerza que se pueda comprobar el caso en que no se detecte basura.
-        result_filename = os.path.basename(final) + ".png"
+        detection_count = 0  # Esto fuerza que se pueda comprobar el caso en que no se detecte basura.
+        base = os.path.basename(final)
+        result_filename = base + ".png"
+        result_json_filename = base + ".json"
 
         tasks[task_id]["status"] = "done"
         tasks[task_id]["message"] = "Proceso completado"
         tasks[task_id]["result_filename"] = result_filename
+        tasks[task_id]["result_json_filename"] = result_json_filename
         tasks[task_id]["detection_count"] = detection_count
 
     except Exception as e:
@@ -207,6 +210,14 @@ async def get_status(task_id: str):
 
     if task["status"] == "done" and task["result_filename"]:
         response["result_url"] = f"http://localhost:8000/result/{task['result_filename']}"
+        json_name = task.get("result_json_filename", "")
+        # Si el JSON del run no existe aún (compañero en progreso), usar cualquier JSON disponible
+        if json_name and not os.path.exists(os.path.join(OUTPUT_DIR, json_name)):
+            available = sorted(f for f in os.listdir(OUTPUT_DIR) if f.endswith(".json"))
+            if available:
+                json_name = available[-1]
+        if json_name and os.path.exists(os.path.join(OUTPUT_DIR, json_name)):
+            response["result_json_url"] = f"http://localhost:8000/result/{json_name}"
         response["detection_count"] = task.get("detection_count", 0)
 
     if task["status"] == "error" and task.get("overlap_detail") is not None:
@@ -222,8 +233,9 @@ async def get_status(task_id: str):
 
 @app.get("/result/{filename}")
 async def get_result(filename: str):
-    """Sirve la imagen anotada generada por detectingOrtho."""
+    """Sirve la imagen anotada o el JSON de detecciones generados por detectingOrtho."""
     file_path = os.path.join(OUTPUT_DIR, filename)
     if not os.path.exists(file_path):
         return {"status": "error", "message": "Archivo no encontrado"}
-    return FileResponse(file_path, media_type="image/png")
+    media = "application/json" if filename.endswith(".json") else "image/png"
+    return FileResponse(file_path, media_type=media)

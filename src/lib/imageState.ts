@@ -119,6 +119,23 @@ export function clearBackendStage(): void {
   sessionStorage.removeItem(KEY_BACKEND_STAGE);
 }
 
+const KEY_DETECTION_JSON_URL = "condorfinder_detection_json_url";
+
+export function saveDetectionJsonUrl(url: string): void {
+  if (!isBrowser) return;
+  sessionStorage.setItem(KEY_DETECTION_JSON_URL, url);
+}
+
+export function loadDetectionJsonUrl(): string | null {
+  if (!isBrowser) return null;
+  return sessionStorage.getItem(KEY_DETECTION_JSON_URL);
+}
+
+export function clearDetectionJsonUrl(): void {
+  if (!isBrowser) return;
+  sessionStorage.removeItem(KEY_DETECTION_JSON_URL);
+}
+
 export function clearImageState(): void {
   if (!isBrowser) return;
   sessionStorage.removeItem(KEY_ITEMS);
@@ -128,4 +145,5 @@ export function clearImageState(): void {
   sessionStorage.removeItem(KEY_TASK_ID);
   sessionStorage.removeItem(KEY_NO_WASTE);
   sessionStorage.removeItem(KEY_BACKEND_STAGE);
+  sessionStorage.removeItem(KEY_DETECTION_JSON_URL);
 }

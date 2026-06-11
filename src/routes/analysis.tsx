@@ -41,8 +41,34 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { analyzeUnifiedMap, type WastePolygon } from "@/lib/analysis";
 import { loadMapUrl, MAP_READY_EVENT } from "@/lib/mapState";
-import { loadNoWasteDetected } from "@/lib/imageState";
+import { loadNoWasteDetected, loadDetectionJsonUrl } from "@/lib/imageState";
 import { AppNavbar } from "@/components/AppNavbar";
+
+interface Detection {
+  id: number;
+  class: string;
+  confidence: number;
+  bbox: { minx: number; miny: number; maxx: number; maxy: number };
+  volume_m3: number;
+  weight_kg: number;
+}
+
+const CLASS_COLORS: Record<string, string> = {
+  construction_waste: "#ef4444",
+  metal:              "#f97316",
+  plastic:            "#3b82f6",
+  organic_waste:      "#22c55e",
+  furniture:          "#a855f7",
+  tyres:              "#64748b",
+  other:              "#f59e0b",
+};
+
+function classColor(cls: string): string {
+  if (CLASS_COLORS[cls]) return CLASS_COLORS[cls];
+  let hash = 0;
+  for (let i = 0; i < cls.length; i++) hash = (hash * 31 + cls.charCodeAt(i)) | 0;
+  return `hsl(${Math.abs(hash) % 360},75%,55%)`;
+}
 
 export const Route = createFileRoute("/analysis")({
   head: () => ({
@@ -81,6 +107,18 @@ function AnalysisPage() {
   const [dragging, setDragging] = useState(false);
   const dragStart = useRef({ x: 0, y: 0, offsetX: 0, offsetY: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
+  const [detections, setDetections] = useState<Detection[]>([]);
+  const [imgNaturalSize, setImgNaturalSize] = useState<{ w: number; h: number } | null>(null);
+
+  // Carga detecciones desde sessionStorage al montar
+  useEffect(() => {
+    const jsonUrl = loadDetectionJsonUrl();
+    if (!jsonUrl) return;
+    fetch(jsonUrl)
+      .then(r => r.json())
+      .then(data => setDetections(data.detections ?? []))
+      .catch(() => {});
+  }, []);
 
   // Escucha el evento de mapa listo para sincronizar en tiempo real si la tarea
   // termina mientras el usuario está en esta vista.
@@ -309,7 +347,7 @@ function AnalysisPage() {
                   />
                   <Metric
                     label="Poligonos"
-                    value={String(polygons.length)}
+                    value={detections.length > 0 ? String(detections.length) : String(polygons.length)}
                     icon={<MapIcon className="h-4 w-4" />}
                   />
                   <Metric label="Preview" value="WEBP" icon={<ZoomIn className="h-4 w-4" />} />
@@ -318,30 +356,30 @@ function AnalysisPage() {
                 <div className="rounded-md border border-border bg-background/40">
                   <div className="border-b border-border px-3 py-2">
                     <p className="mono text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      Volumen por poligono
+                      Tipos detectados
                     </p>
                   </div>
-                  {status === "done" ? (
-                    <ul className="pb-8">
-                      {polygons.map((polygon) => (
-                        <li key={polygon.id} className="border-b border-border p-3">
-                          <div className="min-w-0">
-                            <p className="truncate text-xs font-semibold">{polygon.name}</p>
-                            <p className="text-[10px] text-muted-foreground">
-                              Resultado simulado de volumen
-                            </p>
-                          </div>
-                          <div className="mt-2 grid grid-cols-3 gap-2 text-[10px]">
-                            <MiniStat label="Vol." value={`${polygon.volumeM3} m3`} />
-                            <MiniStat label="Area" value={`${polygon.areaM2} m2`} />
-                            <MiniStat label="Conf." value={`${polygon.confidence}%`} />
-                          </div>
+                  {detections.length > 0 ? (
+                    <ul className="p-2 space-y-1">
+                      {Object.entries(
+                        detections.reduce((acc, d) => {
+                          acc[d.class] = (acc[d.class] ?? 0) + 1;
+                          return acc;
+                        }, {} as Record<string, number>)
+                      ).map(([cls, count]) => (
+                        <li key={cls} className="flex items-center gap-2.5 rounded px-2 py-2 bg-background/60 border border-border/50">
+                          <span
+                            className="h-3 w-3 rounded-sm flex-shrink-0"
+                            style={{ background: classColor(cls) }}
+                          />
+                          <span className="text-xs font-medium flex-1 truncate">{cls}</span>
+                          <span className="mono text-[10px] text-muted-foreground flex-shrink-0">{count}×</span>
                         </li>
                       ))}
                     </ul>
                   ) : (
-                    <div className="flex h-full items-center justify-center p-5 text-center text-xs text-muted-foreground">
-                      Presiona Analizar volumen para calcular los poligonos detectados.
+                    <div className="p-4 text-center text-xs text-muted-foreground">
+                      Sin detecciones cargadas.
                     </div>
                   )}
                 </div>
@@ -389,13 +427,65 @@ function AnalysisPage() {
                     transition: dragging ? "none" : "transform 120ms ease-out",
                   }}
                 >
-                  <img
-                    src={mapUrl!}
-                    alt="Mapa unificado para analisis de volumen"
-                    className="h-full w-full object-contain p-4 pointer-events-none"
-                    draggable={false}
-                    onDragStart={(e) => e.preventDefault()}
-                  />
+                  <div className="absolute inset-4 flex items-center justify-center">
+                    <div className="relative w-full h-full">
+                      <img
+                        src={mapUrl!}
+                        alt="Mapa unificado para analisis de volumen"
+                        className="h-full w-full object-contain pointer-events-none"
+                        draggable={false}
+                        onDragStart={(e) => e.preventDefault()}
+                        onLoad={e => {
+                          const img = e.currentTarget;
+                          setImgNaturalSize({ w: img.naturalWidth, h: img.naturalHeight });
+                        }}
+                      />
+                      {imgNaturalSize && detections.length > 0 && (
+                        <svg
+                          viewBox={`0 0 ${imgNaturalSize.w} ${imgNaturalSize.h}`}
+                          className="absolute inset-0 w-full h-full pointer-events-none"
+                          preserveAspectRatio="xMidYMid meet"
+                        >
+                          {detections.map(d => {
+                            const color = classColor(d.class);
+                            const bw = d.bbox.maxx - d.bbox.minx;
+                            const bh = d.bbox.maxy - d.bbox.miny;
+                            const showLabel = bw >= 80 && bh >= 40;
+                            const LABEL_H = 34;
+                            const FONT = 24;
+                            return (
+                              <g key={d.id}>
+                                <rect
+                                  x={d.bbox.minx} y={d.bbox.miny}
+                                  width={bw} height={bh}
+                                  fill={`${color}28`}
+                                  stroke={color}
+                                  strokeWidth={3}
+                                  strokeLinejoin="round"
+                                />
+                                {showLabel && (
+                                  <>
+                                    <rect
+                                      x={d.bbox.minx} y={d.bbox.miny}
+                                      width={bw} height={LABEL_H}
+                                      fill="rgba(0,0,0,0.68)"
+                                    />
+                                    <text
+                                      x={d.bbox.minx + 6} y={d.bbox.miny + FONT + 2}
+                                      fontSize={FONT} fill={color}
+                                      fontFamily="monospace" fontWeight="700"
+                                    >
+                                      {d.class}
+                                    </text>
+                                  </>
+                                )}
+                              </g>
+                            );
+                          })}
+                        </svg>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
             </>
