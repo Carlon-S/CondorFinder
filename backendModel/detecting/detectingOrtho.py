@@ -10,11 +10,12 @@ from rasterio.warp import transform as rasterio_transform
 import folium
 import json
 from pathlib import Path
+import cv2
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "model/best.pt")
 OUTPUT_PATH = os.path.join(BASE_DIR, "output")
-CONF        = 0.15
+CONF        = 0.18
 
 CLASSES = ["Residuo de construcción", "Muebles", "Metal", "Plástico", "Residuo orgánico", "Neumáticos", "Tipo de basura indefinido"]
 
@@ -33,6 +34,7 @@ def detect(file_name: str):
 
     ORTHO_PATH = file_name
     FILE_NAME = os.path.splitext(os.path.basename(file_name))[0]
+
 
     with rasterio.open(ORTHO_PATH) as src:
         geo_transform = src.transform
