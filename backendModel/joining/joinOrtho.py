@@ -5,13 +5,16 @@ import sys
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 presetfast = {
-        'orthophoto-resolution': 6,
-        'fast-orthophoto':False, #Cambiar a True despues
-        'skip-3dmodel': False, #Cambiar a True despues
-        'dtm': True, #Cambiar a False despues
-        'dsm': True, #Cambiar a False despues
+        'orthophoto-resolution': 8,
+        'fast-orthophoto': False,
+        'skip-3dmodel': False,
+        'dtm': True,
+        'dsm': True,
         'matcher-neighbors': 8,
-        'feature-quality': 'medium',
+        'feature-quality': 'low',
+        'pc-quality': 'lowest',
+        'min-num-features': 4000,
+        'resize-to': 1500,
     }
 
 presethigh = {

@@ -94,6 +94,7 @@ pip install -r backendModel/requirements.txt
 
 > La instalación puede tardar varios minutos porque incluye PyTorch, Ultralytics y Rasterio.
 
+
 ---
 
 ## Ejecución
@@ -103,7 +104,7 @@ El sistema requiere **tres terminales corriendo simultáneamente**.
 ### Terminal 1 — NodeODM (WSL)
 
 ```bash
-docker run -ti -p 3000:3000 webodm/nodeodm
+docker run -ti -p 3000:3000 opendronemap/nodeodm
 ```
 
 Espera hasta ver:
@@ -148,19 +149,21 @@ La aplicación estará disponible en **http://localhost:8080**
 1. Abre http://localhost:8080 en el navegador
 2. Arrastra o selecciona las imágenes JPG tomadas con drone (mínimo 16)
 3. El sistema valida el formato y la cantidad antes de habilitar la generación
-4. Presiona **Generar mapa unificado** — el proceso pasa por tres fases secuenciales: verificación de solapamiento (~60%), unificación con ODM y detección con YOLOv8
-5. Al terminar, el mapa aparece en el visor:
+4. Presiona **Generar mapa unificado** — el proceso pasa por cuatro fases secuenciales: verificación de solapamiento (~60%), unificación con ODM, detección con YOLOv8 y cálculo automático de volúmenes
+5. Al terminar, el mapa aparece en el visor con los polígonos de detección superpuestos:
    - Si se detectó basura: el mapa es clicable y navega a la vista de análisis
-   - Si no se detectó basura: el mapa igual se muestra con un aviso informativo, y sigue siendo posible navegar al análisis
+   - Si no se detectó basura: el mapa igual se muestra con un aviso informativo
 
 > El estado de la tarea persiste en la sesión. Si navegas a otra vista o recargas la página durante la generación, el proceso continúa y el resultado se sincroniza al volver.
 
 ### Vista de Análisis (`/analysis`)
 
 6. Accede desde el mapa generado o directamente desde la barra de navegación
-7. Si existe un mapa generado, presiona **Analizar volumen** para calcular el volumen por polígono
-8. Si el mapa no contenía basura detectada, el sistema informa inmediatamente y el botón de análisis queda deshabilitado
-9. Si no se ha generado ningún mapa, la vista muestra un mensaje indicando que primero se debe completar la unificación
+7. Las zonas detectadas aparecen en la lista — puedes activar o desactivar cada una antes de analizar
+8. Presiona **Analizar volumen** para revelar los resultados ya calculados durante la generación
+9. Los polígonos se colorean con un degradé **verde → rojo** según su volumen relativo (más rojo = mayor volumen)
+10. Zonas solapadas se fusionan automáticamente como **"Varios tipos"** mostrando el desglose por cada clase contenida
+11. Si el mapa no contenía basura detectada, el botón de análisis queda deshabilitado y se muestra un aviso
 
 ---
 
@@ -173,14 +176,14 @@ CondorFinder/
 │   ├── components/          ← Componentes React reutilizables
 │   ├── lib/                 ← Servicios y utilidades del frontend
 │   │   ├── unify.ts         ← Cliente del pipeline de generación
-│   │   ├── analysis.ts      ← Servicio de análisis de volumen (simulado)
+│   │   ├── analysis.ts      ← Servicio de análisis de volumen (real)
 │   │   ├── imageState.ts    ← Persistencia de estado en sessionStorage
 │   │   └── mapState.ts      ← Persistencia y eventos de la URL del mapa
 │   └── routes/              ← Vistas principales
 │       ├── index.tsx        ← HDU1: Unificación de imágenes
 │       └── analysis.tsx     ← HDU2/HDU3: Análisis de volumen
 ├── backendModel/
-│   ├── orquestador.py       ← API FastAPI (carga, generación, estado)
+│   ├── orquestador.py       ← API FastAPI (carga, generación, estado, análisis)
 │   ├── requirements.txt     ← Dependencias Python
 │   ├── joining/
 │   │   ├── joinOrtho.py                  ← Unificación de imágenes con ODM
@@ -189,8 +192,9 @@ CondorFinder/
 │   │   └── finals/                       ← Ortomosaico .tif generado por ODM
 │   └── detecting/
 │       ├── detectingOrtho.py ← Detección de basura con YOLOv8 + SAHI
+│       ├── volumeCalc.py     ← Cálculo de volumen/peso/área usando nDSM de ODM
 │       ├── model/best.pt     ← Pesos del modelo entrenado
-│       └── output/           ← Imágenes anotadas con detecciones
+│       └── output/           ← PNG del mapa y JSON de detecciones por tarea
 ├── package.json
 └── README.MD
 ```
@@ -204,13 +208,13 @@ CondorFinder/
 | HDU1 | Se verifica que las imágenes sean del formato correcto (JPG) | ✅ Cumplido |
 | HDU1 | Se revisa si las imágenes entregadas son suficientes y/o cumplen un margen de superposición (~60% de solapamiento) | ✅ Cumplido |
 | HDU1 | El sistema genera un mapa unificando todas las imágenes | ✅ Cumplido |
-| HDU2 | El sistema calcula el volumen asociado a cada polígono | ⚠️ A medias |
-| HDU2 | Se muestra un resumen del volumen estimado total del área | ⚠️ A medias |
+| HDU2 | El sistema calcula el volumen asociado a cada polígono | ✅ Cumplido |
+| HDU2 | Se muestra un resumen del volumen estimado total del área | ✅ Cumplido |
 | HDU2 | Se muestra un mensaje de "No hay basura detectada en el área" | ✅ Cumplido |
-| HDU3 | Se muestra un resumen relevante para el análisis: volumen estimado, área estimada y tipos de residuo | ⚠️ A medias |
+| HDU3 | Se muestra un resumen relevante para el análisis: volumen estimado, área estimada y tipos de residuo | ✅ Cumplido |
 | HDU3 | El sistema informa que no se encontraron basurales registrados | ✅ Cumplido |
-| HDU3 | Se destaca visualmente la zona en base a su volumen estimado | ❌ Incumplido |
-| HDU3 | El sistema muestra un mensaje de "Tipo de basura indefinido" | ❌ Incumplido |
+| HDU3 | Se destaca visualmente la zona en base a su volumen estimado | ✅ Cumplido |
+| HDU3 | El sistema muestra un mensaje de "Tipo de basura indefinido" | ✅ Cumplido |
 
 
 ---
@@ -228,6 +232,7 @@ CondorFinder/
 | Backend API | FastAPI + Uvicorn |
 | Unificación de imágenes | OpenDroneMap (NodeODM vía Docker) |
 | Detección de basura | YOLOv8 (Ultralytics) + SAHI |
+| Cálculo de volumen | RasterStats + GeoPandas sobre nDSM de ODM |
 
 ---
 

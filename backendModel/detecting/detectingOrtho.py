@@ -2,7 +2,7 @@ import rasterio
 import os
 import sys
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image
 from sahi import AutoDetectionModel
 from sahi.predict import get_sliced_prediction
 from rasterio.crs import CRS
@@ -16,26 +16,16 @@ MODEL_PATH = os.path.join(BASE_DIR, "model/best.pt")
 OUTPUT_PATH = os.path.join(BASE_DIR, "output")
 CONF        = 0.15
 
-CLASSES = ["construction_waste", "furniture", "metal", "plastic", "organic_waste", "tyres", "other"]
-
-COLORS_PIL = {
-    "construction_waste": (255, 0, 0),
-    "furniture": (255, 165, 0),
-    "metal": (128, 128, 128),
-    "plastic": (0, 0, 255),
-    "organic_waste": (0, 200, 0),
-    "tyres": (0, 0, 0),
-    "other": (128, 0, 128),
-}
+CLASSES = ["Residuo de construcción", "Muebles", "Metal", "Plástico", "Residuo orgánico", "Neumáticos", "Tipo de basura indefinido"]
 
 COLORS_MAP = {
-    "construction_waste": "red",
-    "furniture": "orange",
-    "metal": "gray",
-    "plastic": "blue",
-    "organic_waste": "green",
-    "tyres": "black",
-    "other": "purple",
+    "Residuo de construcción": "red",
+    "Muebles":                 "orange",
+    "Metal":                   "gray",
+    "Plástico":                "blue",
+    "Residuo orgánico":        "green",
+    "Neumáticos":              "black",
+    "Tipo de basura indefinido": "purple",
 }
 
 def detect(file_name: str):
@@ -55,7 +45,7 @@ def detect(file_name: str):
         model_type="yolov8",
         model_path=MODEL_PATH,
         confidence_threshold=CONF,
-        device="cpu",
+        device="cuda",
     )
 
     # SAHI y YOLOv8 solo aceptan RGB — la transparencia se aplica al final
@@ -73,15 +63,6 @@ def detect(file_name: str):
     )
     print(f"Encontradas {len(result.object_prediction_list)} detecciones")
 
-    draw = ImageDraw.Draw(image)
-    for pred in result.object_prediction_list:
-        box = pred.bbox
-        cls = CLASSES[pred.category.id]
-        conf = round(float(pred.score.value), 3)
-        color = COLORS_PIL.get(cls, (255, 255, 255))
-        draw.rectangle([box.minx, box.miny, box.maxx, box.maxy], outline=color, width=4)
-        draw.text((box.minx, box.miny - 15), f"{cls} {conf}", fill=color)
-
     w, h = image.size
     scale = min(1.0, 10000 / max(w, h))
     preview = image.resize((int(w * scale), int(h * scale)))
@@ -96,4 +77,28 @@ def detect(file_name: str):
     preview_rgba.save(f"{final}.png")
     print(f"Archivo Final en {final}.png")
 
-    return final, len(result.object_prediction_list)
+    # Guardar detecciones en JSON con coordenadas escaladas al espacio del PNG
+    detections_list = []
+    for i, pred in enumerate(result.object_prediction_list):
+        box = pred.bbox
+        cls = CLASSES[pred.category.id]
+        conf = round(float(pred.score.value), 3)
+        detections_list.append({
+            "id": i,
+            "class": cls,
+            "confidence": conf,
+            "bbox": {
+                "minx": round(box.minx * scale),
+                "miny": round(box.miny * scale),
+                "maxx": round(box.maxx * scale),
+                "maxy": round(box.maxy * scale),
+            },
+            "polygon": None,
+        })
+
+    json_path = f"{final}.json"
+    with open(json_path, "w") as jf:
+        json.dump({"detections": detections_list}, jf, indent=2)
+    print(f"JSON detecciones en {json_path}")
+
+    return final, len(result.object_prediction_list), json_path

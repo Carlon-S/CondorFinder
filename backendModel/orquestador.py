@@ -155,18 +155,15 @@ def run_pipeline(task_id: str, opc: int):
         result_filename = base + ".png"
         result_json_filename = base + ".json"
 
-        ENRICHED_JSON = os.path.join(BASE_DIR, f"{DETECTIONS_JSON}")
+        tasks[task_id]["detections_json_path"] = DETECTIONS_JSON
+        tasks[task_id]["ortho_path"] = fileplace
 
-        if not os.path.exists(NDSM_PATH):
-            volumeCalc.compute_ndsm(DSM_PATH, DTM_PATH, NDSM_PATH)
+        if os.path.exists(DSM_PATH) and os.path.exists(DTM_PATH):
+            if not os.path.exists(NDSM_PATH):
+                volumeCalc.compute_ndsm(DSM_PATH, DTM_PATH, NDSM_PATH)
 
-        volumeCalc.enrich(
-            DETECTIONS_JSON,
-            fileplace,
-            NDSM_PATH,
-            ENRICHED_JSON,
-        )
-
+        # Análisis de volumen automático — corre en este mismo hilo antes de marcar done
+        run_analysis(task_id)
 
         tasks[task_id]["status"] = "done"
         tasks[task_id]["message"] = "Proceso completado"
@@ -198,12 +195,67 @@ async def generate_map():
         "status": "running",
         "message": "Iniciando pipeline...",
         "result_filename": None,
+        "detections_json_path": None,
+        "ortho_path": None,
+        "analysis_status": None,
+        "analysis_message": None,
     }
 
     thread = threading.Thread(target=run_pipeline, args=(task_id, 0), daemon=True)
     thread.start()
 
     return {"task_id": task_id, "status": "running"}
+
+
+# =============================================================================
+# ENDPOINT: CALCULAR VOLUMEN (HDU2)
+# Se ejecuta separado del pipeline — requiere que el mapa ya esté generado.
+# =============================================================================
+
+def run_analysis(task_id: str):
+    """Calcula volumen por detección usando el nDSM generado por ODM."""
+    try:
+        tasks[task_id]["analysis_status"] = "running"
+        tasks[task_id]["analysis_message"] = "Calculando volúmenes con datos del modelo 3D..."
+
+        detections_json = tasks[task_id]["detections_json_path"]
+        ortho_path = tasks[task_id]["ortho_path"]
+
+        if not os.path.exists(NDSM_PATH):
+            if os.path.exists(DSM_PATH) and os.path.exists(DTM_PATH):
+                volumeCalc.compute_ndsm(DSM_PATH, DTM_PATH, NDSM_PATH)
+            else:
+                raise FileNotFoundError(
+                    "Archivos DEM no disponibles (dsm.tif / dtm.tif). "
+                    "Verifica que ODM generó los modelos de elevación."
+                )
+
+        volumeCalc.enrich(detections_json, ortho_path, NDSM_PATH, detections_json)
+
+        tasks[task_id]["analysis_status"] = "done"
+        tasks[task_id]["analysis_message"] = "Análisis de volumen completado"
+
+    except Exception as e:
+        tasks[task_id]["analysis_status"] = "error"
+        tasks[task_id]["analysis_message"] = str(e)
+
+
+@app.post("/analyze/{task_id}")
+async def start_analysis(task_id: str):
+    """Inicia el cálculo de volumen en background para una tarea ya completada."""
+    task = tasks.get(task_id)
+    if not task:
+        return {"status": "error", "message": "Tarea no encontrada"}
+    if task["status"] != "done":
+        return {"status": "error", "message": "El mapa aún no está generado"}
+    if task.get("analysis_status") == "done":
+        return {"status": "already_done", "message": "El análisis ya fue calculado durante la generación del mapa"}
+    if task.get("analysis_status") == "running":
+        return {"status": "already_running", "message": "El análisis ya está en curso"}
+
+    thread = threading.Thread(target=run_analysis, args=(task_id,), daemon=True)
+    thread.start()
+    return {"status": "running"}
 
 
 # =============================================================================
@@ -240,6 +292,10 @@ async def get_status(task_id: str):
     if task["status"] == "error" and task.get("overlap_detail") is not None:
         response["overlap_detail"] = task["overlap_detail"]
         response["overlap_total"] = task.get("overlap_total", 0)
+
+    if task.get("analysis_status") is not None:
+        response["analysis_status"] = task["analysis_status"]
+        response["analysis_message"] = task.get("analysis_message", "")
 
     return response
 

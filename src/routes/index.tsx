@@ -134,17 +134,29 @@ type Phase =
  */
 type TriState = "pending" | "ok" | "warn" | "error" | "running";
 
+// Filtro temporal: zonas con peso mayor a este valor se ignoran en el overlay
+const WEIGHT_LIMIT_KG = 2000;
+
 interface Detection {
   id: number;
   class: string;
   confidence: number;
   bbox: { minx: number; miny: number; maxx: number; maxy: number };
   volume_m3: number;
-  weight_kg: number;
+  weight_kg: number | null;
 }
 
 // Color fijo por tipo de basura — no se repiten
 const CLASS_COLORS: Record<string, string> = {
+  // Nombres en español (nuevas ejecuciones)
+  "Residuo de construcción":   "#ef4444",
+  "Metal":                     "#f97316",
+  "Plástico":                  "#3b82f6",
+  "Residuo orgánico":          "#22c55e",
+  "Muebles":                   "#a855f7",
+  "Neumáticos":                "#64748b",
+  "Tipo de basura indefinido": "#f59e0b",
+  // Nombres en inglés (tareas anteriores al cambio)
   construction_waste: "#ef4444",
   metal:              "#f97316",
   plastic:            "#3b82f6",
@@ -371,9 +383,9 @@ function Page() {
       const stageAtError = res.status === "error"
         ? (res.overlapDetail !== undefined ? "checking_overlap" : loadBackendStage())
         : null;
-      clearTaskId();
       clearBackendStage();
       if (res.status === "error") {
+        clearTaskId();
         setPhase("error"); savePhase("error");
         setProgress(100);
         setErrorMsg(res.message || "No se pudo generar el mapa. Intenta nuevamente.");
@@ -618,6 +630,7 @@ function Page() {
     setErrorStage(null);
     setDetections([]);
     setImgNaturalSize(null);
+    clearTaskId();
     clearDetectionJsonUrl();
   };
 
@@ -699,7 +712,7 @@ function Page() {
       }
       setProgress(100);
       setPhase("done"); savePhase("done");
-      clearTaskId(); clearBackendStage();
+      clearBackendStage();
 
     } catch {
       clearTaskId(); clearBackendStage();
@@ -1045,42 +1058,41 @@ function Page() {
                             className="absolute inset-0 w-full h-full pointer-events-none transition-opacity group-hover:opacity-80"
                             preserveAspectRatio="xMidYMid meet"
                           >
-                            {detections.map(d => {
-                              const color = classColor(d.class);
-                              const bw = d.bbox.maxx - d.bbox.minx;
-                              const bh = d.bbox.maxy - d.bbox.miny;
-                              const showLabel = bw >= 80 && bh >= 40;
-                              const LABEL_H = 34;
-                              const FONT = 24;
-                              return (
-                                <g key={d.id}>
-                                  <rect
-                                    x={d.bbox.minx} y={d.bbox.miny}
-                                    width={bw} height={bh}
-                                    fill={`${color}28`}
-                                    stroke={color}
-                                    strokeWidth={3}
-                                    strokeLinejoin="round"
-                                  />
-                                  {showLabel && (
-                                    <>
-                                      <rect
-                                        x={d.bbox.minx} y={d.bbox.miny}
-                                        width={bw} height={LABEL_H}
-                                        fill="rgba(0,0,0,0.68)"
-                                      />
-                                      <text
-                                        x={d.bbox.minx + 6} y={d.bbox.miny + FONT + 2}
-                                        fontSize={FONT} fill={color}
-                                        fontFamily="monospace" fontWeight="700"
-                                      >
-                                        {d.class}
-                                      </text>
-                                    </>
-                                  )}
-                                </g>
-                              );
-                            })}
+                            {detections
+                              .filter(d => !(d.weight_kg != null && d.weight_kg > WEIGHT_LIMIT_KG))
+                              .map(d => {
+                                const color = classColor(d.class);
+                                const bw = d.bbox.maxx - d.bbox.minx;
+                                const bh = d.bbox.maxy - d.bbox.miny;
+                                const FONT = 24;
+                                return (
+                                  <g key={d.id}>
+                                    <rect
+                                      x={d.bbox.minx} y={d.bbox.miny}
+                                      width={bw} height={bh}
+                                      fill={color}
+                                      fillOpacity={0.18}
+                                      stroke={color}
+                                      strokeWidth={1.5}
+                                      strokeLinejoin="round"
+                                    />
+                                    <text
+                                      x={d.bbox.minx}
+                                      y={d.bbox.miny - 6}
+                                      fontSize={FONT}
+                                      fill={color}
+                                      fontFamily="monospace"
+                                      fontWeight="700"
+                                      paintOrder="stroke"
+                                      stroke="rgba(0,0,0,0.75)"
+                                      strokeWidth={5}
+                                      strokeLinejoin="round"
+                                    >
+                                      {d.class}
+                                    </text>
+                                  </g>
+                                );
+                              })}
                           </svg>
                         )}
                       </div>

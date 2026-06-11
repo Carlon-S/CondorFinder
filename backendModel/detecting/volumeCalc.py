@@ -8,23 +8,23 @@ import geopandas as gpd
 
 # kg/m³ bulk density estimates per class
 DENSITY_MAP = {
-    "plastic":            80,
-    "metal":             600,
-    "organic_waste":     300,
-    "tyres":             400,
-    "furniture":         200,
-    "construction_waste":800,
-    "other":             200,
+    "Plástico":                 80,
+    "Metal":                   600,
+    "Residuo orgánico":        300,
+    "Neumáticos":              400,
+    "Muebles":                 200,
+    "Residuo de construcción": 800,
+    "Tipo de basura indefinido": 200,
 }
 
 COLORS_MAP = {
-    "construction_waste": "#ff1100",
-    "furniture": "#ff8400",
-    "metal": "#696969",
-    "plastic": "#0228c2",
-    "organic_waste": "#02c218",
-    "tyres": "#262626",
-    "other": "#8404b3",
+    "Residuo de construcción":   "#ff1100",
+    "Muebles":                   "#ff8400",
+    "Metal":                     "#696969",
+    "Plástico":                  "#0228c2",
+    "Residuo orgánico":          "#02c218",
+    "Neumáticos":                "#262626",
+    "Tipo de basura indefinido": "#8404b3",
 }
 
 
@@ -125,13 +125,16 @@ def enrich(
         color = COLORS_MAP.get(cls,"#000000")
         weight_kg = round(volume_m3 * density, 2)
 
+        area_m2 = round((stats["count"] or 0) * pixel_area_m2, 4)
+
         result.update({
-            "geo_polygon": geo_coords,
-            "ndsm_mean_m": round(stats["mean"] or 0, 3),
-            "ndsm_max_m":  round(stats["max"]  or 0, 3),
-            "volume_m3":   volume_m3,
+            "geo_polygon":   geo_coords,
+            "area_m2":       area_m2,
+            "ndsm_mean_m":   round(stats["mean"] or 0, 3),
+            "ndsm_max_m":    round(stats["max"]  or 0, 3),
+            "volume_m3":     volume_m3,
             "density_kg_m3": density,
-            "weight_kg":   weight_kg,
+            "weight_kg":     weight_kg,
         })
 
         enriched.append(result)

@@ -4,9 +4,10 @@ API REST que orquesta el pipeline completo de procesamiento:
 
 1. **Carga de imágenes** — recibe y persiste las imágenes JPG del drone en `joining/images/`
 2. **Verificación de solapamiento** (`joining/Reconociemiento_solapamiento.py`) — comprueba que cada par de imágenes consecutivas tenga al menos un 60% de solapamiento usando datos GPS EXIF y el FOV del drone (82.1°)
-3. **Unificación** (`joining/joinOrtho.py`) — genera un ortomosaico `.tif` usando OpenDroneMap
-4. **Detección** (`detecting/detectingOrtho.py`) — detecta categorías de basura con YOLOv8 + SAHI y genera una imagen anotada en `detecting/output/`
-5. **Resultado** — expone la imagen anotada y el conteo de detecciones al frontend
+3. **Unificación** (`joining/joinOrtho.py`) — genera un ortomosaico `.tif` y un modelo 3D completo (DSM, DTM, nube de puntos) usando OpenDroneMap
+4. **Detección** (`detecting/detectingOrtho.py`) — detecta categorías de basura con YOLOv8 + SAHI, genera el PNG del mapa y un JSON con las detecciones y sus coordenadas en píxeles
+5. **Análisis de volumen** (`detecting/volumeCalc.py`) — calcula volumen, peso y área real por detección usando el nDSM generado por ODM. Se ejecuta automáticamente al finalizar el pipeline
+6. **Resultado** — expone el PNG del mapa, el JSON de detecciones enriquecido y las métricas de volumen al frontend
 
 ---
 
@@ -23,17 +24,18 @@ API REST que orquesta el pipeline completo de procesamiento:
 backendModel/
 ├── orquestador.py        ← API FastAPI principal
 ├── requirements.txt      ← Dependencias Python
-├── main.py               ← Script CLI alternativo (uso directo sin API)
 ├── joining/
-│   ├── joinOrtho.py                   ← Conecta con NodeODM y genera el ortomosaico
+│   ├── joinOrtho.py                   ← Conecta con NodeODM y genera el ortomosaico + modelo 3D
 │   ├── Reconociemiento_solapamiento.py ← Verifica solapamiento GPS entre imágenes
 │   ├── images/                        ← Imágenes JPG de entrada
-│   └── finals/                        ← Ortomosaico .tif de salida
+│   ├── finals/                        ← Ortomosaico .tif de salida
+│   └── output/odm_dem/               ← DSM, DTM y nDSM generados por ODM
 └── detecting/
     ├── detectingOrtho.py ← Ejecuta YOLOv8 + SAHI sobre el ortomosaico
+    ├── volumeCalc.py     ← Calcula volumen/peso/área por detección usando nDSM
     ├── model/
     │   └── best.pt       ← Pesos del modelo YOLOv8 entrenado
-    └── output/           ← Imágenes anotadas con detecciones
+    └── output/           ← PNG del mapa y JSON de detecciones por tarea
 ```
 
 ---
@@ -55,7 +57,7 @@ source backendModel/joining/venv/bin/activate
 pip install -r backendModel/requirements.txt
 ```
 
-> Tarda varios minutos en la primera instalación.
+> Tarda varios minutos en la primera instalación. PyTorch, Ultralytics y Rasterio son los paquetes más pesados.
 
 ---
 
@@ -64,7 +66,7 @@ pip install -r backendModel/requirements.txt
 ### Paso 1 — Levanta NodeODM
 
 ```bash
-docker run -ti -p 3000:3000 webodm/nodeodm
+docker run -ti -p 3000:3000 opendronemap/nodeodm
 ```
 
 Espera hasta ver:
@@ -100,9 +102,10 @@ INFO: Application startup complete.
 | `GET` | `/upload` | Lista los archivos actualmente en `joining/images/` |
 | `DELETE` | `/upload/{filename}` | Elimina una imagen específica de `joining/images/` |
 | `DELETE` | `/upload` | Elimina todas las imágenes de `joining/images/` |
-| `POST` | `/generate` | Inicia el pipeline join + detect en background |
-| `GET` | `/status/{task_id}` | Consulta el estado de una tarea en curso |
-| `GET` | `/result/{filename}` | Sirve la imagen anotada generada por YOLOv8 |
+| `POST` | `/generate` | Inicia el pipeline completo (solapamiento → ODM → YOLO → análisis de volumen) en background |
+| `GET` | `/status/{task_id}` | Consulta el estado de la tarea y del análisis de volumen |
+| `POST` | `/analyze/{task_id}` | Fuerza el cálculo de volumen si no se ejecutó automáticamente |
+| `GET` | `/result/{filename}` | Sirve el PNG del mapa o el JSON de detecciones |
 
 ---
 
@@ -113,8 +116,8 @@ INFO: Application startup complete.
 | `running` | Tarea creada, iniciando pipeline |
 | `checking_overlap` | Verificando solapamiento GPS entre imágenes consecutivas |
 | `joining` | Unificando imágenes con ODM (fase más lenta) |
-| `detecting` | Detectando basura con YOLOv8 + SAHI |
-| `done` | Proceso completado — `result_url` y `detection_count` disponibles |
+| `detecting` | Detectando basura con YOLOv8 + SAHI y calculando volúmenes |
+| `done` | Proceso completado — mapa, detecciones y volúmenes disponibles |
 | `error` | El proceso falló — `message` contiene el detalle |
 
 ### Respuesta cuando `status = "done"`
@@ -123,13 +126,18 @@ INFO: Application startup complete.
 {
   "status": "done",
   "message": "Proceso completado",
-  "result_url": "http://localhost:8000/result/nombre_archivo.png",
-  "detection_count": 12
+  "result_url": "http://localhost:8000/result/ortho_uuid.png",
+  "result_json_url": "http://localhost:8000/result/ortho_uuid.json",
+  "detection_count": 4,
+  "analysis_status": "done",
+  "analysis_message": "Análisis de volumen completado"
 }
 ```
 
-- `result_url`: URL de la imagen anotada con bounding boxes
-- `detection_count`: número de detecciones encontradas por YOLOv8. Si es `0`, el frontend muestra el aviso de "sin basura detectada" en ambas vistas (HDU2 CA3 y HDU3 CA2)
+- `result_url`: URL del PNG del mapa limpio (el overlay SVG lo genera el frontend)
+- `result_json_url`: URL del JSON con detecciones enriquecidas (coordenadas, volumen, área, peso)
+- `detection_count`: número de detecciones. Si es `0`, el frontend muestra aviso de "sin basura detectada"
+- `analysis_status`: `"done"` al terminar el pipeline, `"error"` si faltan los archivos DEM
 
 ### Respuesta cuando `status = "error"` por solapamiento insuficiente
 
@@ -149,27 +157,27 @@ INFO: Application startup complete.
 }
 ```
 
-- `overlap_detail`: lista de pares de imágenes consecutivas con solapamiento inferior al umbral (60%). Presente solo cuando el error es de solapamiento.
-- `overlap_total`: total de pares evaluados con datos GPS válidos.
-
 ---
 
 ## Categorías de basura detectadas
 
-| Clase | Color en imagen |
+| Clase | Color en overlay |
 |---|---|
-| `construction_waste` | Rojo |
-| `furniture` | Naranja |
-| `metal` | Gris |
-| `plastic` | Azul |
-| `organic_waste` | Verde |
-| `tyres` | Negro |
-| `other` | Morado |
+| `Residuo de construcción` | Rojo |
+| `Muebles` | Naranja |
+| `Metal` | Naranja oscuro |
+| `Plástico` | Azul |
+| `Residuo orgánico` | Verde |
+| `Neumáticos` | Gris |
+| `Tipo de basura indefinido` | Amarillo |
+| `Varios tipos` | Morado |
 
 ---
 
 ## Notas
 
 - El venv está en `joining/venv/` y está excluido del repositorio vía `.gitignore`.
-- Las tareas se almacenan en memoria (`tasks: dict`) — se pierden al reiniciar uvicorn. Esto es esperado en el MVP; una versión futura debería persistirlas en base de datos.
-- Para forzar el escenario de "sin basura detectada" durante pruebas, se puede agregar temporalmente `detection_count = 0` después de la llamada a `detectingOrtho.detect()` en `run_pipeline`. 
+- Las tareas se almacenan en memoria (`tasks: dict`) — se pierden al reiniciar uvicorn. Esto es esperado en el MVP.
+- El análisis de volumen requiere que ODM haya generado `dsm.tif` y `dtm.tif` en `joining/output/odm_dem/`. Si no existen, el pipeline continúa pero `analysis_status` queda en `"error"`.
+- Detecciones que se solapan en más del 50% (IoU ≥ 0.5) se fusionan en una zona "Varios tipos" en el frontend para evitar doble conteo de volumen.
+- El color del relleno de cada polígono varía en un degradé verde → rojo según el volumen relativo entre todas las zonas detectadas.
