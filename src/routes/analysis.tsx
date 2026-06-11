@@ -24,9 +24,6 @@ import { loadMapUrl, MAP_READY_EVENT } from "@/lib/mapState";
 import { loadNoWasteDetected, loadDetectionJsonUrl, loadTaskId } from "@/lib/imageState";
 import { AppNavbar } from "@/components/AppNavbar";
 
-// Filtro temporal: zonas con peso mayor a este valor se ignoran en overlay y análisis
-const WEIGHT_LIMIT_KG = 2000;
-
 // ── tipos ──────────────────────────────────────────────────────────────────────
 
 interface ClassBreakdown {
@@ -289,8 +286,7 @@ function AnalysisPage() {
     fetch(jsonUrl)
       .then(r => r.json())
       .then(data => {
-        const merged = mergeOverlapping(data.detections ?? [])
-          .filter(d => !(d.weight_kg != null && d.weight_kg > WEIGHT_LIMIT_KG));
+        const merged = mergeOverlapping(data.detections ?? []);
         setDisplayDetections(merged);
         setEnabledIds(new Set(merged.map(d => d.id)));
       })
@@ -340,8 +336,7 @@ function AnalysisPage() {
 
       const response = await pollVolumeAnalysis(taskId, jsonUrl, setProgress);
       if (response.status === "success") {
-        const merged = mergeOverlapping(response.detections)
-          .filter(d => !(d.weight_kg != null && d.weight_kg > WEIGHT_LIMIT_KG));
+        const merged = mergeOverlapping(response.detections);
         setDisplayDetections(merged);
         setEnabledIds(new Set(merged.map(d => d.id)));
         setStatus("done");

@@ -134,9 +134,6 @@ type Phase =
  */
 type TriState = "pending" | "ok" | "warn" | "error" | "running";
 
-// Filtro temporal: zonas con peso mayor a este valor se ignoran en el overlay
-const WEIGHT_LIMIT_KG = 2000;
-
 interface Detection {
   id: number;
   class: string;
@@ -1059,7 +1056,6 @@ function Page() {
                             preserveAspectRatio="xMidYMid meet"
                           >
                             {detections
-                              .filter(d => !(d.weight_kg != null && d.weight_kg > WEIGHT_LIMIT_KG))
                               .map(d => {
                                 const color = classColor(d.class);
                                 const bw = d.bbox.maxx - d.bbox.minx;
