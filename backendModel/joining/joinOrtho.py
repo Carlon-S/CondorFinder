@@ -6,8 +6,10 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 presetfast = {
         'orthophoto-resolution': 6,
-        'fast-orthophoto':True,  
-        'skip-3dmodel': True,
+        'fast-orthophoto':False, #Cambiar a True despues
+        'skip-3dmodel': False, #Cambiar a True despues
+        'dtm': True, #Cambiar a False despues
+        'dsm': True, #Cambiar a False despues
         'matcher-neighbors': 8,
         'feature-quality': 'medium',
     }
@@ -19,6 +21,19 @@ presethigh = {
     }
 
 def join(opc: int) -> str:
+
+    output_dir = os.path.join(BASE_DIR, "output")
+    os.makedirs(output_dir, exist_ok=True)
+
+    for filename in os.listdir(output_dir):
+        file_path = os.path.join(output_dir, filename)
+        try:
+            if os.path.isfile(file_path) or os.path.islink(file_path):
+                os.unlink(file_path)
+            elif os.path.isdir(file_path):
+                shutil.rmtree(file_path)
+        except Exception as e:
+            print('Failed to delete %s. Reason: %s' % (file_path, e), file=sys.stderr)
 
     if opc == 0:
         setting = presetfast
@@ -56,8 +71,6 @@ def join(opc: int) -> str:
         print(f"Juntado fallado con error: {task.info().status.name}", file=sys.stderr)
         exit()
 
-    output_dir = os.path.join(BASE_DIR, "output")
-    os.makedirs(output_dir, exist_ok=True)
 
     final_dir = os.path.join(BASE_DIR, "finals")
 
@@ -65,17 +78,8 @@ def join(opc: int) -> str:
 
     shutil.move(f"{output_dir}/odm_orthophoto/odm_orthophoto.tif",f"{final_dir}/ortho_{task.uuid}.tif")
 
-    for filename in os.listdir(output_dir):
-        file_path = os.path.join(output_dir, filename)
-        try:
-            if os.path.isfile(file_path) or os.path.islink(file_path):
-                os.unlink(file_path)
-            elif os.path.isdir(file_path):
-                shutil.rmtree(file_path)
-        except Exception as e:
-            print('Failed to delete %s. Reason: %s' % (file_path, e), file=sys.stderr)
 
-    print(f"Orthomosaic guardado en ./finals/ortho_{task.uuid}", file=sys.stderr)
+    print(f"Orthomosaic guardado en ./finals/ortho_{task.uuid}.tif", file=sys.stderr)
 
     """Probablmente este se tiene que cambiar al archivo en si en vez del nombre? Funciona asi pero podria ser nesesario"""
     return f"ortho_{task.uuid}.tif"

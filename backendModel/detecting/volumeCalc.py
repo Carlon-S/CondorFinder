@@ -17,6 +17,17 @@ DENSITY_MAP = {
     "other":             200,
 }
 
+COLORS_MAP = {
+    "construction_waste": "#ff1100",
+    "furniture": "#ff8400",
+    "metal": "#696969",
+    "plastic": "#0228c2",
+    "organic_waste": "#02c218",
+    "tyres": "#262626",
+    "other": "#8404b3",
+}
+
+
 def pixels_to_geo(polygon_px, transform):
     """
     Convert [[x,y], ...] pixel coords to geographic coords
@@ -77,7 +88,6 @@ def enrich(
         result = dict(det)
 
         if det["polygon"] is None:
-            # Fallback: use bbox as a rectangle polygon
             b = det["bbox"]
             pixel_polygon = [
                 [b["minx"], b["miny"]],
@@ -107,12 +117,12 @@ def enrich(
             geojson_out=False,
         )[0]
 
-        # Step 4: volume and weight
         height_sum = stats["sum"] if stats["sum"] is not None else 0.0
         volume_m3 = round(height_sum * pixel_area_m2, 4)
 
         cls = det["class"]
         density = DENSITY_MAP.get(cls, 200)
+        color = COLORS_MAP.get(cls,"#000000")
         weight_kg = round(volume_m3 * density, 2)
 
         result.update({
@@ -130,5 +140,5 @@ def enrich(
     with open(output_json_path, "w") as f:
         json.dump(output, f, indent=2)
 
-    print(f"Saved enriched detections → {output_json_path}")
+    print(f"Guardado Json: {output_json_path}")
     return output
