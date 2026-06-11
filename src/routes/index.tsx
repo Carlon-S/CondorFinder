@@ -725,8 +725,8 @@ function Page() {
     function getPhaseLabel(phase: Phase, backendStage: "checking_overlap" | "joining" | "detecting" | null): string {
     if (phase === "generating_map") {
       if (backendStage === "checking_overlap") return "Verificando solapamiento entre imágenes...";
-      if (backendStage === "joining") return "Unificando imágenes con ODM...";
-      if (backendStage === "detecting") return "Detectando basura con YOLOv8...";
+      if (backendStage === "joining") return "Unificando imágenes...";
+      if (backendStage === "detecting") return "Detectando basura...";
       return "Iniciando pipeline...";
     }
     const labels: Record<Phase, string> = {
