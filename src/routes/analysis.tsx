@@ -416,26 +416,24 @@ function AnalysisPage() {
         {/* ── panel lateral ── */}
         <aside
           id="dashboard"
-          className="border-r border-border bg-card/95 backdrop-blur p-4 shadow-2xl overflow-y-auto"
+          className="border-r border-border/35 p-5 overflow-y-auto"
         >
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col divide-y divide-border/25">
 
             {/* título */}
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/15 text-primary">
-                  <BarChart3 className="h-4 w-4" />
-                </span>
-                <h1 className="text-lg font-semibold">Analisis de volumen</h1>
+            <div className="pb-4">
+              <div className="flex items-center gap-2.5 border-l-2 border-primary/50 pl-3">
+                <BarChart3 className="h-4 w-4 text-primary/75" />
+                <h1 className="text-lg font-bold tracking-tight">Análisis de volumen</h1>
               </div>
-              <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+              <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
                 Activa o desactiva zonas antes de ejecutar el análisis. Los totales
                 reflejan únicamente las zonas activas.
               </p>
             </div>
 
             {/* botón análisis */}
-            <div className="rounded-md border border-border bg-background/40 p-3">
+            <div className="py-4">
               <Button
                 onClick={runAnalysis}
                 disabled={status === "running" || !usingGeneratedMap || status === "empty"}
@@ -450,73 +448,75 @@ function AnalysisPage() {
             </div>
 
             {/* estado */}
-            <div className="rounded-md border border-border bg-background/40 p-3">
-              <p className="mono text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Estado del analisis
-              </p>
-              <div className="mt-2 flex items-center gap-2">
+            <div className="py-4">
+              <p className="text-xs font-semibold text-muted-foreground mb-2.5">Estado del análisis</p>
+              <div className="flex items-center gap-2">
                 {status === "running"  ? <Loader2      className="h-4 w-4 animate-spin text-primary" />
                 : status === "done"    ? <CheckCircle2 className="h-4 w-4 text-success" />
                 : status === "empty"   ? <TriangleAlert className="h-4 w-4 text-warning" />
                 :                        <Clock         className="h-4 w-4 text-muted-foreground" />}
                 <p className="text-xs font-medium">{statusLabel[status]}</p>
               </div>
-              <Progress value={progress} className="mt-3 h-1" />
-              <p className="mono mt-1 text-[10px] text-muted-foreground">{progress}% completado</p>
+              <Progress value={progress} className="mt-2.5 h-1" />
+              <p className="mt-1 text-[10px] text-muted-foreground">{progress}% completado</p>
             </div>
 
             {/* empty / error */}
             {(status === "empty" || status === "error") ? (
-              <div className="flex flex-col items-center justify-center rounded-md border border-warning/40 bg-warning/10 p-5 text-center">
-                {status === "empty"
-                  ? <Trash2        className="mb-3 h-8 w-8 text-warning" />
-                  : <TriangleAlert className="mb-3 h-8 w-8 text-warning" />}
-                <p className="text-sm font-semibold">
-                  {analysisMessage || "No hay basura detectada en el área"}
-                </p>
-                <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+              <div className="py-4">
+                <div className="flex flex-col items-center justify-center rounded-md border border-warning/40 bg-warning/10 p-5 text-center">
                   {status === "empty"
-                    ? "El analisis finalizo correctamente, pero no encontro poligonos de residuos en el mapa unificado."
-                    : "El servicio de analisis no retorno resultados validos para mostrar."}
-                </p>
+                    ? <Trash2        className="mb-3 h-8 w-8 text-warning" />
+                    : <TriangleAlert className="mb-3 h-8 w-8 text-warning" />}
+                  <p className="text-sm font-semibold">
+                    {analysisMessage || "No hay basura detectada en el área"}
+                  </p>
+                  <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                    {status === "empty"
+                      ? "El análisis finalizó correctamente, pero no encontró polígonos de residuos en el mapa unificado."
+                      : "El servicio de análisis no retornó resultados válidos para mostrar."}
+                  </p>
+                </div>
               </div>
             ) : (
-              <div className="flex flex-col gap-4">
-
+              <>
                 {/* métricas */}
-                <div className="grid grid-cols-2 gap-2">
-                  <Metric
-                    label="Volumen total"
-                    value={status === "done" ? `${activeSummary.totalVolumeM3} m³` : "—"}
-                    icon={<Boxes className="h-4 w-4" />}
-                  />
-                  <Metric
-                    label="Peso total"
-                    value={status === "done" ? `${activeSummary.totalWeightKg} kg` : "—"}
-                    icon={<Scale className="h-4 w-4" />}
-                  />
-                  <Metric
-                    label="Area total"
-                    value={status === "done" ? `${activeSummary.totalAreaM2} m²` : "—"}
-                    icon={<Crosshair className="h-4 w-4" />}
-                  />
-                  <Metric
-                    label="Zonas activas"
-                    value={`${enabledIds.size} / ${displayDetections.length}`}
-                    icon={<MapIcon className="h-4 w-4" />}
-                  />
+                <div className="py-4">
+                  <p className="text-xs font-semibold text-muted-foreground mb-2.5">Métricas</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Metric
+                      label="Volumen total"
+                      value={status === "done" ? `${activeSummary.totalVolumeM3} m³` : "—"}
+                      icon={<Boxes className="h-4 w-4" />}
+                    />
+                    <Metric
+                      label="Peso total"
+                      value={status === "done" ? `${activeSummary.totalWeightKg} kg` : "—"}
+                      icon={<Scale className="h-4 w-4" />}
+                    />
+                    <Metric
+                      label="Área total"
+                      value={status === "done" ? `${activeSummary.totalAreaM2} m²` : "—"}
+                      icon={<Crosshair className="h-4 w-4" />}
+                    />
+                    <Metric
+                      label="Zonas activas"
+                      value={`${enabledIds.size} / ${displayDetections.length}`}
+                      icon={<MapIcon className="h-4 w-4" />}
+                    />
+                  </div>
                 </div>
 
                 {/* lista de zonas */}
-                <div className="rounded-md border border-border bg-background/40">
-                  <div className="flex items-center justify-between border-b border-border px-3 py-2">
-                    <p className="mono text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                <div className="py-4">
+                  <div className="flex items-center justify-between mb-2.5">
+                    <p className="text-xs font-semibold text-muted-foreground">
                       Zonas detectadas
                     </p>
                     {displayDetections.length > 0 && (
                       <button
                         onClick={toggleAll}
-                        className="mono text-[10px] text-primary hover:underline"
+                        className="text-[10px] text-primary hover:underline"
                       >
                         {allEnabled ? "Desactivar todas" : "Activar todas"}
                       </button>
@@ -524,7 +524,7 @@ function AnalysisPage() {
                   </div>
 
                   {displayDetections.length > 0 ? (
-                    <ul className="p-2 space-y-1.5">
+                    <ul className="space-y-1.5 max-h-[340px] overflow-y-auto pr-0.5">
                       {displayDetections.map(d => {
                         const enabled = enabledIds.has(d.id);
                         const color   = classColor(d.class);
@@ -606,18 +606,18 @@ function AnalysisPage() {
                       })}
                     </ul>
                   ) : (
-                    <div className="p-4 text-center text-xs text-muted-foreground">
+                    <div className="py-3 text-center text-xs text-muted-foreground">
                       Sin detecciones cargadas.
                     </div>
                   )}
                 </div>
-              </div>
+              </>
             )}
           </div>
         </aside>
 
         {/* ── visor de mapa ── */}
-        <section className="relative min-w-0 overflow-hidden bg-[#1d1d1d]">
+        <section className="relative min-w-0 overflow-hidden bg-background">
           {usingGeneratedMap ? (
             <>
               <div className="absolute left-4 top-4 z-20 rounded-md border border-border bg-card/90 px-3 py-2 text-xs shadow-xl backdrop-blur">
@@ -759,10 +759,10 @@ const statusLabel: Record<AnalysisStatus, string> = {
 
 function Metric({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
   return (
-    <div className="rounded-md border border-border bg-background/40 p-3">
-      <div className="mb-2 text-muted-foreground">{icon}</div>
-      <p className="mono text-[9px] uppercase tracking-wider text-muted-foreground">{label}</p>
-      <p className="text-base font-semibold tabular-nums">{value}</p>
+    <div className="rounded-lg bg-background/60 px-3 py-3">
+      <div className="mb-2.5 text-primary/65 [&_svg]:h-4 [&_svg]:w-4">{icon}</div>
+      <p className="text-[10px] text-muted-foreground leading-none mb-1">{label}</p>
+      <p className="text-base font-bold tabular-nums">{value}</p>
     </div>
   );
 }

@@ -266,7 +266,6 @@ function Page() {
     return saved === "done" || saved === "error" || saved === "generating_map" ? saved : "idle";
   });
 
-
   const [resultUrl, setResultUrl] = useState<string | null>(() => loadResultUrl());
   const [noWasteDetected, setNoWasteDetected] = useState<boolean>(() => loadNoWasteDetected());
   const [overlapDetail, setOverlapDetail] = useState<OverlapPair[]>([]);
@@ -720,6 +719,26 @@ function Page() {
     }
   };
 
+  /** Descarga el mapa como blob local — evita bloqueo cross-origin del atributo download */
+  const downloadMap = async () => {
+    const url = resultUrl || unifiedMapImg;
+    try {
+      const res = await fetch(url);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = "mapa-unificado.png";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+    } catch {
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "mapa-unificado.png";
+      a.click();
+    }
+  };
+
   /** Etiquetas descriptivas para cada fase del proceso */
     function getPhaseLabel(phase: Phase, backendStage: "checking_overlap" | "joining" | "detecting" | null): string {
     if (phase === "generating_map") {
@@ -757,49 +776,52 @@ function Page() {
   // ---------------------------------------------------------------------------
   return (
     <div className="min-h-screen bg-background text-foreground gis-gradient-bg">
-
-      {/* HEADER: barra de navegacion fija con logotipo y enlaces de ancla */}
       <AppNavbar />
-      <main className="mx-auto max-w-[1400px] px-6 py-6 space-y-4">
-        <h2 className="font-Futura text-3xl tracking-tight text-foreground md:text-4xl">
-          Unificacion de imagenes aereas
-        </h2>
+      <main className="mx-auto max-w-[1400px] px-4 py-4 sm:px-6 sm:py-6 space-y-4">
 
-        {/* FILA 1: Instrucciones de uso en 4 pasos */}
+        {/* Título de página */}
+        <div>
+          <h2 className="font-SpaceGrotesk text-3xl font-bold tracking-tight text-foreground md:text-4xl">
+            Unificación de imágenes aéreas
+          </h2>
+          <p className="mt-1.5 text-sm text-muted-foreground">
+            Carga imágenes JPG capturadas con drone para generar el mapa unificado de la zona.
+          </p>
+        </div>
+
+        {/* ── FILA 1: Instrucciones ── */}
         <section className="panel p-5">
           <PanelHeader icon={<Info className="h-3.5 w-3.5" />} title="Instrucciones" />
-          <ol className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <GuideStep number="1" title="Selecciona la zona" text="Usa imagenes tomadas en un mismo sector para que el mapa final sea coherente y continuo." />
-            <GuideStep number="2" title="Carga archivos JPG" text="Arrastra las fotografias o seleccionalas desde tu equipo. Solo se aceptan archivos en formato JPG o JPEG." />
-            <GuideStep number="3" title="Verificar requisito" text={`Se necesitan al menos ${MIN_IMAGES} imagenes JPG validas.`} />
-            <GuideStep number="4" title="Genera el mapa" text='Cuando todo este aprobado, presiona el boton para iniciar el procesamiento y obtener el mapa unificado de la zona.' />
+          <ol className="mt-4 grid gap-3 sm:grid-cols-2 md:grid-cols-4">
+            <GuideStep number="1" title="Selecciona la zona" text="Usa imágenes tomadas en un mismo sector para que el mapa final sea coherente y continuo." />
+            <GuideStep number="2" title="Carga archivos JPG" text="Arrastra las fotografías o selecciónalas desde tu equipo. Solo se aceptan archivos JPG o JPEG." />
+            <GuideStep number="3" title="Verifica el requisito" text={`Se necesitan al menos ${MIN_IMAGES} imágenes JPG válidas para procesar.`} />
+            <GuideStep number="4" title="Genera el mapa" text="Cuando todo esté aprobado, presiona el botón para obtener el mapa unificado." />
           </ol>
         </section>
 
-        {/* FILA 2: Carga de imagenes (izquierda) | Imagenes adjuntas (derecha) */}
-        <div id="carga" className="grid gap-4 lg:grid-cols-[2fr_3fr]">
+        {/* ── FILA 2: Carga | Imágenes ── */}
+        <div className="grid gap-4 md:grid-cols-[2fr_3fr]">
 
-          {/* Panel izquierdo: zona drag & drop */}
-          <section className="panel p-5 flex flex-col gap-4 min-h-[420px]">
-            <PanelHeader icon={<Upload className="h-3.5 w-3.5" />} title="Carga de imagenes" />
+          {/* Zona de carga */}
+          <section className="panel p-5 flex flex-col gap-4 h-[460px]">
+            <PanelHeader icon={<Upload className="h-3.5 w-3.5" />} title="Carga de imágenes" />
             <button
               type="button"
               onClick={() => !uploading && inputRef.current?.click()}
               onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
               onDragLeave={() => setDragOver(false)}
               onDrop={onDrop}
-              className={`group relative flex w-full flex-col items-center justify-center rounded-md border border-dashed px-6 py-10 text-center transition-all h-[340px] overflow-hidden ${
-                dragOver ? "border-primary bg-primary/10" : "border-border bg-background/40 hover:border-primary/60 hover:bg-primary/5"
+              className={`upload-zone group relative flex w-full flex-col items-center justify-center rounded-lg border border-dashed px-6 py-10 text-center transition-all duration-300 flex-1 overflow-hidden ${
+                dragOver ? "border-primary bg-primary/10 scale-[1.01]" : "border-border/60 bg-background/30 hover:border-primary/50 hover:bg-primary/5"
               }`}
             >
-              <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-primary/15 text-primary ring-1 ring-primary/30">
+              <div className="upload-icon flex h-14 w-14 items-center justify-center rounded-xl bg-primary/15 text-primary ring-1 ring-primary/30">
                 <Upload className="h-7 w-7" />
               </div>
-              <p className="mt-4 text-sm font-semibold">Arrastra imagenes JPG aqui</p>
+              <p className="mt-4 text-sm font-semibold">Arrastra imágenes JPG aquí</p>
               <p className="mt-1 text-xs text-muted-foreground">o haz clic para seleccionar desde tu equipo</p>
-              <p className="mono mt-3 text-[10px] uppercase tracking-wider text-muted-foreground/70">
-                Solo JPG · JPEG · Minimo {MIN_IMAGES} imagenes
-              </p>
+              <p className="mt-3 text-[10px] text-muted-foreground/60">Solo JPG · JPEG · Mínimo {MIN_IMAGES} imágenes</p>
               <input ref={inputRef} type="file" accept="image/jpeg,.jpg,.jpeg" multiple className="hidden"
                 disabled={uploading}
                 onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }}
@@ -807,244 +829,232 @@ function Page() {
             </button>
           </section>
 
-          {/* Panel derecho: grid de thumbnails con scroll vertical */}
-          <section className="panel p-5 flex flex-col gap-3 h-[420px]">
+          {/* Grid de imágenes */}
+          <section className="panel p-5 flex flex-col gap-3 h-[460px] relative overflow-hidden">
+
+            {/* Overlay de carga — cubre toda la card independientemente del scroll */}
+            {uploading && (
+              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-xl bg-background/85 backdrop-blur-sm">
+                <div className="scan-line relative h-20 w-20 overflow-hidden rounded-md border border-primary/40 bg-primary/10">
+                  <Loader2 className="absolute left-1/2 top-1/2 h-7 w-7 -translate-x-1/2 -translate-y-1/2 animate-spin text-primary" />
+                </div>
+                <p className="text-[11px] font-semibold text-primary">Subiendo imágenes al servidor...</p>
+              </div>
+            )}
+
             <div className="flex items-center justify-between">
-              <PanelHeader icon={<ImageIcon className="h-3.5 w-3.5" />} title="Imagenes adjuntas" />
-              <div className="flex items-center gap-3">
-                <p className="mono text-[10px] text-muted-foreground">{validCount} JPG · {invalidCount} rechazadas</p>
+              <PanelHeader icon={<ImageIcon className="h-3.5 w-3.5" />} title="Imágenes adjuntas">
+                <p className="text-[10px] text-muted-foreground ml-2">{validCount} JPG · {invalidCount} rechazadas</p>
+              </PanelHeader>
+              <div className="flex items-center gap-2">
                 {skippedCount > 0 && (
-                  <p className="mono text-[10px] rounded px-2 py-0.5 bg-warning/20 text-yellow-400 border border-warning/30">
-                    {skippedCount} archivo(s) omitido(s) — ya existen archivos cargados con ese nombre
+                  <p className="text-[10px] rounded px-2 py-0.5 bg-warning/15 text-yellow-400 border border-warning/20">
+                    {skippedCount} omitido(s) — nombre duplicado
                   </p>
                 )}
                 {invalidCount > 0 && (
                   <Button variant="ghost" size="sm" onClick={clearInvalid} disabled={processing}
                     className="h-7 px-2 text-xs hover:bg-destructive/15 hover:text-destructive">
-                    <Trash2 className="mr-1 h-3 w-3" /> Eliminar imagenes no JPG/JPEG
+                    <Trash2 className="mr-1 h-3 w-3" /> No JPG
                   </Button>
                 )}
                 {items.length > 0 && (
                   <Button variant="ghost" size="sm" onClick={clearAll} disabled={processing}
                     className="h-7 px-2 text-xs hover:bg-destructive/15 hover:text-destructive">
-                    <Trash2 className="mr-1 h-3 w-3" /> Limpiar todas las imagenes
+                    <Trash2 className="mr-1 h-3 w-3" /> Limpiar todo
                   </Button>
                 )}
               </div>
             </div>
 
-            {/* Grid 3 columnas con scroll vertical optimizado para rendimiento */}
             {items.length > 0 ? (
-              <div className="relative h-[340px]">
-                {uploading && (
-                  <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 rounded-md bg-background/80 backdrop-blur-sm">
-                    <div className="scan-line relative h-24 w-24 overflow-hidden rounded-md border border-primary/40 bg-primary/10">
-                      <Loader2 className="absolute left-1/2 top-1/2 h-8 w-8 -translate-x-1/2 -translate-y-1/2 animate-spin text-primary" />
-                    </div>
-                    <p className="mono text-[11px] uppercase tracking-wider text-primary">
-                      Subiendo imagenes al servidor...
-                    </p>
-                  </div>
-                )}
-                <ul className="flex flex-wrap items-start gap-2 h-full overflow-y-auto overflow-x-hidden pb-1 pr-1 will-change-scroll" style={{ contain: "strict" }}>
-              
-                {items.map((it) => (
-                  <li key={it.id}
-                    className={`w-[calc(33.333%-6px)] flex-shrink-0 overflow-hidden rounded-md border bg-background/40 transform-gpu ${
-                      it.status === "invalid" ? "border-destructive/40" : "border-border"
-                    }`}
-                  >
-                    <div className="relative h-28 w-full overflow-hidden bg-muted">
-                      {it.preview ? (
-                        <img src={it.preview} alt={it.file.name} className="h-full w-full object-cover" decoding="async" />
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center">
-                          <ImageIcon className="h-6 w-6 text-muted-foreground/40" />
-                        </div>
-                      )}
-                      <button type="button" aria-label="Eliminar" onClick={() => removeItem(it.id)} disabled={processing}
-                        className="absolute right-1.5 top-1.5 rounded bg-background/85 p-1 text-muted-foreground shadow-sm backdrop-blur transition hover:bg-destructive/15 hover:text-destructive">
-                        <Trash2 className="h-3 w-3" />
-                      </button>
-                    </div>
-                    <div className="min-w-0 p-2">
-                      <p className="truncate text-[10px] font-medium" title={it.file.name}>{it.file.name}</p>
-                      <p className="mono text-[9px] text-muted-foreground leading-tight">{formatSize(it.file.size)}</p>
-                    </div>
-                  </li>
-                ))}
-              </ul>
+              <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
+                <ul className="grid grid-cols-3 gap-2 pb-1 pr-1 will-change-scroll">
+                  {items.map((it) => (
+                    <li key={it.id}
+                      className={`overflow-hidden rounded-lg border bg-background/40 transform-gpu ${
+                        it.status === "invalid" ? "border-destructive/40" : "border-border/60"
+                      }`}
+                    >
+                      <div className="relative h-28 w-full overflow-hidden bg-muted">
+                        {it.preview.startsWith("data:") ? (
+                          <img src={it.preview} alt={it.file.name} className="h-full w-full object-cover" decoding="async" />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center">
+                            <Loader2 className="h-5 w-5 animate-spin text-primary/40" />
+                          </div>
+                        )}
+                        <button type="button" aria-label="Eliminar" onClick={() => removeItem(it.id)} disabled={processing}
+                          className="absolute right-1.5 top-1.5 rounded bg-background/85 p-1 text-muted-foreground shadow-sm backdrop-blur transition hover:bg-destructive/15 hover:text-destructive">
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </div>
+                      <div className="min-w-0 p-2">
+                        <p className="truncate text-[10px] font-medium" title={it.file.name}>{it.file.name}</p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
               </div>
             ) : (
-              <div className="flex h-[340px] items-center justify-center rounded-md border border-dashed border-border bg-background/30 text-center text-xs text-muted-foreground">
-                Las imagenes seleccionadas apareceran aqui.
+              <div className="flex flex-1 min-h-0 items-center justify-center rounded-lg border border-dashed border-border/40 bg-background/20 text-center text-xs text-muted-foreground/60">
+                Las imágenes seleccionadas aparecerán aquí
               </div>
             )}
-            {/* Loading overlay de subida — visible solo mientras se sube o justo al terminar */}
-            {(uploading) && (
-              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 rounded-md bg-background/80 backdrop-blur-sm">
-                <div className="scan-line relative h-24 w-24 overflow-hidden rounded-md border border-primary/40 bg-primary/10">
-                  <Loader2 className="absolute left-1/2 top-1/2 h-8 w-8 -translate-x-1/2 -translate-y-1/2 animate-spin text-primary" />
-                </div>
-                <p className="mono text-[11px] uppercase tracking-wider text-primary">
-                  {uploadLabel[uploadPhase]}
-                </p>
-              </div>
-            )}            
           </section>
         </div>
 
-        {/* FILA 3: Boton centrado + tooltip de estado */}
-        <div className="flex flex-col items-center gap-3">
-          <div className="flex items-center gap-3">
-            <Button onClick={generate} disabled={!canGenerate} className="w-full max-w-sm" size="lg">
-              {processing ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generando...</>)
-              : phase === "done" || phase === "error" ? (<><RotateCcw className="mr-2 h-4 w-4" /> Reprocesar mapa</>)
-              : (<><MapIcon className="mr-2 h-4 w-4" /> Generar mapa unificado</>)}
-            </Button>
+        {/* ── FILA 3: Botón + tooltip ── */}
+        <div className="flex items-center justify-center gap-3">
+          <Button onClick={generate} disabled={!canGenerate} className="w-full max-w-sm btn-cta" size="lg">
+            {processing ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generando...</>)
+            : phase === "done" || phase === "error" ? (<><RotateCcw className="mr-2 h-4 w-4" /> Reprocesar mapa</>)
+            : (<><MapIcon className="mr-2 h-4 w-4" /> Generar mapa unificado</>)}
+          </Button>
 
-            {/* Tooltip dinamico: varia color y mensaje segun estado del sistema */}
-            <div className="group relative flex items-center">
-              <div className={`flex h-7 w-7 items-center justify-center rounded-full cursor-help transition-colors ${
-                tooltipState.color === "empty" ? "bg-[#1e1e1e] text-white hover:bg-[#1e1e1e]/90"
-                : tooltipState.color === "warning" ? "bg-warning text-warning-foreground hover:bg-warning/90"
-                : tooltipState.color === "destructive" ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                : "bg-success text-black hover:bg-success/90"
+          <div className="group relative flex-shrink-0">
+            <div className={`flex h-9 w-9 items-center justify-center rounded-full cursor-help transition-colors ${
+              tooltipState.color === "empty" ? "bg-[#1c2219] text-[#ede8df] hover:bg-[#1c2219]/90"
+              : tooltipState.color === "warning" ? "bg-warning text-warning-foreground hover:bg-warning/90"
+              : tooltipState.color === "destructive" ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              : "bg-success text-black hover:bg-success/90"
+            }`}>
+              <AlertTriangle className="h-4 w-4" />
+            </div>
+            <div className={`absolute left-full top-1/2 ml-2 -translate-y-1/2 w-64 transition-all ${
+              tooltipState.color === "warning" ? "opacity-100 scale-100 pointer-events-auto"
+              : "scale-95 opacity-0 group-hover:scale-100 group-hover:opacity-100 pointer-events-none"
+            } z-50`}>
+              <div className={`relative rounded-md p-2.5 text-[11px] font-medium shadow-xl ${
+                tooltipState.color === "empty" ? "bg-[#1c2219] text-[#ede8df]"
+                : tooltipState.color === "warning" ? "bg-warning text-warning-foreground"
+                : tooltipState.color === "destructive" ? "bg-destructive text-destructive-foreground"
+                : "bg-success text-black"
               }`}>
-                <AlertTriangle className="h-4 w-4" />
-              </div>
-              <div className={`absolute left-full top-1/2 ml-2 -translate-y-1/2 w-64 min-w-[200px] transition-all ${
-                tooltipState.color === "warning" ? "opacity-100 scale-100 pointer-events-auto"
-                : "scale-95 opacity-0 group-hover:scale-100 group-hover:opacity-100 pointer-events-none"
-              } z-50`}>
-                <div className={`relative rounded-md p-2.5 text-[11px] font-medium shadow-xl ${
-                  tooltipState.color === "empty" ? "bg-[#1e1e1e] text-white"
-                  : tooltipState.color === "warning" ? "bg-warning text-warning-foreground"
-                  : tooltipState.color === "destructive" ? "bg-destructive text-destructive-foreground"
-                  : "bg-success text-black"
-                }`}>
-                  <div className={`absolute right-full top-1/2 -mt-[6px] border-[6px] border-transparent ${
-                    tooltipState.color === "empty" ? "border-r-[#1e1e1e]"
-                    : tooltipState.color === "warning" ? "border-r-warning"
-                    : tooltipState.color === "destructive" ? "border-r-destructive"
-                    : "border-r-success"
-                  }`} />
-                  {tooltipState.message}
-                </div>
+                <div className={`absolute right-full top-1/2 -mt-[6px] border-[6px] border-transparent ${
+                  tooltipState.color === "empty" ? "border-r-[#1c2219]"
+                  : tooltipState.color === "warning" ? "border-r-warning"
+                  : tooltipState.color === "destructive" ? "border-r-destructive"
+                  : "border-r-success"
+                }`} />
+                {tooltipState.message}
               </div>
             </div>
           </div>
         </div>
 
-        {/* FILA 4: Revision tecnica (izquierda) | Mapa unificado (derecha) */}
-        <div id="revision" className="grid gap-4 lg:grid-cols-[1fr_2fr]">
+        {/* ── FILA 4: Revisión técnica | Mapa ── */}
+        <div className="grid gap-4 md:grid-cols-[1fr_1.6fr]">
 
-          {/* Panel izquierdo: revision tecnica */}
-          <section id="mapa" className="panel p-5 flex flex-col gap-4">
-            <PanelHeader icon={<ListChecks className="h-3.5 w-3.5" />} title="Revision tecnica" />
-
-            {/* Indicadores de estado de cada condicion requerida */}
-            <div className="divide-y divide-border rounded-md border border-border bg-background/30">
-              <CheckRow label="Formato JPG" state={formatState}
-                hint={formatState === "error" ? `${invalidCount} archivo(s) rechazado(s): solo se aceptan imagenes en formato JPG o JPEG`
-                  : formatState === "ok" ? "Todos los archivos son JPG y estan listos para procesar"
-                  : "Sin archivos cargados aun"} />
-              <CheckRow label="Cantidad minima" state={countState}
-                hint={countState === "ok" ? `${validCount} imagenes JPG cargadas (minimo requerido: ${MIN_IMAGES})`
-                  : countState === "warn" ? `Faltan ${MIN_IMAGES - validCount} imagen(es) para alcanzar el minimo de ${MIN_IMAGES}`
-                  : `Se requieren al menos ${MIN_IMAGES} imagenes JPG validas`} />
-              <CheckRow label="Solapamiento (~60%)" state={overlapState}
-                hint={overlapState === "running" ? "Verificando solapamiento entre imágenes consecutivas..."
-                  : overlapState === "ok" ? "Solapamiento entre imágenes aprobado"
-                  : overlapState === "error" ? (errorMsg ?? "Solapamiento insuficiente en uno o más pares")
-                  : "Pendiente: se verifica al iniciar la generación"} />
-              <CheckRow label="Generacion de mapa" state={joinState}
-                hint={joinState === "running" ? "Unificando imagenes..."
-                  : joinState === "ok" ? "Mapa unificado generado correctamente"
-                  : joinState === "error" ? "La unificacion de imagenes fallo"
-                  : "Pendiente: requiere solapamiento aprobado"} />
-              <CheckRow label="Deteccion de basura" state={detectState}
-                hint={detectState === "running" ? "Detectando basura..."
-                  : detectState === "ok" ? "Deteccion completada"
-                  : detectState === "error" ? "La deteccion de basura fallo"
-                  : "Pendiente: requiere mapa unificado"} />
+          {/* Revisión técnica */}
+          <section className="panel flex flex-col">
+            <div className="flex-shrink-0 px-5 pt-5 pb-4">
+              <PanelHeader icon={<ListChecks className="h-3.5 w-3.5" />} title="Revisión técnica" />
             </div>
 
-            {/* Panel de pares en conflicto de solapamiento */}
-            {overlapDetail.length > 0 && (
-              <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 space-y-2">
-                <p className="mono text-[10px] font-semibold uppercase tracking-wider text-destructive">
-                  Pares en conflicto ({overlapDetail.length})
-                </p>
-                <ul className="space-y-1.5">
-                  {overlapDetail.map((pair, i) => (
-                    <li key={i} className="rounded border border-destructive/20 bg-background/40 px-2 py-1.5">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="mono text-[10px] font-semibold text-destructive">{pair.solape}%</span>
-                        <span className="mono text-[9px] text-muted-foreground">{pair.distancia_m} m</span>
-                      </div>
-                      <p className="mono text-[9px] text-muted-foreground truncate mt-0.5" title={pair.imagen_1}>{pair.imagen_1}</p>
-                      <p className="mono text-[9px] text-muted-foreground truncate" title={pair.imagen_2}>{pair.imagen_2}</p>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+            {/* Contenido scrollable — no desplaza la card del mapa */}
+            <div className="flex-1 overflow-y-auto px-5 pb-5 space-y-4 min-h-0">
 
-            {/* Resumen numerico de la carga actual */}
-            <div className="rounded-md border border-border bg-background/30 p-3 space-y-3">
-              <p className="mono text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Resumen de carga</p>
+              <div className="divide-y divide-border/60 rounded-lg border border-border/40 bg-background/20 overflow-hidden">
+                <CheckRow label="Formato JPG" state={formatState}
+                  hint={formatState === "error" ? `${invalidCount} archivo(s) rechazado(s): solo se aceptan imágenes JPG o JPEG`
+                    : formatState === "ok" ? "Todos los archivos son JPG y están listos para procesar"
+                    : "Sin archivos cargados aún"} />
+                <CheckRow label="Cantidad mínima" state={countState}
+                  hint={countState === "ok" ? `${validCount} imágenes JPG cargadas (mínimo requerido: ${MIN_IMAGES})`
+                    : countState === "warn" ? `Faltan ${MIN_IMAGES - validCount} imagen(es) para alcanzar el mínimo de ${MIN_IMAGES}`
+                    : `Se requieren al menos ${MIN_IMAGES} imágenes JPG válidas`} />
+                <CheckRow label="Solapamiento (~60%)" state={overlapState}
+                  hint={overlapState === "running" ? "Verificando solapamiento entre imágenes..."
+                    : overlapState === "ok" ? "Solapamiento entre imágenes aprobado"
+                    : overlapState === "error" ? (errorMsg ?? "Solapamiento insuficiente en uno o más pares")
+                    : "Pendiente: se verifica al iniciar la generación"} />
+                <CheckRow label="Generación de mapa" state={joinState}
+                  hint={joinState === "running" ? "Unificando imágenes..."
+                    : joinState === "ok" ? "Mapa unificado generado correctamente"
+                    : joinState === "error" ? "La unificación de imágenes falló"
+                    : "Pendiente: requiere solapamiento aprobado"} />
+                <CheckRow label="Detección de basura" state={detectState}
+                  hint={detectState === "running" ? "Detectando basura..."
+                    : detectState === "ok" ? "Detección completada"
+                    : detectState === "error" ? "La detección de basura falló"
+                    : "Pendiente: requiere mapa unificado"} />
+              </div>
+
+              {overlapDetail.length > 0 && (
+                <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 space-y-2">
+                  <p className="text-[10px] font-semibold text-destructive">Pares en conflicto ({overlapDetail.length})</p>
+                  <ul className="space-y-1.5 max-h-[140px] overflow-y-auto pr-1">
+                    {overlapDetail.map((pair, i) => (
+                      <li key={i} className="rounded border border-destructive/20 bg-background/40 px-2 py-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="mono text-[10px] font-semibold text-destructive">{pair.solape}%</span>
+                          <span className="mono text-[9px] text-muted-foreground">{pair.distancia_m} m</span>
+                        </div>
+                        <p className="mono text-[9px] text-muted-foreground truncate mt-0.5" title={pair.imagen_1}>{pair.imagen_1}</p>
+                        <p className="mono text-[9px] text-muted-foreground truncate" title={pair.imagen_2}>{pair.imagen_2}</p>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Estado del proceso */}
+              <div className="space-y-1.5">
+                <p className="text-xs font-semibold text-muted-foreground">Estado del proceso</p>
+                <div className="flex items-center gap-2">
+                  <Clock className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                  <p className="text-xs text-foreground font-medium">{getPhaseLabel(phase, backendStage)}</p>
+                </div>
+                <Progress value={progress} className="h-1" />
+                <p className="text-[10px] text-muted-foreground">{progress}% completado</p>
+                {uploadProgress !== null && (
+                  <div className="mt-1.5 space-y-1">
+                    <p className="text-[10px] font-semibold text-primary">Subiendo imágenes al servidor...</p>
+                    <Progress value={uploadProgress} className="h-1" />
+                    <p className="text-[10px] text-muted-foreground">{uploadProgress}% subido</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Resumen de carga */}
               <div className="grid grid-cols-2 gap-2">
-                <InfoTile icon={<ImageIcon className="h-3.5 w-3.5" />} label="Total imagenes" value={String(items.length)} />
+                <InfoTile icon={<ImageIcon className="h-3.5 w-3.5" />} label="Total imágenes" value={String(items.length)} />
                 <InfoTile icon={<FileCheck className="h-3.5 w-3.5" />} label="JPG cargadas" value={String(validCount)} tone={validCount >= MIN_IMAGES ? "ok" : undefined} />
                 <InfoTile icon={<XCircle className="h-3.5 w-3.5" />} label="Con error" value={String(invalidCount)} tone={invalidCount > 0 ? "error" : undefined} />
               </div>
-            </div>
 
-            {/* Indicador de fase actual con barra de progreso */}
-            <div className="rounded-md border border-border bg-background/30 p-3 space-y-1.5">
-              <p className="mono text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Estado del proceso</p>
-              <div className="flex items-center gap-2">
-                <Clock className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
-                <p className="text-xs text-foreground font-medium">{getPhaseLabel(phase, backendStage)}</p>
-              </div>
-              <Progress value={progress} className="h-1" />
-              <p className="mono text-[10px] text-muted-foreground">{progress}% completado</p>
-              {uploadProgress !== null && (
-                <div className="mt-2 space-y-1">
-                  <p className="mono text-[10px] uppercase tracking-wider text-primary font-semibold">Subiendo imágenes al servidor...</p>
-                  <Progress value={uploadProgress} className="h-1" />
-                  <p className="mono text-[10px] text-muted-foreground">{uploadProgress}% subido</p>
-                </div>
-              )}
             </div>
           </section>
 
-          {/* Panel derecho: visualizacion del mapa */}
+          {/* Mapa unificado */}
           <section className="panel overflow-hidden flex flex-col">
-            <div className="flex items-center justify-between border-b border-border px-4 py-3">
-              <div className="flex items-center gap-2">
-                <Layers className="h-4 w-4 text-primary" />
+            <div className="flex items-center justify-between border-b border-border/30 px-4 py-3">
+              <div className="flex items-center gap-2.5 border-l-2 border-primary/50 pl-3">
+                <Layers className="h-4 w-4 text-primary/75" />
                 <span className="text-sm font-semibold">Mapa unificado</span>
               </div>
+              {phase === "done" && (
+                <Button size="sm" onClick={downloadMap} className="h-7 px-3 text-xs">
+                  <Download className="mr-1.5 h-3.5 w-3.5" /> Descargar mapa
+                </Button>
+              )}
             </div>
 
-            {/* Visor del mapa con estados visuales. Usa object-contain para respetar la forma irregular de la ortofoto. */}
-            <div className="relative h-[min(68vh,760px)] min-h-[420px] w-full overflow-hidden bg-[#1d1d1d]">
-              
+            <div className="relative flex-1 min-h-[380px] w-full overflow-hidden bg-background/50">
               {phase === "done" && resultUrl ? (
+                <>
                   <button
                     type="button"
                     onClick={() => navigate({ to: "/analysis" })}
                     className="relative h-full w-full cursor-pointer group"
                     title="Ver análisis de detección"
                   >
-                    {/* Contenedor de imagen + overlay — inset-3 replica el padding visual */}
                     <div className="absolute inset-3 flex items-center justify-center">
                       <div className="relative w-full h-full">
                         <img
                           src={resultUrl}
-                          alt="Mapa unificado generado a partir de las imagenes aereas"
+                          alt="Mapa unificado generado a partir de las imágenes aéreas"
                           className="h-full w-full object-contain transition-opacity group-hover:opacity-80"
                           onLoad={e => {
                             const img = e.currentTarget;
@@ -1066,27 +1076,11 @@ function Page() {
                                 const FONT = 24;
                                 return (
                                   <g key={d.id}>
-                                    <rect
-                                      x={d.bbox.minx} y={d.bbox.miny}
-                                      width={bw} height={bh}
-                                      fill={color}
-                                      fillOpacity={0.18}
-                                      stroke={color}
-                                      strokeWidth={1.5}
-                                      strokeLinejoin="round"
-                                    />
-                                    <text
-                                      x={d.bbox.minx}
-                                      y={d.bbox.miny - 6}
-                                      fontSize={FONT}
-                                      fill={color}
-                                      fontFamily="monospace"
-                                      fontWeight="700"
-                                      paintOrder="stroke"
-                                      stroke="rgba(0,0,0,0.75)"
-                                      strokeWidth={5}
-                                      strokeLinejoin="round"
-                                    >
+                                    <rect x={d.bbox.minx} y={d.bbox.miny} width={bw} height={bh}
+                                      fill={color} fillOpacity={0.18} stroke={color} strokeWidth={1.5} strokeLinejoin="round" />
+                                    <text x={d.bbox.minx} y={d.bbox.miny - 6} fontSize={FONT} fill={color}
+                                      fontFamily="monospace" fontWeight="700" paintOrder="stroke"
+                                      stroke="rgba(0,0,0,0.75)" strokeWidth={5} strokeLinejoin="round">
                                       {d.class}
                                     </text>
                                   </g>
@@ -1103,8 +1097,17 @@ function Page() {
                       </div>
                     </div>
                   </button>
-                ) : processing ? (
-                <div className="relative flex h-full w-full flex-col items-center justify-center gap-3">
+                  {noWasteDetected && (
+                    <div className="absolute bottom-0 left-0 right-0 z-10 flex items-start gap-3 bg-warning/90 backdrop-blur-sm px-4 py-2.5">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-black" />
+                      <p className="text-xs font-medium leading-relaxed text-black">
+                        No se detectó basura en el área procesada. El mapa está disponible para inspección visual.
+                      </p>
+                    </div>
+                  )}
+                </>
+              ) : processing ? (
+                <div className="flex h-full w-full flex-col items-center justify-center gap-3">
                   <div className="scan-line relative h-24 w-24 overflow-hidden rounded-md border border-primary/40 bg-primary/10">
                     <Loader2 className="absolute left-1/2 top-1/2 h-8 w-8 -translate-x-1/2 -translate-y-1/2 animate-spin text-primary" />
                   </div>
@@ -1112,52 +1115,38 @@ function Page() {
                   <div className="w-64"><Progress value={progress} className="h-1" /></div>
                 </div>
               ) : phase === "error" ? (
-                <div className="relative flex h-full w-full flex-col items-center justify-center gap-3 p-6 text-center">
+                <div className="flex h-full w-full flex-col items-center justify-center gap-3 p-6 text-center">
                   <div className="flex h-12 w-12 items-center justify-center rounded-full border border-destructive/40 bg-destructive/15 mb-1">
                     <XCircle className="h-6 w-6 text-destructive" />
                   </div>
-                  <div className="w-full max-w-md">
-                    <p className="text-sm font-semibold text-foreground mb-1">Error en el procesamiento</p>
-                    <p className="text-xs text-muted-foreground leading-relaxed">{errorMsg}</p>
-                  </div>
+                  <p className="text-sm font-semibold text-foreground mb-1">Error en el procesamiento</p>
+                  <p className="text-xs text-muted-foreground leading-relaxed max-w-md">{errorMsg}</p>
                 </div>
               ) : (
-                <div className="relative flex h-full w-full flex-col items-center justify-center gap-2 text-muted-foreground">
-                  <MapIcon className="h-12 w-12 opacity-40" />
-                  <p className="mono text-[11px] uppercase tracking-wider">El mapa aparecera aqui</p>
-                  <p className="text-xs opacity-70">Carga imagenes y presiona Generar mapa unificado</p>
+                <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-muted-foreground">
+                  <MapIcon className="h-12 w-12 opacity-30" />
+                  <p className="mono text-[11px] uppercase tracking-wider">El mapa aparecerá aquí</p>
+                  <p className="text-xs opacity-60">Carga imágenes y presiona Generar mapa unificado</p>
                 </div>
               )}
             </div>
 
-            {/* HDU2 CA3: aviso cuando el mapa no tiene basura detectada */}
-            {phase === "done" && noWasteDetected && (
-              <div className="flex items-start gap-3 border-t border-warning/40 bg-warning/10 px-4 py-3">
-                <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-warning" />
-                <p className="text-xs leading-relaxed text-warning">
-                  No se detectó basura en el área procesada. El mapa está disponible para inspección visual, pero no se encontraron residuos con el nivel de confianza requerido.
-                </p>
+            {phase === "done" && noWasteDetected ? null : (
+              <div className="grid grid-cols-3 divide-x divide-border/30 border-t border-border/30">
+                <MetaCell label="Estado" value={phase === "done" ? "Completado" : phase === "error" ? "Error" : processing ? "Procesando" : "En espera"} />
+                <MetaCell label="Imágenes" value={`${validCount} / ${items.length}`} />
+                <MetaCell label="Salida" value={phase === "done" ? "JPG generado" : "JPG"} tone={phase === "done" ? "ok" : undefined} />
               </div>
             )}
 
-            {/* Metadatos del mapa */}
-            <div className="grid grid-cols-3 divide-x divide-border border-t border-border bg-card/40">
-              <MetaCell label="Estado" value={phase === "done" ? "Completado" : phase === "error" ? "Error" : processing ? "Procesando" : "En espera"} />
-              <MetaCell label="Imagenes" value={`${validCount} / ${items.length}`} />
-              <MetaCell label="Salida generada" value="JPG" />
-            </div>
-
-            {/* Boton de descarga, visible solo cuando el mapa esta listo */}
             {phase === "done" && (
-              <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-border">
-                <Button size="sm" onClick={() => { const a = document.createElement("a"); a.href = resultUrl || unifiedMapImg; a.download = "mapa-unificado.png"; a.click(); }} className="h-8 px-3 text-xs">
-                  <Download className="mr-1.5 h-3.5 w-3.5" /> Descargar mapa
-                </Button>
-                <p className="text-xs text-success font-medium">Mapa generado exitosamente</p>
+              <div className="flex items-center justify-end gap-2 px-4 py-2.5 border-t border-border/30 bg-success/5">
+                <p className="text-xs text-success font-semibold">Mapa generado exitosamente</p>
               </div>
             )}
           </section>
         </div>
+
       </main>
     </div>
   );
@@ -1168,28 +1157,28 @@ function Page() {
 // FUNCIONES Y COMPONENTES AUXILIARES
 // =============================================================================
 
-/** Encabezado estandar para cada panel del sistema */
+/** Encabezado de panel con barra de acento izquierda */
 function PanelHeader({ icon, title, children }: { icon: React.ReactNode; title: string; children?: React.ReactNode; }) {
   return (
-    <div className="flex items-center justify-between px-1">
-      <div className="flex items-center gap-2">
-        <span className="flex h-5 w-5 items-center justify-center rounded bg-primary/15 text-primary">{icon}</span>
-        <h3 className="mono text-[11px] font-semibold uppercase tracking-wider">{title}</h3>
+    <div className="flex items-center justify-between">
+      <div className="flex items-center gap-2.5 border-l-2 border-primary/50 pl-3">
+        <span className="text-primary/75 [&_svg]:h-4 [&_svg]:w-4">{icon}</span>
+        <h3 className="text-sm font-semibold tracking-tight text-foreground">{title}</h3>
       </div>
       {children}
     </div>
   );
 }
 
-/** Tile de metrica para el resumen de carga en la revision tecnica */
+/** Tile de metrica para el resumen de carga */
 function InfoTile({ icon, label, value, tone }: { icon: React.ReactNode; label: string; value: string; tone?: "ok" | "warn" | "error"; }) {
-  const color = tone === "ok" ? "text-success" : tone === "warn" ? "text-warning-foreground" : tone === "error" ? "text-destructive" : "text-foreground";
+  const color = tone === "ok" ? "text-success" : tone === "warn" ? "text-warning" : tone === "error" ? "text-destructive" : "text-foreground";
   return (
-    <div className="flex items-center gap-2 rounded border border-border bg-background/40 px-2 py-1.5">
-      <span className="text-muted-foreground">{icon}</span>
+    <div className="flex items-center gap-3 rounded-lg bg-background/60 px-3 py-2.5">
+      <span className="text-primary/60 flex-shrink-0 [&_svg]:h-4 [&_svg]:w-4">{icon}</span>
       <div className="min-w-0">
-        <p className="mono text-[9px] uppercase tracking-wider text-muted-foreground">{label}</p>
-        <p className={`text-sm font-semibold tabular-nums ${color}`}>{value}</p>
+        <p className="text-[10px] text-muted-foreground leading-none mb-1">{label}</p>
+        <p className={`text-sm font-bold tabular-nums leading-none ${color}`}>{value}</p>
       </div>
     </div>
   );
@@ -1197,24 +1186,31 @@ function InfoTile({ icon, label, value, tone }: { icon: React.ReactNode; label: 
 
 /** Celda de metadatos en la barra inferior del mapa unificado */
 function MetaCell({ label, value, tone }: { label: string; value: string; tone?: "ok" | "error"; }) {
-  const color = tone === "ok" ? "text-success" : tone === "error" ? "text-destructive" : "text-foreground";
+  const color = tone === "ok" ? "text-success" : tone === "error" ? "text-destructive" : "text-foreground/80";
   return (
     <div className="px-3 py-2">
-      <p className="mono text-[9px] uppercase tracking-wider text-muted-foreground">{label}</p>
+      <p className="text-[10px] text-muted-foreground leading-none mb-1">{label}</p>
       <p className={`text-xs font-semibold truncate ${color}`}>{value}</p>
     </div>
   );
 }
 
-/** Paso numerado para el panel de instrucciones */
-function GuideStep({ number, title, text }: { number: string; title: string; text: string; }) {
+/** Paso del panel de instrucciones — número fantasma como fondo editorial */
+function GuideStep({ number, title, text, compact }: { number: string; title: string; text: string; compact?: boolean }) {
   return (
-    <li className="flex gap-3">
-      <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md bg-primary/15 mono text-[10px] font-semibold text-primary ring-1 ring-primary/30">{number}</span>
-      <span>
-        <span className="block font-semibold text-foreground text-xs">{title}</span>
-        <span className="text-xs text-muted-foreground leading-relaxed">{text}</span>
+    <li className={`relative overflow-hidden rounded-lg bg-background/30 flex flex-col justify-end gap-1 ${
+      compact ? "px-3 pb-3 pt-5 min-h-[88px]" : "px-4 pb-4 pt-6 min-h-[108px]"
+    }`}>
+      <span
+        className={`absolute -top-3 -left-1 font-SpaceGrotesk font-bold leading-none select-none pointer-events-none ${
+          compact ? "text-5xl" : "text-7xl"
+        }`}
+        style={{ color: "var(--primary)", opacity: 0.1 }}
+      >
+        {number}
       </span>
+      <span className={`relative font-semibold text-foreground ${compact ? "text-xs" : "text-sm"}`}>{title}</span>
+      <span className={`relative text-muted-foreground leading-snug ${compact ? "text-[11px]" : "text-xs"}`}>{text}</span>
     </li>
   );
 }
@@ -1226,22 +1222,22 @@ function GuideStep({ number, title, text }: { number: string; title: string; tex
 function CheckRow({ label, state, hint }: { label: string; state: TriState; hint?: string; }) {
   const cfg = useMemo(() => {
     switch (state) {
-      case "ok": return { icon: <CheckCircle2 className="h-4 w-4 text-success" />, text: "APROBADO", color: "text-success", bar: "bg-success" };
-      case "warn": return { icon: <AlertTriangle className="h-4 w-4 text-warning" />, text: "INSUFICIENTE", color: "text-warning", bar: "bg-warning" };
-      case "error": return { icon: <XCircle className="h-4 w-4 text-destructive" />, text: "ERROR", color: "text-destructive", bar: "bg-destructive" };
-      case "running": return { icon: <Loader2 className="h-4 w-4 animate-spin text-primary" />, text: "ANALIZANDO", color: "text-primary", bar: "bg-primary" };
-      default: return { icon: <span className="inline-block h-2 w-2 rounded-full bg-muted-foreground/60" />, text: "PENDIENTE", color: "text-muted-foreground", bar: "bg-muted-foreground/40" };
+      case "ok":      return { icon: <CheckCircle2 className="h-4 w-4 text-success" />,               text: "Aprobado",     color: "text-success",          bar: "bg-success",              bg: "bg-success/5" };
+      case "warn":    return { icon: <AlertTriangle className="h-4 w-4 text-warning" />,               text: "Insuficiente", color: "text-warning",           bar: "bg-warning",              bg: "bg-warning/5" };
+      case "error":   return { icon: <XCircle className="h-4 w-4 text-destructive" />,                 text: "Error",        color: "text-destructive",       bar: "bg-destructive",          bg: "bg-destructive/5" };
+      case "running": return { icon: <Loader2 className="h-4 w-4 animate-spin text-primary" />,        text: "Analizando",   color: "text-primary",           bar: "bg-primary",              bg: "bg-primary/5" };
+      default:        return { icon: <span className="inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground/50 mt-1.5" />, text: "Pendiente", color: "text-muted-foreground", bar: "bg-muted-foreground/30", bg: "" };
     }
   }, [state]);
   return (
-    <div className="relative flex items-start gap-3 px-3 py-2.5">
-      <span className={`absolute left-0 top-0 h-full w-0.5 ${cfg.bar}`} />
-      <div className="mt-0.5">{cfg.icon}</div>
+    <div className={`check-row relative flex items-start gap-3 px-3 py-3 ${cfg.bg}`}>
+      <span className={`absolute left-0 top-0 h-full w-[3px] rounded-r-full ${cfg.bar} transition-all duration-300`} />
+      <div className="mt-0.5 flex-shrink-0">{cfg.icon}</div>
       <div className="min-w-0 flex-1">
-        <p className="text-xs font-medium leading-tight">{label}</p>
-        {hint && <p className="mono text-[10px] text-muted-foreground">{hint}</p>}
+        <p className="text-xs font-semibold leading-tight text-foreground">{label}</p>
+        {hint && <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">{hint}</p>}
       </div>
-      <span className={`mono text-[10px] font-semibold tracking-wider ${cfg.color}`}>{cfg.text}</span>
+      <span className={`text-[10px] font-semibold ${cfg.color} flex-shrink-0`}>{cfg.text}</span>
     </div>
   );
 }

@@ -1,27 +1,20 @@
 /* =============================================================================
    CONDORFINDER — ESTILOS GLOBALES
-   Archivo principal de estilos del sistema de unificación de imágenes aéreas.
-   Utiliza Tailwind CSS v4 con variables CSS personalizadas para el sistema
-   de diseño y tokens de color.
    ============================================================================= */
 
 
 /* =============================================================================
    FUENTES
-   Se importan desde Google Fonts:
-   - Shrikhand: usada en el logotipo "CondorFinder" del header
-   - Montserrat: fuente global del sistema (body, textos generales)
-   - Futura: usada en el título principal de cada página
+   - Shrikhand:     logotipo
+   - Space Grotesk: títulos de página y display
+   - Sora:          cuerpo — humanista geométrica, menos corporativa que Montserrat
+   - JetBrains Mono: etiquetas técnicas y datos
    ============================================================================= */
-@import url("https://fonts.googleapis.com/css2?family=Shrikhand&family=Montserrat:wght@300;400;500;600;700;800;900&display=swap");
-@import url("https://fonts.googleapis.com/css2?family=Futura:wght@300;400;700;900&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Shrikhand&family=Space+Grotesk:wght@400;500;600;700&family=Sora:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap");
 
 
 /* =============================================================================
    TAILWIND CSS v4
-   - "source(none)" desactiva el escaneo automático de clases
-   - "@source" indica manualmente la carpeta a escanear (src/)
-   - "tw-animate-css" agrega animaciones utilitarias adicionales
    ============================================================================= */
 @import "tailwindcss" source(none);
 @source "../src";
@@ -30,19 +23,12 @@
 
 /* =============================================================================
    VARIANTE DARK
-   Define cómo Tailwind detecta el modo oscuro.
-   Se activa cuando un ancestro tiene la clase ".dark" en el DOM.
-   El toggle de tema en el header agrega/quita esta clase en <html>.
    ============================================================================= */
 @custom-variant dark (&:is(.dark *));
 
 
 /* =============================================================================
    TEMA — TOKENS DE DISEÑO
-   Mapea las variables CSS del sistema de diseño a tokens de Tailwind.
-   Permite usar clases como "bg-primary", "text-destructive", etc.
-   Incluye también los alias de fuentes personalizadas para uso con
-   clases como "font-shrikhand", "font-montserrat", "font-Futura".
    ============================================================================= */
 @theme inline {
   --radius-sm: calc(var(--radius) - 4px);
@@ -91,244 +77,418 @@
   --color-success-foreground: var(--success-foreground);
   --color-info: var(--info);
 
-  /* Fuentes personalizadas registradas como tokens de Tailwind */
-  --font-shrikhand: "Shrikhand", cursive;
-  --font-montserrat: "Montserrat", sans-serif;
-  --font-Futura: "Futura", sans-serif;
+  --font-shrikhand:     "Shrikhand", cursive;
+  --font-SpaceGrotesk:  "Space Grotesk", sans-serif;
+  --font-sora:          "Sora", sans-serif;
+  --font-JetBrainsMono: "JetBrains Mono", monospace;
 }
 
 
 /* =============================================================================
-   VARIABLES CSS — MODO CLARO (por defecto)
-   Define la paleta de colores base del sistema en modo oscuro por defecto,
-   ya que CondorFinder usa un tema oscuro como base principal.
-
-   Paleta principal:
-   - background: #151414 (gris muy oscuro, casi negro)
-   - primary: #22d3ee (cyan eléctrico — color de acento principal)
-   - success: #34d399 (verde — estados aprobados)
-   - warning: #fbbf24 (amarillo — estados insuficientes)
-   - destructive: #ef4444 (rojo — errores y rechazos)
+   TEMA VERDE TIERRA (default / :root)
    ============================================================================= */
 :root {
-  --radius: 0.625rem;                  /* Radio de borde global para componentes */
-  --grid-color: oklch(0.6 0.04 170 / 0.03);
+  --radius: 0.625rem;
+  --grid-color: oklch(0.6 0.04 90 / 0.04);
 
-  /* Fondos */
-  --background: #151414;
-  --foreground: #ffffff;
+  --background:         #0b0d0a;
+  --foreground:         #ede8df;
+  --card:               #1c2219;
+  --card-foreground:    #ede8df;
+  --popover:            #1c2219;
+  --popover-foreground: #ede8df;
+  --primary:            #d4a843;
+  --primary-foreground: #0b0d0a;
+  --secondary:          #1c2219;
+  --secondary-foreground: #ede8df;
+  --muted:              #1c2219;
+  --muted-foreground:   #6b7d6e;
+  --accent:             #d4a843;
+  --accent-foreground:  #0b0d0a;
+  --destructive:        #b84040;
+  --destructive-foreground: #ede8df;
+  --border:             #252c22;
+  --input:              #252c22;
+  --ring:               #d4a843;
+  --warning:            #cc8a2a;
+  --warning-foreground: #0b0d0a;
+  --success:            #3d7a50;
+  --success-foreground: #ede8df;
+  --chart-1: #d4a843; --chart-2: #3d7a50; --chart-3: #cc8a2a;
+  --chart-4: #b84040; --chart-5: #6b7d6e;
+  --sidebar: #0f1210; --sidebar-foreground: #ede8df;
+  --sidebar-primary: #d4a843; --sidebar-primary-foreground: #0b0d0a;
+  --sidebar-accent: #1c2219; --sidebar-accent-foreground: #ede8df;
+  --sidebar-border: #252c22; --sidebar-ring: #d4a843;
 
-  /* Tarjetas y paneles */
-  --card: #1e1e1e;
-  --card-foreground: #ffffff;
-
-  /* Color principal del sistema (cyan) */
-  --primary: #22d3ee;
-  --primary-foreground: #151414;
-
-  /* Color secundario (gris oscuro) */
-  --secondary: #2a2a2a;
-  --secondary-foreground: #ffffff;
-
-  /* Elementos atenuados / textos secundarios */
-  --muted: #2a2a2a;
-  --muted-foreground: #9ca3af;
-
-  /* Acento — igual que primary en este tema */
-  --accent: #22d3ee;
-  --accent-foreground: #151414;
-
-  /* Error / archivos rechazados / solapamiento insuficiente */
-  --destructive: #ef4444;
-  --destructive-foreground: #ffffff;
-
-  /* Bordes e inputs */
-  --border: #333333;
-  --input: #333333;
-  --ring: #22d3ee;
-
-  /* Advertencia — cantidad insuficiente de imágenes */
-  --warning: #fbbf24;
-  --warning-foreground: #151414;
-
-  /* Éxito — validaciones aprobadas */
-  --success: #34d399;
+  --navbar:         #0f1210;
+  --scan-color:     rgba(212, 168, 67, 0.42);
+  --primary-glow:   rgba(212, 168, 67, 0.5);
+  --primary-glow-2: rgba(212, 168, 67, 0.25);
 }
 
 
 /* =============================================================================
-   VARIABLES CSS — MODO OSCURO ALTERNATIVO
-   Variables oklch para el modo .dark activado por el toggle del header.
-   Nota: actualmente el sistema usa el modo :root como base oscura,
-   por lo que este bloque aplica solo si se activa la clase .dark en <html>.
+   TEMA NEGRO CLÁSICO
    ============================================================================= */
-.dark {
-  --background: oklch(0.16 0.025 185);
-  --foreground: oklch(0.96 0.008 190);
-  --card: oklch(0.22 0.03 185 / 0.9);
-  --card-foreground: oklch(0.96 0.008 190);
-  --popover: oklch(0.22 0.03 185);
-  --popover-foreground: oklch(0.96 0.008 190);
-  --primary: oklch(0.72 0.13 170);
-  --primary-foreground: oklch(0.12 0.03 175);
-  --secondary: oklch(0.26 0.03 190);
-  --secondary-foreground: oklch(0.96 0.008 190);
-  --muted: oklch(0.25 0.025 190);
-  --muted-foreground: oklch(0.74 0.03 190);
-  --accent: oklch(0.3 0.055 145);
-  --accent-foreground: oklch(0.96 0.008 190);
-  --destructive: oklch(0.7 0.22 25);
-  --destructive-foreground: oklch(0.99 0.005 0);
-  --warning: oklch(0.82 0.17 88);
-  --warning-foreground: oklch(0.18 0.04 80);
-  --success: oklch(0.72 0.18 152);
-  --success-foreground: oklch(0.12 0.04 160);
-  --info: oklch(0.72 0.13 220);
-  --border: oklch(0.75 0.035 180 / 0.18);
-  --input: oklch(1 0 0 / 0.08);
-  --ring: oklch(0.72 0.13 170);
-  --chart-1: oklch(0.72 0.13 170);
-  --chart-2: oklch(0.72 0.18 152);
-  --chart-3: oklch(0.82 0.17 88);
-  --chart-4: oklch(0.7 0.22 25);
-  --chart-5: oklch(0.6 0.05 245);
-  --sidebar: oklch(0.18 0.025 185);
-  --sidebar-foreground: oklch(0.96 0.008 190);
-  --sidebar-primary: oklch(0.72 0.13 170);
-  --sidebar-primary-foreground: oklch(0.12 0.03 175);
-  --sidebar-accent: oklch(0.26 0.03 190);
-  --sidebar-accent-foreground: oklch(0.96 0.008 190);
-  --sidebar-border: oklch(0.75 0.035 180 / 0.18);
-  --sidebar-ring: oklch(0.72 0.13 170);
+html[data-theme="negro"] {
+  --background:         #151414;
+  --foreground:         #ffffff;
+  --card:               #252525;
+  --card-foreground:    #ffffff;
+  --popover:            #252525;
+  --popover-foreground: #ffffff;
+  --primary:            #22d3ee;
+  --primary-foreground: #151414;
+  --secondary:          #2a2a2a;
+  --secondary-foreground: #ffffff;
+  --muted:              #2a2a2a;
+  --muted-foreground:   #9ca3af;
+  --accent:             #22d3ee;
+  --accent-foreground:  #151414;
+  --destructive:        #ef4444;
+  --destructive-foreground: #ffffff;
+  --border:             #333333;
+  --input:              #333333;
+  --ring:               #22d3ee;
+  --warning:            #fbbf24;
+  --warning-foreground: #151414;
+  --success:            #34d399;
+  --success-foreground: #151414;
+  --chart-1: #22d3ee; --chart-2: #34d399; --chart-3: #fbbf24;
+  --chart-4: #ef4444; --chart-5: #9ca3af;
+  --sidebar: #0f1a24; --sidebar-foreground: #ffffff;
+  --sidebar-primary: #22d3ee; --sidebar-primary-foreground: #151414;
+  --sidebar-accent: #2a2a2a; --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #333333; --sidebar-ring: #22d3ee;
 
-  /* Color de las líneas de la grilla GIS en modo oscuro */
-  --grid-color: oklch(0.8 0.08 170 / 0.065);
+  --navbar:         #0f1a24;
+  --scan-color:     rgba(34, 211, 238, 0.35);
+  --primary-glow:   rgba(34, 211, 238, 0.5);
+  --primary-glow-2: rgba(34, 211, 238, 0.25);
+}
 
-  /* Sombra de brillo para elementos primarios destacados */
-  --glow-primary:
-    0 0 0 1px oklch(0.72 0.13 170 / 0.35), 0 12px 48px -12px oklch(0.72 0.13 170 / 0.4);
+
+/* =============================================================================
+   TEMA AZUL OSCURO
+   ============================================================================= */
+html[data-theme="azul"] {
+  --background:         #090d1a;
+  --foreground:         #e2e8f4;
+  --card:               #121a30;
+  --card-foreground:    #e2e8f4;
+  --popover:            #121a30;
+  --popover-foreground: #e2e8f4;
+  --primary:            #60a5fa;
+  --primary-foreground: #090d1a;
+  --secondary:          #172038;
+  --secondary-foreground: #e2e8f4;
+  --muted:              #172038;
+  --muted-foreground:   #6b7fa3;
+  --accent:             #60a5fa;
+  --accent-foreground:  #090d1a;
+  --destructive:        #f87171;
+  --destructive-foreground: #090d1a;
+  --border:             #1e2d4a;
+  --input:              #1e2d4a;
+  --ring:               #60a5fa;
+  --warning:            #fbbf24;
+  --warning-foreground: #090d1a;
+  --success:            #34d399;
+  --success-foreground: #090d1a;
+  --chart-1: #60a5fa; --chart-2: #34d399; --chart-3: #fbbf24;
+  --chart-4: #f87171; --chart-5: #6b7fa3;
+  --sidebar: #0b1121; --sidebar-foreground: #e2e8f4;
+  --sidebar-primary: #60a5fa; --sidebar-primary-foreground: #090d1a;
+  --sidebar-accent: #172038; --sidebar-accent-foreground: #e2e8f4;
+  --sidebar-border: #1e2d4a; --sidebar-ring: #60a5fa;
+
+  --navbar:         #0b1121;
+  --scan-color:     rgba(96, 165, 250, 0.4);
+  --primary-glow:   rgba(96, 165, 250, 0.5);
+  --primary-glow-2: rgba(96, 165, 250, 0.25);
+}
+
+
+/* =============================================================================
+   TEMA MODO CLARO
+   ============================================================================= */
+html[data-theme="claro"] {
+  --background:         #f7f4ee;
+  --foreground:         #1a1a16;
+  --card:               #ffffff;
+  --card-foreground:    #1a1a16;
+  --popover:            #ffffff;
+  --popover-foreground: #1a1a16;
+  --primary:            #b8873a;
+  --primary-foreground: #ffffff;
+  --secondary:          #e8e4da;
+  --secondary-foreground: #1a1a16;
+  --muted:              #e8e4da;
+  --muted-foreground:   #6b6656;
+  --accent:             #b8873a;
+  --accent-foreground:  #ffffff;
+  --destructive:        #c0392b;
+  --destructive-foreground: #ffffff;
+  --border:             #d4cfc4;
+  --input:              #d4cfc4;
+  --ring:               #b8873a;
+  --warning:            #d97706;
+  --warning-foreground: #ffffff;
+  --success:            #2d6e42;
+  --success-foreground: #ffffff;
+  --chart-1: #b8873a; --chart-2: #2d6e42; --chart-3: #d97706;
+  --chart-4: #c0392b; --chart-5: #6b6656;
+  --sidebar: #ece8e0; --sidebar-foreground: #1a1a16;
+  --sidebar-primary: #b8873a; --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #e8e4da; --sidebar-accent-foreground: #1a1a16;
+  --sidebar-border: #d4cfc4; --sidebar-ring: #b8873a;
+
+  --navbar:         #ece8e0;
+  --scan-color:     rgba(184, 135, 58, 0.3);
+  --primary-glow:   rgba(184, 135, 58, 0.5);
+  --primary-glow-2: rgba(184, 135, 58, 0.25);
 }
 
 
 /* =============================================================================
    ESTILOS BASE GLOBALES
-   Aplica estilos fundamentales a todos los elementos del documento.
    ============================================================================= */
 @layer base {
-  /* Todos los elementos heredan el color de borde del sistema de diseño */
-  * {
-    border-color: var(--color-border);
-  }
-
-  /* Fondo, color de texto y fuente global del body */
+  * { border-color: var(--color-border); }
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
-    font-family: var(--font-montserrat); /* Fuente global: Montserrat */
+    font-family: var(--font-sora), sans-serif;
   }
 }
-
 
 
 /* =============================================================================
    CLASE: .gis-gradient-bg
-   Fondo con degradado de negros profundos para el sistema CondorFinder.
+   Patrón de curvas de nivel topográficas adaptado a cada tema.
    ============================================================================= */
 .gis-gradient-bg {
-  background: linear-gradient(
-    135deg,
-    #0a0a0a 0%,
-    #0f0f0f 35%,
-    #141414 65%,
-    #0a0a0a 100%
-  );
-  background-attachment: fixed;
+  background-image:
+    url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='800' height='800'><ellipse cx='400' cy='400' rx='385' ry='268' fill='none' stroke='%23d4a843' stroke-opacity='0.05' stroke-width='1.5'/><ellipse cx='400' cy='400' rx='325' ry='225' fill='none' stroke='%23d4a843' stroke-opacity='0.045' stroke-width='1'/><ellipse cx='400' cy='400' rx='265' ry='183' fill='none' stroke='%23d4a843' stroke-opacity='0.04' stroke-width='1'/><ellipse cx='400' cy='400' rx='205' ry='141' fill='none' stroke='%23d4a843' stroke-opacity='0.035' stroke-width='1'/><ellipse cx='400' cy='400' rx='145' ry='99' fill='none' stroke='%23d4a843' stroke-opacity='0.03' stroke-width='1'/><ellipse cx='400' cy='400' rx='85' ry='58' fill='none' stroke='%23d4a843' stroke-opacity='0.025' stroke-width='1'/><ellipse cx='400' cy='400' rx='35' ry='24' fill='none' stroke='%23d4a843' stroke-opacity='0.02' stroke-width='1'/></svg>"),
+    linear-gradient(135deg, #080a07 0%, #0b0f0a 35%, #0e1209 65%, #080a07 100%);
+  background-size: 800px 800px, cover;
+  background-attachment: fixed, fixed;
 }
+
+html[data-theme="negro"] .gis-gradient-bg {
+  background-image:
+    url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='800' height='800'><ellipse cx='400' cy='400' rx='385' ry='268' fill='none' stroke='%2322d3ee' stroke-opacity='0.04' stroke-width='1.5'/><ellipse cx='400' cy='400' rx='325' ry='225' fill='none' stroke='%2322d3ee' stroke-opacity='0.035' stroke-width='1'/><ellipse cx='400' cy='400' rx='265' ry='183' fill='none' stroke='%2322d3ee' stroke-opacity='0.03' stroke-width='1'/><ellipse cx='400' cy='400' rx='205' ry='141' fill='none' stroke='%2322d3ee' stroke-opacity='0.025' stroke-width='1'/><ellipse cx='400' cy='400' rx='145' ry='99' fill='none' stroke='%2322d3ee' stroke-opacity='0.02' stroke-width='1'/><ellipse cx='400' cy='400' rx='85' ry='58' fill='none' stroke='%2322d3ee' stroke-opacity='0.015' stroke-width='1'/><ellipse cx='400' cy='400' rx='35' ry='24' fill='none' stroke='%2322d3ee' stroke-opacity='0.01' stroke-width='1'/></svg>"),
+    linear-gradient(135deg, #0a0a0a 0%, #0f0f0f 35%, #141414 65%, #0a0a0a 100%);
+  background-size: 800px 800px, cover;
+  background-attachment: fixed, fixed;
+}
+
+html[data-theme="azul"] .gis-gradient-bg {
+  background-image:
+    url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='800' height='800'><ellipse cx='400' cy='400' rx='385' ry='268' fill='none' stroke='%2360a5fa' stroke-opacity='0.06' stroke-width='1.5'/><ellipse cx='400' cy='400' rx='325' ry='225' fill='none' stroke='%2360a5fa' stroke-opacity='0.05' stroke-width='1'/><ellipse cx='400' cy='400' rx='265' ry='183' fill='none' stroke='%2360a5fa' stroke-opacity='0.045' stroke-width='1'/><ellipse cx='400' cy='400' rx='205' ry='141' fill='none' stroke='%2360a5fa' stroke-opacity='0.04' stroke-width='1'/><ellipse cx='400' cy='400' rx='145' ry='99' fill='none' stroke='%2360a5fa' stroke-opacity='0.03' stroke-width='1'/><ellipse cx='400' cy='400' rx='85' ry='58' fill='none' stroke='%2360a5fa' stroke-opacity='0.025' stroke-width='1'/><ellipse cx='400' cy='400' rx='35' ry='24' fill='none' stroke='%2360a5fa' stroke-opacity='0.02' stroke-width='1'/></svg>"),
+    linear-gradient(135deg, #060810 0%, #090d1a 35%, #0b1020 65%, #060810 100%);
+  background-size: 800px 800px, cover;
+  background-attachment: fixed, fixed;
+}
+
+html[data-theme="claro"] .gis-gradient-bg {
+  background-image:
+    url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='800' height='800'><ellipse cx='400' cy='400' rx='385' ry='268' fill='none' stroke='%23b8873a' stroke-opacity='0.07' stroke-width='1.5'/><ellipse cx='400' cy='400' rx='325' ry='225' fill='none' stroke='%23b8873a' stroke-opacity='0.06' stroke-width='1'/><ellipse cx='400' cy='400' rx='265' ry='183' fill='none' stroke='%23b8873a' stroke-opacity='0.055' stroke-width='1'/><ellipse cx='400' cy='400' rx='205' ry='141' fill='none' stroke='%23b8873a' stroke-opacity='0.05' stroke-width='1'/><ellipse cx='400' cy='400' rx='145' ry='99' fill='none' stroke='%23b8873a' stroke-opacity='0.04' stroke-width='1'/><ellipse cx='400' cy='400' rx='85' ry='58' fill='none' stroke='%23b8873a' stroke-opacity='0.035' stroke-width='1'/><ellipse cx='400' cy='400' rx='35' ry='24' fill='none' stroke='%23b8873a' stroke-opacity='0.03' stroke-width='1'/></svg>"),
+    linear-gradient(135deg, #f0ece4 0%, #f5f1ea 35%, #f7f4ee 65%, #f0ece4 100%);
+  background-size: 800px 800px, cover;
+  background-attachment: fixed, fixed;
+}
+
 
 /* =============================================================================
    CLASE: .panel
-   Estilo base para todos los bloques/tarjetas del sistema (secciones principales).
-   Características:
-   - Fondo de color card con blur para efecto glassmorphism
-   - Borde sutil definido por --border
-   - Sombra interior blanca muy tenue (efecto de profundidad)
-   - Sombra exterior negra para separar el panel del fondo
-   Usada en: instrucciones, carga de imágenes, imágenes adjuntas,
-             revisión técnica y mapa unificado.
+   Card elegante con profundidad real: gradiente interno, borde biselado
+   (borde superior más claro simula luz cenital) y sombras en tres capas.
    ============================================================================= */
 .panel {
   background-color: var(--card);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  backdrop-filter: blur(8px);
+  border-radius: var(--radius-xl);
   box-shadow:
-    0 1px 0 0 oklch(1 0 0 / 0.04) inset,   /* Brillo interior sutil */
-    0 8px 24px -12px oklch(0 0 0 / 0.5);    /* Sombra exterior */
+    0 2px 4px rgba(0, 0, 0, 0.60),
+    0 8px 24px -4px rgba(0, 0, 0, 0.75),
+    0 28px 56px -12px rgba(0, 0, 0, 0.65);
+  transition: box-shadow 0.2s ease;
+}
+
+html[data-theme="negro"] .panel {
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.70),
+    0 8px 24px -4px rgba(0, 0, 0, 0.80),
+    0 28px 56px -12px rgba(0, 0, 0, 0.70);
+}
+
+html[data-theme="azul"] .panel {
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.65),
+    0 8px 24px -4px rgba(0, 0, 0, 0.78),
+    0 28px 56px -12px rgba(4, 6, 15, 0.80);
+}
+
+html[data-theme="claro"] .panel {
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.18),
+    0 8px 24px -4px rgba(0, 0, 0, 0.22),
+    0 28px 56px -12px rgba(0, 0, 0, 0.16);
+}
+
+
+/* =============================================================================
+   SCROLLBARS PERSONALIZADOS
+   Track = fondo de página, thumb = borde del tema.
+   ============================================================================= */
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) var(--background);
+}
+
+/* Chromium / Edge / Safari */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--background);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--border) 70%, var(--foreground) 30%);
+}
+
+::-webkit-scrollbar-corner {
+  background: var(--background);
 }
 
 
 /* =============================================================================
    CLASE: .mono
-   Aplica fuente monoespaciada con tracking ligeramente expandido.
-   Usada en etiquetas técnicas, contadores, porcentajes, estados del proceso
-   y cualquier texto que requiera alineación de columnas o estética de código.
    ============================================================================= */
 .mono {
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-family: var(--font-JetBrainsMono), ui-monospace, monospace;
   letter-spacing: 0.02em;
 }
 
 
 /* =============================================================================
    ANIMACIÓN: scan
-   Animación de línea de escaneo vertical que recorre un contenedor de arriba
-   a abajo en bucle. Usada en el estado de procesamiento del mapa unificado
-   para indicar visualmente que el sistema está analizando las imágenes.
    ============================================================================= */
 @keyframes scan {
-  0% {
-    transform: translateY(-100%);
-  }
-  100% {
-    transform: translateY(100%);
-  }
+  0%   { transform: translateY(-100%); }
+  100% { transform: translateY(100%); }
 }
 
-/* =============================================================================
-   CLASE: .scan-line
-   Aplica la animación "scan" mediante un pseudo-elemento ::after.
-   El gradiente semitransparente simula un haz de luz que barre la superficie.
-   Requiere que el contenedor tenga position: relative y overflow: hidden.
-   ============================================================================= */
 .scan-line::after {
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg, transparent, oklch(0.7 0.18 240 / 0.35), transparent);
+  background: linear-gradient(180deg, transparent, var(--scan-color), transparent);
   animation: scan 2s linear infinite;
-  pointer-events: none; /* No intercepta clics */
+  pointer-events: none;
 }
 
 
 /* =============================================================================
    ANIMACIÓN: pulse-dot
-   Animación de pulso suave para indicadores de estado activo.
-   Alterna entre opacidad completa y reducida, y escala ligeramente
-   el elemento para simular un latido. Actualmente disponible como
-   utilidad, no usada activamente en la UI principal.
    ============================================================================= */
 @keyframes pulse-dot {
-  0%,
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.5;
-    transform: scale(0.85);
-  }
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.5; transform: scale(0.85); }
 }
 
 .pulse-dot {
   animation: pulse-dot 1.4s ease-in-out infinite;
+}
+
+
+/* =============================================================================
+   ANIMACIONES DE BOTONES
+   ============================================================================= */
+
+/* Keyframe: barrido de luz en el CTA principal */
+@keyframes light-sweep {
+  from { transform: translateX(-150%) skewX(-12deg); }
+  to   { transform: translateX(350%) skewX(-12deg); }
+}
+
+/* Clase para el botón CTA principal (Generar mapa unificado) */
+.btn-cta {
+  position: relative;
+  overflow: hidden;
+}
+
+/* Barrido de luz único en hover — natural, no loop */
+.btn-cta:not(:disabled)::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 40%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.22),
+    transparent
+  );
+  transform: translateX(-150%) skewX(-12deg);
+  transition: none;
+  pointer-events: none;
+}
+
+.btn-cta:not(:disabled):hover::after {
+  animation: light-sweep 0.55s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+/* Bounce suave al icono de upload en hover */
+@keyframes icon-bounce {
+  0%   { transform: translateY(0); }
+  40%  { transform: translateY(-7px); }
+  65%  { transform: translateY(-3px); }
+  85%  { transform: translateY(-5px); }
+  100% { transform: translateY(0); }
+}
+
+.upload-zone:hover .upload-icon {
+  animation: icon-bounce 0.65s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Transición de estados en CheckRow */
+.check-row {
+  transition: background-color 0.3s ease;
+}
+
+/* =============================================================================
+   ANIMACIÓN: dropdown
+   Entrada del menú de selección de tema — escala desde la esquina superior
+   derecha con overshoot suave, sobre el origen del botón disparador.
+   ============================================================================= */
+@keyframes dropdown-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.92) translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.dropdown-enter {
+  transform-origin: top right;
+  animation: dropdown-enter 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }

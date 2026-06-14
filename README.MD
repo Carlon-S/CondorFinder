@@ -148,9 +148,10 @@ La aplicación estará disponible en **http://localhost:8080**
 
 1. Abre http://localhost:8080 en el navegador
 2. Arrastra o selecciona las imágenes JPG tomadas con drone (mínimo 16)
-3. El sistema valida el formato y la cantidad antes de habilitar la generación
-4. Presiona **Generar mapa unificado** — el proceso pasa por cuatro fases secuenciales: verificación de solapamiento (~60%), unificación con ODM, detección con YOLOv8 y cálculo automático de volúmenes
-5. Al terminar, el mapa aparece en el visor con los polígonos de detección superpuestos:
+3. Las imágenes se suben automáticamente al backend mientras se generan sus thumbnails — el bloque de imágenes adjuntas muestra un spinner por imagen hasta que el thumbnail esté listo
+4. El sistema valida el formato y la cantidad antes de habilitar la generación
+5. Presiona **Generar mapa unificado** — el proceso pasa por cuatro fases secuenciales: verificación de solapamiento (~60%), unificación con ODM, detección con YOLOv8 y cálculo automático de volúmenes
+6. Al terminar, el mapa aparece en el visor con los polígonos de detección superpuestos:
    - Si se detectó basura: el mapa es clicable y navega a la vista de análisis
    - Si no se detectó basura: el mapa igual se muestra con un aviso informativo
 
@@ -158,12 +159,12 @@ La aplicación estará disponible en **http://localhost:8080**
 
 ### Vista de Análisis (`/analysis`)
 
-6. Accede desde el mapa generado o directamente desde la barra de navegación
-7. Las zonas detectadas aparecen en la lista — puedes activar o desactivar cada una antes de analizar
-8. Presiona **Analizar volumen** para revelar los resultados ya calculados durante la generación
-9. Los polígonos se colorean con un degradé **verde → rojo** según su volumen relativo (más rojo = mayor volumen)
-10. Zonas solapadas se fusionan automáticamente como **"Varios tipos"** mostrando el desglose por cada clase contenida
-11. Si el mapa no contenía basura detectada, el botón de análisis queda deshabilitado y se muestra un aviso
+7. Accede desde el mapa generado o directamente desde la barra de navegación
+8. Las zonas detectadas aparecen en la lista — puedes activar o desactivar cada una antes de analizar
+9. Presiona **Analizar volumen** para revelar los resultados ya calculados durante la generación
+10. Los polígonos se colorean con un degradé **verde → rojo** según su volumen relativo (más rojo = mayor volumen)
+11. Zonas solapadas se fusionan automáticamente como **"Varios tipos"** mostrando el desglose por cada clase contenida
+12. Si el mapa no contenía basura detectada, el botón de análisis queda deshabilitado y se muestra un aviso
 
 ---
 
@@ -173,23 +174,27 @@ La aplicación estará disponible en **http://localhost:8080**
 CondorFinder/
 ├── src/
 │   ├── assets/              ← Imágenes estáticas de referencia
-│   ├── components/          ← Componentes React reutilizables
+│   ├── components/
+│   │   ├── AppNavbar.tsx    ← Barra de navegación con selector de 4 temas
+│   │   └── ui/              ← Componentes shadcn/ui
 │   ├── lib/                 ← Servicios y utilidades del frontend
 │   │   ├── unify.ts         ← Cliente del pipeline de generación
-│   │   ├── analysis.ts      ← Servicio de análisis de volumen (real)
+│   │   ├── analysis.ts      ← Servicio de análisis de volumen
 │   │   ├── imageState.ts    ← Persistencia de estado en sessionStorage
 │   │   └── mapState.ts      ← Persistencia y eventos de la URL del mapa
-│   └── routes/              ← Vistas principales
-│       ├── index.tsx        ← HDU1: Unificación de imágenes
-│       └── analysis.tsx     ← HDU2/HDU3: Análisis de volumen
+│   ├── routes/              ← Vistas principales (file-based routing)
+│   │   ├── __root.tsx       ← Shell de la app (layout, anti-flash de tema)
+│   │   ├── index.tsx        ← HDU1: Unificación de imágenes
+│   │   └── analysis.tsx     ← HDU2/HDU3: Análisis de volumen
+│   └── styles.css           ← Estilos globales, tokens de los 4 temas, animaciones
 ├── backendModel/
 │   ├── orquestador.py       ← API FastAPI (carga, generación, estado, análisis)
 │   ├── requirements.txt     ← Dependencias Python
 │   ├── joining/
-│   │   ├── joinOrtho.py                  ← Unificación de imágenes con ODM
+│   │   ├── joinOrtho.py                    ← Unificación de imágenes con ODM
 │   │   ├── Reconociemiento_solapamiento.py ← Verificación de solapamiento GPS
-│   │   ├── images/                       ← Imágenes JPG cargadas por el usuario
-│   │   └── finals/                       ← Ortomosaico .tif generado por ODM
+│   │   ├── images/                         ← Imágenes JPG cargadas por el usuario
+│   │   └── finals/                         ← Ortomosaico .tif generado por ODM
 │   └── detecting/
 │       ├── detectingOrtho.py ← Detección de basura con YOLOv8 + SAHI
 │       ├── volumeCalc.py     ← Cálculo de volumen/peso/área usando nDSM de ODM
@@ -216,18 +221,17 @@ CondorFinder/
 | HDU3 | Se destaca visualmente la zona en base a su volumen estimado | ✅ Cumplido |
 | HDU3 | El sistema muestra un mensaje de "Tipo de basura indefinido" | ✅ Cumplido |
 
-
 ---
 
 ## Tecnologías
 
 | Capa | Tecnología |
 |---|---|
-| Frontend | React 19 + TanStack Router |
+| Frontend | React 19 + TanStack Start (SSR) + TanStack Router |
 | Lenguaje frontend | TypeScript |
-| Estilos | Tailwind CSS v4 |
+| Estilos | Tailwind CSS v4 + sistema de 4 temas (Verde tierra, Negro clásico, Azul oscuro, Modo claro) |
 | Componentes UI | shadcn/ui + Radix UI |
-| Bundler | Vite 7 |
+| Bundler / servidor SSR | Vinxi + Nitro |
 | Gestor de paquetes | pnpm |
 | Backend API | FastAPI + Uvicorn |
 | Unificación de imágenes | OpenDroneMap (NodeODM vía Docker) |

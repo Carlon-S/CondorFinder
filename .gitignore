@@ -1,3 +1,6 @@
+# Claude Code agents
+.agents/
+
 # Logs
 logs
 *.log
@@ -47,4 +50,6 @@ __pycache__/
 *$py.class
 venv/
 .venv/
-*.egg-info/
+*.egg-info/skills-lock.json
+
+skills-lock.json
