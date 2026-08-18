@@ -11,6 +11,8 @@
 // en localhost:8000.
 // =============================================================================
 
+import { BACKEND_URL } from "./config";
+
 
 // =============================================================================
 // INTERFACES DE RESPUESTA
@@ -61,7 +63,6 @@ export interface UnifyOptions {
 // CONSTANTE DE URL DEL BACKEND
 // =============================================================================
 
-const BACKEND_URL = "http://localhost:8000";
 const POLLING_INTERVAL_MS = 5000;
 
 
@@ -95,6 +96,74 @@ export async function unifyImages(
 }
 
 
+export interface RawTaskStatus {
+  status: string;
+  message: string;
+  result_url?: string;
+  result_json_url?: string;
+  detection_count?: number;
+}
+
+/**
+ * Consulta el estado de una tarea una sola vez (sin loop de polling).
+ * Usado por carga.tsx para retomar una generación en curso al volver a esa
+ * vista. Devuelve null si el backend no responde (caído, red, etc.).
+ */
+export async function getTaskStatus(taskId: string): Promise<RawTaskStatus | null> {
+  try {
+    const res = await fetch(`${BACKEND_URL}/status/${taskId}`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+export interface PendingTask {
+  taskId: string;
+  status: string;
+  message: string;
+  createdAt: string | null;
+  resultUrl?: string;
+  resultJsonUrl?: string;
+  detectionCount?: number;
+}
+
+/**
+ * Lista las tareas "en progreso" o "done pero todavía no guardadas" —
+ * reemplaza taskRegistry.ts (localStorage). Antes, Vista Principal llevaba
+ * su propia lista de task_id por navegador; una falla de red al consultar
+ * el estado (ej. un reinicio de uvicorn en el momento equivocado) hacía que
+ * esa tarea se desregistrara para siempre aunque siguiera sana en Mongo.
+ * Ahora es una sola consulta al backend, que es la única fuente de verdad.
+ * Lanza en caso de error — el caller decide si degrada en silencio o avisa.
+ */
+export async function listPendingTasks(): Promise<PendingTask[]> {
+  const res = await fetch(`${BACKEND_URL}/tasks/pending`);
+  if (!res.ok) {
+    throw new Error("No se pudieron cargar las tareas pendientes.");
+  }
+  const raw: {
+    task_id: string;
+    status: string;
+    message: string;
+    created_at: string | null;
+    result_url?: string;
+    result_json_url?: string;
+    detection_count?: number;
+  }[] = await res.json();
+
+  return raw.map((t) => ({
+    taskId: t.task_id,
+    status: t.status,
+    message: t.message,
+    createdAt: t.created_at,
+    resultUrl: t.result_url,
+    resultJsonUrl: t.result_json_url,
+    detectionCount: t.detection_count,
+  }));
+}
+
 export async function pollTask(
   taskId: string,
   onProgress?: (stage: "checking_overlap" | "joining" | "detecting") => void,
@@ -124,6 +193,14 @@ export async function pollTask(
         message: statusData.message,
         overlapDetail: statusData.overlap_detail,
         overlapTotal: statusData.overlap_total,
+      };
+    }
+
+    if (statusData.status === "cancelled") {
+      return {
+        status: "error",
+        reason: "cancelled",
+        message: statusData.message || "Generación cancelada por el usuario.",
       };
     }
 
@@ -177,13 +254,45 @@ export async function uploadImages(
     };
 
     xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) resolve();
-      else reject(new Error(`Upload failed: ${xhr.status}`));
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve();
+        return;
+      }
+      // El backend devuelve 409 + {"detail": "..."} cuando UPLOAD_DIR está
+      // ocupado por otra tarea en curso (ver is_pipeline_busy en
+      // orquestador.py) — se propaga ese mensaje en vez de uno genérico para
+      // que el usuario entienda por qué falló.
+      let message = `Upload failed: ${xhr.status}`;
+      try {
+        const parsed = JSON.parse(xhr.responseText);
+        if (parsed?.detail) message = parsed.detail;
+      } catch {
+        // responseText no era JSON — se usa el mensaje genérico
+      }
+      reject(new Error(message));
     };
 
     xhr.onerror = () => reject(new Error("Upload error"));
     xhr.send(formData);
   });
+}
+
+/**
+ * Consulta si el servidor está ocupado con otra tarea (checking_overlap /
+ * joining / detecting / running) — independiente de lo que sepa localmente
+ * ESTA pestaña. Se usa al montar /carga para que el botón "Generar mapa
+ * unificado" arranque en el estado correcto incluso después de un F5, en
+ * vez de depender de un intento fallido previo que ya se perdió al
+ * recargar la página.
+ */
+export async function getPipelineStatus(): Promise<{ busy: boolean } | null> {
+  try {
+    const res = await fetch(`${BACKEND_URL}/pipeline-status`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -199,6 +308,15 @@ export async function listUploadedImages(): Promise<string[] | null> {
   } catch {
     return null;  // null = backend inalcanzable, [] = backend vacío
   }
+}
+
+/**
+ * Solicita cancelar una tarea en curso. El backend solo puede aplicar la
+ * cancelación entre fases (no interrumpe una llamada a ODM o YOLO ya en
+ * curso) — ver comentario en orquestador.py::run_pipeline.
+ */
+export async function cancelTask(taskId: string): Promise<void> {
+  await fetch(`${BACKEND_URL}/cancel/${taskId}`, { method: "POST" }).catch(() => {});
 }
 
 /**
@@ -225,4 +343,88 @@ export async function deleteAllImages(): Promise<void> {
  */
 export function deleteAllImagesSync(): void {
   fetch(`${BACKEND_URL}/upload`, { method: "DELETE", keepalive: true });
+}
+
+/**
+ * URL para ver una imagen ya subida al backend — usado para reconstruir las
+ * miniaturas de "Imágenes adjuntas" al retomar una generación en curso desde
+ * la Vista Principal, donde ya no existen los File originales en memoria.
+ */
+export function getUploadedImageUrl(filename: string): string {
+  return `${BACKEND_URL}/upload/${encodeURIComponent(filename)}`;
+}
+
+/**
+ * Borra un archivo de resultado (imagen o JSON) en el backend.
+ * Se usa al eliminar una zona guardada, para no dejar archivos huérfanos.
+ */
+export async function deleteResultFile(filename: string): Promise<void> {
+  await fetch(`${BACKEND_URL}/result/${encodeURIComponent(filename)}`, {
+    method: "DELETE",
+  }).catch(() => {});
+}
+
+/**
+ * Borra el ortomosaico .tif de joining/finals/ — sin esto, esa carpeta
+ * nunca se limpiaba para ninguna zona, ni siquiera las guardadas y luego
+ * eliminadas correctamente desde la UI (deleteResultFile solo apunta a
+ * detecting/output/, no a joining/finals/).
+ */
+export async function deleteFinalsFile(filename: string): Promise<void> {
+  await fetch(`${BACKEND_URL}/finals/${encodeURIComponent(filename)}`, {
+    method: "DELETE",
+  }).catch(() => {});
+}
+
+// =============================================================================
+// SNAPSHOT DE IMÁGENES POR TAREA
+//
+// UPLOAD_DIR en el backend es una carpeta COMPARTIDA que se sobreescribe con
+// cada carga nueva. Estas funciones consultan la "foto" que el backend toma
+// de las imágenes de cada tarea al momento de crearla (ver /generate en
+// orquestador.py), para poder mostrar el set ORIGINAL correcto al retomar
+// una tarea antigua desde la Vista Principal — no el set actual de UPLOAD_DIR.
+// =============================================================================
+
+/**
+ * Consulta al backend qué imágenes se usaron para iniciar una tarea puntual.
+ */
+export async function listTaskImages(taskId: string): Promise<string[] | null> {
+  try {
+    const res = await fetch(`${BACKEND_URL}/task-images/${encodeURIComponent(taskId)}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.archivos ?? [];
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * URL para ver una imagen del snapshot de una tarea puntual.
+ */
+export function getTaskImageUrl(taskId: string, filename: string): string {
+  return `${BACKEND_URL}/task-images/${encodeURIComponent(taskId)}/${encodeURIComponent(filename)}`;
+}
+
+/**
+ * Borra el snapshot de imágenes de una tarea — usado al eliminar una zona
+ * (en cualquier estado) para no dejar copias huérfanas en el servidor.
+ */
+export async function deleteTaskImages(taskId: string): Promise<void> {
+  await fetch(`${BACKEND_URL}/task-images/${encodeURIComponent(taskId)}`, {
+    method: "DELETE",
+  }).catch(() => {});
+}
+
+/**
+ * Borra el documento de la tarea en Mongo — sin esto, eliminar una zona
+ * (guardada o no) desde Vista Principal dejaba su tarea huérfana en la
+ * colección `tasks` para siempre, ahora que ese estado persiste entre
+ * reinicios de uvicorn (antes se perdía solo con reiniciar).
+ */
+export async function deleteTask(taskId: string): Promise<void> {
+  await fetch(`${BACKEND_URL}/status/${encodeURIComponent(taskId)}`, {
+    method: "DELETE",
+  }).catch(() => {});
 }

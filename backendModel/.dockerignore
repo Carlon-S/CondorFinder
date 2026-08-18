@@ -1,0 +1,16 @@
+# Mismo criterio que .gitignore para backendModel/ — datos de runtime, no
+# algo que deba hornearse en la imagen (docker-compose monta estos
+# directorios como bind mounts del host, ver docker-compose.yml).
+joining/images/*
+joining/finals/*
+joining/output/*
+joining/task_images/*
+detecting/output/*
+detecting/__pycache__
+joining/__pycache__
+__pycache__
+*.pyc
+.venv
+venv
+.env
+training/

@@ -119,6 +119,27 @@ export function clearBackendStage(): void {
   sessionStorage.removeItem(KEY_BACKEND_STAGE);
 }
 
+const KEY_CANCEL_REQUESTED = "condorfinder_cancel_requested";
+
+/**
+ * Se pide cancelar, pero el backend puede tardar en aplicarlo de verdad
+ * (hasta ~10s para que ODM lo note, o hasta que YOLO termine su corrida
+ * actual si se canceló durante "detecting"). Esta bandera persiste esa
+ * intención para que la UI siga mostrando "Cancelando..." durante toda esa
+ * ventana — incluso si se recarga la página mientras tanto — en vez de
+ * volver a mostrar el botón de generar/cancelar como si nada.
+ */
+export function saveCancelRequested(v: boolean): void {
+  if (!isBrowser) return;
+  if (v) sessionStorage.setItem(KEY_CANCEL_REQUESTED, "true");
+  else sessionStorage.removeItem(KEY_CANCEL_REQUESTED);
+}
+
+export function loadCancelRequested(): boolean {
+  if (!isBrowser) return false;
+  return sessionStorage.getItem(KEY_CANCEL_REQUESTED) === "true";
+}
+
 const KEY_DETECTION_JSON_URL = "condorfinder_detection_json_url";
 
 export function saveDetectionJsonUrl(url: string): void {
@@ -146,4 +167,5 @@ export function clearImageState(): void {
   sessionStorage.removeItem(KEY_NO_WASTE);
   sessionStorage.removeItem(KEY_BACKEND_STAGE);
   sessionStorage.removeItem(KEY_DETECTION_JSON_URL);
+  sessionStorage.removeItem(KEY_CANCEL_REQUESTED);
 }

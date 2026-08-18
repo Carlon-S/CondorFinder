@@ -82,6 +82,14 @@ def enrich(
     with rasterio.open(ortho_path) as ortho:
         transform = ortho.transform
         crs = ortho.crs
+        # Centro geográfico REAL del ortomosaico completo (extensión real
+        # del mapa, dada por su propia georreferenciación) — a diferencia
+        # del centroide de las detecciones, este valor es el mismo sin
+        # importar qué encuentre YOLO en cada corrida: dos análisis del
+        # mismo set de fotos deben ubicarse en el mismo lugar en /rutas
+        # aunque sus detecciones (cantidad, tamaño) difieran entre sí.
+        bounds = ortho.bounds
+        ortho_center = [(bounds.left + bounds.right) / 2, (bounds.bottom + bounds.top) / 2]
 
     pixel_area_m2 = abs(transform.a * transform.e)
 
@@ -143,7 +151,7 @@ def enrich(
 
         enriched.append(result)
 
-    output = {"crs": str(crs), "detections": enriched}
+    output = {"crs": str(crs), "ortho_center": ortho_center, "detections": enriched}
     with open(output_json_path, "w") as f:
         json.dump(output, f, indent=2)
 

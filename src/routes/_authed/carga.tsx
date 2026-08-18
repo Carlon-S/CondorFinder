@@ -1,10 +1,13 @@
 // =============================================================================
-// CONDORFINDER — PÁGINA PRINCIPAL (HDU1: Unificación de imágenes)
-// Archivo: src/routes/index.tsx
+// CONDORFINDER — VISTA DE CARGA (HDU1: Unificación de imágenes)
+// Archivo: src/routes/carga.tsx
 //
-// Componente principal del sistema. Implementa el frontend completo de la
-// Historia de Usuario HDU1: permite al trabajador municipal cargar imágenes
-// JPG capturadas con drone, validarlas y generar un mapa unificado de la zona.
+// Implementa el frontend completo de la Historia de Usuario HDU1: permite al
+// trabajador municipal cargar imágenes JPG capturadas con drone, validarlas y
+// generar un mapa unificado de la zona.
+//
+// Se llega a esta vista desde la Vista Principal ("/"), al elegir "Nueva zona"
+// en el popup de "Agregar zona" — ya no es la ruta raíz de la aplicación.
 //
 // Criterios de aceptación cubiertos (frontend):
 //   1. Verificación de formato JPG al cargar archivos
@@ -35,10 +38,9 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { unifyImages, uploadImages, deleteImage, deleteAllImages, listUploadedImages, pollTask, type OverlapPair } from "@/lib/unify";
-import unifiedMapImg from "@/assets/unified-map-simulation.png";
+import { unifyImages, uploadImages, deleteImage, deleteAllImages, listUploadedImages, pollTask, cancelTask, getPipelineStatus, getTaskStatus, type OverlapPair } from "@/lib/unify";
+import { notify } from "@/lib/notify";
 import { saveMapUrl, clearMapUrl } from "@/lib/mapState";
-import { AppNavbar } from "@/components/AppNavbar";
 import {
   saveItems, loadItems, saveUploadDone, loadUploadDone,
   savePhase, loadPhase, saveResultUrl, loadResultUrl,
@@ -46,14 +48,15 @@ import {
   saveBackendStage, loadBackendStage, clearBackendStage,
   saveNoWasteDetected, loadNoWasteDetected, clearNoWasteDetected,
   saveDetectionJsonUrl, loadDetectionJsonUrl, clearDetectionJsonUrl,
+  saveCancelRequested, loadCancelRequested,
   clearImageState, type PersistedFileItem,
 } from "@/lib/imageState";
 
 import { useNavigate } from "@tanstack/react-router";
 
-// Registro de la ruta raíz "/" en TanStack Router.
+// Registro de la ruta "/carga" en TanStack Router.
 // "head" define los metadatos HTML de la página (título, descripción, OG tags).
-export const Route = createFileRoute("/")({
+export const Route = createFileRoute("/_authed/carga")({
   head: () => ({
     meta: [
       { title: "CondorFinder — Unificación de imágenes" },
@@ -213,7 +216,7 @@ function formatSize(bytes: number): string {
 // =============================================================================
 
 /**
- * Página principal de CondorFinder.
+ * Vista de Carga de CondorFinder.
  * Gestiona todo el estado del sistema y renderiza el layout completo en 4 filas:
  *   Fila 1: Instrucciones de uso
  *   Fila 2: Carga de imágenes | Imágenes adjuntas
@@ -243,6 +246,21 @@ function Page() {
 
   /** true si hay una subida de imágenes en curso */
   const [uploading, setUploading] = useState(false);
+
+  /** Motivo por el que la última subida falló (ej. lock de multiusuario del
+   * backend) — se muestra en el tooltip del botón principal para explicar
+   * por qué "Generar mapa unificado" sigue deshabilitado. */
+  const [uploadBlockedMessage, setUploadBlockedMessage] = useState<string | null>(null);
+
+  /**
+   * Estado REAL del servidor (¿hay otra tarea corriendo?), consultado
+   * directamente en vez de inferido de un intento fallido previo.
+   * uploadBlockedMessage se resetea a null en cada F5 — sin esto, después
+   * de recargar la página el botón podía verse habilitado aunque el
+   * servidor siguiera ocupado, porque el frontend "olvidaba" el bloqueo
+   * anterior sin volver a preguntarle al backend.
+   */
+  const [backendBusy, setBackendBusy] = useState(false);
 
   /** Referencia al input de tipo file (oculto), activado por el botón de carga */
   const inputRef = useRef<HTMLInputElement>(null);
@@ -311,6 +329,37 @@ function Page() {
     const navType = (performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming)?.type;
     const isReload = navType === "reload";
 
+    // Entrada fresca (no F5) a /carga con una tarea que ya no está en curso
+    // (terminó bien, con error, o ya fue analizada/guardada en otro lado) —
+    // no corresponde resucitar esa sesión vieja solo por haber navegado aquí
+    // desde el sidebar. "En progreso" (generating_map) sí debe sobrevivir,
+    // tanto a un F5 como a una navegación de ida y vuelta — eso ya lo cubre
+    // el efecto de resume-poll más abajo. Retomar una tarea puntual desde
+    // Vista Principal (resumeInCarga) prepara su propio estado ANTES de
+    // navegar, así que llega con phase="generating_map" y no entra aquí.
+    if (!isReload && (phase === "done" || phase === "error")) {
+      clearAll();
+      return;
+    }
+
+    // Un F5 con phase "done"/"error" sí sobrevive por diseño (no se pierde
+    // el resultado al recargar) — pero el task_id que lo sostiene puede ya
+    // no existir en el backend (reinicio de uvicorn, que vacía el dict de
+    // tasks en memoria sin borrar los archivos que ya estaban en
+    // UPLOAD_DIR). Sin esto, la reconciliación de más abajo seguía viendo
+    // los mismos archivos en el servidor y daba por buena una tarea
+    // "fantasma" — la vista quedaba mostrando un resultado de un proceso
+    // que ya no existe en vez de verse nueva.
+    if (isReload && (phase === "done" || phase === "error")) {
+      const savedTaskId = loadTaskId();
+      if (savedTaskId) {
+        getTaskStatus(savedTaskId).then((status) => {
+          if (!status || status.message === "Tarea no encontrada") clearAll();
+        });
+      }
+      return;
+    }
+
     if (items.length === 0) {
       // Solo limpiar el backend si es sesión nueva, no si es un reload
       if (!isReload) {
@@ -378,6 +427,13 @@ function Page() {
       saveBackendStage(stage);
       setProgress(stage === "checking_overlap" ? 45 : stage === "joining" ? 60 : 75);
     }, controller.signal).then((res) => {
+      if (res.status === "error" && res.reason === "cancelled") {
+        clearBackendStage();
+        resetProcess();
+        savePhase("idle");
+        return;
+      }
+
       const stageAtError = res.status === "error"
         ? (res.overlapDetail !== undefined ? "checking_overlap" : loadBackendStage())
         : null;
@@ -392,17 +448,26 @@ function Page() {
         return;
       }
       setProgress(85);
-      const finalUrl = res.mapUrl || unifiedMapImg;
+      const finalUrl = res.mapUrl;
       const noWaste = res.detectionCount === 0;
       setResultUrl(finalUrl); saveResultUrl(finalUrl);
       setNoWasteDetected(noWaste); saveNoWasteDetected(noWaste);
       saveMapUrl(finalUrl);
+      // Si detectionJsonUrl no viene por algún motivo, hay que LIMPIAR
+      // explícitamente en vez de dejar sessionStorage con lo que haya
+      // quedado de una generación anterior en esta misma pestaña — si no,
+      // /analysis termina mostrando el mapa recién generado con las
+      // detecciones de OTRA zona (mismo patrón que reviewPending() en
+      // index.tsx).
       if (res.detectionJsonUrl) {
         saveDetectionJsonUrl(res.detectionJsonUrl);
         fetch(res.detectionJsonUrl)
           .then(r => r.json())
           .then(data => setDetections(data.detections ?? []))
           .catch(() => {});
+      } else {
+        clearDetectionJsonUrl();
+        setDetections([]);
       }
       setProgress(100);
       setPhase("done"); savePhase("done");
@@ -417,6 +482,43 @@ function Page() {
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Consulta el estado real del servidor al montar (incluye recargas con
+  // F5) y cada 5s mientras siga ocupado, para que el botón "Generar mapa
+  // unificado" refleje la realidad del backend en vez de un estado local
+  // que se resetea en cada recarga. Deja de consultar apenas se libera —
+  // no hace falta seguir preguntando una vez que ya se puede generar.
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    // Solo avisa una vez por transición a "ocupado" (no en cada poll de 5s
+    // mientras sigue ocupado) — evita repetir el mismo toast en loop.
+    let notifiedBusy = false;
+    const check = async () => {
+      const status = await getPipelineStatus();
+      if (cancelled || !status) return;
+      setBackendBusy(status.busy);
+      if (status.busy) {
+        setUploadBlockedMessage((prev) => prev ?? "Hay un proceso de generación en curso en el servidor. Espera a que termine.");
+        // Si el "ocupado" es la propia tarea de esta pestaña (retomada tras
+        // un F5, o recién iniciada por el propio usuario), no es un bloqueo
+        // externo — no corresponde avisar que "no se puede generar".
+        if (!notifiedBusy && phase !== "generating_map") {
+          notifiedBusy = true;
+          notify.warning(
+            "No se puede generar el mapa",
+            "Hay un proceso de generación en curso en el servidor. Espera a que termine.",
+          );
+        }
+        timer = setTimeout(check, 5000);
+      } else {
+        setUploadBlockedMessage(null);
+        notifiedBusy = false;
+      }
+    };
+    check();
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [phase]);
 
   useEffect(() => {
     itemNamesRef.current = new Set(items.map((i) => i.file.name));
@@ -457,7 +559,7 @@ function Page() {
    * true si el botón "Generar mapa" debe estar habilitado.
    * Requiere: al menos un archivo, ninguno inválido, cantidad suficiente y no procesando.
    */
-  const canGenerate = items.length > 0 && !hasInvalid && enoughImages && !processing && uploadDone && !uploading;
+  const canGenerate = items.length > 0 && !hasInvalid && enoughImages && !processing && uploadDone && !uploading && !backendBusy;
 
   // ---------------------------------------------------------------------------
   // ESTADOS DE LA REVISIÓN TÉCNICA
@@ -512,6 +614,18 @@ function Page() {
    */
   const addFiles = useCallback(async (files: FileList | File[]) => {
     if (uploading) return;
+    // UPLOAD_DIR es compartido por todas las tareas — si se agregan imágenes
+    // mientras un proceso ya está corriendo (joining/detecting), se
+    // contaminaría el set que esa tarea está usando. Se bloquea aquí además
+    // de en la UI (botón/input deshabilitados) para cubrir también el path
+    // de arrastrar-y-soltar.
+    if (processing) {
+      notify.warning(
+        "Proceso en curso",
+        "No se pueden agregar imágenes mientras se genera el mapa. Cancélalo primero si necesitas modificar el set.",
+      );
+      return;
+    }
 
     const newItems: FileItem[] = [];
     const validFiles: File[] = [];
@@ -553,8 +667,17 @@ function Page() {
     try {
       await uploadImages(validFiles, (pct) => setUploadProgress(pct));
       setUploadDone(true);
-    } catch {
+      setUploadBlockedMessage(null);
+    } catch (err) {
       setUploadDone(false);
+      const message = err instanceof Error ? err.message : "No se pudieron subir las imágenes.";
+      notify.error("No se pudieron subir las imágenes", message);
+      // El toast desaparece solo — sin esto, el botón "Generar mapa
+      // unificado" queda deshabilitado (uploadDone sigue false) pero el
+      // tooltip debajo seguía diciendo "Todas las condiciones cumplidas",
+      // sin explicar por qué no se puede generar (típicamente porque el
+      // lock de multiusuario del backend rechazó la subida).
+      setUploadBlockedMessage(message);
     } finally {
       setUploading(false);
       setUploadProgress(null);
@@ -587,7 +710,7 @@ function Page() {
       // Cede el hilo entre cada thumbnail para no congelar la UI
       await new Promise((r) => setTimeout(r, 10));
     }
-  }, [uploading]);
+  }, [uploading, processing]);
 
   /** Elimina un archivo individual y libera su memoria */
   const removeItem = (id: string) => {
@@ -605,7 +728,7 @@ function Page() {
       return prev.filter((i) => i.id !== id);
     });
   };
-  
+
   const uploadLabel: Record<string, string> = {
     idle: "Listo para procesar",
     uploading: "Subiendo imágenes al servidor...",
@@ -630,6 +753,8 @@ function Page() {
     setImgNaturalSize(null);
     clearTaskId();
     clearDetectionJsonUrl();
+    setCancelling(false);
+    saveCancelRequested(false);
   };
 
   /** Elimina todas las imágenes y reinicia el proceso */
@@ -641,6 +766,7 @@ function Page() {
     deleteAllImages().catch(() => {});
     setUploadDone(false);
     setUploadProgress(null);
+    setUploadBlockedMessage(null);
     clearImageState();
   };
 
@@ -685,6 +811,12 @@ function Page() {
       });
 
       if (res.status === "error") {
+        if (res.reason === "cancelled") {
+          clearBackendStage();
+          resetProcess();
+          savePhase("idle");
+          return;
+        }
         const stageAtError = res.overlapDetail !== undefined ? "checking_overlap" : loadBackendStage();
         clearTaskId(); clearBackendStage();
         setPhase("error"); savePhase("error");
@@ -696,17 +828,26 @@ function Page() {
       }
 
       setProgress(85);
-      const finalUrl = res.mapUrl || unifiedMapImg;
+      const finalUrl = res.mapUrl;
       const noWaste = res.detectionCount === 0;
       setResultUrl(finalUrl); saveResultUrl(finalUrl);
       setNoWasteDetected(noWaste); saveNoWasteDetected(noWaste);
       saveMapUrl(finalUrl);
+      // Si detectionJsonUrl no viene por algún motivo, hay que LIMPIAR
+      // explícitamente en vez de dejar sessionStorage con lo que haya
+      // quedado de una generación anterior en esta misma pestaña — si no,
+      // /analysis termina mostrando el mapa recién generado con las
+      // detecciones de OTRA zona (mismo patrón que reviewPending() en
+      // index.tsx).
       if (res.detectionJsonUrl) {
         saveDetectionJsonUrl(res.detectionJsonUrl);
         fetch(res.detectionJsonUrl)
           .then(r => r.json())
           .then(data => setDetections(data.detections ?? []))
           .catch(() => {});
+      } else {
+        clearDetectionJsonUrl();
+        setDetections([]);
       }
       setProgress(100);
       setPhase("done"); savePhase("done");
@@ -719,9 +860,31 @@ function Page() {
     }
   };
 
+  /**
+   * Solicita cancelar la generación en curso. Solo puede aplicarse entre
+   * fases del pipeline (ver orquestador.py) — si justo está corriendo ODM o
+   * YOLO, la cancelación se aplica apenas esa llamada termine, no al instante
+   * (hasta ~10s para que ODM lo note, o hasta que YOLO termine su corrida
+   * actual). "cancelling" queda en true durante TODA esa ventana — no solo
+   * mientras dura el POST /cancel — para que el botón siga mostrando
+   * "Cancelando..." hasta que el poll detecte el estado final. Se resetea
+   * en resetProcess(), que corre cuando el poll confirma la cancelación.
+   * Sin toasts: son detalles técnicos del backend que no le aportan nada al
+   * usuario — el cambio de estado visual del botón ya comunica lo mismo.
+   */
+  const [cancelling, setCancelling] = useState(() => loadCancelRequested());
+  const handleCancel = async () => {
+    const taskId = loadTaskId();
+    if (!taskId || cancelling) return;
+    setCancelling(true);
+    saveCancelRequested(true);
+    await cancelTask(taskId);
+  };
+
   /** Descarga el mapa como blob local — evita bloqueo cross-origin del atributo download */
   const downloadMap = async () => {
-    const url = resultUrl || unifiedMapImg;
+    if (!resultUrl) return;
+    const url = resultUrl;
     try {
       const res = await fetch(url);
       const blob = await res.blob();
@@ -740,8 +903,13 @@ function Page() {
   };
 
   /** Etiquetas descriptivas para cada fase del proceso */
-    function getPhaseLabel(phase: Phase, backendStage: "checking_overlap" | "joining" | "detecting" | null): string {
+    function getPhaseLabel(phase: Phase, backendStage: "checking_overlap" | "joining" | "detecting" | null, cancelling: boolean): string {
     if (phase === "generating_map") {
+      // Mientras se está cancelando, el estado siempre debe leer
+      // "Cancelando..." sin importar en qué fase técnica esté el pipeline
+      // (unificando, detectando, etc.) — de lo contrario el usuario ve el
+      // mismo texto de "en curso" que antes de haber pedido cancelar.
+      if (cancelling) return "Cancelando...";
       if (backendStage === "checking_overlap") return "Verificando solapamiento entre imágenes...";
       if (backendStage === "joining") return "Unificando imágenes...";
       if (backendStage === "detecting") return "Detectando basura...";
@@ -766,73 +934,91 @@ function Page() {
   const tooltipState = useMemo(() => {
     if (phase === "error" && errorMsg) return { color: "destructive", message: errorMsg };
     if (items.length === 0) return { color: "empty", message: `No hay imagenes cargadas. Arrastra o selecciona al menos ${MIN_IMAGES} imagenes JPG.` };
-    if (hasInvalid) return { color: "destructive", message: `Hay ${invalidCount} archivo(s) que no son JPG o JPEG. Eliminatlos para continuar.` };
+    if (hasInvalid) return { color: "destructive", message: `Hay ${invalidCount} archivo(s) que no son JPG o JPEG. Elimínalos para continuar.` };
     if (!enoughImages) return { color: "warning", message: `Se necesitan al menos ${MIN_IMAGES} imagenes JPG para iniciar el procesamiento. Tienes ${validCount}.` };
+    // Sin esto, si la subida falla (ej. otro usuario tiene un proceso en
+    // curso en el servidor), el botón queda deshabilitado (uploadDone en
+    // false) pero el tooltip seguía diciendo "Todas las condiciones
+    // cumplidas" — contradictorio y sin explicar qué hacer.
+    if (!uploadDone && uploadBlockedMessage) return { color: "destructive", message: uploadBlockedMessage };
+    // Chequeo independiente de uploadDone: si el servidor está ocupado con
+    // otra tarea (verificado directo contra el backend, no inferido de un
+    // intento previo), el botón debe verse bloqueado aunque uploadDone
+    // siga en true por una subida exitosa anterior en esta misma pestaña.
+    if (backendBusy) return { color: "destructive", message: uploadBlockedMessage ?? "Hay un proceso de generación en curso en el servidor. Espera a que termine." };
     return { color: "success", message: "Todas las condiciones cumplidas. Puedes generar el mapa unificado." };
-  }, [items.length, hasInvalid, invalidCount, enoughImages, validCount, phase, errorMsg]);
+  }, [items.length, hasInvalid, invalidCount, enoughImages, validCount, phase, errorMsg, uploadDone, uploadBlockedMessage, backendBusy]);
 
   // ---------------------------------------------------------------------------
   // RENDER
   // ---------------------------------------------------------------------------
   return (
-    <div className="min-h-screen bg-background text-foreground gis-gradient-bg">
-      <AppNavbar />
-      <main className="mx-auto max-w-[1400px] px-4 py-4 sm:px-6 sm:py-6 space-y-4">
+    <div className="min-h-screen bg-background text-foreground">
+      <main className="w-full px-4 py-4 sm:px-6 sm:py-6 space-y-5">
 
-        {/* Título de página */}
+        {/* Título de página — sin botón de volver, la navegación ya vive en
+            el sidebar persistente (mismo criterio que analysis.tsx). */}
         <div>
-          <h2 className="font-SpaceGrotesk text-3xl font-bold tracking-tight text-foreground md:text-4xl">
-            Unificación de imágenes aéreas
+          <h2 className="font-rubik text-3xl font-semibold tracking-normal text-foreground md:text-4xl">
+            Carga de imágenes
           </h2>
-          <p className="mt-1.5 text-sm text-muted-foreground">
-            Carga imágenes JPG capturadas con drone para generar el mapa unificado de la zona.
-          </p>
         </div>
 
-        {/* ── FILA 1: Instrucciones ── */}
-        <section className="panel p-5">
+        {/* ── ETAPA 1: Instrucciones — tarjeta propia, GuideStep en modo
+            compacto (prop ya existía, sin usar) para no dominar la página
+            antes de llegar a lo importante. ── */}
+        <section className="rounded-xl border border-border bg-card p-5 animate-in fade-in slide-in-from-top-2 duration-500 fill-mode-both">
           <PanelHeader icon={<Info className="h-3.5 w-3.5" />} title="Instrucciones" />
           <ol className="mt-4 grid gap-3 sm:grid-cols-2 md:grid-cols-4">
-            <GuideStep number="1" title="Selecciona la zona" text="Usa imágenes tomadas en un mismo sector para que el mapa final sea coherente y continuo." />
-            <GuideStep number="2" title="Carga archivos JPG" text="Arrastra las fotografías o selecciónalas desde tu equipo. Solo se aceptan archivos JPG o JPEG." />
-            <GuideStep number="3" title="Verifica el requisito" text={`Se necesitan al menos ${MIN_IMAGES} imágenes JPG válidas para procesar.`} />
-            <GuideStep number="4" title="Genera el mapa" text="Cuando todo esté aprobado, presiona el botón para obtener el mapa unificado." />
+            <GuideStep compact number="1" title="Selecciona la zona" text="Usa imágenes tomadas en un mismo sector para que el mapa final sea coherente y continuo." />
+            <GuideStep compact number="2" title="Carga archivos JPG" text="Arrastra las fotografías o selecciónalas desde tu equipo. Solo se aceptan archivos JPG o JPEG." />
+            <GuideStep compact number="3" title="Verifica el requisito" text={`Se necesitan al menos ${MIN_IMAGES} imágenes JPG válidas para procesar.`} />
+            <GuideStep compact number="4" title="Genera el mapa" text="Cuando todo esté aprobado, presiona el botón para obtener el mapa unificado." />
           </ol>
         </section>
 
-        {/* ── FILA 2: Carga | Imágenes ── */}
-        <div className="grid gap-4 md:grid-cols-[2fr_3fr]">
+        {/* ── ETAPA 2: Carga | Imágenes + botón CTA — una sola tarjeta, el
+            botón queda adentro en vez de flotar solo entre dos secciones
+            sin relación. ── */}
+        <section className="rounded-xl border border-border bg-card p-5 animate-in fade-in slide-in-from-top-2 duration-500 delay-100 fill-mode-both">
+        <div className="grid gap-6 md:grid-cols-[2fr_3fr] md:divide-x md:divide-border/25">
 
           {/* Zona de carga */}
-          <section className="panel p-5 flex flex-col gap-4 h-[460px]">
+          <section className="flex h-[460px] flex-col gap-4 md:pr-6">
             <PanelHeader icon={<Upload className="h-3.5 w-3.5" />} title="Carga de imágenes" />
             <button
               type="button"
-              onClick={() => !uploading && inputRef.current?.click()}
-              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onClick={() => !uploading && !processing && inputRef.current?.click()}
+              onDragOver={(e) => { e.preventDefault(); if (!processing) setDragOver(true); }}
               onDragLeave={() => setDragOver(false)}
               onDrop={onDrop}
+              disabled={processing}
               className={`upload-zone group relative flex w-full flex-col items-center justify-center rounded-lg border border-dashed px-6 py-10 text-center transition-all duration-300 flex-1 overflow-hidden ${
+                processing ? "cursor-not-allowed opacity-50" :
                 dragOver ? "border-primary bg-primary/10 scale-[1.01]" : "border-border/60 bg-background/30 hover:border-primary/50 hover:bg-primary/5"
               }`}
             >
               <div className="upload-icon flex h-14 w-14 items-center justify-center rounded-xl bg-primary/15 text-primary ring-1 ring-primary/30">
                 <Upload className="h-7 w-7" />
               </div>
-              <p className="mt-4 text-sm font-semibold">Arrastra imágenes JPG aquí</p>
-              <p className="mt-1 text-xs text-muted-foreground">o haz clic para seleccionar desde tu equipo</p>
+              <p className="mt-4 text-sm font-semibold">
+                {processing ? "Proceso en curso — no se pueden agregar imágenes" : "Arrastra imágenes JPG aquí"}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {processing ? "Espera a que termine o cancélalo para poder modificar el set." : "o haz clic para seleccionar desde tu equipo"}
+              </p>
               <p className="mt-3 text-[10px] text-muted-foreground/60">Solo JPG · JPEG · Mínimo {MIN_IMAGES} imágenes</p>
               <input ref={inputRef} type="file" accept="image/jpeg,.jpg,.jpeg" multiple className="hidden"
-                disabled={uploading}
+                disabled={uploading || processing}
                 onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }}
               />
             </button>
           </section>
 
           {/* Grid de imágenes */}
-          <section className="panel p-5 flex flex-col gap-3 h-[460px] relative overflow-hidden">
+          <section className="relative flex h-[460px] flex-col gap-3 overflow-hidden md:pl-6">
 
-            {/* Overlay de carga — cubre toda la card independientemente del scroll */}
+            {/* Overlay de carga — cubre todo el bloque independientemente del scroll */}
             {uploading && (
               <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-xl bg-background/85 backdrop-blur-sm">
                 <div className="scan-line relative h-20 w-20 overflow-hidden rounded-md border border-primary/40 bg-primary/10">
@@ -848,7 +1034,7 @@ function Page() {
               </PanelHeader>
               <div className="flex items-center gap-2">
                 {skippedCount > 0 && (
-                  <p className="text-[10px] rounded px-2 py-0.5 bg-warning/15 text-yellow-400 border border-warning/20">
+                  <p className="text-[10px] rounded px-2 py-0.5 bg-warning/15 text-warning border border-warning/20">
                     {skippedCount} omitido(s) — nombre duplicado
                   </p>
                 )}
@@ -872,12 +1058,12 @@ function Page() {
                 <ul className="grid grid-cols-3 gap-2 pb-1 pr-1 will-change-scroll">
                   {items.map((it) => (
                     <li key={it.id}
-                      className={`overflow-hidden rounded-lg border bg-background/40 transform-gpu ${
+                      className={`animate-in fade-in zoom-in-95 duration-200 fill-mode-both overflow-hidden rounded-lg border bg-background/40 transform-gpu ${
                         it.status === "invalid" ? "border-destructive/40" : "border-border/60"
                       }`}
                     >
                       <div className="relative h-28 w-full overflow-hidden bg-muted">
-                        {it.preview.startsWith("data:") ? (
+                        {it.preview.startsWith("data:") || it.preview.startsWith("http") ? (
                           <img src={it.preview} alt={it.file.name} className="h-full w-full object-cover" decoding="async" />
                         ) : (
                           <div className="flex h-full w-full items-center justify-center">
@@ -904,20 +1090,39 @@ function Page() {
           </section>
         </div>
 
-        {/* ── FILA 3: Botón + tooltip ── */}
-        <div className="flex items-center justify-center gap-3">
-          <Button onClick={generate} disabled={!canGenerate} className="w-full max-w-sm btn-cta" size="lg">
-            {processing ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generando...</>)
-            : phase === "done" || phase === "error" ? (<><RotateCcw className="mr-2 h-4 w-4" /> Reprocesar mapa</>)
-            : (<><MapIcon className="mr-2 h-4 w-4" /> Generar mapa unificado</>)}
-          </Button>
+        {/* Botón + tooltip — dentro de la misma tarjeta que Carga/Imágenes,
+            se lee como el paso que cierra esta etapa. */}
+        <div className="mt-6 flex items-center justify-center gap-3 border-t border-border/25 pt-5">
+          {processing ? (
+            <Button
+              onClick={handleCancel}
+              disabled={cancelling}
+              variant="destructive"
+              className="w-full max-w-sm"
+              size="lg"
+            >
+              {cancelling
+                ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Cancelando...</>)
+                : (<><XCircle className="mr-2 h-4 w-4" /> Cancelar generación del mapa unificado</>)}
+            </Button>
+          ) : (
+            <Button onClick={generate} disabled={!canGenerate} className="w-full max-w-sm btn-cta" size="lg">
+              {phase === "done" || phase === "error"
+                ? (<><RotateCcw className="mr-2 h-4 w-4" /> Reprocesar mapa</>)
+                : (<><MapIcon className="mr-2 h-4 w-4" /> Generar mapa unificado</>)}
+            </Button>
+          )}
 
           <div className="group relative flex-shrink-0">
+            {/* "empty" usa --secondary/--secondary-foreground (mismo tono
+                cálido que el resto de la paleta) — bg-foreground/text-
+                background quedaba como un chip casi negro que no combinaba
+                con el resto del tema. */}
             <div className={`flex h-9 w-9 items-center justify-center rounded-full cursor-help transition-colors ${
-              tooltipState.color === "empty" ? "bg-[#1c2219] text-[#ede8df] hover:bg-[#1c2219]/90"
+              tooltipState.color === "empty" ? "bg-secondary text-secondary-foreground hover:bg-secondary/80"
               : tooltipState.color === "warning" ? "bg-warning text-warning-foreground hover:bg-warning/90"
               : tooltipState.color === "destructive" ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              : "bg-success text-black hover:bg-success/90"
+              : "bg-success text-success-foreground hover:bg-success/90"
             }`}>
               <AlertTriangle className="h-4 w-4" />
             </div>
@@ -926,13 +1131,13 @@ function Page() {
               : "scale-95 opacity-0 group-hover:scale-100 group-hover:opacity-100 pointer-events-none"
             } z-50`}>
               <div className={`relative rounded-md p-2.5 text-[11px] font-medium shadow-xl ${
-                tooltipState.color === "empty" ? "bg-[#1c2219] text-[#ede8df]"
+                tooltipState.color === "empty" ? "bg-secondary text-secondary-foreground"
                 : tooltipState.color === "warning" ? "bg-warning text-warning-foreground"
                 : tooltipState.color === "destructive" ? "bg-destructive text-destructive-foreground"
-                : "bg-success text-black"
+                : "bg-success text-success-foreground"
               }`}>
                 <div className={`absolute right-full top-1/2 -mt-[6px] border-[6px] border-transparent ${
-                  tooltipState.color === "empty" ? "border-r-[#1c2219]"
+                  tooltipState.color === "empty" ? "border-r-secondary"
                   : tooltipState.color === "warning" ? "border-r-warning"
                   : tooltipState.color === "destructive" ? "border-r-destructive"
                   : "border-r-success"
@@ -942,18 +1147,20 @@ function Page() {
             </div>
           </div>
         </div>
+        </section>
 
-        {/* ── FILA 4: Revisión técnica | Mapa ── */}
-        <div className="grid gap-4 md:grid-cols-[1fr_1.6fr]">
+        {/* ── ETAPA 3: Revisión técnica | Mapa unificado ── */}
+        <section className="rounded-xl border border-border bg-card p-5 animate-in fade-in slide-in-from-top-2 duration-500 delay-200 fill-mode-both">
+        <div className="grid gap-6 md:grid-cols-[1fr_1.6fr] md:divide-x md:divide-border/25">
 
           {/* Revisión técnica */}
-          <section className="panel flex flex-col">
-            <div className="flex-shrink-0 px-5 pt-5 pb-4">
+          <section className="flex flex-col md:pr-6">
+            <div className="flex-shrink-0 pb-4">
               <PanelHeader icon={<ListChecks className="h-3.5 w-3.5" />} title="Revisión técnica" />
             </div>
 
-            {/* Contenido scrollable — no desplaza la card del mapa */}
-            <div className="flex-1 overflow-y-auto px-5 pb-5 space-y-4 min-h-0">
+            {/* Contenido scrollable — no desplaza el bloque del mapa */}
+            <div className="flex-1 overflow-y-auto space-y-4 min-h-0">
 
               <div className="divide-y divide-border/60 rounded-lg border border-border/40 bg-background/20 overflow-hidden">
                 <CheckRow label="Formato JPG" state={formatState}
@@ -1004,7 +1211,7 @@ function Page() {
                 <p className="text-xs font-semibold text-muted-foreground">Estado del proceso</p>
                 <div className="flex items-center gap-2">
                   <Clock className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
-                  <p className="text-xs text-foreground font-medium">{getPhaseLabel(phase, backendStage)}</p>
+                  <p className="text-xs text-foreground font-medium">{getPhaseLabel(phase, backendStage, cancelling)}</p>
                 </div>
                 <Progress value={progress} className="h-1" />
                 <p className="text-[10px] text-muted-foreground">{progress}% completado</p>
@@ -1028,8 +1235,8 @@ function Page() {
           </section>
 
           {/* Mapa unificado */}
-          <section className="panel overflow-hidden flex flex-col">
-            <div className="flex items-center justify-between border-b border-border/30 px-4 py-3">
+          <section className="flex flex-col overflow-hidden md:pl-6">
+            <div className="flex items-center justify-between border-b border-border/25 pb-3">
               <div className="flex items-center gap-2.5 border-l-2 border-primary/50 pl-3">
                 <Layers className="h-4 w-4 text-primary/75" />
                 <span className="text-sm font-semibold">Mapa unificado</span>
@@ -1099,8 +1306,8 @@ function Page() {
                   </button>
                   {noWasteDetected && (
                     <div className="absolute bottom-0 left-0 right-0 z-10 flex items-start gap-3 bg-warning/90 backdrop-blur-sm px-4 py-2.5">
-                      <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-black" />
-                      <p className="text-xs font-medium leading-relaxed text-black">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-warning-foreground" />
+                      <p className="text-xs font-medium leading-relaxed text-warning-foreground">
                         No se detectó basura en el área procesada. El mapa está disponible para inspección visual.
                       </p>
                     </div>
@@ -1111,7 +1318,7 @@ function Page() {
                   <div className="scan-line relative h-24 w-24 overflow-hidden rounded-md border border-primary/40 bg-primary/10">
                     <Loader2 className="absolute left-1/2 top-1/2 h-8 w-8 -translate-x-1/2 -translate-y-1/2 animate-spin text-primary" />
                   </div>
-                  <p className="mono text-[11px] uppercase tracking-wider text-primary">{getPhaseLabel(phase, backendStage)}</p>
+                  <p className="mono text-[11px] uppercase tracking-wider text-primary">{getPhaseLabel(phase, backendStage, cancelling)}</p>
                   <div className="w-64"><Progress value={progress} className="h-1" /></div>
                 </div>
               ) : phase === "error" ? (
@@ -1146,6 +1353,7 @@ function Page() {
             )}
           </section>
         </div>
+        </section>
 
       </main>
     </div>

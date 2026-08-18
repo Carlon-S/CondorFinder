@@ -1,0 +1,9 @@
+import { cva } from "class-variance-authority";
+
+// Separado de navigation-menu.tsx: exportar una constante junto a los
+// componentes de ese archivo rompía el contrato de Fast Refresh de Vite
+// (forzaba un full reload del programa entero en cada cambio, en vez de
+// un hot-patch).
+export const navigationMenuTriggerStyle = cva(
+  "group inline-flex h-9 w-max items-center justify-center rounded-md bg-background px-4 py-2 text-sm font-medium cursor-pointer transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none disabled:pointer-events-none disabled:opacity-50 disabled:cursor-not-allowed data-[state=open]:text-accent-foreground data-[state=open]:bg-accent/50 data-[state=open]:hover:bg-accent data-[state=open]:focus:bg-accent",
+);

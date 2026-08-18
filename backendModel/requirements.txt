@@ -55,3 +55,8 @@ exif
 geopy
 rasterstats
 geopandas
+pymongo>=4.13
+PyJWT
+pwdlib[argon2]
+python-dotenv
+google-cloud-storage

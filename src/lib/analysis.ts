@@ -3,7 +3,8 @@
 // Archivo: src/lib/analysis.ts
 // =============================================================================
 
-const BACKEND_URL = "http://localhost:8000";
+import { BACKEND_URL } from "./config";
+
 const POLLING_INTERVAL_MS = 3000;
 
 export interface EnrichedDetection {
@@ -12,6 +13,11 @@ export interface EnrichedDetection {
   confidence: number;
   bbox: { minx: number; miny: number; maxx: number; maxy: number };
   polygon: null | number[][];
+  // Coordenadas reales (en el CRS proyectado del ortomosaico, ver `crs` en
+  // AnalyzeSuccess) — volumeCalc.py ya las calcula (backendModel/detecting/
+  // volumeCalc.py:104) a partir del geotransform del .tif, HDU5 las usa para
+  // ubicar el polígono en un mapa real.
+  geo_polygon?: number[][] | null;
   area_m2?: number | null;
   volume_m3?: number | null;
   weight_kg?: number | null;
@@ -30,6 +36,15 @@ export interface AnalyzeSuccess {
   status: "success";
   detections: EnrichedDetection[];
   summary: AnalyzeSummary;
+  // CRS proyectado del ortomosaico (ej. "EPSG:32719") — mismo para todas las
+  // detecciones de un análisis, ver src/lib/projection.ts para reproyectarlo.
+  crs: string;
+  // Centro geográfico real del ortomosaico completo (mismo CRS que `crs`),
+  // calculado por volumeCalc.py a partir de la extensión real del mapa —
+  // no de las detecciones. HDU5/rutas.tsx lo usa para ubicar la zona en el
+  // mapa de forma consistente entre corridas de análisis del mismo set de
+  // fotos, aunque encuentren detecciones distintas entre sí.
+  orthoCenter: [number, number] | null;
 }
 
 export interface AnalyzeEmpty {
@@ -94,10 +109,12 @@ export async function pollVolumeAnalysis(
       return {
         status: "success",
         detections,
+        crs: jsonData.crs ?? "",
+        orthoCenter: jsonData.ortho_center ?? null,
         summary: {
           totalVolumeM3: Math.round(totalVolumeM3 * 100) / 100,
           totalWeightKg: Math.round(totalWeightKg),
-          totalAreaM2:   Math.round(totalAreaM2 * 100) / 100,
+          totalAreaM2: Math.round(totalAreaM2 * 100) / 100,
           detectionCount: detections.length,
         },
       };

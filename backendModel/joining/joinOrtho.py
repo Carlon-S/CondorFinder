@@ -4,6 +4,11 @@ import sys
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+
+class TaskCancelledError(Exception):
+    """Se lanza cuando la tarea de ODM fue cancelada (status CANCELED)."""
+    pass
+
 presetfast = {
         'orthophoto-resolution': 8,
         'fast-orthophoto': False,
@@ -23,7 +28,7 @@ presethigh = {
         'pc-quality': 'medium'
     }
 
-def join(opc: int) -> str:
+def join(opc: int, on_task_created=None) -> str:
 
     output_dir = os.path.join(BASE_DIR, "output")
     os.makedirs(output_dir, exist_ok=True)
@@ -45,7 +50,9 @@ def join(opc: int) -> str:
         print("Preset Calidad", file=sys.stderr)
         setting = presethigh
 
-    node = Node('localhost', 3000)
+    # NODEODM_HOST: "localhost" en WSL local (NodeODM en la misma máquina),
+    # "nodeodm" en docker-compose (contenedor sibling, ver orquestador.py).
+    node = Node(os.environ.get("NODEODM_HOST", "localhost"), 3000)
 
     image_folder = os.path.join(BASE_DIR, "images")
 
@@ -66,13 +73,40 @@ def join(opc: int) -> str:
 
     print(f"Tarea juntado creada: {task.uuid}", file=sys.stderr)
 
-    task.wait_for_completion(interval=10)
+    # Le pasa la tarea de ODM a quien llamó (orquestador.py) ANTES de bloquear
+    # en wait_for_completion, para que /cancel/{task_id} pueda pedirle a ODM
+    # que la cancele de verdad mientras sigue corriendo — no solo dejar de
+    # avanzar a la siguiente fase.
+    if on_task_created:
+        on_task_created(task)
 
-    if task.info().status.name == "COMPLETED":
+    try:
+        task.wait_for_completion(interval=10)
+    except Exception as wait_err:
+        # pyodm lanza su propia excepción cuando la tarea no termina en
+        # COMPLETED (incluyendo cuando se cancela) — antes de asumir que es
+        # un error real, hay que revisar si en realidad fue una cancelación.
+        try:
+            status_name = task.info().status.name
+        except Exception:
+            raise wait_err
+        if status_name == "CANCELED":
+            print("Juntado cancelado por el usuario", file=sys.stderr)
+            raise TaskCancelledError("Unificación cancelada por el usuario")
+        raise wait_err
+
+    status_name = task.info().status.name
+    if status_name == "COMPLETED":
         print("Juntado completado!", file=sys.stderr)
+    elif status_name == "CANCELED":
+        print("Juntado cancelado por el usuario", file=sys.stderr)
+        raise TaskCancelledError("Unificación cancelada por el usuario")
     else:
-        print(f"Juntado fallado con error: {task.info().status.name}", file=sys.stderr)
-        exit()
+        # Antes esto llamaba a exit(), que en un hilo secundario solo termina
+        # el hilo sin avisar — la tarea quedaba "joining" para siempre en el
+        # frontend. Ahora se propaga como excepción real para que
+        # run_pipeline la capture y marque la tarea como error.
+        raise Exception(f"ODM falló con estado: {status_name}")
 
 
     final_dir = os.path.join(BASE_DIR, "finals")

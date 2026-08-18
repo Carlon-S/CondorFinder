@@ -7,10 +7,11 @@
    FUENTES
    - Shrikhand:     logotipo
    - Space Grotesk: títulos de página y display
+   - Rubik:         título de la Vista Principal ("Zonas monitoreadas")
    - Sora:          cuerpo — humanista geométrica, menos corporativa que Montserrat
    - JetBrains Mono: etiquetas técnicas y datos
    ============================================================================= */
-@import url("https://fonts.googleapis.com/css2?family=Shrikhand&family=Space+Grotesk:wght@400;500;600;700&family=Sora:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Shrikhand&family=Space+Grotesk:wght@400;500;600;700&family=Rubik:wght@500;600;700;800&family=Sora:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap");
 
 
 /* =============================================================================
@@ -79,175 +80,73 @@
 
   --font-shrikhand:     "Shrikhand", cursive;
   --font-SpaceGrotesk:  "Space Grotesk", sans-serif;
+  --font-rubik:         "Rubik", sans-serif;
   --font-sora:          "Sora", sans-serif;
   --font-JetBrainsMono: "JetBrains Mono", monospace;
+
+  /* Tailwind v4 genera las utilidades animate-accordion-down/up a partir de
+     estos --animate-*, igual que --color-*/--font-* generan sus propias
+     utilidades más arriba — accordion.tsx (shadcn) ya referencia esas
+     clases, pero el proyecto usa config en CSS (no tailwind.config.js), así
+     que sin esto no existían y el accordion abría/cerraba de golpe. */
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+}
+
+@keyframes accordion-down {
+  from { height: 0; }
+  to   { height: var(--radix-accordion-content-height); }
+}
+@keyframes accordion-up {
+  from { height: var(--radix-accordion-content-height); }
+  to   { height: 0; }
 }
 
 
 /* =============================================================================
-   TEMA VERDE TIERRA (default / :root)
+   TEMA — NEGRO CLÁSICO (único tema de la aplicación)
    ============================================================================= */
 :root {
   --radius: 0.625rem;
   --grid-color: oklch(0.6 0.04 90 / 0.04);
 
-  --background:         #0b0d0a;
-  --foreground:         #ede8df;
-  --card:               #1c2219;
-  --card-foreground:    #ede8df;
-  --popover:            #1c2219;
-  --popover-foreground: #ede8df;
-  --primary:            #d4a843;
-  --primary-foreground: #0b0d0a;
-  --secondary:          #1c2219;
-  --secondary-foreground: #ede8df;
-  --muted:              #1c2219;
-  --muted-foreground:   #6b7d6e;
-  --accent:             #d4a843;
-  --accent-foreground:  #0b0d0a;
-  --destructive:        #b84040;
-  --destructive-foreground: #ede8df;
-  --border:             #252c22;
-  --input:              #252c22;
-  --ring:               #d4a843;
-  --warning:            #cc8a2a;
-  --warning-foreground: #0b0d0a;
-  --success:            #3d7a50;
-  --success-foreground: #ede8df;
-  --chart-1: #d4a843; --chart-2: #3d7a50; --chart-3: #cc8a2a;
-  --chart-4: #b84040; --chart-5: #6b7d6e;
-  --sidebar: #0f1210; --sidebar-foreground: #ede8df;
-  --sidebar-primary: #d4a843; --sidebar-primary-foreground: #0b0d0a;
-  --sidebar-accent: #1c2219; --sidebar-accent-foreground: #ede8df;
-  --sidebar-border: #252c22; --sidebar-ring: #d4a843;
-
-  --navbar:         #0f1210;
-  --scan-color:     rgba(212, 168, 67, 0.42);
-  --primary-glow:   rgba(212, 168, 67, 0.5);
-  --primary-glow-2: rgba(212, 168, 67, 0.25);
-}
-
-
-/* =============================================================================
-   TEMA NEGRO CLÁSICO
-   ============================================================================= */
-html[data-theme="negro"] {
-  --background:         #151414;
-  --foreground:         #ffffff;
-  --card:               #252525;
-  --card-foreground:    #ffffff;
-  --popover:            #252525;
-  --popover-foreground: #ffffff;
-  --primary:            #22d3ee;
-  --primary-foreground: #151414;
-  --secondary:          #2a2a2a;
-  --secondary-foreground: #ffffff;
-  --muted:              #2a2a2a;
-  --muted-foreground:   #9ca3af;
-  --accent:             #22d3ee;
-  --accent-foreground:  #151414;
+  --background:         #FBF8F6;
+  --foreground:         #221614;
+  --card:               #FFFFFF;
+  --card-foreground:    #221614;
+  --popover:            #FFFFFF;
+  --popover-foreground: #221614;
+  --primary:            #E10002;
+  --primary-foreground: #ffffff;
+  --secondary:          #F1EAE8;
+  --secondary-foreground: #221614;
+  --muted:              #F1EAE8;
+  --muted-foreground:   #78716C;
+  --accent:             #E10002;
+  --accent-foreground:  #ffffff;
   --destructive:        #ef4444;
   --destructive-foreground: #ffffff;
-  --border:             #333333;
-  --input:              #333333;
-  --ring:               #22d3ee;
+  --border:             #E8DFDC;
+  --input:              #E8DFDC;
+  --ring:               #E10002;
   --warning:            #fbbf24;
   --warning-foreground: #151414;
   --success:            #34d399;
   --success-foreground: #151414;
-  --chart-1: #22d3ee; --chart-2: #34d399; --chart-3: #fbbf24;
-  --chart-4: #ef4444; --chart-5: #9ca3af;
-  --sidebar: #0f1a24; --sidebar-foreground: #ffffff;
-  --sidebar-primary: #22d3ee; --sidebar-primary-foreground: #151414;
-  --sidebar-accent: #2a2a2a; --sidebar-accent-foreground: #ffffff;
-  --sidebar-border: #333333; --sidebar-ring: #22d3ee;
+  --chart-1: #E10002; --chart-2: #34d399; --chart-3: #fbbf24;
+  --chart-4: #ef4444; --chart-5: #a8a29e;
+  /* Sidebar en gris claro neutro (no la familia cálida del resto de la
+     paleta) — separa visualmente el rail de navegación del contenido. El
+     logo (Logo Light Mode.svg, wordmark blanco) va sobre su propia placa
+     oscura en AppSidebar.tsx, no directo sobre este gris. */
+  --sidebar: #E9E9E9; --sidebar-foreground: #221614;
+  --sidebar-primary: #E10002; --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #DCDCDC; --sidebar-accent-foreground: #221614;
+  --sidebar-border: #D6D6D6; --sidebar-ring: #E10002;
 
-  --navbar:         #0f1a24;
-  --scan-color:     rgba(34, 211, 238, 0.35);
-  --primary-glow:   rgba(34, 211, 238, 0.5);
-  --primary-glow-2: rgba(34, 211, 238, 0.25);
-}
-
-
-/* =============================================================================
-   TEMA AZUL OSCURO
-   ============================================================================= */
-html[data-theme="azul"] {
-  --background:         #090d1a;
-  --foreground:         #e2e8f4;
-  --card:               #121a30;
-  --card-foreground:    #e2e8f4;
-  --popover:            #121a30;
-  --popover-foreground: #e2e8f4;
-  --primary:            #60a5fa;
-  --primary-foreground: #090d1a;
-  --secondary:          #172038;
-  --secondary-foreground: #e2e8f4;
-  --muted:              #172038;
-  --muted-foreground:   #6b7fa3;
-  --accent:             #60a5fa;
-  --accent-foreground:  #090d1a;
-  --destructive:        #f87171;
-  --destructive-foreground: #090d1a;
-  --border:             #1e2d4a;
-  --input:              #1e2d4a;
-  --ring:               #60a5fa;
-  --warning:            #fbbf24;
-  --warning-foreground: #090d1a;
-  --success:            #34d399;
-  --success-foreground: #090d1a;
-  --chart-1: #60a5fa; --chart-2: #34d399; --chart-3: #fbbf24;
-  --chart-4: #f87171; --chart-5: #6b7fa3;
-  --sidebar: #0b1121; --sidebar-foreground: #e2e8f4;
-  --sidebar-primary: #60a5fa; --sidebar-primary-foreground: #090d1a;
-  --sidebar-accent: #172038; --sidebar-accent-foreground: #e2e8f4;
-  --sidebar-border: #1e2d4a; --sidebar-ring: #60a5fa;
-
-  --navbar:         #0b1121;
-  --scan-color:     rgba(96, 165, 250, 0.4);
-  --primary-glow:   rgba(96, 165, 250, 0.5);
-  --primary-glow-2: rgba(96, 165, 250, 0.25);
-}
-
-
-/* =============================================================================
-   TEMA MODO CLARO
-   ============================================================================= */
-html[data-theme="claro"] {
-  --background:         #f7f4ee;
-  --foreground:         #1a1a16;
-  --card:               #ffffff;
-  --card-foreground:    #1a1a16;
-  --popover:            #ffffff;
-  --popover-foreground: #1a1a16;
-  --primary:            #b8873a;
-  --primary-foreground: #ffffff;
-  --secondary:          #e8e4da;
-  --secondary-foreground: #1a1a16;
-  --muted:              #e8e4da;
-  --muted-foreground:   #6b6656;
-  --accent:             #b8873a;
-  --accent-foreground:  #ffffff;
-  --destructive:        #c0392b;
-  --destructive-foreground: #ffffff;
-  --border:             #d4cfc4;
-  --input:              #d4cfc4;
-  --ring:               #b8873a;
-  --warning:            #d97706;
-  --warning-foreground: #ffffff;
-  --success:            #2d6e42;
-  --success-foreground: #ffffff;
-  --chart-1: #b8873a; --chart-2: #2d6e42; --chart-3: #d97706;
-  --chart-4: #c0392b; --chart-5: #6b6656;
-  --sidebar: #ece8e0; --sidebar-foreground: #1a1a16;
-  --sidebar-primary: #b8873a; --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #e8e4da; --sidebar-accent-foreground: #1a1a16;
-  --sidebar-border: #d4cfc4; --sidebar-ring: #b8873a;
-
-  --navbar:         #ece8e0;
-  --scan-color:     rgba(184, 135, 58, 0.3);
-  --primary-glow:   rgba(184, 135, 58, 0.5);
-  --primary-glow-2: rgba(184, 135, 58, 0.25);
+  --scan-color:     rgba(225, 0, 2, 0.35);
+  --primary-glow:   rgba(225, 0, 2, 0.5);
+  --primary-glow-2: rgba(225, 0, 2, 0.25);
 }
 
 
@@ -265,43 +164,6 @@ html[data-theme="claro"] {
 
 
 /* =============================================================================
-   CLASE: .gis-gradient-bg
-   Patrón de curvas de nivel topográficas adaptado a cada tema.
-   ============================================================================= */
-.gis-gradient-bg {
-  background-image:
-    url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='800' height='800'><ellipse cx='400' cy='400' rx='385' ry='268' fill='none' stroke='%23d4a843' stroke-opacity='0.05' stroke-width='1.5'/><ellipse cx='400' cy='400' rx='325' ry='225' fill='none' stroke='%23d4a843' stroke-opacity='0.045' stroke-width='1'/><ellipse cx='400' cy='400' rx='265' ry='183' fill='none' stroke='%23d4a843' stroke-opacity='0.04' stroke-width='1'/><ellipse cx='400' cy='400' rx='205' ry='141' fill='none' stroke='%23d4a843' stroke-opacity='0.035' stroke-width='1'/><ellipse cx='400' cy='400' rx='145' ry='99' fill='none' stroke='%23d4a843' stroke-opacity='0.03' stroke-width='1'/><ellipse cx='400' cy='400' rx='85' ry='58' fill='none' stroke='%23d4a843' stroke-opacity='0.025' stroke-width='1'/><ellipse cx='400' cy='400' rx='35' ry='24' fill='none' stroke='%23d4a843' stroke-opacity='0.02' stroke-width='1'/></svg>"),
-    linear-gradient(135deg, #080a07 0%, #0b0f0a 35%, #0e1209 65%, #080a07 100%);
-  background-size: 800px 800px, cover;
-  background-attachment: fixed, fixed;
-}
-
-html[data-theme="negro"] .gis-gradient-bg {
-  background-image:
-    url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='800' height='800'><ellipse cx='400' cy='400' rx='385' ry='268' fill='none' stroke='%2322d3ee' stroke-opacity='0.04' stroke-width='1.5'/><ellipse cx='400' cy='400' rx='325' ry='225' fill='none' stroke='%2322d3ee' stroke-opacity='0.035' stroke-width='1'/><ellipse cx='400' cy='400' rx='265' ry='183' fill='none' stroke='%2322d3ee' stroke-opacity='0.03' stroke-width='1'/><ellipse cx='400' cy='400' rx='205' ry='141' fill='none' stroke='%2322d3ee' stroke-opacity='0.025' stroke-width='1'/><ellipse cx='400' cy='400' rx='145' ry='99' fill='none' stroke='%2322d3ee' stroke-opacity='0.02' stroke-width='1'/><ellipse cx='400' cy='400' rx='85' ry='58' fill='none' stroke='%2322d3ee' stroke-opacity='0.015' stroke-width='1'/><ellipse cx='400' cy='400' rx='35' ry='24' fill='none' stroke='%2322d3ee' stroke-opacity='0.01' stroke-width='1'/></svg>"),
-    linear-gradient(135deg, #0a0a0a 0%, #0f0f0f 35%, #141414 65%, #0a0a0a 100%);
-  background-size: 800px 800px, cover;
-  background-attachment: fixed, fixed;
-}
-
-html[data-theme="azul"] .gis-gradient-bg {
-  background-image:
-    url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='800' height='800'><ellipse cx='400' cy='400' rx='385' ry='268' fill='none' stroke='%2360a5fa' stroke-opacity='0.06' stroke-width='1.5'/><ellipse cx='400' cy='400' rx='325' ry='225' fill='none' stroke='%2360a5fa' stroke-opacity='0.05' stroke-width='1'/><ellipse cx='400' cy='400' rx='265' ry='183' fill='none' stroke='%2360a5fa' stroke-opacity='0.045' stroke-width='1'/><ellipse cx='400' cy='400' rx='205' ry='141' fill='none' stroke='%2360a5fa' stroke-opacity='0.04' stroke-width='1'/><ellipse cx='400' cy='400' rx='145' ry='99' fill='none' stroke='%2360a5fa' stroke-opacity='0.03' stroke-width='1'/><ellipse cx='400' cy='400' rx='85' ry='58' fill='none' stroke='%2360a5fa' stroke-opacity='0.025' stroke-width='1'/><ellipse cx='400' cy='400' rx='35' ry='24' fill='none' stroke='%2360a5fa' stroke-opacity='0.02' stroke-width='1'/></svg>"),
-    linear-gradient(135deg, #060810 0%, #090d1a 35%, #0b1020 65%, #060810 100%);
-  background-size: 800px 800px, cover;
-  background-attachment: fixed, fixed;
-}
-
-html[data-theme="claro"] .gis-gradient-bg {
-  background-image:
-    url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='800' height='800'><ellipse cx='400' cy='400' rx='385' ry='268' fill='none' stroke='%23b8873a' stroke-opacity='0.07' stroke-width='1.5'/><ellipse cx='400' cy='400' rx='325' ry='225' fill='none' stroke='%23b8873a' stroke-opacity='0.06' stroke-width='1'/><ellipse cx='400' cy='400' rx='265' ry='183' fill='none' stroke='%23b8873a' stroke-opacity='0.055' stroke-width='1'/><ellipse cx='400' cy='400' rx='205' ry='141' fill='none' stroke='%23b8873a' stroke-opacity='0.05' stroke-width='1'/><ellipse cx='400' cy='400' rx='145' ry='99' fill='none' stroke='%23b8873a' stroke-opacity='0.04' stroke-width='1'/><ellipse cx='400' cy='400' rx='85' ry='58' fill='none' stroke='%23b8873a' stroke-opacity='0.035' stroke-width='1'/><ellipse cx='400' cy='400' rx='35' ry='24' fill='none' stroke='%23b8873a' stroke-opacity='0.03' stroke-width='1'/></svg>"),
-    linear-gradient(135deg, #f0ece4 0%, #f5f1ea 35%, #f7f4ee 65%, #f0ece4 100%);
-  background-size: 800px 800px, cover;
-  background-attachment: fixed, fixed;
-}
-
-
-/* =============================================================================
    CLASE: .panel
    Card elegante con profundidad real: gradiente interno, borde biselado
    (borde superior más claro simula luz cenital) y sombras en tres capas.
@@ -311,31 +173,10 @@ html[data-theme="claro"] .gis-gradient-bg {
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
   box-shadow:
-    0 2px 4px rgba(0, 0, 0, 0.60),
-    0 8px 24px -4px rgba(0, 0, 0, 0.75),
-    0 28px 56px -12px rgba(0, 0, 0, 0.65);
+    0 1px 2px rgba(34, 22, 20, 0.04),
+    0 8px 16px -4px rgba(34, 22, 20, 0.08),
+    0 24px 48px -12px rgba(34, 22, 20, 0.10);
   transition: box-shadow 0.2s ease;
-}
-
-html[data-theme="negro"] .panel {
-  box-shadow:
-    0 2px 4px rgba(0, 0, 0, 0.70),
-    0 8px 24px -4px rgba(0, 0, 0, 0.80),
-    0 28px 56px -12px rgba(0, 0, 0, 0.70);
-}
-
-html[data-theme="azul"] .panel {
-  box-shadow:
-    0 2px 4px rgba(0, 0, 0, 0.65),
-    0 8px 24px -4px rgba(0, 0, 0, 0.78),
-    0 28px 56px -12px rgba(4, 6, 15, 0.80);
-}
-
-html[data-theme="claro"] .panel {
-  box-shadow:
-    0 2px 4px rgba(0, 0, 0, 0.18),
-    0 8px 24px -4px rgba(0, 0, 0, 0.22),
-    0 28px 56px -12px rgba(0, 0, 0, 0.16);
 }
 
 
@@ -491,4 +332,173 @@ html[data-theme="claro"] .panel {
 .dropdown-enter {
   transform-origin: top right;
   animation: dropdown-enter 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+
+/* =============================================================================
+   TOASTS (sonner) — animación horizontal + fix de altura
+   Por defecto sonner solo anima translateY (entra/sale vertical, sin importar
+   position="bottom-right") y, mientras el puntero está sobre el toast, fija
+   su altura a la medida original ([data-expanded=true]{height:var(--initial-
+   height)} — pensado para su propio hover-to-expand-stack, que aquí no usamos
+   porque visibleToasts={1}). Eso chocaba con nuestra descripción colapsable:
+   se recortaba al desplegar y solo recalculaba altura al sacar el mouse.
+   Se pisa con !important porque el <style> de sonner se inyecta en runtime y
+   no se puede garantizar que quede antes en el DOM.
+   ============================================================================= */
+[data-sonner-toast] {
+  height: auto !important;
+  --y: translateX(100%) !important;
+}
+[data-sonner-toast][data-mounted="true"] {
+  --y: translateX(0) !important;
+}
+[data-sonner-toast][data-removed="true"] {
+  --y: translateX(100%) !important;
+  opacity: 0 !important;
+}
+
+/* sonner trae su propio "@media (prefers-reduced-motion){[data-sonner-toast]
+   {transition:none!important}}" — respeta la preferencia de accesibilidad del
+   SO por defecto, pero aquí se pide explícitamente que el toast siempre
+   deslice, sin importar esa opción. Se restaura con un selector de mayor
+   especificidad (dos atributos vs. uno) para ganarle sin depender del orden
+   de inyección en el DOM, y sin envolverlo en ningún @media: aplica siempre. */
+[data-sonner-toast][data-mounted] {
+  transition:
+    transform 0.4s,
+    opacity 0.4s,
+    height 0.4s,
+    box-shadow 0.2s !important;
+}
+
+/* =============================================================================
+   GEOMAP: tooltip de puntos guardados (HDU6)
+   Leaflet trae su propio estilo de tooltip (fondo blanco liso, sombra
+   genérica) sin relación con la paleta del proyecto — no se puede pisar
+   solo con className de Tailwind porque .leaflet-tooltip ya define
+   background/border/box-shadow con su propia especificidad. direction="top"
+   en el <Tooltip> de GeoMap.tsx fija qué flecha hay que estilar acá
+   (::before de .leaflet-tooltip-top).
+   ============================================================================= */
+.leaflet-tooltip.condorfinder-map-tooltip {
+  background: var(--card);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-family: var(--font-sora), sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: 0 4px 12px rgba(34, 22, 20, 0.12);
+}
+.leaflet-tooltip.condorfinder-map-tooltip::before {
+  border-top-color: var(--card);
+}
+
+/* Variante con preview de imagen (HDU5) — al pasar el mouse sobre una zona
+   cargada, se ve el mapa unificado real en miniatura en vez de solo el
+   nombre. Mismo mecanismo de estilos que el tooltip de texto de arriba. */
+.leaflet-tooltip.condorfinder-map-tooltip-image {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px;
+  box-shadow: 0 4px 12px rgba(34, 22, 20, 0.12);
+}
+.leaflet-tooltip.condorfinder-map-tooltip-image::before {
+  border-top-color: var(--card);
+}
+/* La imagen llena TODO el cuadrado — el nombre/datos van superpuestos como
+   una franja al pie (degradado oscuro), no agregados debajo. Así el
+   tooltip completo mide 260x260 en vez de crecer en alto con el texto. */
+.condorfinder-map-tooltip-image .tooltip-image-wrap {
+  position: relative;
+  width: 260px;
+  height: 260px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.condorfinder-map-tooltip-image .tooltip-image-wrap img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+/* El PNG no cargó (404) — ej. la zona se eliminó desde otra pestaña/sesión
+   mientras seguía en memoria acá. Mismo tamaño que la imagen real. */
+.condorfinder-map-tooltip-image .tooltip-image-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 16px;
+  text-align: center;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-family: var(--font-sora), sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+}
+.condorfinder-map-tooltip-image .tooltip-detections-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.condorfinder-map-tooltip-image .tooltip-caption {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 8px 10px 7px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.78), rgba(0, 0, 0, 0));
+}
+.condorfinder-map-tooltip-image .tooltip-label {
+  font-family: var(--font-sora), sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  text-align: center;
+}
+.condorfinder-map-tooltip-image .tooltip-subtitle {
+  margin-top: 2px;
+  font-family: var(--font-sora), sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.85);
+  text-align: center;
+}
+
+/* =============================================================================
+   LOGIN: máscara de contraseña animable
+   Un <input type="password"> no puede animar su cambio a type="text" (salto
+   de atributo, sin transición CSS posible). -webkit-text-security hace que
+   el navegador enmascare el texto REAL carácter por carácter al dibujarlo
+   — a diferencia de una capa de puntos superpuesta aparte, esto garantiza
+   ancho proporcional exacto (es el mismo texto, mismo glyph, solo se
+   sustituye el dibujo) y que la selección nativa resalte los puntos, nunca
+   el texto real. Se aplica solo si el navegador la soporta (Chrome/Edge/
+   Safari; no Firefox) — login.tsx detecta el soporte en el cliente y usa
+   type="password" nativo sin animación como fallback seguro si no.
+   ============================================================================= */
+.password-mask {
+  -webkit-text-security: disc;
+}
+
+/* =============================================================================
+   ACCESIBILIDAD: prefers-reduced-motion
+   Desactiva las animaciones decorativas/continuas (scan, pulse, sweeps) sin
+   tocar transiciones de estado puntuales (hover, colapsar/expandir).
+   ============================================================================= */
+@media (prefers-reduced-motion: reduce) {
+  .scan-line::after,
+  .pulse-dot,
+  .btn-cta:not(:disabled):hover::after,
+  .upload-zone:hover .upload-icon,
+  .dropdown-enter {
+    animation: none;
+  }
 }

@@ -1,5 +1,12 @@
 # Claude Code agents
 .agents/
+CLAUDE.md
+
+# 21st CLI local state
+.21st/
+
+# Asset archive not needed in the repo (already unzipped under src/assets/Logo/)
+Logo.zip
 
 # Logs
 logs
@@ -35,6 +42,7 @@ dist-ssr
 *.sw?
 
 backendModel/.venv/
+backendModel/.env
 backendModel/training/
 backendModel/detecting/output/*
 backendModel/detecting/__pycache__

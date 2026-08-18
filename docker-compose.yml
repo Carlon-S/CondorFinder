@@ -1,0 +1,38 @@
+# Despliegue del backend en una VM compartida (ver
+# backendModel/Readme.md y CLAUDE.md para el resto del setup). Uso local
+# en WSL sigue siendo venv + `uvicorn` directo (README.MD) — esto es
+# específicamente para la VM.
+services:
+  nodeodm:
+    image: opendronemap/nodeodm
+    restart: unless-stopped
+    # Sin "ports": no se expone al host, solo alcanzable dentro de esta red
+    # de compose como http://nodeodm:3000 (ver NODEODM_HOST en backend).
+
+  backend:
+    build:
+      context: .
+      dockerfile: backendModel/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - backendModel/.env
+    environment:
+      - NODEODM_HOST=nodeodm
+    volumes:
+      # Bind mounts SOLO de los subdirectorios de datos (no del código/
+      # modelo, que deben venir de la imagen — montar los .py/.pt también
+      # los dejaría pisados por el disco del host y enmascararía un
+      # `--build` tras un `git pull`). Así un rebuild no borra tareas en
+      # curso ni snapshots. UPLOAD_DIR/FINALS_DIR/TASK_IMAGES_DIR/DSM/DTM se
+      # quedan en disco local a propósito (ver el plan de despliegue): solo
+      # detecting/output/ vive en GCS, porque es lo único que un análisis
+      # GUARDADO referencia para siempre.
+      - ./backendModel/joining/images:/app/backendModel/joining/images
+      - ./backendModel/joining/finals:/app/backendModel/joining/finals
+      - ./backendModel/joining/output:/app/backendModel/joining/output
+      - ./backendModel/joining/task_images:/app/backendModel/joining/task_images
+      - ./backendModel/detecting/output:/app/backendModel/detecting/output
+    depends_on:
+      - nodeodm

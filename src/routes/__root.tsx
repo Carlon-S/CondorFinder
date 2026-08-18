@@ -4,11 +4,19 @@ import {
   Link,
   createRootRouteWithContext,
   useRouter,
+  useRouterState,
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
 
 import appCss from "../styles.css?url";
+// Recorte del logo enfocado en el ave — el archivo original (Logo Dark
+// Mode.svg) tiene mucho margen vacío alrededor del isotipo + wordmark, así
+// que a tamaño de favicon (16-32px) se veía diminuto. Este archivo usa el
+// mismo path data, solo con un viewBox más ajustado.
+import favicon from "@/assets/Logo/favicon.svg";
+import { Toaster } from "@/components/ui/sonner";
+import { AppSidebar } from "@/components/AppSidebar";
 
 function NotFoundComponent() {
   return (
@@ -72,7 +80,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Lovable App" },
+      { title: "CondorFinder" },
       { name: "description", content: "Lovable Generated Project" },
       { name: "author", content: "Lovable" },
       { property: "og:title", content: "Lovable App" },
@@ -86,6 +94,11 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         rel: "stylesheet",
         href: appCss,
       },
+      {
+        rel: "icon",
+        type: "image/svg+xml",
+        href: favicon,
+      },
     ],
   }),
   shellComponent: RootShell,
@@ -96,15 +109,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootShell({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="es" data-theme="verde">
+    <html lang="es">
       <head>
         <HeadContent />
-        {/* Anti-flash: aplica el tema guardado antes del primer paint */}
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem('cf-theme');if(t)document.documentElement.setAttribute('data-theme',t);}catch(e){}})();`,
-          }}
-        />
       </head>
       <body>
         {children}
@@ -116,11 +123,27 @@ function RootShell({ children }: { children: React.ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  // /login es la única ruta fuera del guard de _authed.tsx — no tiene
+  // sentido mostrar la navegación de la app todavía si no hay sesión.
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const isLoginRoute = pathname === "/login";
 
   return (
     <QueryClientProvider client={queryClient}>
-      {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-      <Outlet />
+      {/* Sidebar de navegación persistente — reemplaza el navbar superior de
+          antes. Vive aquí (no por ruta) para no duplicarse en las 3 vistas. */}
+      <div className="flex min-h-screen">
+        {!isLoginRoute && <AppSidebar />}
+        {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
+        <div className="flex min-w-0 flex-1 flex-col">
+          <Outlet />
+        </div>
+      </div>
+      {/* richColors/closeButton eran props del toast nativo de sonner — ya no
+          aplican, ahora cada notify.* renderiza su propia tarjeta (ver
+          NotificationToast) vía toast.custom. --width fuerza un ancho único
+          para todos los toasts (el div interno ahora es w-full). */}
+      <Toaster position="bottom-right" style={{ "--width": "360px" } as React.CSSProperties} visibleToasts={1} />
     </QueryClientProvider>
   );
 }
