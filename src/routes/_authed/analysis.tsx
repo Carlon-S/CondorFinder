@@ -323,6 +323,11 @@ function AnalysisPage() {
   // qué encuentre YOLO en cada corrida. rutas.tsx lo prefiere por sobre el
   // centroide de detecciones para ubicar la zona de forma consistente.
   const [orthoCenter, setOrthoCenter] = useState<[number, number] | null>(null);
+  // Huella geográfica COMPLETA del ortomosaico — HDU7 la usa (no las
+  // detecciones puntuales) para detectar duplicados entre análisis
+  // guardados, más robusto ante corridas de YOLO que detectan la basura en
+  // una posición levemente distinta. Ver backendModel/analyses.py.
+  const [orthoBounds, setOrthoBounds] = useState<[number, number, number, number] | null>(null);
 
   // ── HDU4 / AC1 — guardar análisis: pide nombre ─────────────────────────────
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
@@ -401,7 +406,7 @@ function AnalysisPage() {
     setSavingAnalysis(true);
     const result = await saveAnalysis(
       name,
-      { mapUrl, detections: displayDetections, summary: activeSummary, sourceTaskId: taskId ?? undefined, crs, orthoCenter },
+      { mapUrl, detections: displayDetections, summary: activeSummary, sourceTaskId: taskId ?? undefined, crs, orthoCenter, orthoBounds },
       overwriteId,
     );
     setSavingAnalysis(false);
@@ -561,6 +566,7 @@ function AnalysisPage() {
           setEnabledIds(new Set(detections.map(d => d.id)));
           setCrs(record.crs);
           setOrthoCenter(record.orthoCenter ?? null);
+          setOrthoBounds(record.orthoBounds ?? null);
           setStatus("done");
 
           setCurrentAnalysisId(record.id);
@@ -684,6 +690,7 @@ function AnalysisPage() {
         setEnabledIds(new Set(merged.map(d => d.id)));
         setCrs(response.crs || undefined);
         setOrthoCenter(response.orthoCenter ?? null);
+        setOrthoBounds(response.orthoBounds ?? null);
         setStatus("done");
       } else if (response.status === "empty") {
         setAnalysisMessage(response.message);

@@ -3,7 +3,10 @@
 // Archivo: src/lib/analysis.ts
 // =============================================================================
 
-import { BACKEND_URL } from "./config";
+// CLIENT_BACKEND_URL (no BACKEND_URL): este archivo corre 100% en el
+// navegador — necesita la ruta relativa que proxyea vite.config.ts, para
+// que la cookie de sesión no se pierda por ser cross-origin. Ver config.ts.
+import { CLIENT_BACKEND_URL as BACKEND_URL } from "./config";
 
 const POLLING_INTERVAL_MS = 3000;
 
@@ -45,6 +48,11 @@ export interface AnalyzeSuccess {
   // mapa de forma consistente entre corridas de análisis del mismo set de
   // fotos, aunque encuentren detecciones distintas entre sí.
   orthoCenter: [number, number] | null;
+  // Huella geográfica COMPLETA del ortomosaico: [left, bottom, right, top],
+  // mismo CRS que `crs` — HDU7 la usa para detectar duplicados comparando
+  // la imagen completa entre análisis en vez de detecciones puntuales (ver
+  // backendModel/analyses.py::_find_possible_duplicate).
+  orthoBounds: [number, number, number, number] | null;
 }
 
 export interface AnalyzeEmpty {
@@ -111,6 +119,7 @@ export async function pollVolumeAnalysis(
         detections,
         crs: jsonData.crs ?? "",
         orthoCenter: jsonData.ortho_center ?? null,
+        orthoBounds: jsonData.ortho_bounds ?? null,
         summary: {
           totalVolumeM3: Math.round(totalVolumeM3 * 100) / 100,
           totalWeightKg: Math.round(totalWeightKg),

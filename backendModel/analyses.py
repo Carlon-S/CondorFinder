@@ -86,6 +86,11 @@ class SavedAnalysisIn(BaseModel):
     # análisis del mismo set de fotos, en vez de promediar las detecciones
     # (que varían si YOLO encuentra algo distinto entre corridas).
     orthoCenter: list[float] | None = None
+    # Huella geográfica COMPLETA del ortomosaico: [left, bottom, right, top]
+    # (volumeCalc.py::ortho_bounds, mismo CRS que `crs`) — HDU7 compara ESTO
+    # entre análisis para detectar duplicados, no las detecciones puntuales
+    # (ver _find_possible_duplicate).
+    orthoBounds: list[float] | None = None
 
 
 class SavedAnalysisOut(SavedAnalysisIn):
@@ -118,6 +123,7 @@ def _to_out(doc: dict) -> SavedAnalysisOut:
         sourceTaskId=doc.get("sourceTaskId"),
         crs=doc.get("crs"),
         orthoCenter=doc.get("orthoCenter"),
+        orthoBounds=doc.get("orthoBounds"),
         possibleDuplicateOf=doc.get("possibleDuplicateOf"),
         duplicateStatus=doc.get("duplicateStatus"),
         historical=doc.get("historical", False),
@@ -130,8 +136,19 @@ def _to_out(doc: dict) -> SavedAnalysisOut:
 #
 # Distinto del fusionado "Varios tipos" del MVP (mergeOverlapping en
 # analysis.tsx), que combina detecciones DENTRO de una misma imagen
-# unificada — esto compara detecciones entre ANÁLISIS GUARDADOS distintos,
-# usando sus geo_polygon reales (UTM, metros).
+# unificada — esto compara ANÁLISIS GUARDADOS distintos.
+#
+# Compara la huella COMPLETA del ortomosaico (orthoBounds), no las
+# detecciones puntuales de basura. Motivo (encontrado probando el
+# despliegue en la nube): el centro/extensión del ortomosaico, anclado por
+# GPS/EXIF, varía muy poco entre corridas del mismo set de fotos (un par de
+# metros, típico de GPS de dron sin RTK) — pero las detecciones de YOLO
+# pueden correrse esos mismos metros, y en objetos chicos (pocos m²) eso
+# basta para tirar el IoU muy por debajo del umbral aunque sea literalmente
+# la misma basura en el mismo lugar. Comparando la imagen completa en vez
+# de la basura detectada, ese margen de error de unos metros es una
+# fracción mínima del tamaño total del ortomosaico (decenas de metros),
+# así que el umbral de 50% queda con margen amplio en vez de al límite.
 # =============================================================================
 
 OVERLAP_THRESHOLD = 0.5
@@ -140,7 +157,7 @@ OVERLAP_THRESHOLD = 0.5
 def _polygon_iou(coords_a: list[list[float]], coords_b: list[list[float]]) -> float:
     """Intersección sobre unión — mismo criterio (y mismo umbral, 0.5) que
     ya usa mergeOverlapping() en analysis.tsx para el fusionado intra-imagen,
-    solo que acá corre en el backend sobre geo_polygon real (metros), no
+    solo que acá corre en el backend sobre geometría real (metros), no
     sobre bbox en píxeles."""
     try:
         poly_a = Polygon(coords_a)
@@ -157,38 +174,43 @@ def _polygon_iou(coords_a: list[list[float]], coords_b: list[list[float]]) -> fl
         return 0.0
 
 
+def _bounds_to_rect(bounds: list[float]) -> list[list[float]]:
+    """[left, bottom, right, top] -> los 4 vértices del rectángulo, en el
+    mismo formato [[x,y], ...] que espera _polygon_iou."""
+    left, bottom, right, top = bounds
+    return [[left, bottom], [right, bottom], [right, top], [left, top]]
+
+
 async def _find_possible_duplicate(new_doc: dict, exclude_id: ObjectId) -> tuple[str, float] | None:
-    """AC1 — compara los geo_polygon del análisis recién guardado contra
-    todos los análisis guardados anteriormente (mismo crs — no se
-    reproyecta entre zonas UTM distintas, ver "Fuera de alcance" del plan),
-    excluyendo históricos (ya reemplazados) y el propio documento. Devuelve
-    el mejor candidato (mayor IoU) si supera OVERLAP_THRESHOLD, o None."""
+    """AC1 — compara la huella del ortomosaico (orthoBounds) del análisis
+    recién guardado contra la de todos los análisis guardados anteriormente
+    (mismo crs — no se reproyecta entre zonas UTM distintas, ver "Fuera de
+    alcance" del plan), excluyendo históricos (ya reemplazados) y el propio
+    documento. Devuelve el mejor candidato (mayor IoU) si supera
+    OVERLAP_THRESHOLD, o None. Análisis guardados antes de que existiera
+    orthoBounds no tienen con qué compararse — se excluyen (no hay forma de
+    inferir su huella real retroactivamente)."""
     new_crs = new_doc.get("crs")
-    new_detections = new_doc.get("detections", [])
-    if not new_crs or not new_detections:
+    new_bounds = new_doc.get("orthoBounds")
+    if not new_crs or not new_bounds:
         return None
+    new_rect = _bounds_to_rect(new_bounds)
 
     candidates = await get_db().analyses.find({
         "_id": {"$ne": exclude_id},
         "crs": new_crs,
         "historical": {"$ne": True},
+        "orthoBounds": {"$ne": None},
     }).to_list(length=None)
 
     best_id: str | None = None
     best_ratio = 0.0
     for other in candidates:
-        for new_det in new_detections:
-            new_poly = new_det.get("geo_polygon")
-            if not new_poly or len(new_poly) < 3:
-                continue
-            for other_det in other.get("detections", []):
-                other_poly = other_det.get("geo_polygon")
-                if not other_poly or len(other_poly) < 3:
-                    continue
-                ratio = _polygon_iou(new_poly, other_poly)
-                if ratio > best_ratio:
-                    best_ratio = ratio
-                    best_id = str(other["_id"])
+        other_rect = _bounds_to_rect(other["orthoBounds"])
+        ratio = _polygon_iou(new_rect, other_rect)
+        if ratio > best_ratio:
+            best_ratio = ratio
+            best_id = str(other["_id"])
 
     if best_id and best_ratio >= OVERLAP_THRESHOLD:
         return best_id, best_ratio

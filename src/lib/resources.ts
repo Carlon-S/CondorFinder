@@ -7,7 +7,10 @@
 // sola, mismo mecanismo que el resto del backend ya protegido).
 // =============================================================================
 
-import { BACKEND_URL } from "./config";
+// CLIENT_BACKEND_URL (no BACKEND_URL): este archivo corre 100% en el
+// navegador — necesita la ruta relativa que proxyea vite.config.ts, para
+// que la cookie de sesión no se pierda por ser cross-origin. Ver config.ts.
+import { CLIENT_BACKEND_URL as BACKEND_URL } from "./config";
 
 export interface Truck {
   capacity_m3: number;

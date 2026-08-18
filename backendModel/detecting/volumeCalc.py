@@ -90,6 +90,15 @@ def enrich(
         # aunque sus detecciones (cantidad, tamaño) difieran entre sí.
         bounds = ortho.bounds
         ortho_center = [(bounds.left + bounds.right) / 2, (bounds.bottom + bounds.top) / 2]
+        # Huella geográfica COMPLETA del ortomosaico (no solo el centro) —
+        # HDU7 la usa para detectar duplicados comparando el rectángulo
+        # completo entre análisis en vez de detecciones individuales de
+        # basura: el centro/extensión del ortomosaico varía muy poco entre
+        # corridas del mismo set de fotos (georreferenciado por GPS/EXIF),
+        # mientras que detecciones puntuales de YOLO pueden correrse lo
+        # suficiente como para romper el solapamiento en objetos chicos. Ver
+        # analyses.py::_find_possible_duplicate.
+        ortho_bounds = [bounds.left, bounds.bottom, bounds.right, bounds.top]
 
     pixel_area_m2 = abs(transform.a * transform.e)
 
@@ -151,7 +160,12 @@ def enrich(
 
         enriched.append(result)
 
-    output = {"crs": str(crs), "ortho_center": ortho_center, "detections": enriched}
+    output = {
+        "crs": str(crs),
+        "ortho_center": ortho_center,
+        "ortho_bounds": ortho_bounds,
+        "detections": enriched,
+    }
     with open(output_json_path, "w") as f:
         json.dump(output, f, indent=2)
 

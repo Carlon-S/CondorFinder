@@ -123,17 +123,27 @@ function RootShell({ children }: { children: React.ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
-  // /login es la única ruta fuera del guard de _authed.tsx — no tiene
-  // sentido mostrar la navegación de la app todavía si no hay sesión.
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const isLoginRoute = pathname === "/login";
+  // AppSidebar necesita el contexto de "/_authed" (useRouteContext adentro
+  // del componente) — se verifica acá con la MISMA fuente de datos
+  // (s.matches) que usa ese hook internamente, en vez de comparar el
+  // pathname contra "/login". Comparar por pathname puede desincronizarse
+  // de los matches reales durante una redirección en curso (ej. entrar a
+  // una ruta protegida sin sesión → _authed.tsx redirige a /login): por un
+  // instante pathname todavía no refleja "/login" pero el match de
+  // "/_authed" ya dejó de estar activo, y AppSidebar tira "Could not find
+  // an active match from /_authed". Leyendo s.matches acá, este chequeo y
+  // el de useRouteContext quedan sincronizados por construcción — no pueden
+  // divergir porque leen el mismo snapshot de estado en el mismo render.
+  const hasAuthedMatch = useRouterState({
+    select: (s) => s.matches.some((m) => m.routeId === "/_authed"),
+  });
 
   return (
     <QueryClientProvider client={queryClient}>
       {/* Sidebar de navegación persistente — reemplaza el navbar superior de
           antes. Vive aquí (no por ruta) para no duplicarse en las 3 vistas. */}
       <div className="flex min-h-screen">
-        {!isLoginRoute && <AppSidebar />}
+        {hasAuthedMatch && <AppSidebar />}
         {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
         <div className="flex min-w-0 flex-1 flex-col">
           <Outlet />

@@ -18,7 +18,10 @@
 // cambio real que les tocó, la forma de los datos no cambió.
 // =============================================================================
 
-import { BACKEND_URL } from "./config";
+// CLIENT_BACKEND_URL (no BACKEND_URL): este archivo corre 100% en el
+// navegador — necesita la ruta relativa que proxyea vite.config.ts, para
+// que la cookie de sesión no se pierda por ser cross-origin. Ver config.ts.
+import { CLIENT_BACKEND_URL as BACKEND_URL } from "./config";
 
 /** Forma real del resumen que guarda analysis.tsx — tipada para poder
  *  mostrarla en Vista Principal y en el diálogo de nombre duplicado. */
@@ -50,6 +53,13 @@ export interface SavedAnalysisRecord {
    *  ubicar la zona de forma consistente entre análisis del mismo set de
    *  fotos. Ausente en análisis guardados antes de este cambio. */
   orthoCenter?: [number, number] | null;
+  /** HDU7 — huella geográfica COMPLETA del ortomosaico: [left, bottom,
+   *  right, top], mismo CRS que `crs`. El backend la usa (no las
+   *  detecciones puntuales) para detectar duplicados — comparar la imagen
+   *  completa es robusto a que YOLO detecte la basura en una posición
+   *  levemente distinta entre corridas del mismo vuelo. Ausente en
+   *  análisis guardados antes de este cambio. */
+  orthoBounds?: [number, number, number, number] | null;
   /** HDU7 — id del análisis anterior con el que este se superpone >50% de
    *  área (calculado por el backend con shapely al guardar, nunca por el
    *  frontend). Presente solo si el backend encontró un candidato. */
@@ -136,6 +146,7 @@ export async function saveAnalysis(
     sourceTaskId?: string;
     crs?: string;
     orthoCenter?: [number, number] | null;
+    orthoBounds?: [number, number, number, number] | null;
   },
   overwriteId?: string,
 ): Promise<SaveAnalysisResult> {
@@ -148,6 +159,7 @@ export async function saveAnalysis(
       sourceTaskId: data.sourceTaskId ?? null,
       crs: data.crs ?? null,
       orthoCenter: data.orthoCenter ?? null,
+      orthoBounds: data.orthoBounds ?? null,
     };
     const res = await fetch(
       overwriteId

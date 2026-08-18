@@ -44,6 +44,12 @@ dist-ssr
 backendModel/.venv/
 backendModel/.env
 backendModel/training/
+
+# .env de la raíz (VITE_BACKEND_URL) — no es secreto, pero cada integrante
+# puede querer un valor distinto (la VM compartida vs. su backend local), y
+# no queremos que alguien comitee su valor local por error y se lo pise al
+# resto del equipo. Ver .env.example.
+.env
 backendModel/detecting/output/*
 backendModel/detecting/__pycache__
 backendModel/joining/finals/*
