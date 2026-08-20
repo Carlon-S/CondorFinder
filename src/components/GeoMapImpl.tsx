@@ -41,44 +41,52 @@ L.Icon.Default.mergeOptions({
   tooltipAnchor: [0, -28],
 });
 
-// Ícono grande de círculo de color — para marcar zonas (HDU5) con
-// "precisión espectacular" pero visualmente distintas de los pines de
-// puntos de origen (HDU6). DivIcon en vez de L.Icon: se puede colorear por
-// CSS sin depender de un PNG por color.
+// Pines reales (Phosphor "MapPin"/"MapPinArea", regular + fill) en vez de
+// las formas de CSS que había antes — se arman como <svg> crudo porque
+// Leaflet arma L.divIcon a partir de un string de HTML, no de JSX.
 //
-// filled=false ("no activo": zona no sumada a la ruta, o punto inactivo) se
-// dibuja HUECO (relleno transparente, solo borde de color) en vez de bajar
-// la opacidad del ícono entero — la opacidad no se distinguía bien apenas
-// se solapaba con las capas del mapa; sólido-vs-hueco es un patrón mucho
-// más reconocible ("marcado" vs "sin marcar").
-function zoneIcon(color: string, filled: boolean): L.DivIcon {
-  const fillStyle = filled
-    ? `background:${color};border:3px solid white;`
-    : `background:rgba(255,255,255,0.6);border:3px solid ${color};`;
+// Cada par regular/fill reemplaza el viejo truco de opacidad/borde para
+// distinguir "activo" de "no activo": la silueta hueca (regular) YA se lee
+// como "sin marcar" y la rellena (fill) como "marcado", sin necesitar CSS
+// adicional para esa distinción — son dibujos genuinamente distintos, no
+// el mismo dibujo con relleno distinto.
+const ZONE_PIN_REGULAR =
+  "M128,64a40,40,0,1,0,40,40A40,40,0,0,0,128,64Zm0,64a24,24,0,1,1,24-24A24,24,0,0,1,128,128Zm0-112a88.1,88.1,0,0,0-88,88c0,31.4,14.51,64.68,42,96.25a254.19,254.19,0,0,0,41.45,38.3,8,8,0,0,0,9.18,0A254.19,254.19,0,0,0,174,200.25c27.45-31.57,42-64.85,42-96.25A88.1,88.1,0,0,0,128,16Zm0,206c-16.53-13-72-60.75-72-118a72,72,0,0,1,144,0C200,161.23,144.53,209,128,222Z";
+const ZONE_PIN_FILL =
+  "M128,16a88.1,88.1,0,0,0-88,88c0,75.3,80,132.17,83.41,134.55a8,8,0,0,0,9.18,0C136,236.17,216,179.3,216,104A88.1,88.1,0,0,0,128,16Zm0,56a32,32,0,1,1-32,32A32,32,0,0,1,128,72Z";
+// "Puntos de partida y destino" (HDU6) — un punto que el algoritmo de ruta
+// puede tratar como origen o como destino (ver el rename de "punto de
+// origen" a simplemente "punto" en toda la app), por eso un pin distinto
+// al de zona en vez de reusar la misma familia "MapPin".
+const ORIGIN_PIN_REGULAR =
+  "M128,16a88.1,88.1,0,0,0-88,88c0,31.4,14.51,64.68,42,96.25a254.19,254.19,0,0,0,41.45,38.3,8,8,0,0,0,9.18,0A254.19,254.19,0,0,0,174,200.25c27.45-31.57,42-64.85,42-96.25A88.1,88.1,0,0,0,128,16Zm0,206c-16.53-13-72-60.75-72-118a72,72,0,0,1,144,0C200,161.23,144.53,209,128,222Zm40-118a8,8,0,0,1-8,8H136v24a8,8,0,0,1-16,0V112H96a8,8,0,0,1,0-16h24V72a8,8,0,0,1,16,0V96h24A8,8,0,0,1,168,104Z";
+const ORIGIN_PIN_FILL =
+  "M128,16a88.1,88.1,0,0,0-88,88c0,31.4,14.51,64.68,42,96.25a254.19,254.19,0,0,0,41.45,38.3,8,8,0,0,0,9.18,0A254.19,254.19,0,0,0,174,200.25c27.45-31.57,42-64.85,42-96.25A88.1,88.1,0,0,0,128,16Zm32,96H136v24a8,8,0,0,1-16,0V112H96a8,8,0,0,1,0-16h24V72a8,8,0,0,1,16,0V96h24a8,8,0,0,1,0,16Z";
+
+function pinDivIcon(path: string, color: string, size: number): L.DivIcon {
   return L.divIcon({
     className: "",
-    html: `<div style="width:28px;height:28px;border-radius:9999px;${fillStyle}box-shadow:0 2px 8px rgba(0,0,0,0.4);"></div>`,
-    iconSize: [28, 28],
-    iconAnchor: [14, 14],
-    tooltipAnchor: [0, -18],
+    html: `<svg width="${size}" height="${size}" viewBox="0 0 256 256" fill="${color}" style="filter:drop-shadow(0 2px 4px rgba(0,0,0,0.45));"><path d="${path}"/></svg>`,
+    // El pin "apunta" hacia abajo — el ancla va en la punta inferior del
+    // dibujo (no en el centro geométrico, como sí correspondía con el
+    // círculo/cuadrado anteriores), para que quede clavado en la
+    // coordenada real del mapa en vez de flotar sobre ella.
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size - 2],
+    tooltipAnchor: [0, -size + 8],
   });
 }
 
-// Ícono cuadrado (esquinas redondeadas) para puntos de origen (HDU6) — forma
-// distinta a los círculos de zonas (HDU5) para poder diferenciarlos de un
-// vistazo aunque estén juntos en el mismo mapa (ej. /rutas). Mismo patrón
-// sólido-vs-hueco que zoneIcon para distinguir activo/inactivo.
+// Zonas (HDU5): pin más grande, "precisión espectacular" para distinguirlas
+// de los pines de puntos (HDU6) aunque compartan la misma familia de forma.
+function zoneIcon(color: string, filled: boolean): L.DivIcon {
+  return pinDivIcon(filled ? ZONE_PIN_FILL : ZONE_PIN_REGULAR, filled ? color : "var(--muted-foreground)", 44);
+}
+
+// Puntos de origen (HDU6): pin "de área" (silueta con base ovalada en la
+// versión fill) — mismo criterio sólido=activo/hueco=inactivo que zoneIcon.
 function originIcon(active: boolean): L.DivIcon {
-  const fillStyle = active
-    ? "background:var(--primary);border:3px solid white;"
-    : "background:rgba(255,255,255,0.6);border:2.5px solid var(--muted-foreground);";
-  return L.divIcon({
-    className: "",
-    html: `<div style="width:22px;height:22px;border-radius:6px;${fillStyle}box-shadow:0 2px 8px rgba(0,0,0,0.35);"></div>`,
-    iconSize: [22, 22],
-    iconAnchor: [11, 11],
-    tooltipAnchor: [0, -15],
-  });
+  return pinDivIcon(active ? ORIGIN_PIN_FILL : ORIGIN_PIN_REGULAR, active ? "var(--primary)" : "var(--muted-foreground)", 36);
 }
 
 /** Recuadros de detecciones superpuestos sobre la miniatura del tooltip

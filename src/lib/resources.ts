@@ -63,7 +63,7 @@ export async function createResourcePoint(point: ResourcePointInput): Promise<Re
   });
 
   if (!res.ok) {
-    throw new Error(await parseErrorMessage(res, "No se pudo guardar el punto de origen."));
+    throw new Error(await parseErrorMessage(res, "No se pudo guardar el punto."));
   }
 
   return res.json();
@@ -75,7 +75,7 @@ export async function listResourcePoints(): Promise<ResourcePoint[]> {
   });
 
   if (!res.ok) {
-    throw new Error(await parseErrorMessage(res, "No se pudieron cargar los puntos de origen."));
+    throw new Error(await parseErrorMessage(res, "No se pudieron cargar los puntos."));
   }
 
   return res.json();
@@ -90,7 +90,7 @@ export async function updateResourcePoint(id: string, point: ResourcePointInput)
   });
 
   if (!res.ok) {
-    throw new Error(await parseErrorMessage(res, "No se pudo actualizar el punto de origen."));
+    throw new Error(await parseErrorMessage(res, "No se pudo actualizar el punto."));
   }
 
   return res.json();
@@ -103,6 +103,6 @@ export async function deleteResourcePoint(id: string): Promise<void> {
   });
 
   if (!res.ok) {
-    throw new Error(await parseErrorMessage(res, "No se pudo eliminar el punto de origen."));
+    throw new Error(await parseErrorMessage(res, "No se pudo eliminar el punto."));
   }
 }

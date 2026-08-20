@@ -15,7 +15,7 @@ API REST que orquesta el pipeline completo de procesamiento:
 
 - Python 3.12+ en WSL (Ubuntu)
 - Docker instalado en WSL (Ubuntu)
-- Cuenta de MongoDB Atlas (free tier M0) — persiste usuarios, tareas del pipeline, puntos de origen (HDU6) y análisis guardados
+- Cuenta de MongoDB Atlas (free tier M0) — persiste usuarios, tareas del pipeline, puntos (HDU6) y análisis guardados
 
 ---
 
@@ -25,7 +25,7 @@ API REST que orquesta el pipeline completo de procesamiento:
 backendModel/
 ├── orquestador.py        ← API FastAPI principal (pipeline + wiring de los demás routers)
 ├── auth.py                ← Login/logout/sesión (JWT en cookie httpOnly)
-├── resources.py            ← Puntos de origen y recursos disponibles (HDU6)
+├── resources.py            ← Puntos y recursos disponibles (HDU6)
 ├── routing.py               ← Base de POST /routes/generate (HDU5) — algoritmo real pendiente
 ├── analyses.py              ← Análisis guardados (HDU4) + fusión de duplicados (HDU7)
 ├── task_store.py             ← Persistencia de tareas del pipeline en MongoDB
@@ -148,17 +148,17 @@ Todos los endpoints salvo `POST /auth/login` requieren una sesión válida (cook
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| `POST` | `/resources/points` | Crea un punto de origen (tolvas/trucks con capacidad individual, retroexcavadoras/personal como cantidad, `active: bool`) |
-| `GET` | `/resources/points` | Lista todos los puntos de origen guardados |
+| `POST` | `/resources/points` | Crea un punto (tolvas/trucks con capacidad individual, retroexcavadoras/personal como cantidad, `active: bool`) |
+| `GET` | `/resources/points` | Lista todos los puntos guardados |
 | `GET` | `/resources/points/{point_id}` | Consulta un punto puntual. `404` si no existe |
 | `PUT` | `/resources/points/{point_id}` | Reemplaza la configuración de un punto existente |
-| `DELETE` | `/resources/points/{point_id}` | Elimina un punto de origen |
+| `DELETE` | `/resources/points/{point_id}` | Elimina un punto |
 
 ### Generación de ruta — HDU5 (`routing.py`)
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| `POST` | `/routes/generate` | Resuelve la capacidad real de los puntos de origen activos contra Mongo y devuelve una ruta óptima. **El algoritmo de optimización todavía no está implementado** (`TODO(HDU5/AC2)`) — siempre responde `{"status": "infeasible", "message": "..."}` mientras tanto, nunca inventa una ruta falsa |
+| `POST` | `/routes/generate` | Resuelve la capacidad real de los puntos activos contra Mongo y devuelve una ruta óptima. **El algoritmo de optimización todavía no está implementado** (`TODO(HDU5/AC2)`) — siempre responde `{"status": "infeasible", "message": "..."}` mientras tanto, nunca inventa una ruta falsa |
 
 ### Análisis guardados — HDU4 + fusión de duplicados — HDU7 (`analyses.py`)
 
@@ -251,7 +251,7 @@ Todos los endpoints salvo `POST /auth/login` requieren una sesión válida (cook
 | HDU4 | Si el guardado falla, se notifica al usuario y el modal permite reintentar sin perder los datos ingresados | 🔲 Pendiente de verificar |
 | HDU4 | Si el nombre ingresado ya existe, el sistema pide confirmar antes de sobrescribir el análisis existente | ✅ Cumplido |
 | HDU5 | Generación de ruta óptima de recolección según ubicación/tipo/volumen de basurales priorizados y capacidad de camiones/tolvas — frontend completo, `POST /routes/generate` resuelve capacidad real desde Mongo | 🟡 Backend base listo, algoritmo pendiente (`routing.py`, `TODO(HDU5/AC2)`) |
-| HDU6 | Definición de puntos de origen y cantidad/capacidad de tolvas, camiones, retroexcavadoras y personal disponibles, para planes de ruta dinámicos | ✅ Cumplido |
+| HDU6 | Definición de puntos y cantidad/capacidad de tolvas, camiones, retroexcavadoras y personal disponibles, para planes de ruta dinámicos | ✅ Cumplido |
 | HDU7 (Deseable, 5 pts) | Fusión de detecciones entre cargas de la misma zona — comparar la huella geográfica del ortomosaico de un nuevo análisis contra los guardados y marcar posibles duplicados (>50% superposición, IoU real con `shapely` sobre `orthoBounds`, no sobre las detecciones individuales — ver Notas) | ✅ Cumplido |
 | SP1 (Spike, 21 pts) | Investigación e implementación de mejoras al modelo de reconocimiento de imágenes — precisión ≥75%, distinguir construcciones de basurales, mejorar el umbral de solapamiento. AC: elegir entre un modelo preciso/lento u óptimo/rápido al generar el mapa | ❌ No implementado |
 

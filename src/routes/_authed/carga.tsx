@@ -35,7 +35,7 @@ import {
   ImageIcon,
   Clock,
   FileCheck,
-} from "lucide-react";
+} from "@/components/icons/Icons";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { unifyImages, uploadImages, deleteImage, deleteAllImages, listUploadedImages, pollTask, cancelTask, getPipelineStatus, getTaskStatus, type OverlapPair } from "@/lib/unify";

@@ -19,7 +19,7 @@ import {
   Search,
   Trash2,
   TriangleAlert,
-} from "lucide-react";
+} from "@/components/icons/Icons";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";

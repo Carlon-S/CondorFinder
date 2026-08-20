@@ -15,7 +15,7 @@ Sistema web municipal para el monitoreo automatizado de basurales mediante imág
 | Git | cualquiera | Windows + WSL |
 | MongoDB Atlas | cuenta gratuita (M0) | servicio externo, no requiere instalación local |
 
-> El frontend se levanta en **Windows**. El backend y Docker se ejecutan en **WSL (Ubuntu)**. El backend usa MongoDB Atlas para persistir usuarios, tareas del pipeline, puntos de origen y análisis — crea un cluster gratuito en https://www.mongodb.com/cloud/atlas antes de continuar.
+> El frontend se levanta en **Windows**. El backend y Docker se ejecutan en **WSL (Ubuntu)**. El backend usa MongoDB Atlas para persistir usuarios, tareas del pipeline, puntos y análisis — crea un cluster gratuito en https://www.mongodb.com/cloud/atlas antes de continuar.
 
 ### Instalar Node.js y pnpm (Windows)
 
@@ -170,7 +170,7 @@ La aplicación estará disponible en **http://localhost:8080**
 
 ### Vista Principal (`/`)
 
-Dashboard con las zonas guardadas, las tareas del pipeline en curso o pendientes de análisis (consultadas directo al backend, ya no dependen de que el mismo navegador las haya iniciado), y el panel **"Recursos disponibles"** con el resumen de tolvas/retroexcavadoras/camiones/puntos de origen/personal. Las zonas reemplazadas por un análisis más reciente de la misma zona física (HDU7) no aparecen en los filtros normales ni se cuentan en los totales — quedan disponibles aparte bajo el filtro **"Historial"**, con un subtítulo indicando por cuál análisis fueron reemplazadas.
+Dashboard con las zonas guardadas, las tareas del pipeline en curso o pendientes de análisis (consultadas directo al backend, ya no dependen de que el mismo navegador las haya iniciado), y el panel **"Recursos disponibles"** con el resumen de tolvas/retroexcavadoras/camiones/puntos/personal. Las zonas reemplazadas por un análisis más reciente de la misma zona física (HDU7) no aparecen en los filtros normales ni se cuentan en los totales — quedan disponibles aparte bajo el filtro **"Historial"**, con un subtítulo indicando por cuál análisis fueron reemplazadas.
 
 ### Vista de Carga (`/carga`)
 
@@ -197,9 +197,9 @@ Dashboard con las zonas guardadas, las tareas del pipeline en curso o pendientes
 
 ### Vista de Recursos Disponibles (`/recursos`) — HDU6
 
-13. **Definir punto de origen**: clickea un punto en el mapa (o escribe una dirección) para ubicar el origen de vehículos y maquinaria — dirección y comuna se completan solas vía geocodificación (Nominatim/OpenStreetMap), o puedes escribirlas a mano y el punto se reubica en el mapa automáticamente
+13. **Definir punto**: clickea un punto en el mapa (o escribe una dirección) para ubicar un punto que el sistema usará como origen o destino de vehículos y maquinaria — dirección y comuna se completan solas vía geocodificación (Nominatim/OpenStreetMap), o puedes escribirlas a mano y el punto se reubica en el mapa automáticamente
 14. Configura cantidad y capacidad individual de tolvas y camiones (no un valor agregado), y cantidad de retroexcavadoras y personal disponible
-15. **Modificar puntos de origen** lista todos los puntos guardados con opciones para editar o eliminar (con confirmación)
+15. **Modificar puntos** lista todos los puntos guardados con opciones para editar o eliminar (con confirmación)
 16. Cada punto tiene un switch de **punto activo** — solo los puntos activos participan en la generación de ruta (HDU5)
 
 ### Vista de Generación de Ruta (`/rutas`) — HDU5
@@ -208,7 +208,7 @@ Dashboard con las zonas guardadas, las tareas del pipeline en curso o pendientes
 18. Los análisis seleccionados se agregan al mapa como un círculo grande de color, ubicado en la posición geográfica real del ortomosaico (no depende de las detecciones puntuales, así dos análisis del mismo set de fotos caen siempre en el mismo lugar); un círculo **sólido** indica que ese análisis está cargado en la ruta actual, **hueco** que no lo está — click en un círculo ya cargado, o en su fila en la lista lateral "Análisis cargados", lo descarga
 19. Pasar el mouse sobre un círculo muestra una miniatura del mapa real de esa zona con sus polígonos de detección superpuestos; hacer click abre una vista ampliada con el mapa completo, sus polígonos en precisión de píxel, y el resumen de volumen/peso/área
 20. **Generar ruta** queda deshabilitado sin ningún análisis cargado
-21. Al presionar, se pide confirmar los puntos de origen activos, las horas disponibles y el tipo de basura prioritario — "Cancelar" cierra la confirmación sin tocar el mapa
+21. Al presionar, se pide confirmar los puntos activos, las horas disponibles y el tipo de basura prioritario — "Cancelar" cierra la confirmación sin tocar el mapa
 22. El sistema genera la ruta óptima, o informa que no fue posible generarla y sugiere revisar los recursos disponibles (`/recursos`)
 
 > El algoritmo real de optimización de ruta todavía no está implementado (`backendModel/routing.py`) — hoy `/rutas` siempre reporta que no fue posible generar una ruta. El resto del flujo (confirmación, carga de análisis, validaciones) está completo y verificado.
@@ -237,7 +237,7 @@ CondorFinder/
 │   │   ├── mapState.ts             ← Handoff de la URL del mapa entre vistas
 │   │   ├── notify.tsx              ← Wrapper de toasts (sonner)
 │   │   ├── projection.ts           ← Reproyección UTM → WGS84 (proj4)
-│   │   ├── resources.ts            ← Cliente de puntos de origen (HDU6)
+│   │   ├── resources.ts            ← Cliente de puntos (HDU6)
 │   │   └── routePlan.ts            ← Contrato de generación de ruta (HDU5)
 │   ├── routes/                     ← Vistas principales (file-based routing)
 │   │   ├── __root.tsx              ← Shell de la app (layout, temas, anti-flash)
@@ -252,7 +252,7 @@ CondorFinder/
 ├── backendModel/
 │   ├── orquestador.py       ← API FastAPI principal (pipeline + wiring de routers)
 │   ├── auth.py               ← Login/sesión (JWT en cookie httpOnly)
-│   ├── resources.py          ← Puntos de origen y recursos (HDU6)
+│   ├── resources.py          ← Puntos y recursos (HDU6)
 │   ├── routing.py            ← Base de generación de ruta (HDU5) — algoritmo pendiente
 │   ├── analyses.py           ← Análisis guardados (HDU4) + fusión de duplicados (HDU7)
 │   ├── task_store.py         ← Persistencia de tareas del pipeline en MongoDB
@@ -307,10 +307,10 @@ CondorFinder/
 | HDU5 | Dado un mapa georreferenciado, cuando se presione el botón de cargar archivo de análisis y se seleccione uno de los archivos guardados (HDU4), entonces el sistema cargará los polígonos asociados en el mapa junto con su metadata | ✅ Cumplido |
 | HDU5 | Dada una pantalla de confirmación, cuando el trabajador presione "No" o cancele, entonces el sistema cerrará la pantalla de confirmación sin generar la ruta y sin perder el estado actual del mapa | ✅ Cumplido |
 | HDU5 | Dada una pantalla de confirmación con los datos ingresados, cuando el sistema no logre generar una ruta factible con los recursos y restricciones indicadas, entonces mostrará un mensaje informando que no fue posible generar una ruta y sugerirá revisar los recursos disponibles (HDU6) | ✅ Cumplido |
-| HDU6 | Al presionar "Definir punto de origen" con el mapa georreferenciado, se puede ubicar un punto concreto que el sistema considera origen de vehículos y maquinaria | ✅ Cumplido |
+| HDU6 | Al presionar "Definir punto" con el mapa georreferenciado, se puede ubicar un punto concreto que el sistema considera origen o destino de vehículos y maquinaria | ✅ Cumplido |
 | HDU6 | Al escoger la ubicación se muestra una pantalla de configuración para definir cantidad y capacidad de tolvas, retroexcavadoras, camiones y personal disponibles | ✅ Cumplido |
 | HDU6 | Al presionar "Guardar punto" en la configuración, el sistema lo guarda en el perfil del usuario actual (persistencia en MongoDB) | ✅ Cumplido |
-| HDU6 | Al presionar "Modificar puntos de origen" se enlistan todos los puntos guardados con su ubicación y opciones modificar/eliminar | ✅ Cumplido |
+| HDU6 | Al presionar "Modificar puntos" se enlistan todos los puntos guardados con su ubicación y opciones modificar/eliminar | ✅ Cumplido |
 | HDU6 | Al presionar modificar sobre un punto de la lista, se muestra su configuración guardada y permite editarla | ✅ Cumplido |
 | HDU6 | Al presionar eliminar sobre un punto de la lista, se muestra una pantalla de confirmación | ✅ Cumplido |
 | HDU6 | Al confirmar la eliminación, el punto se borra de la lista del perfil | ✅ Cumplido |
@@ -319,7 +319,7 @@ CondorFinder/
 | HDU7 (Deseable) | Fusión de detecciones entre cargas de la misma zona: al guardar un nuevo análisis, el sistema compara sus polígonos georreferenciados contra los análisis guardados y, si detecta >50% de superposición con uno anterior, permite marcarlos como duplicados o mantenerlos por separado | ✅ Cumplido |
 | SP1 (Spike, 21 pts) | Investigación e implementación de mejoras al modelo de reconocimiento de imágenes: precisión ≥75% en detección/volumen, distinguir construcciones de basurales, mejorar el umbral de solapamiento. AC: dado un set de imágenes, cuando el trabajador genere el mapa georreferenciado, el sistema le dará la opción de elegir un modelo preciso y lento o uno más óptimo y rápido | ❌ No implementado |
 
-**Detalles adicionales de HDU6** (más allá del texto literal de los AC): el recurso "tolvas" también permite capacidad individual por unidad, con el mismo modelo que camiones (no un valor de capacidad único compartido). Los puntos de origen incluyen dirección y comuna, con geocodificación bidireccional vía Nominatim/OpenStreetMap: al ubicar un punto en el mapa se completan solas, y al escribir/corregir la dirección a mano el punto se reubica en el mapa automáticamente. Cada punto tiene además un switch de "punto activo" que HDU5 consume en la pantalla de confirmación.
+**Detalles adicionales de HDU6** (más allá del texto literal de los AC): el recurso "tolvas" también permite capacidad individual por unidad, con el mismo modelo que camiones (no un valor de capacidad único compartido). Los puntos incluyen dirección y comuna, con geocodificación bidireccional vía Nominatim/OpenStreetMap: al ubicar un punto en el mapa se completan solas, y al escribir/corregir la dirección a mano el punto se reubica en el mapa automáticamente. Cada punto tiene además un switch de "punto activo" que HDU5 consume en la pantalla de confirmación.
 
 **Detalles adicionales de HDU5** (más allá del texto literal de los AC): los polígonos de un análisis cargado no se dibujan literalmente sobre Leaflet (ilegibles a la escala de toda la comuna) — cada análisis se representa como un círculo grande de color, sólido si está cargado en la ruta actual y hueco si no, ubicado en el centro geográfico real del ortomosaico (`orthoCenter`, determinístico entre corridas del mismo set de fotos — ver HDU7 más abajo); al pasar el mouse se ve una miniatura con los polígonos superpuestos, y al hacer click se abre una vista ampliada con el mapa real en precisión de píxel. Esto sigue cumpliendo el AC4 literal ("cargará los polígonos asociados en el mapa junto con su metadata") sin perder precisión geográfica — el `geo_polygon` real (en su CRS UTM original) es el que efectivamente resuelve `POST /routes/generate` a partir de los `analysisIds` seleccionados, no algo que arme el navegador.
 

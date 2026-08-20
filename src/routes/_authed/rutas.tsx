@@ -20,7 +20,7 @@
 // (hover con miniatura, click con zoom) es la misma estén cargados o no.
 //
 // AC3: "Generar ruta" queda deshabilitado mientras no haya ningún análisis
-// cargado. AC1: confirmación con el estado de los puntos de origen activos
+// cargado. AC1: confirmación con el estado de los puntos activos
 // (HDU6), horas disponibles y tipo de basura prioritario. AC5: cancelar solo
 // cierra la confirmación, no toca los análisis ya cargados. AC2/AC6: llama
 // al contrato de src/lib/routePlan.ts — el algoritmo real es backend
@@ -33,6 +33,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import {
   Boxes,
+  Construction,
   Crosshair,
   FolderOpen,
   Loader2,
@@ -40,8 +41,11 @@ import {
   Route as RouteIcon,
   Scale,
   TriangleAlert,
+  Truck,
+  Users,
+  Warehouse,
   X,
-} from "lucide-react";
+} from "@/components/icons/Icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -250,13 +254,18 @@ function RutasPage() {
   // Principal) mientras esta zona seguía en memoria acá.
   const [zoomImgError, setZoomImgError] = useState(false);
 
+  // Ficha de datos de un punto (HDU6) — a diferencia de zoomAnalysis, no hay
+  // mapa/imagen que ampliar, solo su información (dirección, recursos,
+  // activo/inactivo) en modo solo lectura, mismo estilo de diálogo.
+  const [zoomPoint, setZoomPoint] = useState<ResourcePoint | null>(null);
+
   const [loadDialogOpen, setLoadDialogOpen] = useState(false);
   const [savedAnalyses, setSavedAnalyses] = useState<SavedAnalysisRecord[]>([]);
   const [loadingSaved, setLoadingSaved] = useState(false);
   // AC4 — selección múltiple: ids marcados en el diálogo, todavía no cargados.
   const [selectedToLoad, setSelectedToLoad] = useState<Set<string>>(new Set());
 
-  // Puntos de origen (HDU6) — se ven siempre en el mapa (atenuados si están
+  // Puntos (HDU6) — se ven siempre en el mapa (atenuados si están
   // inactivos), y su subconjunto activo es lo que la confirmación (AC1)
   // necesita. Un solo fetch cubre ambos usos.
   const [originPoints, setOriginPoints] = useState<ResourcePoint[]>([]);
@@ -285,7 +294,7 @@ function RutasPage() {
   // volver a descargar la imagen completa cada vez (ver refreshAllAnalyses).
   const imgSizeCacheRef = useRef<Map<string, { w: number; h: number }>>(new Map());
 
-  // Trae los puntos de origen reales (HDU6) — se usa al entrar a la vista,
+  // Trae los puntos reales (HDU6) — se usa al entrar a la vista,
   // al abrir la confirmación, y al refrescar por multi-pestaña (ver el
   // useEffect de abajo). Es la única fuente de "activo" para el mapa y AC1.
   const refreshOriginPoints = async (): Promise<void> => {
@@ -293,7 +302,7 @@ function RutasPage() {
       setOriginPoints(await listResourcePoints());
     } catch (err) {
       notify.error(
-        "No se pudieron cargar los puntos de origen",
+        "No se pudieron cargar los puntos",
         err instanceof Error ? err.message : "Intenta nuevamente.",
       );
       setOriginPoints([]);
@@ -338,7 +347,7 @@ function RutasPage() {
     }
   };
 
-  // Multi-pestaña: tanto los análisis guardados como los puntos de origen
+  // Multi-pestaña: tanto los análisis guardados como los puntos
   // viven ahora en Mongo (sin evento nativo tipo "storage" para eso, a
   // diferencia de cuando los análisis vivían en localStorage) — se
   // refrescan al recuperar el foco de la ventana, mismo patrón que usan
@@ -459,18 +468,29 @@ function RutasPage() {
   };
 
   // Click en el círculo de una zona (cargada o no — misma interacción) abre
-  // el "zoom" con el mapa real. Si el punto clickeado es un punto de origen
-  // (HDU6), no matchea ningún id de allAnalyses y no pasa nada.
+  // el "zoom" con el mapa real. Click en un cuadrado de punto (HDU6) abre
+  // su ficha de datos en vez — no matchea ningún id de allAnalyses, así que
+  // se busca aparte en originPoints. En los dos casos, además del diálogo,
+  // el mapa de fondo vuela hacia esa ubicación (mismo mecanismo que usa
+  // "Cargar archivo de análisis" con focusPoint/FlyToPoint) — antes solo
+  // abría el diálogo sin mover el mapa.
   const handlePointClick = (point: GeoMapPoint) => {
     const analysis = allAnalyses.find((a) => a.id === point.id);
     if (analysis) {
       setZoomImgSize(null);
       setZoomImgError(false);
       setZoomAnalysis(analysis);
+      setFocusPoint(point.position);
+      return;
+    }
+    const originPoint = originPoints.find((p) => p.id === point.id);
+    if (originPoint) {
+      setZoomPoint(originPoint);
+      setFocusPoint(point.position);
     }
   };
 
-  // AC1 — abre la confirmación, trae el estado real de los puntos de origen.
+  // AC1 — abre la confirmación, trae el estado real de los puntos.
   const openConfirm = async () => {
     setRouteError(null);
     setConfirmOpen(true);
@@ -510,7 +530,7 @@ function RutasPage() {
   };
 
   // Círculos de zonas (todas las ubicables — huecos si no están cargadas
-  // en la ruta) + cuadrados de puntos de origen (huecos si están
+  // en la ruta) + cuadrados de puntos (huecos si están
   // inactivos) — ambos en el mismo mapa. Sólido vs. hueco en vez de
   // opacidad: la opacidad se perdía apenas se solapaba con las capas del
   // mapa base, sólido/hueco se reconoce a cualquier zoom.
@@ -966,6 +986,110 @@ function RutasPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Ficha de datos de un punto (HDU6) — no hay mapa/imagen que ampliar
+          como en zoomAnalysis, así que es una sola columna con la
+          información del punto en modo solo lectura (mismos datos que
+          recursos.tsx, sin poder editarlos desde acá). */}
+      <Dialog open={zoomPoint !== null} onOpenChange={(open) => !open && setZoomPoint(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <div className="flex items-center gap-2">
+              <DialogTitle>{zoomPoint?.name}</DialogTitle>
+              {zoomPoint && (
+                <span
+                  className={`flex-shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                    zoomPoint.active
+                      ? "bg-primary/15 text-primary"
+                      : "bg-muted text-muted-foreground"
+                  }`}
+                >
+                  {zoomPoint.active ? "Activo" : "Inactivo"}
+                </span>
+              )}
+            </div>
+            <DialogDescription>Punto de origen o destino para la generación de ruta.</DialogDescription>
+          </DialogHeader>
+          {zoomPoint && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 rounded-md bg-background/40 p-2.5">
+                <MapPin className="h-4 w-4 flex-shrink-0 text-primary/70" />
+                <span className="text-sm">
+                  {zoomPoint.address}, {zoomPoint.comuna}
+                </span>
+              </div>
+
+              <div className="space-y-1.5">
+                <p className="text-xs font-semibold text-muted-foreground">Recursos disponibles</p>
+
+                <div className="grid grid-cols-2 gap-1.5">
+                  <div className="rounded-md bg-background/40 p-2.5">
+                    <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Boxes className="h-4 w-4 flex-shrink-0 text-primary/70" /> Tolvas
+                    </span>
+                    <div className="mt-1.5 flex flex-wrap gap-1">
+                      {zoomPoint.tolvas.length === 0 ? (
+                        <span className="text-sm text-muted-foreground">—</span>
+                      ) : (
+                        zoomPoint.tolvas.map((t, i) => (
+                          <span
+                            key={i}
+                            className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary"
+                          >
+                            {t.capacity_m3} m³
+                          </span>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                  <div className="rounded-md bg-background/40 p-2.5">
+                    <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Truck className="h-4 w-4 flex-shrink-0 text-primary/70" /> Camiones
+                    </span>
+                    <div className="mt-1.5 flex flex-wrap gap-1">
+                      {zoomPoint.trucks.length === 0 ? (
+                        <span className="text-sm text-muted-foreground">—</span>
+                      ) : (
+                        zoomPoint.trucks.map((t, i) => (
+                          <span
+                            key={i}
+                            className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary"
+                          >
+                            {t.capacity_m3} m³
+                          </span>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-1.5">
+                  <div className="flex items-center justify-between rounded-md bg-background/40 p-2.5">
+                    <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Construction className="h-4 w-4 flex-shrink-0 text-primary/70" /> Retroexc.
+                    </span>
+                    <span className="text-sm font-semibold">{zoomPoint.retroexcavadoras_count}</span>
+                  </div>
+                  <div className="flex items-center justify-between rounded-md bg-background/40 p-2.5">
+                    <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Users className="h-4 w-4 flex-shrink-0 text-primary/70" /> Personal
+                    </span>
+                    <span className="text-sm font-semibold">{zoomPoint.personal_count}</span>
+                  </div>
+                </div>
+              </div>
+
+              <Link
+                to="/recursos"
+                className="flex items-center gap-2 rounded-md border border-dashed border-border/60 p-2.5 text-xs text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary"
+              >
+                <Warehouse className="h-4 w-4 flex-shrink-0" />
+                Editar desde Recursos disponibles
+              </Link>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
       {/* AC1 — confirmación antes de generar la ruta */}
       <Dialog
         open={confirmOpen}
@@ -981,14 +1105,14 @@ function RutasPage() {
 
           <div className="space-y-4">
             <div className="space-y-1.5">
-              <p className="text-xs font-medium text-muted-foreground">Puntos de origen activos</p>
+              <p className="text-xs font-medium text-muted-foreground">Puntos activos</p>
               {loadingPoints ? (
                 <div className="flex justify-center py-3">
                   <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                 </div>
               ) : activePoints.length === 0 ? (
                 <p className="rounded-md border border-dashed border-border/50 py-3 text-center text-xs text-muted-foreground">
-                  No hay puntos de origen activos —{" "}
+                  No hay puntos activos —{" "}
                   <Link to="/recursos" className="text-primary hover:underline">
                     revisa Recursos disponibles
                   </Link>

@@ -4,13 +4,14 @@
 //
 // Extraído de index.tsx (Vista Principal) para reusarlo tal cual en
 // recursos.tsx — el usuario pidió ver exactamente la misma información ahí
-// también, antes del botón "Definir punto de origen". Recibe `points` ya
+// también, antes del botón "Definir punto". Recibe `points` ya
 // cargados por el padre en vez de volver a pedirlos: ambos consumidores
 // (index.tsx, recursos.tsx) ya tienen su propio listResourcePoints().
 // =============================================================================
 
 import { Link } from "@tanstack/react-router";
-import { ArrowRightCircle, ChevronDown, Construction, MapPin, Truck, Users, Warehouse } from "lucide-react";
+import { ChevronDown } from "lucide-react";
+import { ArrowRightCircle, Construction, MapPin, Truck, Users, Warehouse } from "@/components/icons/Icons";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 // Primitivo de Radix directo (no el wrapper compartido) solo para la fila
 // de cada punto dentro del accordion anidado: necesita un botón "Ver en el
@@ -24,7 +25,7 @@ const RESOURCE_ROWS = [
   { icon: Warehouse, label: "Tolvas", key: "tolvas" },
   { icon: Construction, label: "Retroexcavadoras", key: "retro" },
   { icon: Truck, label: "Camiones", key: "trucks" },
-  { icon: MapPin, label: "Puntos de origen", key: "points" },
+  { icon: MapPin, label: "Puntos", key: "points" },
   { icon: Users, label: "Personal", key: "personal" },
 ] as const;
 
@@ -42,7 +43,7 @@ export function ResourcesSummaryPanel({ points, className }: ResourcesSummaryPan
     personal: points.reduce((sum, p) => sum + p.personal_count, 0),
   };
 
-  /** Puntos de origen que contribuyen a un recurso — la cantidad que cada
+  /** Puntos que contribuyen a un recurso — la cantidad que cada
    *  uno aporta se calcula aparte (ver pointCount) para el "{Punto}: N" de
    *  su fila dentro del accordion anidado. */
   function resourceBreakdown(key: keyof typeof resourceTotals): ResourcePoint[] {
@@ -75,10 +76,10 @@ export function ResourcesSummaryPanel({ points, className }: ResourcesSummaryPan
         <h3 className="text-sm font-semibold tracking-tight text-foreground">Recursos disponibles</h3>
       </div>
 
-      {/* Totales reales sobre los puntos de origen guardados (HDU6/AC4) —
+      {/* Totales reales sobre los puntos guardados (HDU6/AC4) —
           ya no son placeholders fijos. Cada fila se expande in-line
           (accordion, no una ventana aparte) mostrando el desglose por
-          punto de origen ("¿dónde están esas 5 tolvas?"). */}
+          punto ("¿dónde están esas 5 tolvas?"). */}
       <Accordion type="single" collapsible className="mt-6">
         {RESOURCE_ROWS.map(({ icon: Icon, label, key }) => (
           <AccordionItem key={key} value={key} className="border-border/15">
@@ -98,7 +99,7 @@ export function ResourcesSummaryPanel({ points, className }: ResourcesSummaryPan
               ) : key === "tolvas" || key === "trucks" ? (
                 // Solo tolvas (capacidad) y camiones (lista por unidad)
                 // tienen algo más que mostrar al expandir un punto —
-                // retroexcavadoras/personal/puntos de origen no, así
+                // retroexcavadoras/personal/puntos no, así
                 // que esos van por la rama plana de abajo, sin chevron.
                 //
                 // Root propio: sin esto, estos Item no tienen estado
@@ -148,7 +149,7 @@ export function ResourcesSummaryPanel({ points, className }: ResourcesSummaryPan
                   })}
                 </AccordionPrimitive.Root>
               ) : (
-                // Retroexcavadoras, personal, puntos de origen — sin
+                // Retroexcavadoras, personal, puntos — sin
                 // desglose posible, así que es una lista plana (sin
                 // chevron ni expand), solo nombre+cantidad y el link.
                 <ul className="ml-4 max-h-40 space-y-0.5 overflow-y-auto border-l border-border/40">

@@ -6,9 +6,9 @@ export interface GeoMapPoint {
   label: string;
   /** Si viene, el marker se dibuja como un círculo grande de este color en
    *  vez del pin por defecto — ej. zonas de basural cargadas (HDU5), para
-   *  distinguirlas visualmente de los puntos de origen (HDU6). */
+   *  distinguirlas visualmente de los puntos (HDU6). */
   color?: string;
-  /** Marca el punto como "no activo/no incluido" (ej. un punto de origen
+  /** Marca el punto como "no activo/no incluido" (ej. un punto
    *  desactivado, o una zona todavía no sumada a la ruta) con un ícono hueco
    *  (relleno transparente, solo borde) en vez del ícono sólido normal — la
    *  opacidad sola no se distinguía bien sobre las capas del mapa. Default false. */

@@ -13,7 +13,7 @@ import auth as auth_module
 # CONDORFINDER — RECURSOS DISPONIBLES (HDU6)
 # Archivo: backendModel/resources.py
 #
-# Puntos de origen (depósitos/patios desde donde salen camiones y
+# Puntos (depósitos/patios desde donde salen camiones y
 # maquinaria) con los recursos asociados a cada uno. Mismo patrón que
 # auth.py: get_db()/set_db() inyectado desde el lifespan de orquestador.py,
 # un router protegido con la misma dependency de sesión (get_current_user)
@@ -103,7 +103,7 @@ def _object_id(point_id: str) -> ObjectId:
     try:
         return ObjectId(point_id)
     except InvalidId:
-        raise HTTPException(status_code=404, detail="Punto de origen no encontrado")
+        raise HTTPException(status_code=404, detail="Punto no encontrado")
 
 
 # =============================================================================
@@ -143,7 +143,7 @@ async def get_point(
 ):
     doc = await get_db().resource_points.find_one({"_id": _object_id(point_id)})
     if not doc:
-        raise HTTPException(status_code=404, detail="Punto de origen no encontrado")
+        raise HTTPException(status_code=404, detail="Punto no encontrado")
     return _to_out(doc)
 
 
@@ -160,7 +160,7 @@ async def update_point(
         return_document=ReturnDocument.AFTER,
     )
     if not result:
-        raise HTTPException(status_code=404, detail="Punto de origen no encontrado")
+        raise HTTPException(status_code=404, detail="Punto no encontrado")
     return _to_out(result)
 
 
@@ -171,5 +171,5 @@ async def delete_point(
 ):
     result = await get_db().resource_points.delete_one({"_id": _object_id(point_id)})
     if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Punto de origen no encontrado")
-    return {"message": "Punto de origen eliminado"}
+        raise HTTPException(status_code=404, detail="Punto no encontrado")
+    return {"message": "Punto eliminado"}

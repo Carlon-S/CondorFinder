@@ -25,7 +25,7 @@ import { CLIENT_BACKEND_URL as BACKEND_URL } from "./config";
 export interface RoutePlanRequest {
   /** ids de análisis guardados (HDU4, Mongo) cargados para la ruta. */
   analysisIds: string[];
-  /** ids de puntos de origen HDU6 marcados como activos. */
+  /** ids de puntos HDU6 marcados como activos. */
   activePointIds: string[];
   availableHours: number;
   /** null = sin prioridad ("Sin prioridad" en el selector). */

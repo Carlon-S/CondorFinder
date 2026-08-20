@@ -10,7 +10,7 @@ import auth as auth_module
 # Archivo: backendModel/routing.py
 #
 # Base de POST /routes/generate: recibe el payload que ya arma el frontend
-# (src/lib/routePlan.ts), resuelve la capacidad REAL de los puntos de origen
+# (src/lib/routePlan.ts), resuelve la capacidad REAL de los puntos
 # activos Y los basurales reales de los análisis elegidos contra Mongo (el
 # frontend solo manda IDs — nunca los datos en sí — el backend es la única
 # fuente de verdad para ambos), y arma la respuesta con la forma exacta que
@@ -97,11 +97,11 @@ class RoutePlanInfeasibleOut(BaseModel):
 
 
 # =============================================================================
-# PUENTE DE ENTRADA — capacidad real de los puntos de origen activos
+# PUENTE DE ENTRADA — capacidad real de los puntos activos
 # =============================================================================
 
 async def _load_active_points(point_ids: list[str]) -> list[dict]:
-    """Trae de Mongo los puntos de origen de `point_ids`, filtrando además
+    """Trae de Mongo los puntos de `point_ids`, filtrando además
     por `active: True` server-side — no basta con que el frontend ya haya
     filtrado antes de mandar los IDs, porque esa lista pudo quedar vieja
     (un punto se pudo haber desactivado después). IDs con formato inválido
@@ -194,7 +194,7 @@ async def generate_route(
 
     if not active_points:
         return RoutePlanInfeasibleOut(
-            message="No hay puntos de origen activos disponibles para generar la ruta.",
+            message="No hay puntos activos disponibles para generar la ruta.",
         )
 
     waste_zones = await _load_waste_zones(payload.analysisIds)

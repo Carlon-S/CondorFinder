@@ -2,12 +2,12 @@
 // CONDORFINDER — RECURSOS DISPONIBLES (HDU6)
 // Archivo: src/routes/_authed/recursos.tsx
 //
-// AC1: botón "Definir punto de origen" habilita el modo de click sobre el
+// AC1: botón "Definir punto" habilita el modo de click sobre el
 // mapa. AC2: al elegir la ubicación se abre la pantalla de configuración
 // (tolvas, retroexcavadoras, camiones, personal). AC8: camiones es una
 // lista, cada uno con su propia capacidad. AC9: personal es solo cantidad.
 // AC3: "Guardar punto" persiste en el perfil (Mongo, vía lib/resources.ts).
-// AC4: botón "Modificar puntos de origen" lista todos los puntos guardados
+// AC4: botón "Modificar puntos" lista todos los puntos guardados
 // y los muestra en el mapa. AC5: "Editar" reabre el mismo formulario de
 // AC2, pre-llenado, y guarda con PUT en vez de POST — no es un modo nuevo,
 // es "configuring" con editingId seteado. AC6/AC7: confirmar + eliminar,
@@ -20,7 +20,7 @@
 
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
-import { Loader2, MapPin, Pencil, Trash2, Truck as TruckIcon, Warehouse, X } from "lucide-react";
+import { Loader2, MapPin, Pencil, Trash2, Truck as TruckIcon, Warehouse, X } from "@/components/icons/Icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -174,7 +174,7 @@ function RecursosPage() {
       setPoints(await listResourcePoints());
     } catch (err) {
       notify.error(
-        "No se pudieron cargar los puntos de origen",
+        "No se pudieron cargar los puntos",
         err instanceof Error ? err.message : "Intenta nuevamente.",
       );
     } finally {
@@ -342,10 +342,10 @@ function RecursosPage() {
     try {
       if (editingId) {
         await updateResourcePoint(editingId, payload);
-        notify.success("Punto de origen actualizado", `Los cambios en "${payload.name}" quedaron guardados.`);
+        notify.success("Punto actualizado", `Los cambios en "${payload.name}" quedaron guardados.`);
       } else {
         await createResourcePoint(payload);
-        notify.success("Punto de origen guardado", `"${payload.name}" quedó guardado en tu perfil.`);
+        notify.success("Punto guardado", `"${payload.name}" quedó guardado en tu perfil.`);
       }
       await refreshPoints();
       backToIdle();
@@ -364,7 +364,7 @@ function RecursosPage() {
     setDeleting(true);
     try {
       await deleteResourcePoint(deletingPoint.id);
-      notify.success("Punto de origen eliminado", `"${deletingPoint.name}" se borró de tu perfil.`);
+      notify.success("Punto eliminado", `"${deletingPoint.name}" se borró de tu perfil.`);
       setDeletingPoint(null);
       await refreshPoints();
     } catch (err) {
@@ -398,7 +398,7 @@ function RecursosPage() {
                 Recursos disponibles
               </h1>
               <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                Define puntos de origen y los recursos disponibles en cada uno
+                Define puntos y los recursos disponibles en cada uno
                 para planificar rutas de recolección.
               </p>
             </div>
@@ -407,7 +407,7 @@ function RecursosPage() {
               selectedPoint ? (
                 <div className="animate-in fade-in slide-in-from-left-2 duration-300 space-y-5">
                   <div className="flex items-center justify-between">
-                    <p className="text-sm font-semibold text-foreground">Punto de origen</p>
+                    <p className="text-sm font-semibold text-foreground">Punto</p>
                     <button
                       type="button"
                       onClick={() => setSelectedPoint(null)}
@@ -496,10 +496,10 @@ function RecursosPage() {
                   <ResourcesSummaryPanel points={points} />
                   <div className="flex flex-col gap-2 rounded-lg bg-background/40 p-3">
                     <Button onClick={startPlacing} size="lg" className="btn-cta w-full">
-                      <MapPin className="mr-2 h-4 w-4" /> Definir punto de origen
+                      <MapPin className="mr-2 h-4 w-4" /> Definir punto
                     </Button>
                     <Button onClick={startListing} variant="secondary" className="w-full">
-                      <Pencil className="mr-2 h-4 w-4" /> Modificar puntos de origen
+                      <Pencil className="mr-2 h-4 w-4" /> Modificar puntos
                     </Button>
                   </div>
                 </div>
@@ -532,7 +532,7 @@ function RecursosPage() {
                   </div>
                 ) : points.length === 0 ? (
                   <p className="rounded-md border border-dashed border-border/50 py-6 text-center text-xs text-muted-foreground">
-                    Todavía no hay puntos de origen guardados.
+                    Todavía no hay puntos guardados.
                   </p>
                 ) : (
                   <ul className="space-y-1.5">
@@ -797,7 +797,7 @@ function RecursosPage() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Eliminar punto de origen</AlertDialogTitle>
+            <AlertDialogTitle>Eliminar punto</AlertDialogTitle>
             <AlertDialogDescription>
               Esto elimina permanentemente "{deletingPointDisplay?.name}" y sus recursos asociados.
             </AlertDialogDescription>

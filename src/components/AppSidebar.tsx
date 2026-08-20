@@ -10,7 +10,7 @@ import {
   Route,
   CircleUserRound,
   LogOut,
-} from "lucide-react";
+} from "@/components/icons/Icons";
 import logo from "@/assets/Logo/Logo Light Mode.svg";
 import { logout } from "@/lib/auth";
 

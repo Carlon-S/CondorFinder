@@ -24,11 +24,11 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { notify } from "@/lib/notify";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import {
   ArrowRightCircle,
   Boxes,
-  ChevronDown,
-  ChevronUp,
+  ChartLineUp,
   Crosshair,
   Eye,
   FolderOpen,
@@ -39,7 +39,7 @@ import {
   Scale,
   Search,
   Trash2,
-} from "lucide-react";
+} from "@/components/icons/Icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -574,7 +574,7 @@ function MainPage() {
 
           <Link to="/recursos" className="pt-5">
             <Button size="lg" className="btn-cta w-full">
-              <MapPin className="mr-2 h-4 w-4" /> Definir punto de origen
+              <MapPin className="mr-2 h-4 w-4" /> Definir punto
             </Button>
           </Link>
         </aside>
@@ -587,7 +587,7 @@ function MainPage() {
               sistema en vez de quedar como una tira plana. */}
           <div className="panel mb-6 flex flex-wrap items-center divide-x divide-border/10 px-1 animate-in fade-in slide-in-from-top-2 duration-500">
             <Kpi
-              icon={<Layers className="h-4 w-4" />}
+              icon={<ChartLineUp className="h-4 w-4" />}
               label="Zonas registradas"
               // HDU7/AC3 — mismo criterio que "totals" más abajo: un análisis
               // histórico (reemplazado) ya no cuenta como zona vigente.
@@ -839,7 +839,7 @@ function MainPage() {
               className="flex cursor-not-allowed flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-muted/30 p-6 text-center opacity-60"
             >
               <span className="flex h-16 w-16 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-                <Layers className="h-7 w-7" />
+                <ChartLineUp className="h-7 w-7" />
               </span>
               <span className="text-sm font-semibold text-foreground">Modificar zona existente</span>
               <span className="rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide bg-warning/15 text-warning">
