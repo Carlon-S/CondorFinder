@@ -162,6 +162,13 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 # descartan cookies Secure seteadas fuera de una conexión HTTPS).
 _COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "false").lower() == "true"
 _COOKIE_SAMESITE = "none" if _COOKIE_SECURE else "lax"
+# COOKIE_DOMAIN (ej. ".condorfinder.cl"): sin esto, la cookie queda scoped
+# exactamente al host que la setea (api.condorfinder.cl) y el navegador
+# nunca la manda en un request a condorfinder.cl (dominio hermano, no el
+# mismo host) — el login "funcionaba" pero el redirect a "/" nunca veía
+# sesión. None por defecto (no seteás esto en local): ahí no hace falta,
+# es el mismo host vía el proxy de Vite.
+_COOKIE_DOMAIN = os.environ.get("COOKIE_DOMAIN")
 
 
 def _set_auth_cookie(response: Response, token: str) -> None:
@@ -171,6 +178,7 @@ def _set_auth_cookie(response: Response, token: str) -> None:
         httponly=True,
         secure=_COOKIE_SECURE,
         samesite=_COOKIE_SAMESITE,
+        domain=_COOKIE_DOMAIN,
         path="/",
         max_age=_jwt_expire_minutes() * 60,
     )
@@ -191,7 +199,7 @@ async def login(credentials: LoginRequest, response: Response):
 async def logout(response: Response):
     # Debe llevar los mismos atributos con los que se seteó (path/samesite),
     # si no el browser no la reconoce como la misma cookie y no la borra.
-    response.delete_cookie(key=COOKIE_NAME, path="/", samesite=_COOKIE_SAMESITE)
+    response.delete_cookie(key=COOKIE_NAME, path="/", samesite=_COOKIE_SAMESITE, domain=_COOKIE_DOMAIN)
     return {"message": "Sesión cerrada"}
 
 
