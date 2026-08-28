@@ -23,6 +23,7 @@
 
 import { loadEnv } from "vite";
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
+import { cloudflare } from "@cloudflare/vite-plugin";
 
 // Backend real (VM en la nube, o localhost:8000 en desarrollo 100% local).
 // loadEnv() en vez de import.meta.env porque este archivo corre en Node al
@@ -55,6 +56,15 @@ const BACKEND_ROUTE_PREFIXES = [
 ];
 
 export default defineConfig({
+  // Plugin oficial de Cloudflare para desplegar TanStack Start como Worker
+  // (distinto del preset "nitro" del propio wrapper — ese solo se activa
+  // dentro del sandbox de Lovable, nunca en un build normal como el de
+  // Cloudflare Pages). Requerido por `wrangler deploy` (ver wrangler.jsonc).
+  // apply: "build" — en modo dev choca con el propio plugin de TanStack
+  // Start (intenta reempaquetar módulos virtuales que solo existen en
+  // build), y esta app no usa bindings nativos de Cloudflare que necesiten
+  // el runtime de Workers durante `pnpm dev`.
+  plugins: [cloudflare()].flat().map((plugin) => ({ ...plugin, apply: "build" as const })),
   tanstackStart: {
     // Redirige el punto de entrada del servidor SSR de TanStack Start
     // hacia "src/server.ts", que actúa como wrapper de manejo de errores
