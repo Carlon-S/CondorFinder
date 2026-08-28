@@ -134,8 +134,18 @@ function RootComponent() {
   // an active match from /_authed". Leyendo s.matches acá, este chequeo y
   // el de useRouteContext quedan sincronizados por construcción — no pueden
   // divergir porque leen el mismo snapshot de estado en el mismo render.
+  //
+  // No basta con que "/_authed" esté en s.matches: cuando beforeLoad lanza
+  // el redirect a /login (sin sesión), la ruta queda "matched" un instante
+  // antes de que el redirect se procese, con context.user todavía sin
+  // poblar (beforeLoad lanzó el redirect antes de llegar a `return
+  // { user }`). En Node local esta ventana es demasiado corta para
+  // notarse, pero el streaming SSR del runtime de Workers sí llega a
+  // renderizar AppSidebar ahí, y explota leyendo user.username de
+  // undefined. Exigir context.user en el match filtra ese estado
+  // transitorio.
   const hasAuthedMatch = useRouterState({
-    select: (s) => s.matches.some((m) => m.routeId === "/_authed"),
+    select: (s) => s.matches.some((m) => m.routeId === "/_authed" && !!m.context?.user),
   });
 
   return (
