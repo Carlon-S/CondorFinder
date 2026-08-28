@@ -1,4 +1,3 @@
-import { Component, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   Outlet,
@@ -39,23 +38,6 @@ function NotFoundComponent() {
       </div>
     </div>
   );
-}
-
-// Contiene cualquier error de render de AppSidebar (ej. la condición de
-// carrera del context de "/_authed" durante un redirect en streaming SSR,
-// ver comentario en RootComponent) sin tumbar el resto de la página — en
-// el peor caso el sidebar no aparece por un instante, en vez de un 500.
-class SidebarBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
-  state = { hasError: false };
-
-  static getDerivedStateFromError() {
-    return { hasError: true };
-  }
-
-  render() {
-    if (this.state.hasError) return null;
-    return this.props.children;
-  }
 }
 
 function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
@@ -172,11 +154,7 @@ function RootComponent() {
       {/* Sidebar de navegación persistente — reemplaza el navbar superior de
           antes. Vive aquí (no por ruta) para no duplicarse en las 3 vistas. */}
       <div className="flex min-h-screen">
-        {hasAuthedMatch && (
-          <SidebarBoundary>
-            <AppSidebar />
-          </SidebarBoundary>
-        )}
+        {hasAuthedMatch && <AppSidebar />}
         {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
         <div className="flex min-w-0 flex-1 flex-col">
           <Outlet />

@@ -17,9 +17,11 @@ const errorMiddleware = createMiddleware().server(async ({ next }) => {
   }
 });
 
-// Protege las server functions (ej. getCurrentUserServerFn en lib/auth.ts)
-// contra CSRF: valida que la invocación venga del propio frontend antes de
-// ejecutarla, no de un sitio de terceros aprovechando la cookie de sesión.
+// Protege las server functions contra CSRF: valida que la invocación venga
+// del propio frontend antes de ejecutarla, no de un sitio de terceros
+// aprovechando la cookie de sesión. (auth.ts::getCurrentUser ya no es una
+// server function — ver su docstring — así que esto no la cubre a ella,
+// pero sigue aplicando a cualquier otra que se agregue.)
 const csrfMiddleware = createCsrfMiddleware({
   filter: (ctx) => ctx.handlerType === "serverFn",
 });

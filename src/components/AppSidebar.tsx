@@ -31,9 +31,14 @@ export function AppSidebar() {
   const [collapsed, setCollapsed] = useState(false);
 
   // El usuario ya lo resolvió el beforeLoad de _authed.tsx (evita otro
-  // fetch aquí) — AppSidebar solo se monta en rutas donde ese guard ya pasó,
-  // así que este contexto siempre está disponible cuando esto renderiza.
+  // fetch aquí) — AppSidebar normalmente solo se monta en rutas donde ese
+  // guard ya pasó, así que este contexto está disponible. Pero en el
+  // streaming SSR del runtime de Workers hay una ventana transitoria (ver
+  // __root.tsx) donde esto puede montarse un instante antes de que el
+  // contexto quede poblado — el guard de abajo corta ahí sin renderizar
+  // nada roto, en vez de que la app entera caiga con un 500.
   const { user } = useRouteContext({ from: "/_authed" });
+  if (!user) return null;
 
   const handleLogout = async () => {
     await logout();

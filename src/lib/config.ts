@@ -6,9 +6,8 @@
 // apuntando a localhost:8000 para desarrollo 100% local.
 //
 // BACKEND_URL (absoluta) — solo para fetches SERVIDOR-A-SERVIDOR (ver
-// auth.ts::getCurrentUserServerFn, la única función que corre en el server
-// de TanStack Start, no en el navegador) — esos fetches salen directo de
-// Node hacia afuera, no pasan por el proxy del dev server de Vite.
+// auth.ts::getCurrentUser, en su rama de servidor) — esos fetches salen
+// directo hacia afuera, no pasan por el proxy del dev server de Vite.
 export const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? "http://localhost:8000";
 
 // CLIENT_BACKEND_URL (relativa, vacía a propósito) — para TODO fetch que
