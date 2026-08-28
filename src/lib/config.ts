@@ -10,12 +10,21 @@
 // directo hacia afuera, no pasan por el proxy del dev server de Vite.
 export const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? "http://localhost:8000";
 
-// CLIENT_BACKEND_URL (relativa, vacía a propósito) — para TODO fetch que
-// corre en el NAVEGADOR. El dev server de Vite (vite.config.ts) hace de
-// proxy reverso de estas rutas hacia BACKEND_URL, así el navegador ve todo
-// como same-origin (localhost:8080) en vez de cross-origin hacia la IP de
-// la VM. Esto es necesario para que la cookie httpOnly de sesión funcione:
-// seteada por un backend en otro host, el navegador nunca la reenvía en
-// fetches cross-origin (ver el bug real que esto resolvió — login parecía
-// funcionar pero la sesión nunca quedaba activa).
-export const CLIENT_BACKEND_URL = "";
+// CLIENT_BACKEND_URL — para TODO fetch que corre en el NAVEGADOR.
+//
+// En desarrollo local, vacía a propósito (relativa): el dev server de Vite
+// (vite.config.ts) hace de proxy reverso de estas rutas hacia BACKEND_URL,
+// así el navegador ve todo como same-origin (localhost:8080) en vez de
+// cross-origin hacia la IP/dominio del backend. Esto es lo que hace que la
+// cookie httpOnly de sesión funcione en local (ver el bug real que esto
+// resolvió — login parecía funcionar pero la sesión nunca quedaba activa).
+//
+// En producción (el frontend desplegado en Cloudflare Workers) no existe
+// ese proxy — es exclusivo del dev server de Vite — así que ahí SÍ
+// necesita ser la URL absoluta real del backend (VITE_CLIENT_BACKEND_URL,
+// seteada como build variable en Cloudflare). Eso hace estos fetches
+// genuinamente cross-origin; el backend necesita permitir ese origen en
+// CORS y la cookie de sesión necesita secure=True + samesite="none" para
+// que el navegador la reenvíe (ver auth.py — condicional por env var, no
+// rompe el desarrollo local que sigue same-origin vía el proxy).
+export const CLIENT_BACKEND_URL = import.meta.env.VITE_CLIENT_BACKEND_URL ?? "";

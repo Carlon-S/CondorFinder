@@ -78,9 +78,13 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+# localhost:8080 siempre permitido (desarrollo local) — EXTRA_CORS_ORIGINS
+# (coma-separado) agrega el/los orígenes del frontend desplegado sin
+# reemplazar el de desarrollo. Ej: "https://condorfinder.diegogcs2003.workers.dev,https://condorfinder.cl"
+_extra_origins = [o.strip() for o in os.environ.get("EXTRA_CORS_ORIGINS", "").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:8080"],
+    allow_origins=["http://localhost:8080", *_extra_origins],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

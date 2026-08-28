@@ -152,13 +152,25 @@ async def seed_admin_user(db: AsyncDatabase) -> None:
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+# COOKIE_SECURE=true en el .env de la VM (nunca en local): el frontend
+# desplegado en Cloudflare Workers no pasa por el proxy same-origin del
+# dev server de Vite, así que estos fetches son cross-origin de verdad —
+# necesitan secure=True + samesite="none" para que el navegador reenvíe la
+# cookie. En local (sin la variable), sigue en secure=False + samesite=
+# "lax": ahí todo sigue siendo same-origin vía el proxy, y secure=True
+# rompería el login porque el backend local es HTTP plano (los navegadores
+# descartan cookies Secure seteadas fuera de una conexión HTTPS).
+_COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "false").lower() == "true"
+_COOKIE_SAMESITE = "none" if _COOKIE_SECURE else "lax"
+
+
 def _set_auth_cookie(response: Response, token: str) -> None:
     response.set_cookie(
         key=COOKIE_NAME,
         value=token,
         httponly=True,
-        secure=False,  # dev en http plano — producción real necesita True + samesite="none"
-        samesite="lax",
+        secure=_COOKIE_SECURE,
+        samesite=_COOKIE_SAMESITE,
         path="/",
         max_age=_jwt_expire_minutes() * 60,
     )
@@ -179,7 +191,7 @@ async def login(credentials: LoginRequest, response: Response):
 async def logout(response: Response):
     # Debe llevar los mismos atributos con los que se seteó (path/samesite),
     # si no el browser no la reconoce como la misma cookie y no la borra.
-    response.delete_cookie(key=COOKIE_NAME, path="/", samesite="lax")
+    response.delete_cookie(key=COOKIE_NAME, path="/", samesite=_COOKIE_SAMESITE)
     return {"message": "Sesión cerrada"}
 
 
