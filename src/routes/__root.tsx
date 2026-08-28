@@ -1,3 +1,4 @@
+import { Component, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   Outlet,
@@ -38,6 +39,23 @@ function NotFoundComponent() {
       </div>
     </div>
   );
+}
+
+// Contiene cualquier error de render de AppSidebar (ej. la condición de
+// carrera del context de "/_authed" durante un redirect en streaming SSR,
+// ver comentario en RootComponent) sin tumbar el resto de la página — en
+// el peor caso el sidebar no aparece por un instante, en vez de un 500.
+class SidebarBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  render() {
+    if (this.state.hasError) return null;
+    return this.props.children;
+  }
 }
 
 function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
@@ -135,17 +153,18 @@ function RootComponent() {
   // el de useRouteContext quedan sincronizados por construcción — no pueden
   // divergir porque leen el mismo snapshot de estado en el mismo render.
   //
-  // No basta con que "/_authed" esté en s.matches: cuando beforeLoad lanza
-  // el redirect a /login (sin sesión), la ruta queda "matched" un instante
-  // antes de que el redirect se procese, con context.user todavía sin
-  // poblar (beforeLoad lanzó el redirect antes de llegar a `return
-  // { user }`). En Node local esta ventana es demasiado corta para
-  // notarse, pero el streaming SSR del runtime de Workers sí llega a
-  // renderizar AppSidebar ahí, y explota leyendo user.username de
-  // undefined. Exigir context.user en el match filtra ese estado
-  // transitorio.
+  // Nota: no basta con que "/_authed" esté en s.matches para garantizar que
+  // context.user ya esté poblado (cuando beforeLoad lanza el redirect a
+  // /login, la ruta queda "matched" un instante antes de que el redirect
+  // se procese) — pero leer match.context acá para filtrar ese estado
+  // dispara un getter interno del router que puede lanzar su propia
+  // excepción en pleno SSR por streaming en el runtime de Workers ("Cannot
+  // read properties of null (reading 'context')"), así que no se puede
+  // usar para decidir esto de forma segura. El SidebarBoundary de abajo
+  // contiene ese caso (y cualquier otro similar) sin tumbar toda la
+  // página.
   const hasAuthedMatch = useRouterState({
-    select: (s) => s.matches.some((m) => m.routeId === "/_authed" && !!m.context?.user),
+    select: (s) => s.matches.some((m) => m.routeId === "/_authed"),
   });
 
   return (
@@ -153,7 +172,11 @@ function RootComponent() {
       {/* Sidebar de navegación persistente — reemplaza el navbar superior de
           antes. Vive aquí (no por ruta) para no duplicarse en las 3 vistas. */}
       <div className="flex min-h-screen">
-        {hasAuthedMatch && <AppSidebar />}
+        {hasAuthedMatch && (
+          <SidebarBoundary>
+            <AppSidebar />
+          </SidebarBoundary>
+        )}
         {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
         <div className="flex min-w-0 flex-1 flex-col">
           <Outlet />
