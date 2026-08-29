@@ -1102,34 +1102,48 @@ function Page() {
           </section>
         </div>
 
-        {/* SP1 — elección de modelo antes de generar. Deshabilitada mientras
-            el pipeline está corriendo (la elección ya quedó fija en esa
-            tarea apenas se envió); no depende de canGenerate porque tiene
-            sentido dejar elegir el modelo aunque todavía falten imágenes o
-            la subida no haya terminado. */}
-        <div className="mt-6 flex flex-col items-center gap-2 border-t border-border/25 pt-5">
-          <p className="mono text-[11px] uppercase tracking-wider text-muted-foreground">Modelo de generación</p>
-          <ToggleGroup
-            type="single"
-            value={precise ? "precise" : "fast"}
-            onValueChange={(value) => {
-              if (value) setPrecise(value === "precise");
-            }}
-            disabled={processing}
-            className="rounded-md border border-border/60 bg-background/40 p-0.5"
-          >
-            <ToggleGroupItem value="fast" className="text-xs" aria-label="Modelo óptimo y rápido">
-              Óptimo y rápido
-            </ToggleGroupItem>
-            <ToggleGroupItem value="precise" className="text-xs" aria-label="Modelo preciso y lento">
-              Preciso y lento
-            </ToggleGroupItem>
-          </ToggleGroup>
-        </div>
+        {/* Modelo (SP1) + botón + tooltip, todo en una sola fila centrada
+            para que quede alineado con el botón en vez de en su propio
+            bloque aparte. El toggle queda deshabilitado mientras el
+            pipeline está corriendo (la elección ya quedó fija en esa tarea
+            apenas se envió); no depende de canGenerate porque tiene sentido
+            dejar elegir el modelo aunque todavía falten imágenes o la
+            subida no haya terminado. */}
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-3 border-t border-border/25 pt-5">
+          <div className="flex items-center gap-2">
+            <ToggleGroup
+              type="single"
+              value={precise ? "precise" : "fast"}
+              onValueChange={(value) => {
+                if (value) setPrecise(value === "precise");
+              }}
+              disabled={processing}
+              className="rounded-md border border-border/60 bg-background/40 p-0.5"
+            >
+              <ToggleGroupItem value="fast" className="text-xs" aria-label="Modelo óptimo (más rápido)">
+                Óptimo
+              </ToggleGroupItem>
+              <ToggleGroupItem value="precise" className="text-xs" aria-label="Modelo preciso (más lento)">
+                Preciso
+              </ToggleGroupItem>
+            </ToggleGroup>
 
-        {/* Botón + tooltip — dentro de la misma tarjeta que Carga/Imágenes,
-            se lee como el paso que cierra esta etapa. */}
-        <div className="mt-6 flex items-center justify-center gap-3 border-t border-border/25 pt-5">
+            {/* Mismo patrón de badge circular + tooltip que el de abajo,
+                en tono neutro (bg-secondary) para no competir visualmente
+                con el semáforo de validación. */}
+            <div className="group relative flex-shrink-0">
+              <div className="flex h-9 w-9 items-center justify-center rounded-full cursor-help transition-colors bg-secondary text-secondary-foreground hover:bg-secondary/80">
+                <Info className="h-4 w-4" />
+              </div>
+              <div className="absolute left-full top-1/2 ml-2 -translate-y-1/2 w-64 scale-95 opacity-0 transition-all pointer-events-none group-hover:scale-100 group-hover:opacity-100 z-50">
+                <div className="relative rounded-md p-2.5 text-[11px] font-medium shadow-xl bg-secondary text-secondary-foreground">
+                  <div className="absolute right-full top-1/2 -mt-[6px] border-[6px] border-transparent border-r-secondary" />
+                  <strong>Óptimo</strong> genera el mapa más rápido. <strong>Preciso</strong> tarda más, pero con mayor exactitud.
+                </div>
+              </div>
+            </div>
+          </div>
+
           {processing ? (
             <Button
               onClick={handleCancel}
