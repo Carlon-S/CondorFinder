@@ -84,9 +84,22 @@ export const getCurrentUser = createIsomorphicFn()
     if (!token) return null;
 
     try {
-      const res = await fetch(`${BACKEND_URL}/auth/me`, {
-        headers: { cookie: `access_token=${token}` },
-      });
+      // TEMPORAL: timeout corto explicito -- sin esto, algo dentro del
+      // runtime de Workers corta la ejecucion antes de que nuestro propio
+      // catch pueda correr (no se ve ningun error logueado pese al catch
+      // de abajo), asi que forzamos un abort propio para poder loguear
+      // ALGO capturable por nuestro codigo.
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(new Error("timeout-8s")), 8000);
+      let res: Response;
+      try {
+        res = await fetch(`${BACKEND_URL}/auth/me`, {
+          headers: { cookie: `access_token=${token}` },
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
       if (!res.ok) return null;
       return await res.json();
     } catch (err) {
