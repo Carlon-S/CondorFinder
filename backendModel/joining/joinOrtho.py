@@ -25,7 +25,9 @@ presetfast = {
 presethigh = {
         'orthophoto-resolution': 2,
         'feature-quality': 'high',
-        'pc-quality': 'medium'
+        'pc-quality': 'medium',
+        'dtm': True,
+        'dsm': True,
     }
 
 def join(opc: int, on_task_created=None) -> str:
