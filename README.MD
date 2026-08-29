@@ -4,6 +4,17 @@ Sistema web municipal para el monitoreo automatizado de basurales mediante imág
 
 ---
 
+## Producción
+
+El sistema está desplegado y funcionando en la nube, sin depender de `localhost`:
+
+- **Frontend**: [https://condorfinder.cl](https://condorfinder.cl) — Cloudflare Workers, desplegado automáticamente con cada `git push` a `main`.
+- **Backend**: `https://api.condorfinder.cl` — VM de Google Cloud (`southamerica-west1`, Santiago) con Docker Compose; el despliegue **no** es automático, requiere entrar por SSH y correr `git pull && docker compose up -d --build`.
+
+Todo lo que sigue en este documento (Requisitos, Instalación, Ejecución) describe cómo levantar el sistema **en local para desarrollo** — no es necesario para usar la aplicación ya desplegada. Cómo subir cambios a producción está en la sección [Despliegue a producción](#despliegue-a-producción) más abajo; detalles adicionales de la infraestructura están en `CLAUDE.md`.
+
+---
+
 ## Requisitos previos
 
 | Herramienta | Versión mínima | Plataforma |
@@ -159,6 +170,93 @@ pnpm.cmd dev
 
 La aplicación estará disponible en **http://localhost:8080**
 
+### Alternativa: frontend local + backend en la nube
+
+No siempre hace falta levantar las 3 terminales. Si solo quieres probar un cambio de **frontend** (y no tienes o no necesitas el backend local corriendo), puedes apuntar tu frontend local al backend real de producción:
+
+1. Edita `.env` (raíz del proyecto) y deja activa la línea de producción en vez de la de `localhost`:
+   ```
+   VITE_BACKEND_URL=https://api.condorfinder.cl
+   #VITE_BACKEND_URL=http://localhost:8000
+   ```
+2. Corre solo la **Terminal 3**:
+   ```powershell
+   pnpm.cmd dev
+   ```
+
+La app en `http://localhost:8080` va a hablar con el backend real (login, zonas guardadas, recursos — todo con datos reales de producción) sin necesitar NodeODM ni el backend local. **No sirve para probar cambios de backend que todavía no subiste a la VM** — para eso, el modo 100% local de arriba es el único que funciona, porque ahí sí estás corriendo tu propio código modificado.
+
+> Recuerda volver a comentar la línea de producción y descomentar la de `localhost` cuando quieras volver al modo 100% local — es fácil olvidarlo y quedar sin querer apuntando siempre a producción.
+
+---
+
+## Despliegue a producción
+
+El sistema vive en `https://condorfinder.cl` (frontend) y `https://api.condorfinder.cl` (backend). **Frontend y backend se despliegan de formas completamente distintas** — no asumas que un `git push` alcanza para todo.
+
+### Frontend — automático
+
+Cloudflare Workers está conectado directamente a este repositorio de GitHub. Cada `git push origin main` dispara un build y deploy automático — no hay que hacer nada más ahí:
+
+```powershell
+git add <archivos-modificados>
+git commit -m "..."
+git push origin main
+```
+
+**Cuidado con el botón "Retry build"** en el dashboard de Cloudflare (Compute → `condorfinder` → Deployments): repite el build de un commit **específico que ya existía**, no trae el código más reciente del repo. Si un build falla y quieres reintentarlo, primero confirma en "Recent builds" que ese build corresponda al commit que esperas — si el push más reciente ya generó su propio build (aunque sea en paralelo), usar "Retry build" sobre uno viejo puede terminar sirviendo código desactualizado sin ningún error visible.
+
+Para confirmar qué versión está realmente activa: **Deployments → Version History** — la fila de arriba (100% de tráfico) debe corresponder al commit más reciente que esperas.
+
+Las variables de entorno del build (`VITE_BACKEND_URL`, `VITE_CLIENT_BACKEND_URL`) se configuran en Cloudflare, **no** en este repo: **Settings → Builds → Variables and secrets**.
+
+### Backend — manual
+
+El backend en la VM **no se actualiza solo** con un push. Hay que entrar y hacerlo a mano cada vez:
+
+```bash
+# SSH desde la consola de GCP (botón "SSH" en la fila de la VM), o:
+ssh <usuario>@<IP_de_la_VM>
+
+cd ~/CondorFinder
+git pull
+docker compose up -d --build
+```
+
+`docker compose up -d --build` reconstruye la imagen del backend con el código nuevo y reinicia ese contenedor (NodeODM no necesita reconstruirse, no cambió). Verifica que haya quedado bien:
+
+```bash
+docker compose ps                              # ambos servicios "Up"
+docker compose logs backend --tail 50          # sin errores al arrancar
+curl http://localhost:8000/pipeline-status     # {"busy":false}
+```
+
+`backendModel/.env` vive **solo en la VM** (nunca se sube al repo). Si tu cambio necesita una variable de entorno nueva o distinta, edítala ahí a mano antes del `docker compose up`:
+
+```bash
+nano backendModel/.env
+```
+
+#### Variables de entorno exclusivas de producción
+
+Ninguna de estas existe en tu `backendModel/.env` local — todas tienen un valor por defecto seguro para desarrollo cuando faltan, así que no rompen nada en local si nunca las agregas ahí:
+
+| Variable | Dónde vive | Para qué sirve |
+|---|---|---|
+| `PUBLIC_BASE_URL` | VM | Base de las URLs que el backend arma en sus respuestas (`result_url`, `thumbnail_url`, etc.) |
+| `GCS_BUCKET_NAME` | VM | Activa la subida de resultados a Google Cloud Storage en vez de solo disco local |
+| `NODEODM_HOST` | VM | Nombre del servicio de NodeODM dentro de la red de Docker (`nodeodm`, no `localhost`) |
+| `EXTRA_CORS_ORIGINS` | VM | Orígenes del frontend desplegado que CORS debe permitir, además de `localhost:8080` |
+| `COOKIE_SECURE` / `COOKIE_DOMAIN` | VM | Necesarias porque el frontend real no comparte host con el backend real (cross-origin de verdad) |
+| `VITE_BACKEND_URL` / `VITE_CLIENT_BACKEND_URL` | Cloudflare (variable de build, no en el repo) | A qué backend le habla el frontend ya desplegado |
+
+### Checklist para un cambio que toca frontend y backend a la vez
+
+1. Verifica en local primero (ver "Ejecución" arriba — modo 100% local para cambios de backend).
+2. `git push origin main` — espera a que el build de Cloudflare termine solo (Deployments → Recent builds), sin usar "Retry build".
+3. SSH a la VM → `git pull && docker compose up -d --build`.
+4. Prueba en `https://condorfinder.cl` con datos reales.
+
 ---
 
 ## Uso
@@ -256,6 +354,7 @@ CondorFinder/
 │   ├── routing.py            ← Base de generación de ruta (HDU5) — algoritmo pendiente
 │   ├── analyses.py           ← Análisis guardados (HDU4) + fusión de duplicados (HDU7)
 │   ├── task_store.py         ← Persistencia de tareas del pipeline en MongoDB
+│   ├── storage.py            ← Cliente de Google Cloud Storage (resultados guardados en producción)
 │   ├── requirements.txt      ← Dependencias Python
 │   ├── .env.example          ← Plantilla de variables de entorno (ver Instalación)
 │   ├── joining/
@@ -347,6 +446,10 @@ CondorFinder/
 | Detección de duplicados (HDU7) | Shapely (IoU real entre huellas de ortomosaico georreferenciadas, backend) |
 | Geodesia / reproyección | proj4 (UTM → WGS84, cliente) |
 | Geocodificación | Nominatim (OpenStreetMap) |
+| Despliegue frontend | Cloudflare Workers (dominio propio, deploy automático por push) |
+| Despliegue backend | Docker Compose sobre GCP Compute Engine (deploy manual) |
+| Almacenamiento de resultados | Google Cloud Storage |
+| Base de datos en producción | MongoDB Atlas (mismo cluster que en desarrollo local) |
 
 ---
 
