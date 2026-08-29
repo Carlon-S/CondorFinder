@@ -38,6 +38,7 @@ import {
 } from "@/components/icons/Icons";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { unifyImages, uploadImages, deleteImage, deleteAllImages, listUploadedImages, pollTask, cancelTask, getPipelineStatus, getTaskStatus, type OverlapPair } from "@/lib/unify";
 import { notify } from "@/lib/notify";
 import { saveMapUrl, clearMapUrl, saveThumbnailUrl, clearThumbnailUrl } from "@/lib/mapState";
@@ -240,6 +241,14 @@ function Page() {
 
   /** Mensaje de error detallado para mostrar al usuario cuando el proceso falla */
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // SP1 — elección de modelo antes de generar: preciso/lento (más detalle,
+  // corre más lento) vs óptimo/rápido (el preset que ya se usaba siempre,
+  // hardcodeado). Se manda como parte de UnifyOptions, no persiste en
+  // sessionStorage — es una elección puntual antes de cada generación, no
+  // algo que tenga sentido retomar si se recarga la página a mitad del
+  // pipeline (para entonces ya se envió y quedó fija en esa tarea).
+  const [precise, setPrecise] = useState(false);
 
   /** Progreso de subida al backend (0-100), null si no hay subida en curso */
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
@@ -804,7 +813,7 @@ function Page() {
     clearBackendStage();
 
     try {
-      const res = await unifyImages(validFiles, {}, (stage) => {
+      const res = await unifyImages(validFiles, { precise }, (stage) => {
         setBackendStage(stage);
         saveBackendStage(stage);
         setProgress(stage === "checking_overlap" ? 45 : stage === "joining" ? 60 : 75);
@@ -1091,6 +1100,31 @@ function Page() {
               </div>
             )}
           </section>
+        </div>
+
+        {/* SP1 — elección de modelo antes de generar. Deshabilitada mientras
+            el pipeline está corriendo (la elección ya quedó fija en esa
+            tarea apenas se envió); no depende de canGenerate porque tiene
+            sentido dejar elegir el modelo aunque todavía falten imágenes o
+            la subida no haya terminado. */}
+        <div className="mt-6 flex flex-col items-center gap-2 border-t border-border/25 pt-5">
+          <p className="mono text-[11px] uppercase tracking-wider text-muted-foreground">Modelo de generación</p>
+          <ToggleGroup
+            type="single"
+            value={precise ? "precise" : "fast"}
+            onValueChange={(value) => {
+              if (value) setPrecise(value === "precise");
+            }}
+            disabled={processing}
+            className="rounded-md border border-border/60 bg-background/40 p-0.5"
+          >
+            <ToggleGroupItem value="fast" className="text-xs" aria-label="Modelo óptimo y rápido">
+              Óptimo y rápido
+            </ToggleGroupItem>
+            <ToggleGroupItem value="precise" className="text-xs" aria-label="Modelo preciso y lento">
+              Preciso y lento
+            </ToggleGroupItem>
+          </ToggleGroup>
         </div>
 
         {/* Botón + tooltip — dentro de la misma tarjeta que Carga/Imágenes,

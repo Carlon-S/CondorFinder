@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
+from pydantic import BaseModel
 from typing import List
 import shutil
 import requests
@@ -440,13 +441,20 @@ def run_pipeline(task_id: str, opc: int):
         task_store.pop_odm_task_handle(task_id)
 
 
+class GenerateRequest(BaseModel):
+    # SP1 — 0 = joinOrtho.presetfast (óptimo/rápido, el único preset que se
+    # usaba hasta ahora), 1 (o cualquier valor != 0) = joinOrtho.presethigh
+    # (preciso/lento). Default 0 para no romper ningún caller que todavía no
+    # mande este campo.
+    opc: int = 0
+
+
 @app.post("/generate")
-async def generate_map():
+async def generate_map(request: GenerateRequest = GenerateRequest()):
     """
     Inicia el pipeline join + detect en background.
     Verifica que ODM esté corriendo antes de iniciar.
     Retorna un task_id para consultar el estado.
-    Preset fijo: 0 (rápido).
     """
     if not check_odm_running():
         return {
@@ -491,7 +499,7 @@ async def generate_map():
         if is_jpg(fname):
             shutil.copyfile(os.path.join(UPLOAD_DIR, fname), os.path.join(snapshot_dir, fname))
 
-    thread = threading.Thread(target=run_pipeline, args=(task_id, 0), daemon=True)
+    thread = threading.Thread(target=run_pipeline, args=(task_id, request.opc), daemon=True)
     thread.start()
 
     return {"task_id": task_id, "status": "running"}

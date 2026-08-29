@@ -60,6 +60,12 @@ export type UnifyResponse = UnifySuccess | UnifyError;
 
 export interface UnifyOptions {
   forceLowOverlap?: boolean;
+  /** SP1 — true = modelo preciso y lento (más resolución/calidad de
+   *  reconstrucción, corre más lento), false/ausente = óptimo y rápido (el
+   *  preset que se usaba siempre antes de este campo). Ver joinOrtho.py::
+   *  presetfast/presethigh en el backend — se manda como el parámetro
+   *  `opc` que ya existía ahí (0 = rápido, 1 = calidad). */
+  precise?: boolean;
 }
 
 
@@ -82,7 +88,11 @@ export async function unifyImages(
 ): Promise<UnifyResponse> {
 
   // Inicia el pipeline en el backend y obtiene task_id
-  const startRes = await fetch(`${BACKEND_URL}/generate`, { method: "POST" });
+  const startRes = await fetch(`${BACKEND_URL}/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ opc: options.precise ? 1 : 0 }),
+  });
   const startData = await startRes.json();
 
   if (startData.status === "error") {
