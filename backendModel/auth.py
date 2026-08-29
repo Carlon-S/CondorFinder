@@ -197,9 +197,13 @@ async def login(credentials: LoginRequest, response: Response):
 
 @router.post("/logout")
 async def logout(response: Response):
-    # Debe llevar los mismos atributos con los que se seteó (path/samesite),
-    # si no el browser no la reconoce como la misma cookie y no la borra.
-    response.delete_cookie(key=COOKIE_NAME, path="/", samesite=_COOKIE_SAMESITE, domain=_COOKIE_DOMAIN)
+    # Debe llevar los mismos atributos con los que se seteó (path/samesite/
+    # secure), si no el browser no la reconoce como la misma cookie y no la
+    # borra -- delete_cookie() default secure=False, que no calzaba con el
+    # secure=True de _set_auth_cookie en producción.
+    response.delete_cookie(
+        key=COOKIE_NAME, path="/", samesite=_COOKIE_SAMESITE, domain=_COOKIE_DOMAIN, secure=_COOKIE_SECURE
+    )
     return {"message": "Sesión cerrada"}
 
 

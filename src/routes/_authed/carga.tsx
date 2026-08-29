@@ -804,6 +804,10 @@ function Page() {
    */
   const generate = async () => {
     if (!canGenerate) return;
+    notify.success(
+      precise ? "Generando en modo Preciso" : "Generando en modo Óptimo",
+      precise ? "Tomará más tiempo, con mayor exactitud." : "Prioriza velocidad de generación.",
+    );
     resetProcess();
     const validFiles = items.filter((i) => i.status === "valid").map((i) => i.file);
     setPhase("validating_format"); setProgress(10);
@@ -1102,14 +1106,13 @@ function Page() {
           </section>
         </div>
 
-        {/* Modelo (SP1) + botón + tooltip, todo en una sola fila centrada
-            para que quede alineado con el botón en vez de en su propio
-            bloque aparte. El toggle queda deshabilitado mientras el
-            pipeline está corriendo (la elección ya quedó fija en esa tarea
-            apenas se envió); no depende de canGenerate porque tiene sentido
-            dejar elegir el modelo aunque todavía falten imágenes o la
-            subida no haya terminado. */}
-        <div className="mt-6 flex flex-wrap items-center justify-center gap-3 border-t border-border/25 pt-5">
+        {/* Modo (SP1) arriba, en su propia fila centrada; botón abajo. El
+            toggle queda deshabilitado mientras el pipeline está corriendo
+            (la elección ya quedó fija en esa tarea apenas se envió); no
+            depende de canGenerate porque tiene sentido dejar elegir el
+            modelo aunque todavía falten imágenes o la subida no haya
+            terminado. */}
+        <div className="mt-6 flex flex-col items-center gap-4 border-t border-border/25 pt-5">
           <div className="flex items-center gap-2">
             <ToggleGroup
               type="single"
@@ -1144,56 +1147,63 @@ function Page() {
             </div>
           </div>
 
-          {processing ? (
-            <Button
-              onClick={handleCancel}
-              disabled={cancelling}
-              variant="destructive"
-              className="w-full max-w-sm"
-              size="lg"
-            >
-              {cancelling
-                ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Cancelando...</>)
-                : (<><XCircle className="mr-2 h-4 w-4" /> Cancelar generación del mapa unificado</>)}
-            </Button>
-          ) : (
-            <Button onClick={generate} disabled={!canGenerate} className="w-full max-w-sm btn-cta" size="lg">
-              {phase === "done" || phase === "error"
-                ? (<><RotateCcw className="mr-2 h-4 w-4" /> Reprocesar mapa</>)
-                : (<><MapIcon className="mr-2 h-4 w-4" /> Generar mapa unificado</>)}
-            </Button>
-          )}
+          {/* Contenedor del mismo ancho que el botón (mx-auto centra ESE
+              ancho exacto en la página) — el badge de validación queda
+              posicionado fuera de esta caja (absolute), así no suma ancho
+              al grupo ni corre el centro real del botón, a diferencia de
+              antes donde ambos eran ítems flex hermanos. */}
+          <div className="relative mx-auto w-full max-w-sm">
+            {processing ? (
+              <Button
+                onClick={handleCancel}
+                disabled={cancelling}
+                variant="destructive"
+                className="w-full"
+                size="lg"
+              >
+                {cancelling
+                  ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Cancelando...</>)
+                  : (<><XCircle className="mr-2 h-4 w-4" /> Cancelar generación del mapa unificado</>)}
+              </Button>
+            ) : (
+              <Button onClick={generate} disabled={!canGenerate} className="w-full btn-cta" size="lg">
+                {phase === "done" || phase === "error"
+                  ? (<><RotateCcw className="mr-2 h-4 w-4" /> Reprocesar mapa</>)
+                  : (<><MapIcon className="mr-2 h-4 w-4" /> Generar mapa unificado</>)}
+              </Button>
+            )}
 
-          <div className="group relative flex-shrink-0">
-            {/* "empty" usa --secondary/--secondary-foreground (mismo tono
-                cálido que el resto de la paleta) — bg-foreground/text-
-                background quedaba como un chip casi negro que no combinaba
-                con el resto del tema. */}
-            <div className={`flex h-9 w-9 items-center justify-center rounded-full cursor-help transition-colors ${
-              tooltipState.color === "empty" ? "bg-secondary text-secondary-foreground hover:bg-secondary/80"
-              : tooltipState.color === "warning" ? "bg-warning text-warning-foreground hover:bg-warning/90"
-              : tooltipState.color === "destructive" ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              : "bg-success text-success-foreground hover:bg-success/90"
-            }`}>
-              <AlertTriangle className="h-4 w-4" />
-            </div>
-            <div className={`absolute left-full top-1/2 ml-2 -translate-y-1/2 w-64 transition-all ${
-              tooltipState.color === "warning" ? "opacity-100 scale-100 pointer-events-auto"
-              : "scale-95 opacity-0 group-hover:scale-100 group-hover:opacity-100 pointer-events-none"
-            } z-50`}>
-              <div className={`relative rounded-md p-2.5 text-[11px] font-medium shadow-xl ${
-                tooltipState.color === "empty" ? "bg-secondary text-secondary-foreground"
-                : tooltipState.color === "warning" ? "bg-warning text-warning-foreground"
-                : tooltipState.color === "destructive" ? "bg-destructive text-destructive-foreground"
-                : "bg-success text-success-foreground"
+            <div className="group absolute left-full top-1/2 ml-3 -translate-y-1/2 flex-shrink-0">
+              {/* "empty" usa --secondary/--secondary-foreground (mismo tono
+                  cálido que el resto de la paleta) — bg-foreground/text-
+                  background quedaba como un chip casi negro que no combinaba
+                  con el resto del tema. */}
+              <div className={`flex h-9 w-9 items-center justify-center rounded-full cursor-help transition-colors ${
+                tooltipState.color === "empty" ? "bg-secondary text-secondary-foreground hover:bg-secondary/80"
+                : tooltipState.color === "warning" ? "bg-warning text-warning-foreground hover:bg-warning/90"
+                : tooltipState.color === "destructive" ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                : "bg-success text-success-foreground hover:bg-success/90"
               }`}>
-                <div className={`absolute right-full top-1/2 -mt-[6px] border-[6px] border-transparent ${
-                  tooltipState.color === "empty" ? "border-r-secondary"
-                  : tooltipState.color === "warning" ? "border-r-warning"
-                  : tooltipState.color === "destructive" ? "border-r-destructive"
-                  : "border-r-success"
-                }`} />
-                {tooltipState.message}
+                <AlertTriangle className="h-4 w-4" />
+              </div>
+              <div className={`absolute left-full top-1/2 ml-2 -translate-y-1/2 w-64 transition-all ${
+                tooltipState.color === "warning" ? "opacity-100 scale-100 pointer-events-auto"
+                : "scale-95 opacity-0 group-hover:scale-100 group-hover:opacity-100 pointer-events-none"
+              } z-50`}>
+                <div className={`relative rounded-md p-2.5 text-[11px] font-medium shadow-xl ${
+                  tooltipState.color === "empty" ? "bg-secondary text-secondary-foreground"
+                  : tooltipState.color === "warning" ? "bg-warning text-warning-foreground"
+                  : tooltipState.color === "destructive" ? "bg-destructive text-destructive-foreground"
+                  : "bg-success text-success-foreground"
+                }`}>
+                  <div className={`absolute right-full top-1/2 -mt-[6px] border-[6px] border-transparent ${
+                    tooltipState.color === "empty" ? "border-r-secondary"
+                    : tooltipState.color === "warning" ? "border-r-warning"
+                    : tooltipState.color === "destructive" ? "border-r-destructive"
+                    : "border-r-success"
+                  }`} />
+                  {tooltipState.message}
+                </div>
               </div>
             </div>
           </div>
