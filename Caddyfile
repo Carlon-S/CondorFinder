@@ -1,3 +1,16 @@
+{
+	# Sin HTTP/3 (QUIC corre sobre UDP): el firewall de la VM solo permite
+	# TCP:443, no UDP:443. Caddy anunciaba soporte h3 igual (header Alt-Svc),
+	# lo que hacia que fetch() del Worker de Cloudflare intentara QUIC en la
+	# siguiente request y se quedara esperando ~5-10s antes del fallback a
+	# HTTP/2 -- causaba que la verificacion de sesion SSR pareciera colgada
+	# y terminara redirigiendo a /login. No hay beneficio real de HTTP/3
+	# para esta API, asi que se desactiva de raiz en vez de abrir UDP:443.
+	servers {
+		protocols h1 h2
+	}
+}
+
 api.condorfinder.cl {
 	reverse_proxy backend:8000
 }
