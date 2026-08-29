@@ -81,13 +81,19 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "CondorFinder" },
-      { name: "description", content: "Lovable Generated Project" },
-      { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Lovable App" },
-      { property: "og:description", content: "Lovable Generated Project" },
+      {
+        name: "description",
+        content: "Sistema municipal de detección automatizada de basurales mediante imágenes aéreas de drones.",
+      },
+      { name: "author", content: "CondorFinder" },
+      { property: "og:title", content: "CondorFinder" },
+      {
+        property: "og:description",
+        content: "Sistema municipal de detección automatizada de basurales mediante imágenes aéreas de drones.",
+      },
       { property: "og:type", content: "website" },
+      { property: "og:url", content: "https://condorfinder.cl" },
       { name: "twitter:card", content: "summary" },
-      { name: "twitter:site", content: "@Lovable" },
     ],
     links: [
       {
