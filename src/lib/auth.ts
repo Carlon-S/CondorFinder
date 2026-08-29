@@ -89,7 +89,11 @@ export const getCurrentUser = createIsomorphicFn()
       });
       if (!res.ok) return null;
       return await res.json();
-    } catch {
+    } catch (err) {
+      // TEMPORAL: diagnosticando por que este fetch nunca llega a la VM en
+      // produccion (ver wrangler tail) -- revertir despues de identificar
+      // la causa.
+      console.error("getCurrentUser().server() fetch failed:", err);
       return null;
     }
   })
