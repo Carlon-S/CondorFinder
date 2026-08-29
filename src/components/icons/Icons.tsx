@@ -382,6 +382,14 @@ export function ChartLineUp({ className }: IconProps) {
   );
 }
 
+export function Lightning({ className }: IconProps) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="currentColor" viewBox="0 0 256 256">
+      <path d="M215.79,118.17a8,8,0,0,0-5-5.66L153.18,90.9l14.66-73.33a8,8,0,0,0-13.85-6.87l-112,120a8,8,0,0,0,3.79,13.51l57.65,21.61L88.77,238.6a8,8,0,0,0,13.85,6.87l112-120A8,8,0,0,0,215.79,118.17ZM109.37,214.36l14.51-58a8,8,0,0,0-5.14-9.72L68.24,127.51,145,45.64,132.63,102.7a8,8,0,0,0,5.14,9.72l50.4,19.13Z" />
+    </svg>
+  );
+}
+
 export function ArrowRightCircle({ className }: IconProps) {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="currentColor" viewBox="0 0 256 256">

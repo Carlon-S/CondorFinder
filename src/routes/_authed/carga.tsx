@@ -35,10 +35,12 @@ import {
   ImageIcon,
   Clock,
   FileCheck,
+  Lightning,
+  Crosshair,
 } from "@/components/icons/Icons";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { unifyImages, uploadImages, deleteImage, deleteAllImages, listUploadedImages, pollTask, cancelTask, getPipelineStatus, getTaskStatus, type OverlapPair } from "@/lib/unify";
 import { notify } from "@/lib/notify";
 import { saveMapUrl, clearMapUrl, saveThumbnailUrl, clearThumbnailUrl } from "@/lib/mapState";
@@ -242,13 +244,16 @@ function Page() {
   /** Mensaje de error detallado para mostrar al usuario cuando el proceso falla */
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // SP1 — elección de modelo antes de generar: preciso/lento (más detalle,
-  // corre más lento) vs óptimo/rápido (el preset que ya se usaba siempre,
-  // hardcodeado). Se manda como parte de UnifyOptions, no persiste en
-  // sessionStorage — es una elección puntual antes de cada generación, no
-  // algo que tenga sentido retomar si se recarga la página a mitad del
-  // pipeline (para entonces ya se envió y quedó fija en esa tarea).
-  const [precise, setPrecise] = useState(false);
+  // SP1 — elección de modelo justo al presionar "Generar mapa unificado":
+  // preciso/lento (más detalle, corre más lento) vs óptimo/rápido (el
+  // preset que ya se usaba siempre, hardcodeado). Se manda como parámetro
+  // directo a generate() (no como estado leído por closure) porque
+  // setState no aplica de inmediato dentro del mismo handler de click de
+  // la tarjeta del modal — un setPrecise() seguido de generate() en la
+  // misma función vería el valor viejo de precise, no el recién elegido.
+  /** Modal que pide elegir el modelo justo al presionar "Generar mapa
+   * unificado" — elegir una tarjeta ahí dispara la generación de inmediato. */
+  const [showModelDialog, setShowModelDialog] = useState(false);
 
   /** Progreso de subida al backend (0-100), null si no hay subida en curso */
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
@@ -802,11 +807,11 @@ function Page() {
    * Ejecuta el proceso secuencial de generación del mapa.
    * Las fases de formato y cantidad son validadas en el frontend.
    */
-  const generate = async () => {
+  const generate = async (modelPrecise: boolean) => {
     if (!canGenerate) return;
     notify.success(
-      precise ? "Generando en modo Preciso" : "Generando en modo Óptimo",
-      precise ? "Tomará más tiempo, con mayor exactitud." : "Prioriza velocidad de generación.",
+      modelPrecise ? "Generando en modo Preciso" : "Generando en modo Óptimo",
+      modelPrecise ? "Tomará más tiempo, con mayor exactitud." : "Prioriza velocidad de generación.",
     );
     resetProcess();
     const validFiles = items.filter((i) => i.status === "valid").map((i) => i.file);
@@ -817,7 +822,7 @@ function Page() {
     clearBackendStage();
 
     try {
-      const res = await unifyImages(validFiles, { precise }, (stage) => {
+      const res = await unifyImages(validFiles, { precise: modelPrecise }, (stage) => {
         setBackendStage(stage);
         saveBackendStage(stage);
         setProgress(stage === "checking_overlap" ? 45 : stage === "joining" ? 60 : 75);
@@ -1106,47 +1111,11 @@ function Page() {
           </section>
         </div>
 
-        {/* Modo (SP1) arriba, en su propia fila centrada; botón abajo. El
-            toggle queda deshabilitado mientras el pipeline está corriendo
-            (la elección ya quedó fija en esa tarea apenas se envió); no
-            depende de canGenerate porque tiene sentido dejar elegir el
-            modelo aunque todavía falten imágenes o la subida no haya
-            terminado. */}
+        {/* Botón + tooltip — al presionar "Generar mapa unificado" (SP1)
+            se abre el modal de elección de modelo en vez de arrancar
+            directo; elegir una tarjeta ahí dispara la generación de
+            inmediato (ver showModelDialog más abajo, junto al Dialog). */}
         <div className="mt-6 flex flex-col items-center gap-4 border-t border-border/25 pt-5">
-          <div className="flex items-center gap-2">
-            <ToggleGroup
-              type="single"
-              value={precise ? "precise" : "fast"}
-              onValueChange={(value) => {
-                if (value) setPrecise(value === "precise");
-              }}
-              disabled={processing}
-              className="rounded-md border border-border/60 bg-background/40 p-0.5"
-            >
-              <ToggleGroupItem value="fast" className="text-xs" aria-label="Modelo óptimo (más rápido)">
-                Óptimo
-              </ToggleGroupItem>
-              <ToggleGroupItem value="precise" className="text-xs" aria-label="Modelo preciso (más lento)">
-                Preciso
-              </ToggleGroupItem>
-            </ToggleGroup>
-
-            {/* Mismo patrón de badge circular + tooltip que el de abajo,
-                en tono neutro (bg-secondary) para no competir visualmente
-                con el semáforo de validación. */}
-            <div className="group relative flex-shrink-0">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full cursor-help transition-colors bg-secondary text-secondary-foreground hover:bg-secondary/80">
-                <Info className="h-4 w-4" />
-              </div>
-              <div className="absolute left-full top-1/2 ml-2 -translate-y-1/2 w-64 scale-95 opacity-0 transition-all pointer-events-none group-hover:scale-100 group-hover:opacity-100 z-50">
-                <div className="relative rounded-md p-2.5 text-[11px] font-medium shadow-xl bg-secondary text-secondary-foreground">
-                  <div className="absolute right-full top-1/2 -mt-[6px] border-[6px] border-transparent border-r-secondary" />
-                  <strong>Óptimo</strong> genera el mapa más rápido. <strong>Preciso</strong> tarda más, pero con mayor exactitud.
-                </div>
-              </div>
-            </div>
-          </div>
-
           {/* Contenedor del mismo ancho que el botón (mx-auto centra ESE
               ancho exacto en la página) — el badge de validación queda
               posicionado fuera de esta caja (absolute), así no suma ancho
@@ -1166,7 +1135,7 @@ function Page() {
                   : (<><XCircle className="mr-2 h-4 w-4" /> Cancelar generación del mapa unificado</>)}
               </Button>
             ) : (
-              <Button onClick={generate} disabled={!canGenerate} className="w-full btn-cta" size="lg">
+              <Button onClick={() => setShowModelDialog(true)} disabled={!canGenerate} className="w-full btn-cta" size="lg">
                 {phase === "done" || phase === "error"
                   ? (<><RotateCcw className="mr-2 h-4 w-4" /> Reprocesar mapa</>)
                   : (<><MapIcon className="mr-2 h-4 w-4" /> Generar mapa unificado</>)}
@@ -1417,6 +1386,44 @@ function Page() {
         </section>
 
       </main>
+
+      {/* SP1 — elegir modelo justo al presionar "Generar mapa unificado".
+          Mismo patrón visual que el popup de "Agregar zona" en Vista
+          Principal (tarjetas grandes con ícono + título + descripción). */}
+      <Dialog open={showModelDialog} onOpenChange={setShowModelDialog}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Elegir modelo de generación</DialogTitle>
+            <DialogDescription>¿Priorizas velocidad o precisión para este mapa?</DialogDescription>
+          </DialogHeader>
+
+          <div className="grid grid-cols-1 gap-4 pt-2 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={() => { setShowModelDialog(false); generate(false); }}
+              className="group flex cursor-pointer flex-col items-center gap-3 rounded-xl border border-border bg-card p-6 text-center transition-[transform,box-shadow,border-color,background-color] duration-200 hover:-translate-y-0.5 hover:border-primary/50 hover:bg-primary/5 hover:shadow-md"
+            >
+              <span className="flex h-16 w-16 items-center justify-center rounded-xl bg-primary/10 text-primary transition-colors group-hover:bg-primary/15">
+                <Lightning className="h-7 w-7" />
+              </span>
+              <span className="text-sm font-semibold text-foreground">Óptimo</span>
+              <span className="text-xs text-muted-foreground">Genera el mapa más rápido.</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => { setShowModelDialog(false); generate(true); }}
+              className="group flex cursor-pointer flex-col items-center gap-3 rounded-xl border border-border bg-card p-6 text-center transition-[transform,box-shadow,border-color,background-color] duration-200 hover:-translate-y-0.5 hover:border-primary/50 hover:bg-primary/5 hover:shadow-md"
+            >
+              <span className="flex h-16 w-16 items-center justify-center rounded-xl bg-primary/10 text-primary transition-colors group-hover:bg-primary/15">
+                <Crosshair className="h-7 w-7" />
+              </span>
+              <span className="text-sm font-semibold text-foreground">Preciso</span>
+              <span className="text-xs text-muted-foreground">Tarda más, pero con mayor exactitud.</span>
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
