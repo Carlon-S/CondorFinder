@@ -1,0 +1,3 @@
+api.condorfinder.cl {
+	reverse_proxy backend:8000
+}

@@ -15,8 +15,11 @@ services:
       dockerfile: backendModel/Dockerfile
     restart: unless-stopped
     ports:
+      # Solo 8000 (HTTP plano, sin TLS) — se mantiene expuesto para pruebas
+      # directas (bypass de Caddy/Cloudflare) y para depurar NodeODM. El
+      # puerto 80 ya NO apunta acá: Caddy (abajo) lo toma para el desafío
+      # ACME de Let's Encrypt y para redirigir a HTTPS.
       - "8000:8000"
-      - "80:8000"
     env_file:
       - backendModel/.env
     environment:
@@ -37,3 +40,28 @@ services:
       - ./backendModel/detecting/output:/app/backendModel/detecting/output
     depends_on:
       - nodeodm
+
+  # Termina TLS real (Let's Encrypt, renovación automática) directo en la VM
+  # y reenvía a backend:8000 por la red interna de compose. Reemplaza el
+  # "Flexible SSL" de Cloudflare (que forzaba a que TODO el tráfico,
+  # incluidas las subidas de imágenes, pasara por el borde de Cloudflare —
+  # el cual buferea el cuerpo completo del POST antes de reenviarlo al
+  # origen, agregando varios segundos reales por subida). Con Caddy, el DNS
+  # de api.condorfinder.cl pasa a "DNS only" (nube gris) en Cloudflare: el
+  # navegador habla HTTPS directo con la VM, sin ese hop.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+
+volumes:
+  caddy_data:
+  caddy_config:
