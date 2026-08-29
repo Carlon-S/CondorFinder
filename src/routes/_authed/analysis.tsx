@@ -51,7 +51,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { loadMapUrl, saveMapUrl, clearMapUrl, MAP_READY_EVENT } from "@/lib/mapState";
+import {
+  loadMapUrl,
+  saveMapUrl,
+  clearMapUrl,
+  MAP_READY_EVENT,
+  loadThumbnailUrl,
+  saveThumbnailUrl,
+  clearThumbnailUrl,
+} from "@/lib/mapState";
 import {
   loadNoWasteDetected, loadDetectionJsonUrl, saveDetectionJsonUrl, clearDetectionJsonUrl,
   loadTaskId, saveTaskId, clearTaskId,
@@ -274,6 +282,10 @@ type AnalysisStatus = "idle" | "running" | "done" | "empty" | "error";
 
 function AnalysisPage() {
   const [mapUrl, setMapUrl] = useState<string | null>(() => loadMapUrl());
+  // Miniatura liviana asociada a mapUrl (ver mapState.ts) — puede no existir
+  // (análisis reabiertos de antes de este campo), se guarda igual con la
+  // misma disciplina "capturado una vez al montar" que mapUrl.
+  const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(() => loadThumbnailUrl());
   const usingGeneratedMap = mapUrl !== null;
 
   // taskId/detectionJsonUrl se capturan UNA VEZ al montar, igual que mapUrl
@@ -406,7 +418,16 @@ function AnalysisPage() {
     setSavingAnalysis(true);
     const result = await saveAnalysis(
       name,
-      { mapUrl, detections: displayDetections, summary: activeSummary, sourceTaskId: taskId ?? undefined, crs, orthoCenter, orthoBounds },
+      {
+        mapUrl,
+        thumbnailUrl,
+        detections: displayDetections,
+        summary: activeSummary,
+        sourceTaskId: taskId ?? undefined,
+        crs,
+        orthoCenter,
+        orthoBounds,
+      },
       overwriteId,
     );
     setSavingAnalysis(false);
@@ -560,6 +581,8 @@ function AnalysisPage() {
         if (record) {
           setMapUrl(record.mapUrl);
           saveMapUrl(record.mapUrl);
+          setThumbnailUrl(record.thumbnailUrl ?? null);
+          saveThumbnailUrl(record.thumbnailUrl ?? null);
 
           const detections = (record.detections as DisplayDetection[]) ?? [];
           setDisplayDetections(detections);
@@ -639,6 +662,7 @@ function AnalysisPage() {
   useEffect(() => {
     return () => {
       clearMapUrl();
+      clearThumbnailUrl();
       clearDetectionJsonUrl();
     };
   }, []);
@@ -649,6 +673,7 @@ function AnalysisPage() {
     const handler = (e: Event) => {
       const url = (e as CustomEvent<{ url: string }>).detail.url;
       setMapUrl(url);
+      setThumbnailUrl(loadThumbnailUrl());
       if (loadNoWasteDetected()) {
         setStatus("empty");
         setAnalysisMessage("No hay basura detectada en el área");
@@ -1214,7 +1239,7 @@ function AnalysisPage() {
           {duplicateExisting && (
             <div className="flex items-center gap-3 rounded-lg border border-border/60 bg-background/40 p-3">
               <img
-                src={duplicateExisting.mapUrl}
+                src={duplicateExisting.thumbnailUrl ?? duplicateExisting.mapUrl}
                 alt={duplicateExisting.name}
                 className="h-16 w-16 flex-shrink-0 rounded object-cover"
               />

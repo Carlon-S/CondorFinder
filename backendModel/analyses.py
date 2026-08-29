@@ -72,6 +72,12 @@ class AnalysisSummaryModel(BaseModel):
 class SavedAnalysisIn(BaseModel):
     name: str
     mapUrl: str
+    # Miniatura liviana (orquestador.py::result_thumbnail_filename) para
+    # vistas de lista/tarjeta — Optional porque los análisis guardados antes
+    # de que existiera este campo no la tienen (mismo criterio que
+    # orthoCenter/orthoBounds más abajo): el frontend cae de vuelta a mapUrl
+    # cuando es None.
+    thumbnailUrl: str | None = None
     # Blob opaco para el backend — cada detección trae bbox/geo_polygon/
     # volumen/etc., ya validados y calculados aguas arriba (volumeCalc.py);
     # acá no hace falta re-tipar cada campo, solo guardarlo y devolverlo tal
@@ -118,6 +124,7 @@ def _to_out(doc: dict) -> SavedAnalysisOut:
         savedAt=doc["savedAt"],
         name=doc["name"],
         mapUrl=doc["mapUrl"],
+        thumbnailUrl=doc.get("thumbnailUrl"),
         detections=doc.get("detections", []),
         summary=doc.get("summary"),
         sourceTaskId=doc.get("sourceTaskId"),

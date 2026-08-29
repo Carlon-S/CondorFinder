@@ -79,6 +79,17 @@ def detect(file_name: str):
     preview_rgba.save(f"{final}.png")
     print(f"Archivo Final en {final}.png")
 
+    # Miniatura para vistas de lista/tarjeta (Vista Principal, hover de
+    # rutas.tsx) — la imagen completa pesa varios MB y es innecesaria ahí;
+    # el nombre sigue la misma convención que result_filename en
+    # orquestador.py (base + sufijo), así que no hace falta cambiar la
+    # firma de retorno de esta función.
+    thumb_max = 800
+    thumb_scale = min(1.0, thumb_max / max(pw, ph))
+    thumbnail = preview_rgba.resize((max(1, int(pw * thumb_scale)), max(1, int(ph * thumb_scale))))
+    thumbnail.save(f"{final}_thumb.png")
+    print(f"Miniatura en {final}_thumb.png")
+
     # Guardar detecciones en JSON con coordenadas escaladas al espacio del PNG
     detections_list = []
     for i, pred in enumerate(result.object_prediction_list):

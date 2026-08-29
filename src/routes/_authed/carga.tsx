@@ -40,7 +40,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { unifyImages, uploadImages, deleteImage, deleteAllImages, listUploadedImages, pollTask, cancelTask, getPipelineStatus, getTaskStatus, type OverlapPair } from "@/lib/unify";
 import { notify } from "@/lib/notify";
-import { saveMapUrl, clearMapUrl } from "@/lib/mapState";
+import { saveMapUrl, clearMapUrl, saveThumbnailUrl, clearThumbnailUrl } from "@/lib/mapState";
 import {
   saveItems, loadItems, saveUploadDone, loadUploadDone,
   savePhase, loadPhase, saveResultUrl, loadResultUrl,
@@ -453,6 +453,7 @@ function Page() {
       setResultUrl(finalUrl); saveResultUrl(finalUrl);
       setNoWasteDetected(noWaste); saveNoWasteDetected(noWaste);
       saveMapUrl(finalUrl);
+      saveThumbnailUrl(res.thumbnailUrl ?? null);
       // Si detectionJsonUrl no viene por algún motivo, hay que LIMPIAR
       // explícitamente en vez de dejar sessionStorage con lo que haya
       // quedado de una generación anterior en esta misma pestaña — si no,
@@ -762,6 +763,7 @@ function Page() {
     items.forEach((i) => URL.revokeObjectURL(i.preview));
     setItems([]);
     clearMapUrl();
+    clearThumbnailUrl();
     resetProcess();
     deleteAllImages().catch(() => {});
     setUploadDone(false);
@@ -833,6 +835,7 @@ function Page() {
       setResultUrl(finalUrl); saveResultUrl(finalUrl);
       setNoWasteDetected(noWaste); saveNoWasteDetected(noWaste);
       saveMapUrl(finalUrl);
+      saveThumbnailUrl(res.thumbnailUrl ?? null);
       // Si detectionJsonUrl no viene por algún motivo, hay que LIMPIAR
       // explícitamente en vez de dejar sessionStorage con lo que haya
       // quedado de una generación anterior en esta misma pestaña — si no,

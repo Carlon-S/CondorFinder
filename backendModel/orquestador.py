@@ -50,6 +50,16 @@ async def lifespan(app: FastAPI):
     resources_module.set_db(db)
     routing_module.set_db(db)
     analyses_module.set_db(db)
+
+    # Índices — create_index es idempotente (no rompe nada si ya existen),
+    # así que se piden cada vez que arranca el proceso en vez de una
+    # migración aparte. Ninguna colección tenía más que el índice por
+    # defecto de _id hasta ahora — estos cubren los filtros que sí corren en
+    # cada request (get_current_user por username) o con frecuencia
+    # (list_pending_tasks/is_pipeline_busy, la detección de duplicados de
+    # HDU7 en cada guardado).
+    await db.users.create_index("username", unique=True)
+    await db.analyses.create_index([("crs", 1), ("historical", 1)])
     # GCS_BUCKET_NAME sin setear => modo local (ver storage.py) — así el
     # backend sigue corriendo 100% en WSL sin depender de ninguna cuenta de
     # GCP; solo la VM en producción lo setea de verdad.
@@ -62,6 +72,7 @@ async def lifespan(app: FastAPI):
     sync_mongo_client = MongoClient(os.environ["MONGODB_URI"])
     sync_db = sync_mongo_client[os.environ.get("MONGODB_DB_NAME", "condorfinder")]
     task_store.set_db(db, sync_db)
+    await db.tasks.create_index([("status", 1), ("reviewed", 1), ("created_at", 1)])
 
     await auth_module.seed_admin_user(db)
 
@@ -343,6 +354,7 @@ def run_pipeline(task_id: str, opc: int):
         base = os.path.basename(final)
         result_filename = base + ".png"
         result_json_filename = base + ".json"
+        result_thumbnail_filename = base + "_thumb.png"
 
         task_store.update_task_sync(task_id, detections_json_path=DETECTIONS_JSON, ortho_path=fileplace)
 
@@ -358,7 +370,7 @@ def run_pipeline(task_id: str, opc: int):
             # este cleanup quedaban huérfanos para siempre — es la causa de
             # los archivos sueltos en detecting/output/ que no correspondían
             # a ninguna zona del listado.
-            for fname in (result_filename, result_json_filename):
+            for fname in (result_filename, result_json_filename, result_thumbnail_filename):
                 fpath = os.path.join(OUTPUT_DIR, fname)
                 if os.path.exists(fpath):
                     try:
@@ -387,6 +399,7 @@ def run_pipeline(task_id: str, opc: int):
         for fname, ctype in (
             (result_filename, "image/png"),
             (result_json_filename, "application/json"),
+            (result_thumbnail_filename, "image/png"),
         ):
             fpath = os.path.join(OUTPUT_DIR, fname)
             if os.path.exists(fpath):
@@ -398,6 +411,7 @@ def run_pipeline(task_id: str, opc: int):
             message="Proceso completado",
             result_filename=result_filename,
             result_json_filename=result_json_filename,
+            result_thumbnail_filename=result_thumbnail_filename,
             detection_count=detection_count,
         )
 
@@ -596,6 +610,9 @@ async def list_pending_tasks():
             json_name = task.get("result_json_filename", "")
             if json_name and storage_module.result_file_exists(json_name):
                 entry["result_json_url"] = f"{PUBLIC_BASE_URL}/result/{json_name}"
+            thumb_name = task.get("result_thumbnail_filename", "")
+            if thumb_name and storage_module.result_file_exists(thumb_name):
+                entry["thumbnail_url"] = f"{PUBLIC_BASE_URL}/result/{thumb_name}"
             entry["detection_count"] = task.get("detection_count", 0)
         result.append(entry)
     return result
@@ -631,6 +648,9 @@ async def get_status(task_id: str):
         # debe recibir datos que no le corresponden).
         if json_name and storage_module.result_file_exists(json_name):
             response["result_json_url"] = f"{PUBLIC_BASE_URL}/result/{json_name}"
+        thumb_name = task.get("result_thumbnail_filename", "")
+        if thumb_name and storage_module.result_file_exists(thumb_name):
+            response["thumbnail_url"] = f"{PUBLIC_BASE_URL}/result/{thumb_name}"
         response["detection_count"] = task.get("detection_count", 0)
 
     if task["status"] == "error" and task.get("overlap_detail") is not None:

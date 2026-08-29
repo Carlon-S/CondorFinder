@@ -61,3 +61,36 @@ export function clearMapUrl(): void {
     // Ignorar silenciosamente
   }
 }
+
+// Miniatura liviana asociada al mapa (ver detectingOrtho.py/orquestador.py) —
+// mismo traspaso de sesión que mapUrl arriba, pero sin evento propio: quien
+// escucha MAP_READY_EVENT relee esto con loadThumbnailUrl() en el mismo
+// instante, porque carga.tsx siempre guarda ambas antes de que ese evento
+// dispare. Puede no existir (análisis reabiertos de antes de este campo, o
+// si el backend no la generó) — null es un valor válido, no un error.
+const THUMBNAIL_URL_KEY = "condorfinder:unified_map_thumbnail_url";
+
+export function saveThumbnailUrl(url: string | null): void {
+  try {
+    if (url) sessionStorage.setItem(THUMBNAIL_URL_KEY, url);
+    else sessionStorage.removeItem(THUMBNAIL_URL_KEY);
+  } catch {
+    console.warn("[CondorFinder] No se pudo guardar la miniatura en sessionStorage.");
+  }
+}
+
+export function loadThumbnailUrl(): string | null {
+  try {
+    return sessionStorage.getItem(THUMBNAIL_URL_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function clearThumbnailUrl(): void {
+  try {
+    sessionStorage.removeItem(THUMBNAIL_URL_KEY);
+  } catch {
+    // Ignorar silenciosamente
+  }
+}

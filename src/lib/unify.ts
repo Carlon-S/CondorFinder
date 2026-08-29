@@ -24,6 +24,7 @@ import { CLIENT_BACKEND_URL as BACKEND_URL } from "./config";
 export interface UnifySuccess {
   status: "success";
   mapUrl: string;
+  thumbnailUrl?: string;
   detectionCount: number;
   detectionJsonUrl?: string;
   technicalDownloadUrl?: string;
@@ -104,6 +105,7 @@ export interface RawTaskStatus {
   message: string;
   result_url?: string;
   result_json_url?: string;
+  thumbnail_url?: string;
   detection_count?: number;
 }
 
@@ -129,6 +131,7 @@ export interface PendingTask {
   createdAt: string | null;
   resultUrl?: string;
   resultJsonUrl?: string;
+  thumbnailUrl?: string;
   detectionCount?: number;
 }
 
@@ -153,6 +156,7 @@ export async function listPendingTasks(): Promise<PendingTask[]> {
     created_at: string | null;
     result_url?: string;
     result_json_url?: string;
+    thumbnail_url?: string;
     detection_count?: number;
   }[] = await res.json();
 
@@ -163,6 +167,7 @@ export async function listPendingTasks(): Promise<PendingTask[]> {
     createdAt: t.created_at,
     resultUrl: t.result_url,
     resultJsonUrl: t.result_json_url,
+    thumbnailUrl: t.thumbnail_url,
     detectionCount: t.detection_count,
   }));
 }
@@ -182,6 +187,7 @@ export async function pollTask(
       return {
         status: "success",
         mapUrl: statusData.result_url,
+        thumbnailUrl: statusData.thumbnail_url,
         detectionCount: statusData.detection_count ?? 0,
         detectionJsonUrl: statusData.result_json_url,
         technicalDownloadUrl: statusData.result_url,

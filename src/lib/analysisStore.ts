@@ -36,6 +36,11 @@ export interface SavedAnalysisRecord {
   name: string;
   savedAt: string; // ISO 8601
   mapUrl: string;
+  /** Miniatura liviana para tarjetas/listas (Vista Principal, hover de
+   *  rutas.tsx) — usar en vez de `mapUrl` (varios MB) donde solo se
+   *  necesita una vista previa. Ausente en análisis guardados antes de este
+   *  cambio; en ese caso el consumidor debe caer de vuelta a `mapUrl`. */
+  thumbnailUrl?: string | null;
   detections: unknown;
   summary: AnalysisSummary | null;
   /** task_id del backend del que salió este análisis, si vino de una
@@ -141,6 +146,7 @@ export async function saveAnalysis(
   name: string,
   data: {
     mapUrl: string;
+    thumbnailUrl?: string | null;
     detections: unknown;
     summary: AnalysisSummary | null;
     sourceTaskId?: string;
@@ -154,6 +160,7 @@ export async function saveAnalysis(
     const payload = {
       name,
       mapUrl: data.mapUrl,
+      thumbnailUrl: data.thumbnailUrl ?? null,
       detections: data.detections ?? [],
       summary: data.summary,
       sourceTaskId: data.sourceTaskId ?? null,

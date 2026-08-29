@@ -127,6 +127,9 @@ interface ZoneRow {
   name: string;
   savedAt: string;
   mapUrl: string | null;
+  /** Miniatura liviana para la tarjeta — preferida sobre mapUrl (varios MB)
+   *  cuando existe; ausente en análisis guardados antes de este campo. */
+  thumbnailUrl?: string | null;
   summary: AnalysisSummary | null;
   recordId?: string;
   taskId?: string;
@@ -151,6 +154,7 @@ function fromRecord(r: SavedAnalysisRecord): ZoneRow {
     name: r.name,
     savedAt: r.savedAt,
     mapUrl: r.mapUrl,
+    thumbnailUrl: r.thumbnailUrl,
     summary: r.summary,
     recordId: r.id,
     taskId: r.sourceTaskId,
@@ -216,6 +220,7 @@ async function loadZoneRows(): Promise<ZoneRow[]> {
         // dejaba en null y la fila mostraba un ícono de placeholder en
         // vez de la miniatura real, aunque el sistema ya la tenía.
         mapUrl: t.resultUrl ?? null,
+        thumbnailUrl: t.thumbnailUrl ?? null,
         summary: null,
         taskId: t.taskId,
         resultUrl: t.resultUrl,
@@ -705,7 +710,11 @@ function MainPage() {
                       <TableCell>
                         {z.mapUrl ? (
                           <div className="h-16 w-24 overflow-hidden rounded-md bg-muted">
-                            <img src={z.mapUrl} alt={`Mapa de ${z.name}`} className="h-full w-full object-cover" />
+                            <img
+                              src={z.thumbnailUrl ?? z.mapUrl}
+                              alt={`Mapa de ${z.name}`}
+                              className="h-full w-full object-cover"
+                            />
                           </div>
                         ) : z.state === "in_progress" ? (
                           // Proceso activo en el backend — el barrido de .scan-line

@@ -31,6 +31,7 @@
 import { createIsomorphicFn } from "@tanstack/react-start";
 
 import { BACKEND_URL, CLIENT_BACKEND_URL } from "./config";
+import { clearCachedAuth, loadCachedAuth, saveCachedAuth } from "./authState";
 
 export interface CurrentUser {
   username: string;
@@ -64,6 +65,7 @@ export async function login(username: string, password: string): Promise<Current
 }
 
 export async function logout(): Promise<void> {
+  clearCachedAuth();
   await fetch(`${CLIENT_BACKEND_URL}/auth/logout`, {
     method: "POST",
     credentials: "include",
@@ -92,10 +94,19 @@ export const getCurrentUser = createIsomorphicFn()
     }
   })
   .client(async (): Promise<CurrentUser | null> => {
+    // Evita reverificar contra el backend en cada navegación (ver
+    // authState.ts) — el componente de la ruta hija no se monta hasta que
+    // esto resuelve, así que una caché vigente lo hace prácticamente
+    // instantáneo en vez de esperar un viaje redondo al backend.
+    const cachedUsername = loadCachedAuth();
+    if (cachedUsername) return { username: cachedUsername };
+
     try {
       const res = await fetch(`${CLIENT_BACKEND_URL}/auth/me`, { credentials: "include" });
       if (!res.ok) return null;
-      return await res.json();
+      const user: CurrentUser = await res.json();
+      saveCachedAuth(user.username);
+      return user;
     } catch {
       return null;
     }
