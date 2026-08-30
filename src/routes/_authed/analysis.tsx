@@ -880,27 +880,33 @@ function AnalysisPage() {
                     lo que le cambiaba el ancho al botón en pleno click y lo
                     sacaba del borde del banner. */}
                 <div className="mt-3 flex gap-2">
+                  {/* El spinner va absolute (fuera del flujo) en vez de un
+                      span reservado en línea con el texto -- ese span le
+                      agregaba margen solo a la izquierda, corriendo el
+                      centro real del texto hacia la derecha. Así el texto
+                      queda perfectamente centrado siempre, y el spinner se
+                      superpone a su izquierda sin mover nada. */}
                   <Button
                     size="sm"
                     variant="secondary"
-                    className="min-w-0 flex-1"
+                    className="relative min-w-0 flex-1"
                     disabled={resolvingDuplicate !== null}
                     onClick={handleRejectDuplicate}
                   >
-                    <span className="mr-2 inline-flex w-3.5 flex-shrink-0 justify-center">
-                      {resolvingDuplicate === "reject" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                    </span>
+                    {resolvingDuplicate === "reject" && (
+                      <Loader2 className="absolute left-3 h-3.5 w-3.5 animate-spin" />
+                    )}
                     Son zonas distintas
                   </Button>
                   <Button
                     size="sm"
-                    className="min-w-0 flex-1"
+                    className="relative min-w-0 flex-1"
                     disabled={resolvingDuplicate !== null}
                     onClick={handleConfirmDuplicate}
                   >
-                    <span className="mr-2 inline-flex w-3.5 flex-shrink-0 justify-center">
-                      {resolvingDuplicate === "confirm" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                    </span>
+                    {resolvingDuplicate === "confirm" && (
+                      <Loader2 className="absolute left-3 h-3.5 w-3.5 animate-spin" />
+                    )}
                     Es la misma zona
                   </Button>
                 </div>
