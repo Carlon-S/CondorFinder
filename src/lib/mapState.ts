@@ -94,3 +94,57 @@ export function clearThumbnailUrl(): void {
     // Ignorar silenciosamente
   }
 }
+
+// Identidad del análisis GUARDADO que se está viendo (id + nombre), si lo
+// hay — antes vivía solo como useState en analysis.tsx, sin persistir. Un
+// F5 reconstruye mapUrl/thumbnailUrl/detectionJsonUrl bien desde acá mismo,
+// pero currentAnalysisId volvía a null: el botón pasaba de "Guardar
+// cambios" a "Guardar análisis" (como si fuera una generación nueva sin
+// guardar) y "Analizar volumen" se mostraba como no ejecutado, aunque el
+// análisis ya estuviera guardado y completo. Guardar esto acá deja que el
+// mount de analysis.tsx lo restaure igual que el resto del hand-off.
+const CURRENT_ANALYSIS_ID_KEY = "condorfinder:current_analysis_id";
+const CURRENT_ANALYSIS_NAME_KEY = "condorfinder:current_analysis_name";
+
+export function saveCurrentAnalysisId(id: string | null): void {
+  try {
+    if (id) sessionStorage.setItem(CURRENT_ANALYSIS_ID_KEY, id);
+    else sessionStorage.removeItem(CURRENT_ANALYSIS_ID_KEY);
+  } catch {
+    // Ignorar silenciosamente
+  }
+}
+
+export function loadCurrentAnalysisId(): string | null {
+  try {
+    return sessionStorage.getItem(CURRENT_ANALYSIS_ID_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function saveCurrentAnalysisName(name: string | null): void {
+  try {
+    if (name) sessionStorage.setItem(CURRENT_ANALYSIS_NAME_KEY, name);
+    else sessionStorage.removeItem(CURRENT_ANALYSIS_NAME_KEY);
+  } catch {
+    // Ignorar silenciosamente
+  }
+}
+
+export function loadCurrentAnalysisName(): string | null {
+  try {
+    return sessionStorage.getItem(CURRENT_ANALYSIS_NAME_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function clearCurrentAnalysisId(): void {
+  try {
+    sessionStorage.removeItem(CURRENT_ANALYSIS_ID_KEY);
+    sessionStorage.removeItem(CURRENT_ANALYSIS_NAME_KEY);
+  } catch {
+    // Ignorar silenciosamente
+  }
+}

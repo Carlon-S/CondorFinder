@@ -85,7 +85,7 @@ import {
   saveNoWasteDetected,
   type PersistedFileItem,
 } from "@/lib/imageState";
-import { clearMapUrl, saveMapUrl } from "@/lib/mapState";
+import { clearMapUrl, saveMapUrl, clearCurrentAnalysisId } from "@/lib/mapState";
 import {
   Dialog,
   DialogContent,
@@ -425,6 +425,11 @@ function MainPage() {
     const fresh = await getTaskStatus(row.taskId);
     const resultUrl = fresh?.result_url ?? row.resultUrl;
     if (!resultUrl) return;
+    // Tarea pendiente, nunca guardada -- sin esto, podía heredar el
+    // currentAnalysisId de la última zona guardada vista antes en esta
+    // misma pestaña, sobrescribiéndola por error en vez de ofrecer
+    // guardar esta tarea como un análisis nuevo.
+    clearCurrentAnalysisId();
     saveTaskId(row.taskId);
     saveMapUrl(resultUrl);
     const resultJsonUrl = fresh?.result_json_url ?? row.resultJsonUrl;
@@ -511,6 +516,7 @@ function MainPage() {
   const goToCarga = () => {
     clearImageState();
     clearMapUrl();
+    clearCurrentAnalysisId();
     deleteAllImages().catch(() => {});
     setAddZoneOpen(false);
     navigate({ to: "/carga" });

@@ -43,7 +43,7 @@ import { Progress } from "@/components/ui/progress";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { unifyImages, uploadImages, deleteImage, deleteAllImages, listUploadedImages, pollTask, cancelTask, getPipelineStatus, getTaskStatus, type OverlapPair } from "@/lib/unify";
 import { notify } from "@/lib/notify";
-import { saveMapUrl, clearMapUrl, saveThumbnailUrl, clearThumbnailUrl } from "@/lib/mapState";
+import { saveMapUrl, clearMapUrl, saveThumbnailUrl, clearThumbnailUrl, clearCurrentAnalysisId } from "@/lib/mapState";
 import {
   saveItems, loadItems, saveUploadDone, loadUploadDone,
   savePhase, loadPhase, saveResultUrl, loadResultUrl,
@@ -770,6 +770,12 @@ function Page() {
     clearDetectionJsonUrl();
     setCancelling(false);
     saveCancelRequested(false);
+    // resetProcess corre al arrancar CADA generate() (no solo clearAll) --
+    // sin esto, generar un mapa nuevo desde acá seguía arrastrando el
+    // currentAnalysisId de la última zona guardada que se hubiera visto en
+    // esta pestaña, aunque el mapa resultante fuera una tarea totalmente
+    // distinta y nunca guardada.
+    clearCurrentAnalysisId();
   };
 
   /** Elimina todas las imágenes y reinicia el proceso */
@@ -778,7 +784,7 @@ function Page() {
     setItems([]);
     clearMapUrl();
     clearThumbnailUrl();
-    resetProcess();
+    resetProcess(); // también limpia currentAnalysisId
     deleteAllImages().catch(() => {});
     setUploadDone(false);
     setUploadProgress(null);

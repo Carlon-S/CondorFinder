@@ -60,6 +60,11 @@ import {
   loadThumbnailUrl,
   saveThumbnailUrl,
   clearThumbnailUrl,
+  loadCurrentAnalysisId,
+  saveCurrentAnalysisId,
+  loadCurrentAnalysisName,
+  saveCurrentAnalysisName,
+  clearCurrentAnalysisId,
 } from "@/lib/mapState";
 import {
   loadNoWasteDetected, loadDetectionJsonUrl, saveDetectionJsonUrl, clearDetectionJsonUrl,
@@ -354,8 +359,14 @@ function AnalysisPage() {
   // ya se guardó una vez en este mismo tab). Mientras esté marcado, volver a
   // guardar sobrescribe directo, sin pedir nombre ni chequear duplicados —
   // no es un análisis nuevo, es el mismo que ya existe.
-  const [currentAnalysisId, setCurrentAnalysisId]     = useState<string | null>(null);
-  const [currentAnalysisName, setCurrentAnalysisName] = useState<string | null>(null);
+  // Estado inicial leído de sessionStorage (no null a secas): sin esto, un
+  // F5 sobre un análisis YA GUARDADO reconstruía mapUrl/detecciones bien
+  // (ver más abajo) pero perdía esta identidad -- el botón volvía a decir
+  // "Guardar análisis" en vez de "Guardar cambios" y ofrecía guardarlo de
+  // nuevo como si fuera una generación nueva sin guardar, en vez de seguir
+  // apuntando al mismo registro.
+  const [currentAnalysisId, setCurrentAnalysisId]     = useState<string | null>(loadCurrentAnalysisId);
+  const [currentAnalysisName, setCurrentAnalysisName] = useState<string | null>(loadCurrentAnalysisName);
   // Guardar/buscar duplicado ahora son llamadas HTTP (Mongo), no localStorage
   // instantáneo — sin este indicador, un click en "Guardar" durante una
   // conexión lenta no daba ninguna señal de que algo estaba pasando.
@@ -445,6 +456,8 @@ function AnalysisPage() {
 
     setCurrentAnalysisId(result.record.id);
     setCurrentAnalysisName(result.record.name);
+    saveCurrentAnalysisId(result.record.id);
+    saveCurrentAnalysisName(result.record.name);
     setSaveDialogOpen(false);
     notify.success(
       overwriteId ? "Análisis actualizado" : "Análisis guardado",
@@ -596,6 +609,8 @@ function AnalysisPage() {
 
           setCurrentAnalysisId(record.id);
           setCurrentAnalysisName(record.name);
+          saveCurrentAnalysisId(record.id);
+          saveCurrentAnalysisName(record.name);
 
           // HDU7/AC2 — "al acceder al mapa del nuevo análisis" cubre tanto
           // el guardado recién hecho (performSave) como reabrirlo después
@@ -683,6 +698,7 @@ function AnalysisPage() {
       clearMapUrl();
       clearThumbnailUrl();
       clearDetectionJsonUrl();
+      clearCurrentAnalysisId();
     };
   }, []);
 
