@@ -282,10 +282,12 @@ function MainPage() {
   useEffect(() => {
     if (deleteTarget) setDeleteTargetDisplay(deleteTarget);
   }, [deleteTarget]);
-  // Feedback de carga mientras confirmDelete hace sus llamadas al backend —
-  // antes el diálogo se cerraba y la fila desaparecía de golpe, sin ningún
-  // indicio de que algo estaba pasando ni confirmación de que terminó.
-  const [deletingZone, setDeletingZone] = useState(false);
+  // key de la fila que se está eliminando ahora mismo (o null) — el diálogo
+  // de confirmación se cierra al instante, y esta fila muestra su propio
+  // estado de carga mientras confirmDelete corre en segundo plano. Antes no
+  // había ningún indicio de que algo estaba pasando ni confirmación visible
+  // hasta que la fila desaparecía de golpe al terminar.
+  const [deletingRowKey, setDeletingRowKey] = useState<string | null>(null);
 
   // Filtro por estado — 4 botones al nivel de "Agregar zona" (Todas incluida).
   // "historical" (HDU7/AC3) es un quinto filtro aparte, no un ZoneState más
@@ -437,14 +439,20 @@ function MainPage() {
 
   const confirmDelete = async () => {
     if (!deleteTarget) return;
-    setDeletingZone(true);
-    const deletedName = deleteTarget.name;
-    if (deleteTarget.state === "done" && deleteTarget.recordId) {
-      await deleteAnalysis(deleteTarget.recordId);
+    // Cierra el diálogo de inmediato y deja la carga visible EN LA FILA
+    // (deletingRowKey) en vez de mantener el diálogo abierto durante todo
+    // el borrado — antes la fila desaparecía de golpe recién al terminar,
+    // sin ningún indicio de que algo estaba pasando mientras tanto.
+    const target = deleteTarget;
+    setDeleteTarget(null);
+    setDeletingRowKey(target.key);
+    const deletedName = target.name;
+    if (target.state === "done" && target.recordId) {
+      await deleteAnalysis(target.recordId);
 
       // Borra también los archivos en el servidor (imagen + json) — si no,
       // quedan huérfanos ocupando espacio aunque la zona ya no aparezca.
-      const filename = deleteTarget.mapUrl?.split("/").pop();
+      const filename = target.mapUrl?.split("/").pop();
       if (filename) {
         deleteResultFile(filename);
         const jsonName = filename.replace(/\.png$/i, ".json");
@@ -460,18 +468,18 @@ function MainPage() {
       // una versión que ya trackeaba sourceTaskId. Sin borrar el documento,
       // quedaba huérfano en Mongo para siempre (ya no se pierde solo con
       // reiniciar uvicorn, a diferencia de cuando `tasks` vivía en memoria).
-      if (deleteTarget.taskId) {
-        deleteTaskImages(deleteTarget.taskId);
-        deleteTask(deleteTarget.taskId);
+      if (target.taskId) {
+        deleteTaskImages(target.taskId);
+        deleteTask(target.taskId);
       }
-    } else if (deleteTarget.taskId) {
+    } else if (target.taskId) {
       // "En progreso" también cancela el proceso en el backend, no solo
       // deja de trackearlo — si no, seguiría corriendo invisible.
-      if (deleteTarget.state === "in_progress") {
-        await cancelTask(deleteTarget.taskId);
+      if (target.state === "in_progress") {
+        await cancelTask(target.taskId);
       }
-      deleteTaskImages(deleteTarget.taskId);
-      deleteTask(deleteTarget.taskId);
+      deleteTaskImages(target.taskId);
+      deleteTask(target.taskId);
 
       // "Pendiente de revisión": el mapa y el JSON de detecciones ya se
       // generaron en el servidor (detecting/output/) aunque nunca se hayan
@@ -479,21 +487,20 @@ function MainPage() {
       // para siempre, ya que nunca llegaron a tener un registro guardado
       // desde el cual borrarlos. Para "en progreso" estos campos son
       // undefined (el mapa todavía no existe), así que no hace nada.
-      if (deleteTarget.resultUrl) {
-        const filename = deleteTarget.resultUrl.split("/").pop();
+      if (target.resultUrl) {
+        const filename = target.resultUrl.split("/").pop();
         if (filename) {
           deleteResultFile(filename);
           const tifName = filename.replace(/\.png$/i, ".tif");
           if (tifName !== filename) deleteFinalsFile(tifName);
         }
       }
-      if (deleteTarget.resultJsonUrl) {
-        const jsonName = deleteTarget.resultJsonUrl.split("/").pop();
+      if (target.resultJsonUrl) {
+        const jsonName = target.resultJsonUrl.split("/").pop();
         if (jsonName) deleteResultFile(jsonName);
       }
     }
-    setDeleteTarget(null);
-    setDeletingZone(false);
+    setDeletingRowKey(null);
     await refreshZones();
     notify.success("Zona eliminada", `"${deletedName}" ya no aparece en tu listado.`);
   };
@@ -712,10 +719,12 @@ function MainPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {visibleRows.map((z) => (
+                  {visibleRows.map((z) => {
+                    const isDeleting = deletingRowKey === z.key;
+                    return (
                     <TableRow
                       key={z.key}
-                      className="animate-in fade-in slide-in-from-top-1 duration-300 fill-mode-both hover:bg-card/60"
+                      className={`animate-in fade-in slide-in-from-top-1 duration-300 fill-mode-both hover:bg-card/60 transition-opacity ${isDeleting ? "pointer-events-none opacity-40" : ""}`}
                     >
                       <TableCell>
                         {z.mapUrl ? (
@@ -796,18 +805,25 @@ function MainPage() {
                         )}
                       </TableCell>
                       <TableCell>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-8 w-8 p-0 text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
-                          onClick={() => setDeleteTarget(z)}
-                          title="Eliminar zona"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
+                        {isDeleting ? (
+                          <div className="flex h-8 w-8 items-center justify-center" title="Eliminando...">
+                            <Loader2 className="h-3.5 w-3.5 animate-spin text-destructive/70" />
+                          </div>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 w-8 p-0 text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
+                            onClick={() => setDeleteTarget(z)}
+                            title="Eliminar zona"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
                       </TableCell>
                     </TableRow>
-                  ))}
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
@@ -883,11 +899,8 @@ function MainPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setDeleteTarget(null)} disabled={deletingZone}>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmDelete} disabled={deletingZone}>
-              {deletingZone && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Eliminar
-            </AlertDialogAction>
+            <AlertDialogCancel onClick={() => setDeleteTarget(null)}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete}>Eliminar</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

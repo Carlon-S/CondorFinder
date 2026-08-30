@@ -966,12 +966,18 @@ function RutasPage() {
                   </div>
                 </div>
 
-                {/* Zonas detectadas — mismo detalle que ya se ve en /analysis. */}
-                <div className="flex min-h-0 flex-1 flex-col">
+                {/* Zonas detectadas — mismo detalle que ya se ve en /analysis.
+                    max-h fijo (no flex-1): el flex-1 dependía de una altura
+                    real del grid de 2 columnas de arriba, que no la tiene
+                    (las filas de grid se ajustan a su contenido por
+                    default) -- con muchos tipos de basura, el scroll
+                    terminaba pasando al DialogContent completo (imagen
+                    incluida) en vez de quedar contenido solo en esta lista. */}
+                <div className="flex flex-col">
                   <p className="mb-2 text-xs font-semibold text-muted-foreground">
                     Zonas detectadas
                   </p>
-                  <ul className="flex-1 space-y-1.5 overflow-y-auto pr-0.5">
+                  <ul className="max-h-[340px] space-y-1.5 overflow-y-auto pr-0.5">
                     {zoomAnalysis.detections.map((d) => (
                       <li
                         key={d.id}
