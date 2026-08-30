@@ -589,8 +589,15 @@ function AnalysisPage() {
     // en paralelo pisaba los datos correctos con los de la última tarea
     // vista). El await adentro de este IIFE preserva ese orden.
     (async () => {
-      // HDU4 / AC4 — abrir un análisis guardado desde el listado (index.tsx)
-      const pendingId = consumePendingOpenId();
+      // HDU4 / AC4 — abrir un análisis guardado desde el listado (index.tsx),
+      // O un F5 sobre un análisis ya guardado: consumePendingOpenId() es de
+      // un solo uso y ya se consumió en el primer mount, así que en un F5
+      // cae acá gracias a loadCurrentAnalysisId() (persistido en
+      // sessionStorage, ver mapState.ts). Volver a pedir el registro
+      // completo a Mongo (en vez de intentar persistir cada campo — status,
+      // detecciones, resumen para el banner de duplicado — por separado)
+      // deja TODO consistente con una sola fuente de verdad.
+      const pendingId = consumePendingOpenId() ?? loadCurrentAnalysisId();
       if (pendingId) {
         const record = await loadAnalysisById(pendingId);
         if (record) {
