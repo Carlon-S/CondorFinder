@@ -137,7 +137,7 @@ function TooltipPreviewImage({ src, alt }: { src: string; alt: string }) {
       </div>
     );
   }
-  return <img src={src} alt={alt} onError={() => setError(true)} />;
+  return <img src={src} alt={alt} decoding="async" onError={() => setError(true)} />;
 }
 
 function ClickHandler({ onMapClick }: { onMapClick?: (lat: number, lng: number) => void }) {

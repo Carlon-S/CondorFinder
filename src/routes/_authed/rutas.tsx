@@ -37,6 +37,7 @@ import {
   Crosshair,
   FolderOpen,
   Loader2,
+  Map as MapIcon,
   MapPin,
   Route as RouteIcon,
   Scale,
@@ -885,21 +886,39 @@ function RutasPage() {
                         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                       </div>
                     )}
-                    <img
-                      src={zoomAnalysis.mapUrl}
-                      alt={`Mapa unificado de ${zoomAnalysis.name}`}
-                      className={`w-full cursor-pointer rounded-md ${zoomImgSize ? "" : "hidden"}`}
-                      title="Ver análisis de esta zona"
+                    {/* <button> real (no un <img> con onClick suelto) — mismo
+                        patrón que "Ver análisis de detección" en /carga:
+                        cursor y estado hover garantizados por ser un
+                        control nativo, con la etiqueta apareciendo al
+                        pasar el mouse en vez de un cursor-pointer sin
+                        ningún otro indicio visual. */}
+                    <button
+                      type="button"
                       onClick={() => {
                         setPendingOpenId(zoomAnalysis.id);
                         navigate({ to: "/analysis" });
                       }}
-                      onLoad={(e) => {
-                        const img = e.currentTarget;
-                        setZoomImgSize({ w: img.naturalWidth, h: img.naturalHeight });
-                      }}
-                      onError={() => setZoomImgError(true)}
-                    />
+                      className={`group relative w-full cursor-pointer ${zoomImgSize ? "" : "hidden"}`}
+                      title="Ver análisis de esta zona"
+                    >
+                      <img
+                        src={zoomAnalysis.mapUrl}
+                        alt={`Mapa unificado de ${zoomAnalysis.name}`}
+                        className="w-full rounded-md transition-opacity group-hover:opacity-80"
+                        decoding="async"
+                        onLoad={(e) => {
+                          const img = e.currentTarget;
+                          setZoomImgSize({ w: img.naturalWidth, h: img.naturalHeight });
+                        }}
+                        onError={() => setZoomImgError(true)}
+                      />
+                      <div className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100">
+                        <div className="flex items-center gap-2 rounded-md bg-background/85 px-4 py-2 shadow-xl backdrop-blur">
+                          <MapIcon className="h-4 w-4 text-primary" />
+                          <span className="text-sm font-semibold text-foreground">Ver análisis de detección</span>
+                        </div>
+                      </div>
+                    </button>
                   </>
                 )}
                 {!zoomImgError && zoomImgSize && (
