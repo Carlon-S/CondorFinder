@@ -29,7 +29,7 @@
 // Mismo layout de dos columnas (aside + mapa) que recursos.tsx.
 // =============================================================================
 
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import {
   Boxes,
@@ -65,7 +65,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { listAnalyses, type AnalysisSummary, type SavedAnalysisRecord } from "@/lib/analysisStore";
+import { listAnalyses, setPendingOpenId, type AnalysisSummary, type SavedAnalysisRecord } from "@/lib/analysisStore";
 import { listResourcePoints, type ResourcePoint } from "@/lib/resources";
 import { projectPolygonToWgs84 } from "@/lib/projection";
 import { generateRoute } from "@/lib/routePlan";
@@ -231,6 +231,8 @@ function processRecord(record: SavedAnalysisRecord): LoadedAnalysis | null {
 }
 
 function RutasPage() {
+  const navigate = useNavigate();
+
   // Todos los análisis guardados que se pudieron ubicar en el mapa —
   // reproyectados una sola vez al entrar a la vista. Se muestran SIEMPRE
   // como círculos (atenuados si no están en `loadedIds`), no solo los que
@@ -870,16 +872,35 @@ function RutasPage() {
                     </p>
                   </div>
                 ) : (
-                  <img
-                    src={zoomAnalysis.mapUrl}
-                    alt={`Mapa unificado de ${zoomAnalysis.name}`}
-                    className="w-full rounded-md"
-                    onLoad={(e) => {
-                      const img = e.currentTarget;
-                      setZoomImgSize({ w: img.naturalWidth, h: img.naturalHeight });
-                    }}
-                    onError={() => setZoomImgError(true)}
-                  />
+                  <>
+                    {/* Placeholder mientras la imagen carga -- sin esto, el
+                        <img> se renderizaba visible desde el primer byte,
+                        mostrando el clásico efecto de PNG grande cargando
+                        de arriba hacia abajo antes de que el overlay de
+                        polígonos (que espera a onLoad) apareciera. Ahora
+                        la imagen queda oculta hasta que termina de cargar
+                        del todo, y aparece ya completa junto al overlay. */}
+                    {!zoomImgSize && (
+                      <div className="flex aspect-square w-full items-center justify-center rounded-md border border-border/40 bg-muted/20">
+                        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                      </div>
+                    )}
+                    <img
+                      src={zoomAnalysis.mapUrl}
+                      alt={`Mapa unificado de ${zoomAnalysis.name}`}
+                      className={`w-full cursor-pointer rounded-md ${zoomImgSize ? "" : "hidden"}`}
+                      title="Ver análisis de esta zona"
+                      onClick={() => {
+                        setPendingOpenId(zoomAnalysis.id);
+                        navigate({ to: "/analysis" });
+                      }}
+                      onLoad={(e) => {
+                        const img = e.currentTarget;
+                        setZoomImgSize({ w: img.naturalWidth, h: img.naturalHeight });
+                      }}
+                      onError={() => setZoomImgError(true)}
+                    />
+                  </>
                 )}
                 {!zoomImgError && zoomImgSize && (
                   <svg
@@ -977,7 +998,7 @@ function RutasPage() {
                   <p className="mb-2 text-xs font-semibold text-muted-foreground">
                     Zonas detectadas
                   </p>
-                  <ul className="max-h-[340px] space-y-1.5 overflow-y-auto pr-0.5">
+                  <ul className="max-h-[280px] space-y-1.5 overflow-y-auto pr-0.5">
                     {zoomAnalysis.detections.map((d) => (
                       <li
                         key={d.id}
