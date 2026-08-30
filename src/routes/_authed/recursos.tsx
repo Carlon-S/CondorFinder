@@ -493,7 +493,7 @@ function RecursosPage() {
                 </div>
               ) : (
                 <div className="animate-in fade-in slide-in-from-left-2 duration-300 flex flex-col gap-5">
-                  <ResourcesSummaryPanel points={points} />
+                  <ResourcesSummaryPanel points={points} loading={loadingPoints} />
                   <div className="flex flex-col gap-2 rounded-lg bg-background/40 p-3">
                     <Button onClick={startPlacing} size="lg" className="btn-cta w-full">
                       <MapPin className="mr-2 h-4 w-4" /> Definir punto
@@ -785,6 +785,14 @@ function RecursosPage() {
             onMapClick={handleMapClick}
             onPointClick={handlePointClick}
           />
+          {/* Sin esto, mientras listResourcePoints() todavía no resuelve el
+              mapa se ve simplemente vacío -- indistinguible de "no hay
+              puntos guardados todavía" para quien lo mira. */}
+          {loadingPoints && (
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/60">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          )}
         </section>
       </main>
 

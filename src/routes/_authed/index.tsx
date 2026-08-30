@@ -282,6 +282,10 @@ function MainPage() {
   useEffect(() => {
     if (deleteTarget) setDeleteTargetDisplay(deleteTarget);
   }, [deleteTarget]);
+  // Feedback de carga mientras confirmDelete hace sus llamadas al backend —
+  // antes el diálogo se cerraba y la fila desaparecía de golpe, sin ningún
+  // indicio de que algo estaba pasando ni confirmación de que terminó.
+  const [deletingZone, setDeletingZone] = useState(false);
 
   // Filtro por estado — 4 botones al nivel de "Agregar zona" (Todas incluida).
   // "historical" (HDU7/AC3) es un quinto filtro aparte, no un ZoneState más
@@ -325,10 +329,12 @@ function MainPage() {
   // Panel "Recursos disponibles" (HDU6) — totales reales sobre los puntos
   // de origen guardados, no los placeholders fijos que había antes.
   const [resourcePoints, setResourcePoints] = useState<ResourcePoint[]>([]);
+  const [resourcePointsLoading, setResourcePointsLoading] = useState(true);
   useEffect(() => {
     listResourcePoints()
       .then(setResourcePoints)
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setResourcePointsLoading(false));
   }, []);
   // Auto-refresh: mientras haya alguna zona "en progreso", vuelve a consultar
   // su estado cada 5s (mismo intervalo que usa el polling en vivo de
@@ -431,6 +437,8 @@ function MainPage() {
 
   const confirmDelete = async () => {
     if (!deleteTarget) return;
+    setDeletingZone(true);
+    const deletedName = deleteTarget.name;
     if (deleteTarget.state === "done" && deleteTarget.recordId) {
       await deleteAnalysis(deleteTarget.recordId);
 
@@ -485,7 +493,9 @@ function MainPage() {
       }
     }
     setDeleteTarget(null);
-    refreshZones();
+    setDeletingZone(false);
+    await refreshZones();
+    notify.success("Zona eliminada", `"${deletedName}" ya no aparece en tu listado.`);
   };
 
   // "Zona nueva" debe partir en blanco — limpia cualquier resto de una
@@ -575,7 +585,7 @@ function MainPage() {
 
         {/* ── Sidebar de HDU6 (recursos disponibles) ── */}
         <aside className="flex w-[400px] flex-shrink-0 flex-col border-r border-border/25 p-6 animate-in fade-in slide-in-from-left-2 duration-500">
-          <ResourcesSummaryPanel points={resourcePoints} />
+          <ResourcesSummaryPanel points={resourcePoints} loading={resourcePointsLoading} />
 
           <Link to="/recursos" className="pt-5">
             <Button size="lg" className="btn-cta w-full">
@@ -873,8 +883,11 @@ function MainPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setDeleteTarget(null)}>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmDelete}>Eliminar</AlertDialogAction>
+            <AlertDialogCancel onClick={() => setDeleteTarget(null)} disabled={deletingZone}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete} disabled={deletingZone}>
+              {deletingZone && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Eliminar
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

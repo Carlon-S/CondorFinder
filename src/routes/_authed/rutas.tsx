@@ -269,6 +269,11 @@ function RutasPage() {
   // inactivos), y su subconjunto activo es lo que la confirmación (AC1)
   // necesita. Un solo fetch cubre ambos usos.
   const [originPoints, setOriginPoints] = useState<ResourcePoint[]>([]);
+  // Solo para el mapa principal (mapPoints, abajo) -- se apaga cuando la
+  // carga INICIAL de ambas fuentes (zonas + puntos de origen) resuelve, no
+  // en cada refresh posterior (multi-pestaña). Antes el mapa se veía vacío
+  // sin ningún indicio de carga hasta que ambos fetches resolvían solos.
+  const [mapDataLoading, setMapDataLoading] = useState(true);
   const activePoints = originPoints.filter((p) => p.active);
 
   // AC1 — confirmación.
@@ -354,8 +359,7 @@ function RutasPage() {
   // librerías de fetching tipo react-query. Sin esto, una zona eliminada
   // en otra pestaña/sesión seguía viéndose acá como si nada.
   useEffect(() => {
-    refreshOriginPoints();
-    refreshAllAnalyses();
+    Promise.all([refreshOriginPoints(), refreshAllAnalyses()]).finally(() => setMapDataLoading(false));
 
     const handleFocus = () => {
       refreshOriginPoints();
@@ -534,26 +538,31 @@ function RutasPage() {
   // inactivos) — ambos en el mismo mapa. Sólido vs. hueco en vez de
   // opacidad: la opacidad se perdía apenas se solapaba con las capas del
   // mapa base, sólido/hueco se reconoce a cualquier zoom.
-  const zoneMapPoints: GeoMapPoint[] = allAnalyses.map((a, i) => {
-    const loaded = loadedIds.has(a.id);
-    return {
+  // AC4/HDU5 (texto literal): "cuando se seleccione uno de los archivos de
+  // análisis guardados... el sistema cargará los polígonos asociados en el
+  // mapa" — el marcador de una zona solo debe existir una vez que esa zona
+  // se cargó a la ruta, no antes. Antes se mostraban TODAS las zonas
+  // guardadas de una vez (huecas las no cargadas), lo cual no lo pide la AC
+  // y hacía que el mapa se llenara de íconos apenas resolvía listAnalyses().
+  const zoneMapPoints: GeoMapPoint[] = allAnalyses
+    .filter((a) => loadedIds.has(a.id))
+    .map((a, i) => ({
       id: a.id,
       position: a.center,
       label: a.name,
       color: ZONE_COLORS[i % ZONE_COLORS.length],
-      muted: !loaded,
+      muted: false,
       previewImageUrl: a.mapUrl,
       previewSubtitle: `${a.summary.totalVolumeM3} m³ · ${a.summary.totalWeightKg} kg · ${a.detections.length} zona${
         a.detections.length === 1 ? "" : "s"
-      }${loaded ? "" : " · no está en la ruta"}`,
+      }`,
       previewImageSize: a.imgSize ?? undefined,
       previewDetections: a.detections.map((d) => ({
         id: d.id,
         bbox: d.bbox,
         color: classColor(d.wasteClass),
       })),
-    };
-  });
+    }));
 
   const originMapPoints: GeoMapPoint[] = originPoints.map((p) => ({
     id: p.id,
@@ -701,6 +710,14 @@ function RutasPage() {
             routePositions={routePositions}
             focusPoint={focusPoint}
           />
+          {/* Sin esto, mientras las zonas y los puntos de origen todavía no
+              resuelven el mapa se ve vacío -- indistinguible de "no hay
+              nada cargado todavía" para quien lo mira. */}
+          {mapDataLoading && (
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/60">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          )}
         </section>
       </main>
 

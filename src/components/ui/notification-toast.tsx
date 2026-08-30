@@ -67,8 +67,8 @@ export function NotificationToast({ id, variant, title, description, duration }:
 
   return (
     <div className="panel relative w-full overflow-hidden">
-      <div className="flex items-start gap-3 p-4">
-        <span className={`mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full ${VARIANT_CHIP[variant]}`}>
+      <div className="flex items-center gap-3 p-4">
+        <span className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full ${VARIANT_CHIP[variant]}`}>
           <Icon className="h-4 w-4" />
         </span>
 

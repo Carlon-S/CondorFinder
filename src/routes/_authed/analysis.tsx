@@ -21,6 +21,7 @@ import {
   TriangleAlert,
 } from "@/components/icons/Icons";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
 import {
@@ -324,6 +325,7 @@ function AnalysisPage() {
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [displayDetections, setDisplayDetections] = useState<DisplayDetection[]>([]);
+  const [detectionsLoading, setDetectionsLoading] = useState(false);
   const [enabledIds, setEnabledIds]               = useState<Set<number>>(new Set());
   const [imgNaturalSize, setImgNaturalSize]        = useState<{ w: number; h: number } | null>(null);
   // CRS proyectado del ortomosaico (HDU5) — llega junto con las detecciones,
@@ -364,7 +366,11 @@ function AnalysisPage() {
   // el análisis ANTERIOR ya resuelto (nombre/volumen) para poder comparar
   // ambos en el banner sin otra vuelta al backend. null = nada pendiente.
   const [duplicateWarning, setDuplicateWarning] = useState<{ older: SavedAnalysisRecord } | null>(null);
-  const [resolvingDuplicate, setResolvingDuplicate] = useState(false);
+  // "confirm"/"reject" (no solo boolean) para saber cuál de los dos botones
+  // mostrar cargando -- antes ambos compartían un solo flag y el ícono de
+  // carga solo se le agregaba al texto de "Es la misma zona", lo que además
+  // le cambiaba el ancho al botón y lo sacaba del borde del banner.
+  const [resolvingDuplicate, setResolvingDuplicate] = useState<"confirm" | "reject" | null>(null);
 
   // Se llama tanto justo después de guardar (performSave) como al reabrir
   // un análisis ya guardado (AC4-de-HDU4, en el efecto de montaje) — mismo
@@ -382,9 +388,9 @@ function AnalysisPage() {
   const handleConfirmDuplicate = async () => {
     if (!currentAnalysisId) return;
     const olderName = duplicateWarning?.older.name;
-    setResolvingDuplicate(true);
+    setResolvingDuplicate("confirm");
     const updated = await confirmDuplicate(currentAnalysisId);
-    setResolvingDuplicate(false);
+    setResolvingDuplicate(null);
     if (!updated) {
       notify.error("No se pudo vincular el análisis", "Intenta nuevamente.");
       return;
@@ -398,9 +404,9 @@ function AnalysisPage() {
 
   const handleRejectDuplicate = async () => {
     if (!currentAnalysisId) return;
-    setResolvingDuplicate(true);
+    setResolvingDuplicate("reject");
     const updated = await rejectDuplicate(currentAnalysisId);
-    setResolvingDuplicate(false);
+    setResolvingDuplicate(null);
     if (!updated) {
       notify.error("No se pudo actualizar el análisis", "Intenta nuevamente.");
       return;
@@ -563,10 +569,6 @@ function AnalysisPage() {
   useEffect(() => {
     if (hasLoadedRef.current) return;
     hasLoadedRef.current = true;
-    // Todo lo que decide mapUrl (el pendingId de abajo, o el useState inicial
-    // que ya leyó sessionStorage) se resuelve de forma síncrona en este mismo
-    // tick — React agrupa este set con cualquier setMapUrl de más abajo.
-    setInitChecked(true);
 
     // loadAnalysisById ahora es una llamada HTTP (Mongo) — el resto de este
     // efecto sigue dependiendo de que se resuelva ANTES de decidir si cae al
@@ -630,14 +632,30 @@ function AnalysisPage() {
             clearTaskId();
             setTaskId(null);
           }
+          setInitChecked(true);
           return;
         }
       }
+
+      // Recién acá se sabe con certeza si había o no un análisis guardado
+      // para mostrar (pendingId ausente, o presente pero sin record) — antes
+      // esto se marcaba síncrono al principio del efecto, y como el camino
+      // de arriba depende de un await real a Mongo, quedaba una vuelta de
+      // render con initChecked=true y mapUrl aún null que disparaba el
+      // "flash" de "No hay un análisis para mostrar" antes de que el
+      // análisis guardado realmente terminara de cargar.
+      setInitChecked(true);
 
       // Camino normal: análisis recién generado en vivo, o "pendiente de
       // análisis" desde Vista Principal (ambos dejan detectionJsonUrl fresco).
       const jsonUrl = loadDetectionJsonUrl();
       if (!jsonUrl) return;
+      // Camino "recién generado": mapUrl ya está disponible sync (leído de
+      // sessionStorage), pero las detecciones dependen de este fetch aparte
+      // -- sin este flag, "Zonas detectadas" mostraba "Sin detecciones
+      // cargadas" (un mensaje de VACÍO, no de CARGANDO) durante esa ventana,
+      // indistinguible de una zona genuinamente sin basura detectada.
+      setDetectionsLoading(true);
       fetch(jsonUrl)
         .then(r => r.json())
         .then(data => {
@@ -646,7 +664,8 @@ function AnalysisPage() {
           setDisplayDetections(merged);
           setEnabledIds(new Set(merged.map(d => d.id)));
         })
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => setDetectionsLoading(false));
     })();
   }, []);
 
@@ -778,7 +797,20 @@ function AnalysisPage() {
 
   // ── render ─────────────────────────────────────────────────────────────────
 
-  if (initChecked && !mapUrl) {
+  // Mientras se resuelve si hay o no un análisis para mostrar (ver el efecto
+  // de arriba) — antes de esto, la navegación a /analysis ya es instantánea,
+  // pero este tramo se renderizaba con datos todavía vacíos (mapUrl/
+  // detecciones/métricas en null) en vez de un estado de carga honesto.
+  if (!initChecked) {
+    return (
+      <div className="flex h-screen flex-col items-center justify-center gap-3 bg-background p-6 text-center text-foreground">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground/60" />
+        <p className="text-sm text-muted-foreground">Cargando análisis...</p>
+      </div>
+    );
+  }
+
+  if (!mapUrl) {
     return (
       <div className="flex h-screen flex-col items-center justify-center gap-3 bg-background p-6 text-center text-foreground">
         <BarChart3 className="h-8 w-8 text-muted-foreground/40" />
@@ -842,23 +874,33 @@ function AnalysisPage() {
                     </p>
                   </div>
                 </div>
+                {/* min-w-0 + ancho de ícono reservado siempre (visible solo
+                    mientras carga la acción de ESE botón puntual): antes el
+                    spinner solo se agregaba al texto de "Es la misma zona",
+                    lo que le cambiaba el ancho al botón en pleno click y lo
+                    sacaba del borde del banner. */}
                 <div className="mt-3 flex gap-2">
                   <Button
                     size="sm"
                     variant="secondary"
-                    className="flex-1"
-                    disabled={resolvingDuplicate}
+                    className="min-w-0 flex-1"
+                    disabled={resolvingDuplicate !== null}
                     onClick={handleRejectDuplicate}
                   >
+                    <span className="mr-2 inline-flex w-3.5 flex-shrink-0 justify-center">
+                      {resolvingDuplicate === "reject" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    </span>
                     Son zonas distintas
                   </Button>
                   <Button
                     size="sm"
-                    className="flex-1"
-                    disabled={resolvingDuplicate}
+                    className="min-w-0 flex-1"
+                    disabled={resolvingDuplicate !== null}
                     onClick={handleConfirmDuplicate}
                   >
-                    {resolvingDuplicate && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}
+                    <span className="mr-2 inline-flex w-3.5 flex-shrink-0 justify-center">
+                      {resolvingDuplicate === "confirm" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    </span>
                     Es la misma zona
                   </Button>
                 </div>
@@ -971,7 +1013,13 @@ function AnalysisPage() {
                     )}
                   </div>
 
-                  {displayDetections.length > 0 ? (
+                  {detectionsLoading ? (
+                    <div className="space-y-1.5">
+                      {[0, 1, 2].map((i) => (
+                        <Skeleton key={i} className="h-14 w-full rounded-md" />
+                      ))}
+                    </div>
+                  ) : displayDetections.length > 0 ? (
                     <ul className="space-y-1.5 max-h-[340px] overflow-y-auto pr-0.5">
                       {displayDetections.map(d => {
                         const enabled = enabledIds.has(d.id);

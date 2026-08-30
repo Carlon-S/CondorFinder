@@ -13,6 +13,7 @@ import { Link } from "@tanstack/react-router";
 import { ChevronDown } from "lucide-react";
 import { ArrowRightCircle, Construction, MapPin, Truck, Users, Warehouse } from "@/components/icons/Icons";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { Skeleton } from "@/components/ui/skeleton";
 // Primitivo de Radix directo (no el wrapper compartido) solo para la fila
 // de cada punto dentro del accordion anidado: necesita un botón "Ver en el
 // mapa" como hermano del trigger, no como hijo — AccordionTrigger (el
@@ -32,9 +33,13 @@ const RESOURCE_ROWS = [
 interface ResourcesSummaryPanelProps {
   points: ResourcePoint[];
   className?: string;
+  /** Mientras el padre todavía está esperando la respuesta de Mongo — sin
+   * esto, points llegaba como [] antes de resolver y esta tabla mostraba
+   * "0" en cada fila por un instante, en vez de un estado de carga. */
+  loading?: boolean;
 }
 
-export function ResourcesSummaryPanel({ points, className }: ResourcesSummaryPanelProps) {
+export function ResourcesSummaryPanel({ points, className, loading }: ResourcesSummaryPanelProps) {
   const resourceTotals = {
     tolvas: points.reduce((sum, p) => sum + p.tolvas.length, 0),
     retro: points.reduce((sum, p) => sum + p.retroexcavadoras_count, 0),
@@ -80,6 +85,16 @@ export function ResourcesSummaryPanel({ points, className }: ResourcesSummaryPan
           ya no son placeholders fijos. Cada fila se expande in-line
           (accordion, no una ventana aparte) mostrando el desglose por
           punto ("¿dónde están esas 5 tolvas?"). */}
+      {loading ? (
+        <div className="mt-6 space-y-3.5">
+          {RESOURCE_ROWS.map(({ key }) => (
+            <div key={key} className="flex items-center gap-3 py-1">
+              <Skeleton className="h-8 w-8 flex-shrink-0 rounded-md" />
+              <Skeleton className="h-4 w-32" />
+            </div>
+          ))}
+        </div>
+      ) : (
       <Accordion type="single" collapsible className="mt-6">
         {RESOURCE_ROWS.map(({ icon: Icon, label, key }) => (
           <AccordionItem key={key} value={key} className="border-border/15">
@@ -179,6 +194,7 @@ export function ResourcesSummaryPanel({ points, className }: ResourcesSummaryPan
           </AccordionItem>
         ))}
       </Accordion>
+      )}
     </div>
   );
 }
