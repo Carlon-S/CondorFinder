@@ -859,7 +859,13 @@ function RutasPage() {
             // diálogo quede simétrico, cerca de un cuadrado, en vez de una
             // franja angosta y muy alta.
             <div className="grid grid-cols-2 gap-4">
-              <div className="relative">
+              {/* group acá arriba (no en el <button> de más abajo): la
+                  etiqueta "Ver análisis" necesita pintar por ENCIMA del
+                  <svg> de polígonos, que en el DOM viene después del
+                  botón -- moverla afuera del botón, como último hijo de
+                  este div, la deja arriba por simple orden de pintado, sin
+                  depender de z-index contra un hermano de un ancestro. */}
+              <div className="group relative">
                 {zoomImgError ? (
                   // El PNG no cargó (404) — probablemente se eliminó desde
                   // otra pestaña/sesión mientras esta zona seguía en
@@ -898,7 +904,7 @@ function RutasPage() {
                         setPendingOpenId(zoomAnalysis.id);
                         navigate({ to: "/analysis" });
                       }}
-                      className={`group relative w-full cursor-pointer ${zoomImgSize ? "" : "hidden"}`}
+                      className={`block w-full cursor-pointer ${zoomImgSize ? "" : "hidden"}`}
                       title="Ver análisis de esta zona"
                     >
                       <img
@@ -912,12 +918,6 @@ function RutasPage() {
                         }}
                         onError={() => setZoomImgError(true)}
                       />
-                      <div className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100">
-                        <div className="flex items-center gap-2 rounded-md bg-background/85 px-4 py-2 shadow-xl backdrop-blur">
-                          <MapIcon className="h-4 w-4 text-primary" />
-                          <span className="text-sm font-semibold text-foreground">Ver análisis de detección</span>
-                        </div>
-                      </div>
                     </button>
                   </>
                 )}
@@ -963,6 +963,19 @@ function RutasPage() {
                       );
                     })}
                   </svg>
+                )}
+                {!zoomImgError && zoomImgSize && (
+                  // Último hijo del contenedor -> pinta por encima del <svg>
+                  // de polígonos sin necesitar z-index. pointer-events-none
+                  // para no tapar los clicks del <button> de más arriba
+                  // (el pointer-events-none del svg ya deja pasar el click
+                  // hacia el botón; este div necesita lo mismo).
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100">
+                    <div className="flex items-center gap-2 rounded-md bg-background/85 px-4 py-2 shadow-xl backdrop-blur">
+                      <MapIcon className="h-4 w-4 text-primary" />
+                      <span className="text-sm font-semibold text-foreground">Ver análisis de detección</span>
+                    </div>
+                  </div>
                 )}
               </div>
 
