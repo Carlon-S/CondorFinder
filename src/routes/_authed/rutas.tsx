@@ -30,7 +30,7 @@
 // =============================================================================
 
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Boxes,
   Construction,
@@ -616,10 +616,21 @@ function RutasPage() {
   // Encuadre automático de la ruta recién generada -- todos los puntos de
   // ambos trazos reales (no solo las paradas), para que el zoom quede justo
   // sobre las calles que realmente recorre, no solo sobre los pines.
-  const routeFitPoints: [number, number][] | null =
-    routeOutboundPaths || routeReturnPaths
-      ? [...(routeOutboundPaths ?? []).flat(), ...(routeReturnPaths ?? []).flat()]
-      : routePositions;
+  //
+  // useMemo (no un const plano) es imprescindible acá: sin él, este array
+  // se recreaba en CADA render de la página (no solo cuando llega una ruta
+  // nueva), y como el efecto de FitBounds en GeoMapImpl.tsx depende de esa
+  // referencia, el mapa hacía flyToBounds en cualquier re-render sin
+  // relación (hover de un marcador, abrir un diálogo, etc.), no solo al
+  // generar. Memoizado sobre las referencias reales de estado, que solo
+  // cambian cuando de verdad llega una ruta nueva.
+  const routeFitPoints = useMemo<[number, number][] | null>(() => {
+    if (routeOutboundPaths || routeReturnPaths) {
+      return [...(routeOutboundPaths ?? []).flat(), ...(routeReturnPaths ?? []).flat()];
+    }
+    return routePositions;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeOutboundPaths, routeReturnPaths]);
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">

@@ -260,20 +260,39 @@ function RouteSegmentLabel({
   path,
   fraction,
   text,
+  offset,
 }: {
   path: [number, number][];
   fraction: number;
   text: string;
+  /** Desplazamiento en píxeles (x, y) — en un tramo de ida y vuelta por la
+   *  MISMA carretera (ej. un solo camino de montaña con curvas), el punto
+   *  al 25% del recorrido de cada trazo puede caer geográficamente cerca
+   *  del otro aunque se midan desde extremos opuestos (las curvas
+   *  concentran buena parte de la distancia recorrida en un tramo corto).
+   *  Un offset horizontal distinto para ida/vuelta garantiza que las dos
+   *  burbujas nunca queden una encima de la otra, sin depender de la
+   *  geometría real de la calle. */
+  offset: [number, number];
 }) {
   const anchor = pointAtFraction(path, fraction);
   if (!anchor) return null;
   return (
     <Marker position={anchor} icon={INVISIBLE_ICON} interactive={false}>
-      <Tooltip permanent direction="top" className="condorfinder-route-tooltip">
+      <Tooltip permanent direction="top" offset={offset} className="condorfinder-route-tooltip">
         {text}
       </Tooltip>
     </Marker>
   );
+}
+
+/** Click sobre la línea de la ruta -> zoom ahí (pedido explícito: el
+ *  encuadre automático solo debe pasar al generar la ruta por primera vez
+ *  -- ver FitBounds -- o al clickear la línea, no en cualquier momento). */
+function flyToLineClick(e: L.LeafletMouseEvent): void {
+  L.DomEvent.stopPropagation(e as unknown as Event);
+  const map = (e.target as unknown as { _map?: L.Map })._map;
+  map?.flyTo(e.latlng, 15, { duration: 0.6 });
 }
 
 export function GeoMapImpl({
@@ -321,6 +340,7 @@ export function GeoMapImpl({
               key={`outbound-outline-${pathKey(path as [number, number][])}-${i}`}
               positions={path as [number, number][]}
               pathOptions={{ color: ROUTE_OUTLINE_COLOR, weight: 8, opacity: 0.5 }}
+              eventHandlers={{ click: flyToLineClick }}
             />
           ))}
           {returnPaths?.map((path, i) => (
@@ -328,12 +348,13 @@ export function GeoMapImpl({
               key={`return-outline-${pathKey(path as [number, number][])}-${i}`}
               positions={path as [number, number][]}
               pathOptions={{ color: ROUTE_OUTLINE_COLOR, weight: 8, opacity: 0.5 }}
+              eventHandlers={{ click: flyToLineClick }}
             />
           ))}
           {/* Ida — trazo real (calles, OSRM), azul sólido (estilo Google
               Maps). Ventana flotante anclada al 25% del recorrido, con
               camiones/tiempo/distancia/velocidad de ESTE tramo — mismo
-              índice que routeSegments. */}
+              índice que routeSegments. Click en la línea -> zoom ahí. */}
           {outboundPaths?.map((path, i) => {
             const key = `outbound-${pathKey(path as [number, number][])}-${i}`;
             return (
@@ -341,6 +362,7 @@ export function GeoMapImpl({
                 key={key}
                 positions={path as [number, number][]}
                 pathOptions={{ color: ROUTE_OUTBOUND_COLOR, weight: 5 }}
+                eventHandlers={{ click: flyToLineClick }}
               />
             );
           })}
@@ -353,6 +375,7 @@ export function GeoMapImpl({
                 key={key}
                 path={path as [number, number][]}
                 fraction={0.25}
+                offset={[-60, 0]}
                 text={segmentTooltipText("Ida", seg.trucksUsed, seg.outboundDistanceKm, seg.outboundDurationHours)}
               />
             );
@@ -368,6 +391,7 @@ export function GeoMapImpl({
                 key={key}
                 positions={path as [number, number][]}
                 pathOptions={{ color: ROUTE_RETURN_COLOR, weight: 5, opacity: ROUTE_RETURN_OPACITY }}
+                eventHandlers={{ click: flyToLineClick }}
               />
             );
           })}
@@ -378,6 +402,7 @@ export function GeoMapImpl({
             return (
               <RouteSegmentLabel
                 key={key}
+                offset={[60, 0]}
                 path={path as [number, number][]}
                 fraction={0.25}
                 text={segmentTooltipText("Vuelta", seg.trucksUsed, seg.returnDistanceKm, seg.returnDurationHours)}
