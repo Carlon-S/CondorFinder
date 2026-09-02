@@ -1,31 +1,61 @@
+import asyncio
+import itertools
+import re
+from math import asin, cos, radians, sin, sqrt
+
 from bson import ObjectId
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from pymongo.asynchronous.database import AsyncDatabase
+from pyproj import Transformer
 
 import auth as auth_module
+import osrm_client
 
 # =============================================================================
 # CONDORFINDER — GENERACIÓN DE RUTA ÓPTIMA (HDU5)
 # Archivo: backendModel/routing.py
 #
-# Base de POST /routes/generate: recibe el payload que ya arma el frontend
-# (src/lib/routePlan.ts), resuelve la capacidad REAL de los puntos
-# activos Y los basurales reales de los análisis elegidos contra Mongo (el
-# frontend solo manda IDs — nunca los datos en sí — el backend es la única
-# fuente de verdad para ambos), y arma la respuesta con la forma exacta que
-# el frontend espera. El algoritmo de optimización en sí — el que decide el
-# ORDEN de las paradas — queda marcado como TODO más abajo; es lo único que
-# falta llenar para que HDU5/AC2 quede completo de punta a punta.
+# POST /routes/generate resuelve la capacidad REAL de los puntos activos y
+# los basurales reales de los análisis elegidos contra Mongo (el frontend
+# solo manda IDs — nunca los datos en sí), arma la ruta real (OSRM, ver
+# osrm_client.py) y devuelve la respuesta con la forma exacta que
+# src/lib/routePlan.ts espera.
 #
-# Mismo patrón que resources.py: set_db()/get_db() inyectado desde el
-# lifespan de orquestador.py, router protegido con la misma dependency de
-# sesión (get_current_user) que ya usa el resto del backend.
+# Decisiones de modelo, ya conversadas y cerradas con el equipo antes de
+# implementar (no re-litigar sin volver a hablarlo):
+#   - Capacidad de la ruta = SOLO camiones (`trucks[].capacity_m3`) de los
+#     puntos activos. Las tolvas quedan fijas en el punto (acopio local, no
+#     son una unidad de transporte) — no participan del cálculo de
+#     capacidad ni de la ruta. `retroexcavadoras_count`/`personal_count`
+#     tampoco son una restricción hoy (sin AC que lo pida explícitamente).
+#   - Un stop de ruta = un ANÁLISIS cargado (no una detección individual):
+#     la ubicación es `orthoCenter` (huella real del ortomosaico, estable
+#     entre corridas — mismo criterio que ya usa /rutas.tsx para el círculo
+#     de zona) y el volumen es la suma de `volume_m3` de todas sus
+#     detecciones. Visitar cada detección por separado no tiene sentido
+#     operacional: son puntos casi superpuestos dentro de la misma zona.
+#   - Si ningún punto activo por sí solo cubre el volumen total, se prueba
+#     con combinaciones de 2+ puntos (mochila por tamaño creciente) y se
+#     reparte cada zona al punto más cercano dentro del grupo elegido
+#     (con rebalanceo si algún punto queda sobrecargado) — cada punto
+#     resultante arma su PROPIA ida+vuelta independiente (una cuadrilla por
+#     patio, no una ruta fusionada entre depósitos distintos).
+#   - Ida a velocidad normal, vuelta más lenta (camiones cargados) —
+#     _RETURN_SPEED_FACTOR abajo. El tiempo total del plan (para el chequeo
+#     contra availableHours y lo que se muestra) asume que las
+#     sub-rutas de distintos puntos corren en PARALELO (cuadrillas
+#     distintas saliendo a la vez), así que se usa el máximo entre
+#     sub-rutas, no la suma.
+#
+# `priorityWasteType` queda en el contrato (AC1 lo pide en la confirmación)
+# pero no cambia el orden de paradas hoy: el algoritmo visita TODAS las
+# zonas cargadas siempre (no hay modo "parcial" que priorizar entre ellas)
+# — se deja reservado para cuando eso exista.
 #
 # Los modelos de acá abajo usan nombres de campo en camelCase (no el
 # snake_case habitual en Python) A PROPÓSITO: src/lib/routePlan.ts interpreta
-# la respuesta tal cual llega, sin traducir nombres — cambiarlos acá
-# rompería el contrato que se encuentra en el frontend para los demas criterios (AC1/AC3/AC4/AC5/AC6).
+# la respuesta tal cual llega, sin traducir nombres.
 # =============================================================================
 
 _db: AsyncDatabase | None = None
@@ -47,30 +77,10 @@ def get_db() -> AsyncDatabase:
 # =============================================================================
 
 class RoutePlanRequestIn(BaseModel):
-    # El frontend manda IDs de análisis ya guardados (Mongo), no los datos
-    # de cada zona — mismo criterio que activePointIds: nunca se confía en
-    # volumen/polígono que mande el navegador, se resuelve acá abajo contra
-    # la fuente real (colección `analyses`).
     analysisIds: list[str]
     activePointIds: list[str]
     availableHours: float
     priorityWasteType: str | None = None
-
-
-class ResolvedWasteZone(BaseModel):
-    """Un basural real, resuelto desde un análisis guardado — una entrada
-    por detección con geo_polygon válido. geoPolygon queda en su CRS
-    proyectado ORIGINAL (UTM, metros — ej. "EPSG:32719"), no reproyectado a
-    WGS84: esa conversión es solo para dibujar en Leaflet (ver
-    src/lib/projection.ts); para calcular distancias reales entre paradas,
-    trabajar directo en metros es lo correcto, no grados."""
-    id: str
-    analysisId: str
-    name: str
-    wasteClass: str
-    volumeM3: float | None
-    geoPolygon: list[list[float]]
-    crs: str
 
 
 class RoutePlanStopOut(BaseModel):
@@ -84,6 +94,11 @@ class RoutePlanRouteOut(BaseModel):
     stops: list[RoutePlanStopOut]
     totalDistanceKm: float | None = None
     totalDurationHours: float | None = None
+    # Un trazo (lista de [lat, lng]) por sub-ruta/punto de origen usado —
+    # casi siempre uno solo. Separados en ida/vuelta para que el frontend
+    # los pinte con estilos distintos (ver GeoMapImpl.tsx).
+    outboundPaths: list[list[list[float]]] = []
+    returnPaths: list[list[list[float]]] = []
 
 
 class RoutePlanSuccessOut(BaseModel):
@@ -97,20 +112,50 @@ class RoutePlanInfeasibleOut(BaseModel):
 
 
 # =============================================================================
-# PUENTE DE ENTRADA — capacidad real de los puntos activos
+# REPROYECCIÓN UTM → WGS84 (orthoCenter viene en el CRS proyectado del
+# ortomosaico, ej. "EPSG:32719" — OSRM y los puntos de HDU6 necesitan
+# WGS84). Mismo patrón de reconocimiento de zona UTM que
+# src/lib/projection.ts (326xx = norte, 327xx = sur), replicado acá porque
+# esta conversión corre en el backend (para llamar a OSRM), no en Leaflet.
+# =============================================================================
+
+_UTM_CRS_PATTERN = re.compile(r"^EPSG:(326|327)(\d{2})$")
+_transformer_cache: dict[str, Transformer] = {}
+
+
+def _utm_to_wgs84(x: float, y: float, crs: str) -> tuple[float, float] | None:
+    crs_norm = crs.strip().upper()
+    if not _UTM_CRS_PATTERN.match(crs_norm):
+        return None
+    if crs_norm not in _transformer_cache:
+        _transformer_cache[crs_norm] = Transformer.from_crs(crs_norm, "EPSG:4326", always_xy=True)
+    lng, lat = _transformer_cache[crs_norm].transform(x, y)
+    return (lat, lng)
+
+
+def _haversine(a: tuple[float, float], b: tuple[float, float]) -> float:
+    """Distancia en línea recta (metros) — SOLO para heurísticas baratas
+    (ordenar candidatos, repartir zonas entre puntos) antes de pedirle a
+    OSRM la distancia real por calles del resultado final. Nunca se le
+    muestra esto al usuario como si fuera la distancia real de la ruta."""
+    lat1, lng1 = a
+    lat2, lng2 = b
+    r = 6371000.0
+    p1, p2 = radians(lat1), radians(lat2)
+    dphi = radians(lat2 - lat1)
+    dlambda = radians(lng2 - lng1)
+    h = sin(dphi / 2) ** 2 + cos(p1) * cos(p2) * sin(dlambda / 2) ** 2
+    return 2 * r * asin(sqrt(h))
+
+
+# =============================================================================
+# PUENTE DE ENTRADA — puntos activos (capacidad real de camiones)
 # =============================================================================
 
 async def _load_active_points(point_ids: list[str]) -> list[dict]:
-    """Trae de Mongo los puntos de `point_ids`, filtrando además
-    por `active: True` server-side — no basta con que el frontend ya haya
-    filtrado antes de mandar los IDs, porque esa lista pudo quedar vieja
-    (un punto se pudo haber desactivado después). IDs con formato inválido
-    se descartan en vez de tirar un 500.
-
-    Cada doc trae, tal como los guarda resources.py: name, lat, lng,
-    tolvas: [{capacity_m3}], trucks: [{capacity_m3}], retroexcavadoras_count,
-    personal_count — todo lo que el algoritmo real va a necesitar.
-    """
+    """Trae de Mongo los puntos de `point_ids`, filtrando además por
+    `active: True` server-side (la lista del frontend pudo quedar vieja).
+    IDs con formato inválido se descartan en vez de tirar un 500."""
     valid_ids: list[ObjectId] = []
     for pid in point_ids:
         try:
@@ -124,27 +169,19 @@ async def _load_active_points(point_ids: list[str]) -> list[dict]:
     ).to_list(length=None)
 
 
-def _total_capacity_m3(points: list[dict]) -> float:
-    """Capacidad total (tolvas + camiones) sumada entre todos los puntos
-    activos — dato base que el algoritmo real va a necesitar para saber
-    si una ruta es factible o no."""
-    total = 0.0
-    for p in points:
-        total += sum(t.get("capacity_m3", 0) for t in p.get("tolvas", []))
-        total += sum(t.get("capacity_m3", 0) for t in p.get("trucks", []))
-    return total
+def _point_truck_capacity(point: dict) -> float:
+    return sum(t.get("capacity_m3", 0) for t in point.get("trucks", []))
 
 
 # =============================================================================
 # PUENTE DE ENTRADA — basurales reales de los análisis guardados elegidos
 # =============================================================================
 
-async def _load_waste_zones(analysis_ids: list[str]) -> list[ResolvedWasteZone]:
-    """Trae de Mongo (colección `analyses`, ver analyses.py) los análisis de
-    `analysis_ids` y expande cada una de sus detecciones con geo_polygon
-    válido en una zona candidata para la ruta. Análisis sin `crs` (guardados
-    antes de HDU5) o detecciones sin geo_polygon se omiten en silencio —
-    mismo criterio que ya aplica el frontend al cargarlos en /rutas."""
+async def _load_route_stops(analysis_ids: list[str]) -> list[dict]:
+    """Un stop por ANÁLISIS cargado (no por detección) — ubicación =
+    orthoCenter reproyectado a WGS84, volumen = suma de volume_m3 de todas
+    sus detecciones. Análisis sin crs/orthoCenter, o cuyo CRS no se puede
+    reproyectar, se omiten (no hay forma de ubicarlos en una ruta real)."""
     valid_ids: list[ObjectId] = []
     for aid in analysis_ids:
         try:
@@ -156,26 +193,188 @@ async def _load_waste_zones(analysis_ids: list[str]) -> list[ResolvedWasteZone]:
 
     docs = await get_db().analyses.find({"_id": {"$in": valid_ids}}).to_list(length=None)
 
-    zones: list[ResolvedWasteZone] = []
+    stops: list[dict] = []
     for doc in docs:
         crs = doc.get("crs")
-        if not crs:
+        center = doc.get("orthoCenter")
+        if not crs or not center or len(center) != 2:
             continue
-        analysis_id = str(doc["_id"])
-        for det in doc.get("detections", []):
-            geo_polygon = det.get("geo_polygon")
-            if not geo_polygon or len(geo_polygon) < 3:
+        latlng = _utm_to_wgs84(center[0], center[1], crs)
+        if latlng is None:
+            continue
+        lat, lng = latlng
+        total_volume = sum((d.get("volume_m3") or 0) for d in doc.get("detections", []))
+        stops.append({
+            "analysisId": str(doc["_id"]),
+            "name": doc.get("name") or "Zona sin nombre",
+            "lat": lat,
+            "lng": lng,
+            "volumeM3": total_volume,
+        })
+    return stops
+
+
+# =============================================================================
+# SELECCIÓN DE ORIGEN(ES) — "mochila" de puntos por capacidad de camiones
+# =============================================================================
+
+def _select_origin_group(points: list[dict], total_volume: float) -> list[dict] | None:
+    """Elige el subconjunto MÁS CHICO de puntos activos (ya ordenados por
+    cercanía a las zonas, ver caller) cuya capacidad de camiones cubre
+    `total_volume`. Prueba tamaños crecientes (1, 2, 3, ...) — con la
+    cantidad de puntos que maneja este proyecto (unos pocos), fuerza bruta
+    sobre itertools.combinations es instantánea."""
+    candidates = [p for p in points if _point_truck_capacity(p) > 0]
+    if not candidates:
+        return None
+    for size in range(1, len(candidates) + 1):
+        for combo in itertools.combinations(candidates, size):
+            if sum(_point_truck_capacity(p) for p in combo) >= total_volume:
+                return list(combo)
+    return None
+
+
+def _split_stops_by_nearest(points: list[dict], stops: list[dict]) -> dict[str, list[dict]]:
+    """Reparte cada zona al punto más cercano (línea recta) dentro del
+    grupo elegido, con un rebalanceo simple: si un punto queda con más
+    volumen asignado del que sus camiones soportan, mueve su zona más
+    lejana al siguiente punto con margen — hasta que todos calcen o no
+    quede movimiento posible (caller trata cada sub-grupo restante por su
+    cuenta, _build_subroute vuelve a fallar si de verdad no alcanza)."""
+    assignment: dict[str, list[dict]] = {str(p["_id"]): [] for p in points}
+    for s in stops:
+        nearest = min(points, key=lambda p: _haversine((p["lat"], p["lng"]), (s["lat"], s["lng"])))
+        assignment[str(nearest["_id"])].append(s)
+
+    capacity = {str(p["_id"]): _point_truck_capacity(p) for p in points}
+
+    def volume_of(pid: str) -> float:
+        return sum(s["volumeM3"] for s in assignment[pid])
+
+    changed = True
+    while changed:
+        changed = False
+        for p in points:
+            pid = str(p["_id"])
+            if volume_of(pid) <= capacity[pid]:
                 continue
-            zones.append(ResolvedWasteZone(
-                id=f"{analysis_id}-{det.get('id')}",
-                analysisId=analysis_id,
-                name=doc.get("name", ""),
-                wasteClass=det.get("class") or "Tipo de basura indefinido",
-                volumeM3=det.get("volume_m3"),
-                geoPolygon=geo_polygon,
-                crs=crs,
-            ))
-    return zones
+            overloaded_stops = sorted(
+                assignment[pid],
+                key=lambda s: -_haversine((p["lat"], p["lng"]), (s["lat"], s["lng"])),
+            )
+            for s in overloaded_stops:
+                for other in sorted(points, key=lambda o: _haversine((o["lat"], o["lng"]), (s["lat"], s["lng"]))):
+                    oid = str(other["_id"])
+                    if oid == pid or volume_of(oid) + s["volumeM3"] > capacity[oid]:
+                        continue
+                    assignment[pid].remove(s)
+                    assignment[oid].append(s)
+                    changed = True
+                    break
+                if changed:
+                    break
+            if changed:
+                break
+    return assignment
+
+
+# =============================================================================
+# ORDEN DE PARADAS (TSP acotado) + GEOMETRÍA REAL POR SUB-RUTA
+# =============================================================================
+
+_RETURN_SPEED_FACTOR = 0.85  # camiones cargados de vuelta ≈ 85% de la velocidad de ida
+_MAX_STOPS_BRUTE_FORCE = 8  # 8! = 40320 permutaciones, instantáneo
+
+
+async def _best_stop_order(
+    origin: tuple[float, float], stop_coords: list[tuple[float, float]]
+) -> tuple[list[int], float, float] | None:
+    """Evalúa todas las permutaciones de `stop_coords` (fuerza bruta hasta
+    _MAX_STOPS_BRUTE_FORCE, vecino-más-cercano por encima de eso) usando la
+    matriz real de OSRM, y devuelve (orden de índices 1-based sobre
+    stop_coords, tiempo_ida_segundos, tiempo_vuelta_segundos) del mejor
+    resultado. None si OSRM no responde."""
+    all_points = [origin] + stop_coords
+    matrix = await asyncio.to_thread(osrm_client.table_matrix, all_points)
+    if matrix is None:
+        return None
+    durations = matrix["durations"]
+
+    n = len(stop_coords)
+    indices = list(range(1, n + 1))
+
+    def orders_to_try():
+        if n <= _MAX_STOPS_BRUTE_FORCE:
+            yield from itertools.permutations(indices)
+            return
+        # Vecino más cercano — heurística, no óptimo exacto, pero evita una
+        # explosión combinatoria si algún día hay muchas zonas en una ruta.
+        remaining = set(indices)
+        order: list[int] = []
+        current = 0
+        while remaining:
+            nxt = min(remaining, key=lambda i: durations[current][i])
+            order.append(nxt)
+            remaining.remove(nxt)
+            current = nxt
+        yield tuple(order)
+
+    best_order: tuple[int, ...] | None = None
+    best_total = None
+    best_ida = best_vuelta = 0.0
+    for order in orders_to_try():
+        ida = 0.0
+        prev = 0
+        for idx in order:
+            ida += durations[prev][idx]
+            prev = idx
+        vuelta = durations[prev][0] / _RETURN_SPEED_FACTOR
+        total = ida + vuelta
+        if best_total is None or total < best_total:
+            best_total, best_order, best_ida, best_vuelta = total, order, ida, vuelta
+
+    assert best_order is not None
+    return list(best_order), best_ida, best_vuelta
+
+
+async def _build_subroute(point: dict, point_stops: list[dict], available_hours: float) -> dict | None:
+    """Arma la ida+vuelta completa desde `point` por `point_stops` — orden
+    óptimo, geometría real (calles) de cada tramo, y chequeo de
+    availableHours. None si OSRM falla o si ni el mejor orden posible
+    respeta el tiempo disponible (infeasible para este punto)."""
+    origin = (point["lat"], point["lng"])
+    stop_coords = [(s["lat"], s["lng"]) for s in point_stops]
+
+    order_result = await _best_stop_order(origin, stop_coords)
+    if order_result is None:
+        return None
+    order, ida_seconds, vuelta_seconds = order_result
+
+    total_hours = (ida_seconds + vuelta_seconds) / 3600
+    if total_hours > available_hours:
+        return None
+
+    ordered_stops = [point_stops[i - 1] for i in order]
+
+    outbound_coords = [origin] + [(s["lat"], s["lng"]) for s in ordered_stops]
+    return_coords = [(ordered_stops[-1]["lat"], ordered_stops[-1]["lng"]), origin]
+    outbound_geo, return_geo = await asyncio.gather(
+        asyncio.to_thread(osrm_client.route_geometry, outbound_coords),
+        asyncio.to_thread(osrm_client.route_geometry, return_coords),
+    )
+    if outbound_geo is None or return_geo is None:
+        return None
+
+    return {
+        "stops": ordered_stops,
+        "outboundPath": outbound_geo["path"],
+        "returnPath": return_geo["path"],
+        # Distancia real de OSRM; la duración usa la nuestra (con el factor
+        # de vuelta cargada aplicado), no la de OSRM (que asume velocidad
+        # normal en ambos sentidos).
+        "distanceKm": outbound_geo["distanceKm"] + return_geo["distanceKm"],
+        "durationHours": total_hours,
+    }
 
 
 # =============================================================================
@@ -191,39 +390,90 @@ async def generate_route(
     current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
 ):
     active_points = await _load_active_points(payload.activePointIds)
-
     if not active_points:
+        return RoutePlanInfeasibleOut(message="No hay puntos activos disponibles para generar la ruta.")
+
+    stops = await _load_route_stops(payload.analysisIds)
+    if not stops:
+        return RoutePlanInfeasibleOut(message="No hay zonas de basura ubicables para generar la ruta.")
+
+    total_volume = sum(s["volumeM3"] for s in stops)
+    centroid = (
+        sum(s["lat"] for s in stops) / len(stops),
+        sum(s["lng"] for s in stops) / len(stops),
+    )
+    points_by_proximity = sorted(active_points, key=lambda p: _haversine((p["lat"], p["lng"]), centroid))
+
+    origin_group = _select_origin_group(points_by_proximity, total_volume)
+    if origin_group is None:
         return RoutePlanInfeasibleOut(
-            message="No hay puntos activos disponibles para generar la ruta.",
+            message=(
+                f"Ningún conjunto de puntos activos tiene camiones suficientes para cubrir "
+                f"los {round(total_volume, 2)} m³ requeridos por las zonas cargadas."
+            )
         )
 
-    waste_zones = await _load_waste_zones(payload.analysisIds)
+    if len(origin_group) == 1:
+        stops_by_point = {str(origin_group[0]["_id"]): stops}
+    else:
+        stops_by_point = _split_stops_by_nearest(origin_group, stops)
 
-    if not waste_zones:
-        return RoutePlanInfeasibleOut(
-            message="No hay zonas de basura cargadas para generar la ruta.",
+    sub_routes: list[dict] = []
+    for point in origin_group:
+        point_stops = stops_by_point.get(str(point["_id"]), [])
+        if not point_stops:
+            continue
+        # _split_stops_by_nearest es una heurística (reparte por cercanía y
+        # rebalancea moviendo zonas de a una) — puede terminar sin lograr
+        # calzar un punto individual dentro de su propia capacidad de
+        # camiones aunque la capacidad COMBINADA del grupo sí alcance. Se
+        # revalida acá antes de construir la sub-ruta, en vez de confiar en
+        # que el reparto siempre calza perfecto.
+        assigned_volume = sum(s["volumeM3"] for s in point_stops)
+        if assigned_volume > _point_truck_capacity(point):
+            return RoutePlanInfeasibleOut(
+                message=(
+                    f'El reparto de zonas entre los puntos elegidos no logró calzar dentro de la '
+                    f'capacidad de camiones de "{point.get("name", "un punto")}" '
+                    f'({round(assigned_volume, 2)} m³ asignados, {round(_point_truck_capacity(point), 2)} m³ '
+                    f'de capacidad) — intenta generar la ruta con menos zonas cargadas a la vez.'
+                )
+            )
+        result = await _build_subroute(point, point_stops, payload.availableHours)
+        if result is None:
+            return RoutePlanInfeasibleOut(
+                message=(
+                    f'No se encontró una ruta desde "{point.get("name", "un punto")}" que respete '
+                    f"las {payload.availableHours} horas disponibles (ida + vuelta), o el servicio "
+                    f"de ruteo no respondió."
+                )
+            )
+        sub_routes.append(result)
+
+    if not sub_routes:
+        return RoutePlanInfeasibleOut(message="No fue posible asignar las zonas cargadas a ningún punto activo.")
+
+    out_stops: list[RoutePlanStopOut] = []
+    outbound_paths: list[list[list[float]]] = []
+    return_paths: list[list[list[float]]] = []
+    order = 1
+    total_distance = 0.0
+    max_duration = 0.0  # sub-rutas de puntos distintos corren en paralelo (cuadrillas separadas)
+    for sub in sub_routes:
+        for s in sub["stops"]:
+            out_stops.append(RoutePlanStopOut(order=order, lat=s["lat"], lng=s["lng"], label=s["name"]))
+            order += 1
+        outbound_paths.append(sub["outboundPath"])
+        return_paths.append(sub["returnPath"])
+        total_distance += sub["distanceKm"]
+        max_duration = max(max_duration, sub["durationHours"])
+
+    return RoutePlanSuccessOut(
+        route=RoutePlanRouteOut(
+            stops=out_stops,
+            totalDistanceKm=round(total_distance, 2),
+            totalDurationHours=round(max_duration, 2),
+            outboundPaths=outbound_paths,
+            returnPaths=return_paths,
         )
-
-    total_capacity_m3 = _total_capacity_m3(active_points)  # noqa: F841 — para el algoritmo real
-
-    # ─────────────────────────────────────────────────────────────────────
-    # TODO(HDU5/AC2): acá va el algoritmo real de optimización de ruta.
-    # Ya está resuelto y disponible en este punto:
-    #   - waste_zones            → cada basural real, resuelto desde Mongo
-    #                              (nunca se confía en lo que mande el
-    #                              navegador). geoPolygon en su CRS UTM
-    #                              proyectado original (metros) — no en
-    #                              WGS84, que es solo para dibujar en
-    #                              Leaflet. wasteClass y volumeM3 incluidos.
-    #   - payload.availableHours / payload.priorityWasteType.
-    #   - active_points          → docs completos de Mongo: lat/lng,
-    #                              tolvas/trucks con su capacity_m3 real.
-    #   - total_capacity_m3      → capacidad total ya sumada.
-    #
-    # Mientras no exista, se devuelve "infeasible" siempre — no se inventa
-    # una ruta falsa. El frontend ya maneja este camino correctamente
-    # (HDU5/AC6, verificado).
-    # ─────────────────────────────────────────────────────────────────────
-    return RoutePlanInfeasibleOut(
-        message="El algoritmo de generación de ruta todavía no está implementado.",
     )

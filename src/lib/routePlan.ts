@@ -45,6 +45,11 @@ export interface RoutePlanSuccess {
     stops: RoutePlanStop[];
     totalDistanceKm?: number;
     totalDurationHours?: number;
+    /** Un trazo (calles reales, vía OSRM) por sub-ruta/punto de origen
+     *  usado — casi siempre uno solo. Separado de returnPaths para poder
+     *  pintar ida y vuelta con estilos distintos en el mapa. */
+    outboundPaths?: [number, number][][];
+    returnPaths?: [number, number][][];
   };
 }
 

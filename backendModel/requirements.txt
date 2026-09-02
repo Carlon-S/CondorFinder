@@ -55,6 +55,7 @@ exif
 geopy
 rasterstats
 geopandas
+pyproj
 pymongo>=4.13
 PyJWT
 pwdlib[argon2]

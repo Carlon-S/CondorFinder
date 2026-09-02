@@ -290,6 +290,11 @@ function RutasPage() {
   const [routeStops, setRouteStops] = useState<
     { order: number; lat: number; lng: number; label: string }[] | null
   >(null);
+  // Trazos reales (calles, vía OSRM) de ida/vuelta -- separados para
+  // pintarlos con estilos distintos (ver GeoMapImpl.tsx). Null hasta que
+  // se genera una ruta con éxito.
+  const [routeOutboundPaths, setRouteOutboundPaths] = useState<[number, number][][] | null>(null);
+  const [routeReturnPaths, setRouteReturnPaths] = useState<[number, number][][] | null>(null);
   const [routeError, setRouteError] = useState<string | null>(null);
 
   // Horas disponibles: 0/negativo/vacío no es una entrada válida — sin esto
@@ -528,10 +533,14 @@ function RutasPage() {
 
     if (result.status === "success") {
       setRouteStops(result.route.stops);
+      setRouteOutboundPaths(result.route.outboundPaths ?? null);
+      setRouteReturnPaths(result.route.returnPaths ?? null);
       setRouteError(null);
       notify.success("Ruta generada", "Revisa el orden de paradas propuesto en el panel.");
     } else {
       setRouteStops(null);
+      setRouteOutboundPaths(null);
+      setRouteReturnPaths(null);
       setRouteError(result.message);
     }
   };
@@ -680,7 +689,11 @@ function RutasPage() {
                   <p className="text-sm font-semibold text-foreground">Ruta propuesta</p>
                   <button
                     type="button"
-                    onClick={() => setRouteStops(null)}
+                    onClick={() => {
+                      setRouteStops(null);
+                      setRouteOutboundPaths(null);
+                      setRouteReturnPaths(null);
+                    }}
                     aria-label="Cerrar"
                     className="flex h-6 w-6 flex-shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                   >
@@ -711,6 +724,8 @@ function RutasPage() {
             points={mapPoints}
             onPointClick={handlePointClick}
             routePositions={routePositions}
+            outboundPaths={routeOutboundPaths}
+            returnPaths={routeReturnPaths}
             focusPoint={focusPoint}
           />
           {/* Sin esto, mientras las zonas y los puntos de origen todavía no

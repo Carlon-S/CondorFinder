@@ -167,11 +167,14 @@ export function GeoMapImpl({
   points,
   polygons,
   routePositions,
+  outboundPaths,
+  returnPaths,
   onMapClick,
   onPointClick,
   focusPoint,
   className,
 }: GeoMapProps) {
+  const hasRealPaths = (outboundPaths && outboundPaths.length > 0) || (returnPaths && returnPaths.length > 0);
   return (
     <MapContainer center={center} zoom={zoom} className={className} scrollWheelZoom>
       <TileLayer
@@ -181,8 +184,32 @@ export function GeoMapImpl({
       <ClickHandler onMapClick={onMapClick} />
       <FlyToPoint target={focusPoint ?? null} />
       {marker && <Marker position={marker} />}
-      {routePositions && routePositions.length > 1 && (
-        <Polyline positions={routePositions} pathOptions={{ color: "#0ea5e9", weight: 4 }} />
+      {hasRealPaths ? (
+        <>
+          {/* Ida — trazo real (calles, OSRM), azul sólido. */}
+          {outboundPaths?.map((path, i) => (
+            <Polyline
+              key={`outbound-${i}`}
+              positions={path as [number, number][]}
+              pathOptions={{ color: "#0ea5e9", weight: 4 }}
+            />
+          ))}
+          {/* Vuelta — mismo tramo tipo de calle, pero más lento (camiones
+              cargados, ver _RETURN_SPEED_FACTOR en routing.py) — naranjo
+              punteado para distinguirla de la ida a simple vista. */}
+          {returnPaths?.map((path, i) => (
+            <Polyline
+              key={`return-${i}`}
+              positions={path as [number, number][]}
+              pathOptions={{ color: "#f97316", weight: 4, dashArray: "8 8" }}
+            />
+          ))}
+        </>
+      ) : (
+        routePositions &&
+        routePositions.length > 1 && (
+          <Polyline positions={routePositions} pathOptions={{ color: "#0ea5e9", weight: 4 }} />
+        )
       )}
       {polygons?.map((poly) => (
         <Polygon

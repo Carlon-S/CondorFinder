@@ -51,8 +51,14 @@ export interface GeoMapProps {
   points?: GeoMapPoint[];
   /** Polígonos georreferenciados, todos a la vez (HDU5). */
   polygons?: GeoMapPolygon[];
-  /** Trazo de la ruta generada (HDU5/AC2) — una sola polilínea a la vez. */
+  /** Trazo de la ruta generada (HDU5/AC2) — fallback simple (línea recta
+   *  entre paradas) cuando no hay geometría real todavía. */
   routePositions?: [number, number][] | null;
+  /** Trazos reales (calles, vía OSRM) de ida/vuelta de cada sub-ruta —
+   *  cuando vienen, se pintan en vez de routePositions, cada uno con su
+   *  propio estilo (ver GeoMapImpl.tsx). */
+  outboundPaths?: [number, number][][] | null;
+  returnPaths?: [number, number][][] | null;
   onMapClick?: (lat: number, lng: number) => void;
   /** Click en un marker de `points` — el padre decide qué hacer (ej. setSelectedPoint). */
   onPointClick?: (point: GeoMapPoint) => void;
