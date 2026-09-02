@@ -15,7 +15,7 @@ import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
 import markerIcon from "leaflet/dist/images/marker-icon.png";
 import markerShadow from "leaflet/dist/images/marker-shadow.png";
 import type { GeoMapProps } from "@/components/GeoMap";
-import { ROUTE_OUTBOUND_COLOR, ROUTE_OUTLINE_COLOR, ROUTE_RETURN_COLOR } from "@/components/route-colors";
+import { ROUTE_OUTBOUND_COLOR, ROUTE_OUTLINE_COLOR, ROUTE_RETURN_COLOR, ROUTE_RETURN_OPACITY } from "@/components/route-colors";
 
 /** Centro aproximado de la comuna de Maipú, Región Metropolitana. Sin
  *  exportar a propósito — nada afuera de este archivo lo usa, y exportar un
@@ -175,6 +175,21 @@ function FitBounds({ points }: { points: [number, number][] | null | undefined }
   return null;
 }
 
+/** Texto de la ventana flotante sobre un tramo de ruta (estilo Google
+ *  Maps) — velocidad calculada acá mismo (distancia/tiempo), no viaja como
+ *  campo aparte del backend. */
+function segmentTooltipText(
+  direction: "Ida" | "Vuelta",
+  trucksUsed: number,
+  distanceKm: number,
+  durationHours: number,
+): string {
+  const minutes = Math.round(durationHours * 60);
+  const speedKmh = durationHours > 0 ? Math.round(distanceKm / durationHours) : 0;
+  const trucksLabel = trucksUsed > 0 ? `🚚×${trucksUsed} · ` : "";
+  return `${trucksLabel}${direction} · ${minutes} min · ${distanceKm.toFixed(1)} km · ~${speedKmh} km/h`;
+}
+
 export function GeoMapImpl({
   center = MAIPU_CENTER,
   zoom = 13,
@@ -184,6 +199,7 @@ export function GeoMapImpl({
   routePositions,
   outboundPaths,
   returnPaths,
+  routeSegments,
   fitBoundsTo,
   onMapClick,
   onPointClick,
@@ -192,7 +208,14 @@ export function GeoMapImpl({
 }: GeoMapProps) {
   const hasRealPaths = (outboundPaths && outboundPaths.length > 0) || (returnPaths && returnPaths.length > 0);
   return (
-    <MapContainer center={center} zoom={zoom} className={className} scrollWheelZoom>
+    // preferCanvas: sin esto, cada trazo de ruta (potencialmente cientos de
+    // vértices en una ruta larga, x2 por el "casing" debajo) se dibuja como
+    // SVG -- Leaflet redibuja SVG a mano en cada frame de zoom, y con esa
+    // cantidad de puntos el zoom se sentía con lag notorio. Canvas delega
+    // el redibujado al navegador y es muchísimo más fluido para polylines
+    // con muchos vértices; los markers (L.divIcon) no se ven afectados,
+    // Leaflet los sigue manejando por DOM sin importar este flag.
+    <MapContainer center={center} zoom={zoom} className={className} scrollWheelZoom preferCanvas>
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -221,24 +244,45 @@ export function GeoMapImpl({
               pathOptions={{ color: ROUTE_OUTLINE_COLOR, weight: 8, opacity: 0.5 }}
             />
           ))}
-          {/* Ida — trazo real (calles, OSRM), violeta sólido. */}
-          {outboundPaths?.map((path, i) => (
-            <Polyline
-              key={`outbound-${i}`}
-              positions={path as [number, number][]}
-              pathOptions={{ color: ROUTE_OUTBOUND_COLOR, weight: 5 }}
-            />
-          ))}
+          {/* Ida — trazo real (calles, OSRM), azul sólido (estilo Google
+              Maps). Tooltip permanente con camiones/tiempo/distancia/
+              velocidad de ESTE tramo — mismo índice que routeSegments. */}
+          {outboundPaths?.map((path, i) => {
+            const seg = routeSegments?.[i];
+            return (
+              <Polyline
+                key={`outbound-${i}`}
+                positions={path as [number, number][]}
+                pathOptions={{ color: ROUTE_OUTBOUND_COLOR, weight: 5 }}
+              >
+                {seg && (
+                  <Tooltip permanent direction="center" className="condorfinder-route-tooltip">
+                    {segmentTooltipText("Ida", seg.trucksUsed, seg.outboundDistanceKm, seg.outboundDurationHours)}
+                  </Tooltip>
+                )}
+              </Polyline>
+            );
+          })}
           {/* Vuelta — mismo tramo tipo de calle, pero más lento (camiones
-              cargados, ver _RETURN_SPEED_FACTOR en routing.py) — rosa
-              punteado para distinguirla de la ida a simple vista. */}
-          {returnPaths?.map((path, i) => (
-            <Polyline
-              key={`return-${i}`}
-              positions={path as [number, number][]}
-              pathOptions={{ color: ROUTE_RETURN_COLOR, weight: 5, dashArray: "10 8" }}
-            />
-          ))}
+              cargados, ver _RETURN_SPEED_FACTOR en routing.py) — mismo azul,
+              más claro/semitransparente, sin punteado (estilo Google Maps:
+              mismo color de ruta, dos sentidos). */}
+          {returnPaths?.map((path, i) => {
+            const seg = routeSegments?.[i];
+            return (
+              <Polyline
+                key={`return-${i}`}
+                positions={path as [number, number][]}
+                pathOptions={{ color: ROUTE_RETURN_COLOR, weight: 5, opacity: ROUTE_RETURN_OPACITY }}
+              >
+                {seg && (
+                  <Tooltip permanent direction="center" className="condorfinder-route-tooltip">
+                    {segmentTooltipText("Vuelta", seg.trucksUsed, seg.returnDistanceKm, seg.returnDurationHours)}
+                  </Tooltip>
+                )}
+              </Polyline>
+            );
+          })}
         </>
       ) : (
         routePositions &&

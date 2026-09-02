@@ -4,12 +4,13 @@
 // componente en un .tsx) por Fast Refresh — ver la nota de disciplina en
 // CLAUDE.md sobre button-variants.ts/etc.
 //
-// Violeta/rosa en vez del celeste/naranjo original: se camuflaban contra
-// las calles naranjas y el agua celeste de los tiles de OpenStreetMap.
-// Violeta y rosa casi no aparecen en la paleta de OSM, así que se leen
-// claro en cualquier zoom/zona del mapa.
-export const ROUTE_OUTBOUND_COLOR = "#7c3aed"; // ida
-export const ROUTE_RETURN_COLOR = "#db2777"; // vuelta
+// Estilo "Google Maps": azul sólido para la ida, el mismo azul pero más
+// claro/semitransparente para la vuelta (ROUTE_RETURN_OPACITY) — en vez de
+// dos colores completamente distintos, para que se lea como "la misma
+// ruta, dos sentidos" igual que en Google/Waze.
+export const ROUTE_OUTBOUND_COLOR = "#2563eb"; // ida
+export const ROUTE_RETURN_COLOR = "#60a5fa"; // vuelta (mismo tono, más claro)
+export const ROUTE_RETURN_OPACITY = 0.62;
 // Borde oscuro debajo de ambos trazos (técnica de "casing" cartográfico) —
 // separa la línea del fondo del mapa sin importar qué colores tenga debajo.
-export const ROUTE_OUTLINE_COLOR = "#1e293b";
+export const ROUTE_OUTLINE_COLOR = "#1e3a8a";

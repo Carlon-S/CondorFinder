@@ -90,6 +90,20 @@ class RoutePlanStopOut(BaseModel):
     label: str
 
 
+class RouteSegmentOut(BaseModel):
+    """Un resumen por sub-ruta/punto de origen usado — mismo índice que
+    outboundPaths[i]/returnPaths[i] abajo, para que el frontend pueda
+    mostrar la ventana flotante de cada tramo (estilo Google Maps: camiones
+    usados, tiempo, distancia, velocidad — la velocidad la calcula el
+    frontend como distancia/tiempo, no hace falta mandarla aparte)."""
+    originName: str
+    trucksUsed: int
+    outboundDistanceKm: float
+    outboundDurationHours: float
+    returnDistanceKm: float
+    returnDurationHours: float
+
+
 class RoutePlanRouteOut(BaseModel):
     stops: list[RoutePlanStopOut]
     totalDistanceKm: float | None = None
@@ -99,6 +113,7 @@ class RoutePlanRouteOut(BaseModel):
     # los pinte con estilos distintos (ver GeoMapImpl.tsx).
     outboundPaths: list[list[list[float]]] = []
     returnPaths: list[list[list[float]]] = []
+    segments: list[RouteSegmentOut] = []
 
 
 class RoutePlanSuccessOut(BaseModel):
@@ -181,6 +196,29 @@ async def _load_active_points(point_ids: list[str]) -> list[dict]:
 
 def _point_truck_capacity(point: dict) -> float:
     return sum(t.get("capacity_m3", 0) for t in point.get("trucks", []))
+
+
+def _min_trucks_used(point: dict, assigned_volume: float) -> int:
+    """Cantidad MÍNIMA de camiones de `point` que hacen falta para cubrir
+    `assigned_volume` — heurística voraz (los más grandes primero), no una
+    combinación óptima exacta, pero es lo que se muestra en la ventana
+    flotante de la ruta ("camiones usados") y no hace falta más precisión
+    que esa para ese propósito. Con al menos un camión y una parada, el
+    mínimo es 1 aunque el volumen asignado sea 0 (igual hay que despachar
+    un camión para hacer el viaje)."""
+    caps = sorted((t.get("capacity_m3", 0) for t in point.get("trucks", [])), reverse=True)
+    if not caps:
+        return 0
+    if assigned_volume <= 0:
+        return 1
+    total = 0.0
+    count = 0
+    for c in caps:
+        count += 1
+        total += c
+        if total >= assigned_volume:
+            break
+    return count
 
 
 # =============================================================================
@@ -375,15 +413,27 @@ async def _build_subroute(point: dict, point_stops: list[dict], available_hours:
     if outbound_geo is None or return_geo is None:
         return None
 
+    # Duraciones "reales" (de la geometría final que se va a dibujar, no
+    # del estimado de la matriz que solo se usó para elegir el orden) — la
+    # vuelta se ajusta con el mismo _RETURN_SPEED_FACTOR que ya se aplicó
+    # para decidir factibilidad, para no mostrarle al usuario un número "a
+    # velocidad normal" que contradiga por qué la vuelta se dibuja más
+    # lenta que la ida.
+    outbound_hours = outbound_geo["durationHours"]
+    return_hours = return_geo["durationHours"] / _RETURN_SPEED_FACTOR
+
     return {
+        "originName": point.get("name", ""),
+        "trucksUsed": _min_trucks_used(point, sum(s["volumeM3"] for s in point_stops)),
         "stops": ordered_stops,
         "outboundPath": outbound_geo["path"],
         "returnPath": return_geo["path"],
-        # Distancia real de OSRM; la duración usa la nuestra (con el factor
-        # de vuelta cargada aplicado), no la de OSRM (que asume velocidad
-        # normal en ambos sentidos).
+        "outboundDistanceKm": outbound_geo["distanceKm"],
+        "outboundDurationHours": outbound_hours,
+        "returnDistanceKm": return_geo["distanceKm"],
+        "returnDurationHours": return_hours,
         "distanceKm": outbound_geo["distanceKm"] + return_geo["distanceKm"],
-        "durationHours": total_hours,
+        "durationHours": outbound_hours + return_hours,
     }
 
 
@@ -466,6 +516,7 @@ async def generate_route(
     out_stops: list[RoutePlanStopOut] = []
     outbound_paths: list[list[list[float]]] = []
     return_paths: list[list[list[float]]] = []
+    segments: list[RouteSegmentOut] = []
     order = 1
     total_distance = 0.0
     max_duration = 0.0  # sub-rutas de puntos distintos corren en paralelo (cuadrillas separadas)
@@ -475,6 +526,14 @@ async def generate_route(
             order += 1
         outbound_paths.append(sub["outboundPath"])
         return_paths.append(sub["returnPath"])
+        segments.append(RouteSegmentOut(
+            originName=sub["originName"],
+            trucksUsed=sub["trucksUsed"],
+            outboundDistanceKm=round(sub["outboundDistanceKm"], 2),
+            outboundDurationHours=round(sub["outboundDurationHours"], 2),
+            returnDistanceKm=round(sub["returnDistanceKm"], 2),
+            returnDurationHours=round(sub["returnDurationHours"], 2),
+        ))
         total_distance += sub["distanceKm"]
         max_duration = max(max_duration, sub["durationHours"])
 
@@ -485,5 +544,6 @@ async def generate_route(
             totalDurationHours=round(max_duration, 2),
             outboundPaths=outbound_paths,
             returnPaths=return_paths,
+            segments=segments,
         )
     )

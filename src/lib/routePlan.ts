@@ -39,6 +39,19 @@ export interface RoutePlanStop {
   label: string;
 }
 
+/** Resumen de una sub-ruta/punto de origen usado -- mismo índice que
+ *  route.outboundPaths[i]/returnPaths[i], para la ventana flotante sobre
+ *  cada tramo (estilo Google Maps). La velocidad no viaja aparte -- se
+ *  calcula en el frontend como distancia/tiempo cuando hace falta mostrarla. */
+export interface RoutePlanSegment {
+  originName: string;
+  trucksUsed: number;
+  outboundDistanceKm: number;
+  outboundDurationHours: number;
+  returnDistanceKm: number;
+  returnDurationHours: number;
+}
+
 export interface RoutePlanSuccess {
   status: "success";
   route: {
@@ -50,6 +63,7 @@ export interface RoutePlanSuccess {
      *  pintar ida y vuelta con estilos distintos en el mapa. */
     outboundPaths?: [number, number][][];
     returnPaths?: [number, number][][];
+    segments?: RoutePlanSegment[];
   };
 }
 

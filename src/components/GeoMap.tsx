@@ -42,6 +42,19 @@ export interface GeoMapPolygon {
   label?: string;
 }
 
+/** Resumen de una sub-ruta (HDU5/AC2) — mismo índice que outboundPaths[i]/
+ *  returnPaths[i], para la ventana flotante sobre cada tramo (estilo
+ *  Google Maps: camiones, tiempo, distancia; la velocidad se calcula acá
+ *  mismo como distancia/tiempo, no viaja aparte). */
+export interface GeoMapRouteSegment {
+  originName: string;
+  trucksUsed: number;
+  outboundDistanceKm: number;
+  outboundDurationHours: number;
+  returnDistanceKm: number;
+  returnDurationHours: number;
+}
+
 export interface GeoMapProps {
   center?: [number, number];
   zoom?: number;
@@ -59,6 +72,9 @@ export interface GeoMapProps {
    *  propio estilo (ver GeoMapImpl.tsx). */
   outboundPaths?: [number, number][][] | null;
   returnPaths?: [number, number][][] | null;
+  /** Mismo índice que outboundPaths/returnPaths -- datos para la ventana
+   *  flotante de cada tramo. */
+  routeSegments?: GeoMapRouteSegment[] | null;
   /** Puntos a encuadrar (zoom+centrado automático) cada vez que cambian —
    *  ej. todos los puntos de los trazos de una ruta recién generada, para
    *  que quede completa en pantalla sin que el trabajador tenga que hacer
