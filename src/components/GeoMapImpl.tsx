@@ -175,9 +175,12 @@ function FitBounds({ points }: { points: [number, number][] | null | undefined }
   return null;
 }
 
-/** Click en la ruta -> zoom ahí. En vez de un eventHandlers de click sobre
- *  cada Polyline (poco confiable con el renderer Canvas para líneas muy
- *  largas/finas), escucha el click del MAPA (mismo mecanismo que
+/** Click en la ruta -> vuelve a encuadrar la ruta COMPLETA (mismo
+ *  flyToBounds que FitBounds hace al generarla, no un zoom de acercamiento
+ *  a un punto) — pensado para volver rápido a "ver toda la ruta" después
+ *  de haber hecho zoom/pan manual. En vez de un eventHandlers de click
+ *  sobre cada Polyline (poco confiable con el renderer Canvas para líneas
+ *  muy largas/finas), escucha el click del MAPA (mismo mecanismo que
  *  ClickHandler arriba, ya probado) y mide la distancia en PÍXELES al
  *  vértice más cercano de cualquiera de los trazos — funciona igual con
  *  canvas o SVG, sin depender del hit-testing de la capa. */
@@ -202,7 +205,7 @@ function RouteClickZoom({
         }
       }
       if (closestDist <= CLICK_TOLERANCE_PX) {
-        map.flyTo(e.latlng, 15, { duration: 0.6 });
+        map.flyToBounds(L.latLngBounds(paths.flat()), { padding: [48, 48], duration: 0.6 });
       }
     },
   });

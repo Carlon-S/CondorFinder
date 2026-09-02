@@ -373,6 +373,23 @@
 }
 
 /* =============================================================================
+   GEOMAP: costuras blancas entre tiles del mapa base (HDU5/AC2)
+   flyTo/flyToBounds (usados por FitBounds/RouteClickZoom en GeoMapImpl.tsx
+   para encuadrar una ruta) pueden dejar el mapa en un zoom FRACCIONARIO
+   (no un entero) al terminar la animación -- Leaflet escala los <img> de
+   cada tile con CSS en ese caso, y el redondeo a sub-píxel deja costuras
+   finas (blancas o grises) entre tiles vecinos, casi siempre visibles como
+   líneas verticales/horizontales regulares. Es un problema conocido de
+   Leaflet+Chromium, no algo específico de este proyecto -- el fix estándar
+   de la comunidad es sobredimensionar levemente cada tile para que se
+   solape con el vecino y tape la costura, sin que se note el solape.
+   ============================================================================= */
+.leaflet-tile-container img {
+  width: 100.5% !important;
+  height: 100.5% !important;
+}
+
+/* =============================================================================
    GEOMAP: tooltip de puntos guardados (HDU6)
    Leaflet trae su propio estilo de tooltip (fondo blanco liso, sombra
    genérica) sin relación con la paleta del proyecto — no se puede pisar
