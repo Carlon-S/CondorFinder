@@ -68,13 +68,15 @@ def route_geometry(points: list[tuple[float, float]]) -> dict | None:
         return None
     url = f"{OSRM_BASE_URL}/route/v1/driving/{_coords_param(points)}"
     try:
-        # "simplified" (no "full"): geometría con muchos menos vértices —
-        # con rutas largas (decenas/cientos de km), "full" puede traer
-        # miles de puntos y volver el renderizado (Leaflet, sobre todo al
-        # hacer zoom) notablemente lento en el navegador. La forma real de
-        # la ruta se sigue viendo bien, solo con menos detalle innecesario.
+        # "full" (no "simplified"): "simplified" reduce vértices con
+        # Douglas-Peucker y la línea empieza a "cortar camino" en curvas en
+        # vez de seguir la calle real (confirmado visualmente — una ruta
+        # simplificada por una carretera con curvas se ve claramente
+        # separada del trazado real en el mapa). El lag de zoom que esto
+        # buscaba evitar se soluciona en el frontend con preferCanvas
+        # (GeoMapImpl.tsx), sin sacrificar precisión acá.
         resp = requests.get(
-            url, params={"overview": "simplified", "geometries": "geojson"}, timeout=_TIMEOUT_SECONDS
+            url, params={"overview": "full", "geometries": "geojson"}, timeout=_TIMEOUT_SECONDS
         )
         resp.raise_for_status()
         data = resp.json()

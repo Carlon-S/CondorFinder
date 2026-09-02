@@ -473,9 +473,10 @@
 }
 
 /* Ventana flotante sobre un tramo de ruta (HDU5/AC2, estilo Google Maps) —
-   tooltip PERMANENTE (siempre visible, no solo al hover) con
-   direction="center", que Leaflet centra sobre la línea sin flecha (a
-   diferencia de direction="top" arriba, acá no hay ::before que estilar). */
+   tooltip PERMANENTE (siempre visible, no solo al hover), atado a un
+   marker invisible (ver RouteSegmentLabel en GeoMapImpl.tsx) en vez de
+   directo al Polyline, con direction="top" -- por eso SÍ necesita la
+   flecha (::before), mismo mecanismo que .condorfinder-map-tooltip. */
 .leaflet-tooltip.condorfinder-route-tooltip {
   background: var(--card);
   color: var(--foreground);
@@ -487,6 +488,9 @@
   font-weight: 600;
   white-space: nowrap;
   box-shadow: 0 3px 10px rgba(34, 22, 20, 0.18);
+}
+.leaflet-tooltip.condorfinder-route-tooltip::before {
+  border-top-color: var(--card);
 }
 
 /* =============================================================================

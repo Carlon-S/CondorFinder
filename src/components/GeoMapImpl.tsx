@@ -190,6 +190,92 @@ function segmentTooltipText(
   return `${trucksLabel}${direction} · ${minutes} min · ${distanceKm.toFixed(1)} km · ~${speedKmh} km/h`;
 }
 
+/** Distancia aproximada (en grados, NO metros) entre dos puntos — alcanza
+ *  para repartir proporciones a lo largo de un trazo (pointAtFraction de
+ *  abajo), no se usa para mostrar ninguna distancia real al usuario. */
+function approxDistance(a: [number, number], b: [number, number]): number {
+  const dLat = a[0] - b[0];
+  const dLng = a[1] - b[1];
+  return Math.sqrt(dLat * dLat + dLng * dLng);
+}
+
+/** Punto ubicado a `fraction` (0-1) de la distancia ACUMULADA de `path`
+ *  (no del índice de vértice) — así la ventana flotante queda a un cuarto
+ *  del recorrido real, sin importar que los vértices de OSRM no estén
+ *  parejo espaciados (hay muchos más en curvas que en tramos rectos). */
+function pointAtFraction(path: [number, number][], fraction: number): [number, number] | null {
+  if (path.length === 0) return null;
+  if (path.length === 1) return path[0];
+  let total = 0;
+  const segLengths: number[] = [];
+  for (let i = 1; i < path.length; i++) {
+    const d = approxDistance(path[i - 1], path[i]);
+    segLengths.push(d);
+    total += d;
+  }
+  if (total === 0) return path[0];
+  const target = total * fraction;
+  let acc = 0;
+  for (let i = 0; i < segLengths.length; i++) {
+    if (acc + segLengths[i] >= target) {
+      const segFraction = segLengths[i] === 0 ? 0 : (target - acc) / segLengths[i];
+      const [lat1, lng1] = path[i];
+      const [lat2, lng2] = path[i + 1];
+      return [lat1 + (lat2 - lat1) * segFraction, lng1 + (lng2 - lng1) * segFraction];
+    }
+    acc += segLengths[i];
+  }
+  return path[path.length - 1];
+}
+
+/** Key estable PERO distinta entre rutas distintas — primer/último punto +
+ *  cantidad de vértices. Forzar el remonte completo del Polyline (y de su
+ *  ventana flotante) cuando cambia la ruta es la garantía más simple y
+ *  robusta contra el problema de arriba (Leaflet no repositiona un
+ *  tooltip ya abierto solo porque cambiaron las coordenadas de su capa) —
+ *  React destruye el nodo viejo del mapa y crea uno nuevo desde cero en
+ *  vez de intentar "actualizar" uno que Leaflet no sabe recolocar solo. */
+function pathKey(path: [number, number][]): string {
+  if (path.length === 0) return "empty";
+  const first = path[0];
+  const last = path[path.length - 1];
+  return `${first[0].toFixed(4)},${first[1].toFixed(4)}-${last[0].toFixed(4)},${last[1].toFixed(4)}-${path.length}`;
+}
+
+// Icono invisible (sin html) -- el marcador solo existe para anclar el
+// tooltip permanente en un punto exacto del trazo; no debe verse ningún
+// pin. Módulo-level: no hace falta recrearlo en cada render.
+const INVISIBLE_ICON = L.divIcon({ className: "", html: "", iconSize: [0, 0] });
+
+/** Ancla una ventana flotante (estilo Google Maps: burbuja + flecha) al
+ *  punto ubicado a `fraction` del trazo `path`. Marker invisible +
+ *  Tooltip direction="top" en vez de atar el tooltip directo al Polyline:
+ *  un Polyline con tooltip "permanent" no recalcula su posición cuando
+ *  solo cambian sus coordenadas (setLatLngs no mueve un tooltip ya
+ *  abierto) -- por eso, al generar una ruta nueva, la ventana anterior se
+ *  quedaba pegada en el lugar de la ruta vieja. Un Marker si sigue su
+ *  propia posición correctamente, y la key (más abajo) fuerza además un
+ *  remonte completo cuando cambia la ruta, como garantía extra. */
+function RouteSegmentLabel({
+  path,
+  fraction,
+  text,
+}: {
+  path: [number, number][];
+  fraction: number;
+  text: string;
+}) {
+  const anchor = pointAtFraction(path, fraction);
+  if (!anchor) return null;
+  return (
+    <Marker position={anchor} icon={INVISIBLE_ICON} interactive={false}>
+      <Tooltip permanent direction="top" className="condorfinder-route-tooltip">
+        {text}
+      </Tooltip>
+    </Marker>
+  );
+}
+
 export function GeoMapImpl({
   center = MAIPU_CENTER,
   zoom = 13,
@@ -232,35 +318,43 @@ export function GeoMapImpl({
               contra el agua y las calles de los tiles de OSM). */}
           {outboundPaths?.map((path, i) => (
             <Polyline
-              key={`outbound-outline-${i}`}
+              key={`outbound-outline-${pathKey(path as [number, number][])}-${i}`}
               positions={path as [number, number][]}
               pathOptions={{ color: ROUTE_OUTLINE_COLOR, weight: 8, opacity: 0.5 }}
             />
           ))}
           {returnPaths?.map((path, i) => (
             <Polyline
-              key={`return-outline-${i}`}
+              key={`return-outline-${pathKey(path as [number, number][])}-${i}`}
               positions={path as [number, number][]}
               pathOptions={{ color: ROUTE_OUTLINE_COLOR, weight: 8, opacity: 0.5 }}
             />
           ))}
           {/* Ida — trazo real (calles, OSRM), azul sólido (estilo Google
-              Maps). Tooltip permanente con camiones/tiempo/distancia/
-              velocidad de ESTE tramo — mismo índice que routeSegments. */}
+              Maps). Ventana flotante anclada al 25% del recorrido, con
+              camiones/tiempo/distancia/velocidad de ESTE tramo — mismo
+              índice que routeSegments. */}
           {outboundPaths?.map((path, i) => {
-            const seg = routeSegments?.[i];
+            const key = `outbound-${pathKey(path as [number, number][])}-${i}`;
             return (
               <Polyline
-                key={`outbound-${i}`}
+                key={key}
                 positions={path as [number, number][]}
                 pathOptions={{ color: ROUTE_OUTBOUND_COLOR, weight: 5 }}
-              >
-                {seg && (
-                  <Tooltip permanent direction="center" className="condorfinder-route-tooltip">
-                    {segmentTooltipText("Ida", seg.trucksUsed, seg.outboundDistanceKm, seg.outboundDurationHours)}
-                  </Tooltip>
-                )}
-              </Polyline>
+              />
+            );
+          })}
+          {outboundPaths?.map((path, i) => {
+            const seg = routeSegments?.[i];
+            if (!seg) return null;
+            const key = `outbound-label-${pathKey(path as [number, number][])}-${i}`;
+            return (
+              <RouteSegmentLabel
+                key={key}
+                path={path as [number, number][]}
+                fraction={0.25}
+                text={segmentTooltipText("Ida", seg.trucksUsed, seg.outboundDistanceKm, seg.outboundDurationHours)}
+              />
             );
           })}
           {/* Vuelta — mismo tramo tipo de calle, pero más lento (camiones
@@ -268,19 +362,26 @@ export function GeoMapImpl({
               más claro/semitransparente, sin punteado (estilo Google Maps:
               mismo color de ruta, dos sentidos). */}
           {returnPaths?.map((path, i) => {
-            const seg = routeSegments?.[i];
+            const key = `return-${pathKey(path as [number, number][])}-${i}`;
             return (
               <Polyline
-                key={`return-${i}`}
+                key={key}
                 positions={path as [number, number][]}
                 pathOptions={{ color: ROUTE_RETURN_COLOR, weight: 5, opacity: ROUTE_RETURN_OPACITY }}
-              >
-                {seg && (
-                  <Tooltip permanent direction="center" className="condorfinder-route-tooltip">
-                    {segmentTooltipText("Vuelta", seg.trucksUsed, seg.returnDistanceKm, seg.returnDurationHours)}
-                  </Tooltip>
-                )}
-              </Polyline>
+              />
+            );
+          })}
+          {returnPaths?.map((path, i) => {
+            const seg = routeSegments?.[i];
+            if (!seg) return null;
+            const key = `return-label-${pathKey(path as [number, number][])}-${i}`;
+            return (
+              <RouteSegmentLabel
+                key={key}
+                path={path as [number, number][]}
+                fraction={0.25}
+                text={segmentTooltipText("Vuelta", seg.trucksUsed, seg.returnDistanceKm, seg.returnDurationHours)}
+              />
             );
           })}
         </>
