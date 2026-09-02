@@ -175,6 +175,40 @@ function FitBounds({ points }: { points: [number, number][] | null | undefined }
   return null;
 }
 
+/** Click en la ruta -> zoom ahí. En vez de un eventHandlers de click sobre
+ *  cada Polyline (poco confiable con el renderer Canvas para líneas muy
+ *  largas/finas), escucha el click del MAPA (mismo mecanismo que
+ *  ClickHandler arriba, ya probado) y mide la distancia en PÍXELES al
+ *  vértice más cercano de cualquiera de los trazos — funciona igual con
+ *  canvas o SVG, sin depender del hit-testing de la capa. */
+function RouteClickZoom({
+  outboundPaths,
+  returnPaths,
+}: {
+  outboundPaths: [number, number][][] | null | undefined;
+  returnPaths: [number, number][][] | null | undefined;
+}) {
+  const CLICK_TOLERANCE_PX = 20;
+  const map = useMapEvents({
+    click(e) {
+      const paths = [...(outboundPaths ?? []), ...(returnPaths ?? [])];
+      if (paths.length === 0) return;
+      const clickPoint = map.latLngToContainerPoint(e.latlng);
+      let closestDist = Infinity;
+      for (const path of paths) {
+        for (const vertex of path) {
+          const dist = clickPoint.distanceTo(map.latLngToContainerPoint(vertex));
+          if (dist < closestDist) closestDist = dist;
+        }
+      }
+      if (closestDist <= CLICK_TOLERANCE_PX) {
+        map.flyTo(e.latlng, 15, { duration: 0.6 });
+      }
+    },
+  });
+  return null;
+}
+
 /** Texto de la ventana flotante sobre un tramo de ruta (estilo Google
  *  Maps) — velocidad calculada acá mismo (distancia/tiempo), no viaja como
  *  campo aparte del backend. */
@@ -247,6 +281,15 @@ function pathKey(path: [number, number][]): string {
 // pin. Módulo-level: no hace falta recrearlo en cada render.
 const INVISIBLE_ICON = L.divIcon({ className: "", html: "", iconSize: [0, 0] });
 
+// Renderer Canvas explícito con más "padding" (buffer alrededor del
+// viewport donde Leaflet SÍ dibuja) que el default (0.1 = 10%) -- con una
+// polilínea larga (100+ km) y zoom/pan seguidos, el buffer chico dejaba
+// tramos de la línea fuera de la zona dibujada, viéndose como cortes/
+// líneas blancas justo en el borde de ese buffer. Módulo-level: un solo
+// renderer reusado, no uno nuevo por render (recrearlo tira todas las
+// capas y las vuelve a dibujar, perdiendo el beneficio de performance).
+const ROUTE_CANVAS_RENDERER = L.canvas({ padding: 1 });
+
 /** Ancla una ventana flotante (estilo Google Maps: burbuja + flecha) al
  *  punto ubicado a `fraction` del trazo `path`. Marker invisible +
  *  Tooltip direction="top" en vez de atar el tooltip directo al Polyline:
@@ -286,15 +329,6 @@ function RouteSegmentLabel({
   );
 }
 
-/** Click sobre la línea de la ruta -> zoom ahí (pedido explícito: el
- *  encuadre automático solo debe pasar al generar la ruta por primera vez
- *  -- ver FitBounds -- o al clickear la línea, no en cualquier momento). */
-function flyToLineClick(e: L.LeafletMouseEvent): void {
-  L.DomEvent.stopPropagation(e as unknown as Event);
-  const map = (e.target as unknown as { _map?: L.Map })._map;
-  map?.flyTo(e.latlng, 15, { duration: 0.6 });
-}
-
 export function GeoMapImpl({
   center = MAIPU_CENTER,
   zoom = 13,
@@ -313,14 +347,20 @@ export function GeoMapImpl({
 }: GeoMapProps) {
   const hasRealPaths = (outboundPaths && outboundPaths.length > 0) || (returnPaths && returnPaths.length > 0);
   return (
-    // preferCanvas: sin esto, cada trazo de ruta (potencialmente cientos de
-    // vértices en una ruta larga, x2 por el "casing" debajo) se dibuja como
-    // SVG -- Leaflet redibuja SVG a mano en cada frame de zoom, y con esa
-    // cantidad de puntos el zoom se sentía con lag notorio. Canvas delega
-    // el redibujado al navegador y es muchísimo más fluido para polylines
-    // con muchos vértices; los markers (L.divIcon) no se ven afectados,
-    // Leaflet los sigue manejando por DOM sin importar este flag.
-    <MapContainer center={center} zoom={zoom} className={className} scrollWheelZoom preferCanvas>
+    // renderer=ROUTE_CANVAS_RENDERER: sin canvas, cada trazo de ruta
+    // (potencialmente cientos de vértices en una ruta larga, x2 por el
+    // "casing" debajo) se dibuja como SVG -- Leaflet redibuja SVG a mano
+    // en cada frame de zoom, y con esa cantidad de puntos el zoom se
+    // sentía con lag notorio. Canvas delega el redibujado al navegador y
+    // es muchísimo más fluido; los markers (L.divIcon) no se ven
+    // afectados, Leaflet los sigue manejando por DOM sin importar esto.
+    <MapContainer
+      center={center}
+      zoom={zoom}
+      className={className}
+      scrollWheelZoom
+      renderer={ROUTE_CANVAS_RENDERER}
+    >
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -328,6 +368,7 @@ export function GeoMapImpl({
       <ClickHandler onMapClick={onMapClick} />
       <FlyToPoint target={focusPoint ?? null} />
       <FitBounds points={fitBoundsTo ?? null} />
+      <RouteClickZoom outboundPaths={outboundPaths} returnPaths={returnPaths} />
       {marker && <Marker position={marker} />}
       {hasRealPaths ? (
         <>
@@ -340,7 +381,6 @@ export function GeoMapImpl({
               key={`outbound-outline-${pathKey(path as [number, number][])}-${i}`}
               positions={path as [number, number][]}
               pathOptions={{ color: ROUTE_OUTLINE_COLOR, weight: 8, opacity: 0.5 }}
-              eventHandlers={{ click: flyToLineClick }}
             />
           ))}
           {returnPaths?.map((path, i) => (
@@ -348,7 +388,6 @@ export function GeoMapImpl({
               key={`return-outline-${pathKey(path as [number, number][])}-${i}`}
               positions={path as [number, number][]}
               pathOptions={{ color: ROUTE_OUTLINE_COLOR, weight: 8, opacity: 0.5 }}
-              eventHandlers={{ click: flyToLineClick }}
             />
           ))}
           {/* Ida — trazo real (calles, OSRM), azul sólido (estilo Google
@@ -362,7 +401,6 @@ export function GeoMapImpl({
                 key={key}
                 positions={path as [number, number][]}
                 pathOptions={{ color: ROUTE_OUTBOUND_COLOR, weight: 5 }}
-                eventHandlers={{ click: flyToLineClick }}
               />
             );
           })}
@@ -391,7 +429,6 @@ export function GeoMapImpl({
                 key={key}
                 positions={path as [number, number][]}
                 pathOptions={{ color: ROUTE_RETURN_COLOR, weight: 5, opacity: ROUTE_RETURN_OPACITY }}
-                eventHandlers={{ click: flyToLineClick }}
               />
             );
           })}
