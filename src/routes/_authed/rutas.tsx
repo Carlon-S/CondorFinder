@@ -71,6 +71,7 @@ import { listResourcePoints, type ResourcePoint } from "@/lib/resources";
 import { projectPolygonToWgs84 } from "@/lib/projection";
 import { generateRoute } from "@/lib/routePlan";
 import { notify } from "@/lib/notify";
+import { ROUTE_OUTBOUND_COLOR, ROUTE_RETURN_COLOR } from "@/components/route-colors";
 
 export const Route = createFileRoute("/_authed/rutas")({
   component: RutasPage,
@@ -157,6 +158,18 @@ function centroidOf(polygons: [number, number][][]): [number, number] | null {
   const lat = points.reduce((sum, [la]) => sum + la, 0) / points.length;
   const lng = points.reduce((sum, [, ln]) => sum + ln, 0) / points.length;
   return [lat, lng];
+}
+
+/** "2.27" horas -> "2 h 16 min" -- la leyenda de la ruta (AC2) muestra
+ *  tiempo estimado, y horas decimales crudas no se leen bien de un
+ *  vistazo en una demo en vivo. */
+function formatDuration(hours: number): string {
+  const totalMinutes = Math.round(hours * 60);
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  if (h === 0) return `${m} min`;
+  if (m === 0) return `${h} h`;
+  return `${h} h ${m} min`;
 }
 
 /** Mismo cálculo que activeSummary en analysis.tsx (misma cantidad de
@@ -295,6 +308,12 @@ function RutasPage() {
   // se genera una ruta con éxito.
   const [routeOutboundPaths, setRouteOutboundPaths] = useState<[number, number][][] | null>(null);
   const [routeReturnPaths, setRouteReturnPaths] = useState<[number, number][][] | null>(null);
+  // Totales de la ruta generada -- para la leyenda del mapa (distancia y
+  // duración estimada). null hasta que hay una ruta exitosa.
+  const [routeSummary, setRouteSummary] = useState<{
+    distanceKm: number | null;
+    durationHours: number | null;
+  } | null>(null);
   const [routeError, setRouteError] = useState<string | null>(null);
 
   // Horas disponibles: 0/negativo/vacío no es una entrada válida — sin esto
@@ -535,12 +554,17 @@ function RutasPage() {
       setRouteStops(result.route.stops);
       setRouteOutboundPaths(result.route.outboundPaths ?? null);
       setRouteReturnPaths(result.route.returnPaths ?? null);
+      setRouteSummary({
+        distanceKm: result.route.totalDistanceKm ?? null,
+        durationHours: result.route.totalDurationHours ?? null,
+      });
       setRouteError(null);
       notify.success("Ruta generada", "Revisa el orden de paradas propuesto en el panel.");
     } else {
       setRouteStops(null);
       setRouteOutboundPaths(null);
       setRouteReturnPaths(null);
+      setRouteSummary(null);
       setRouteError(result.message);
     }
   };
@@ -576,16 +600,31 @@ function RutasPage() {
       })),
     }));
 
-  const originMapPoints: GeoMapPoint[] = originPoints.map((p) => ({
-    id: p.id,
-    position: [p.lat, p.lng] as [number, number],
-    label: p.active ? p.name : `${p.name} (inactivo)`,
-    muted: !p.active,
-  }));
+  const originMapPoints: GeoMapPoint[] = originPoints.map((p) => {
+    // Capacidad de camiones (Modelo A -- las tolvas quedan fijas en el
+    // punto, ver CLAUDE.md/routing.py) -- es lo que de verdad limita si una
+    // ruta es factible desde acá, así que vale la pena verlo sin tener que
+    // abrir la ficha completa del punto.
+    const truckCapacity = p.trucks.reduce((sum, t) => sum + t.capacity_m3, 0);
+    const capacityLabel = `${truckCapacity} m³ camiones`;
+    return {
+      id: p.id,
+      position: [p.lat, p.lng] as [number, number],
+      label: p.active ? `${p.name} · ${capacityLabel}` : `${p.name} (inactivo) · ${capacityLabel}`,
+      muted: !p.active,
+    };
+  });
 
   const mapPoints: GeoMapPoint[] = [...zoneMapPoints, ...originMapPoints];
 
   const routePositions = routeStops?.map((s) => [s.lat, s.lng] as [number, number]) ?? null;
+  // Encuadre automático de la ruta recién generada -- todos los puntos de
+  // ambos trazos reales (no solo las paradas), para que el zoom quede justo
+  // sobre las calles que realmente recorre, no solo sobre los pines.
+  const routeFitPoints: [number, number][] | null =
+    routeOutboundPaths || routeReturnPaths
+      ? [...(routeOutboundPaths ?? []).flat(), ...(routeReturnPaths ?? []).flat()]
+      : routePositions;
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
@@ -693,6 +732,7 @@ function RutasPage() {
                       setRouteStops(null);
                       setRouteOutboundPaths(null);
                       setRouteReturnPaths(null);
+                      setRouteSummary(null);
                     }}
                     aria-label="Cerrar"
                     className="flex h-6 w-6 flex-shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
@@ -726,6 +766,7 @@ function RutasPage() {
             routePositions={routePositions}
             outboundPaths={routeOutboundPaths}
             returnPaths={routeReturnPaths}
+            fitBoundsTo={routeFitPoints}
             focusPoint={focusPoint}
           />
           {/* Sin esto, mientras las zonas y los puntos de origen todavía no
@@ -734,6 +775,44 @@ function RutasPage() {
           {mapDataLoading && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/60">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          )}
+          {/* Leyenda de la ruta generada (AC2) -- qué es cada trazo +
+              tiempo/distancia estimados, para no depender de que se
+              entienda solo por el color. Arriba a la izquierda, sobre el
+              mapa, para no competir con los controles de zoom (arriba a la
+              izquierda TAMBIÉN los pone Leaflet -- se corre con margen). */}
+          {(routeOutboundPaths?.length || routeReturnPaths?.length) && (
+            <div className="pointer-events-none absolute left-14 top-3 z-[1000] rounded-lg border border-border/60 bg-background/90 p-3 text-xs shadow-lg backdrop-blur">
+              <p className="mb-2 font-semibold text-foreground">Ruta generada</p>
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <span className="h-0.5 w-5 flex-shrink-0 rounded-full" style={{ backgroundColor: ROUTE_OUTBOUND_COLOR }} />
+                  <span className="text-muted-foreground">Ida</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span
+                    className="h-0 w-5 flex-shrink-0 border-t-2 border-dashed"
+                    style={{ borderColor: ROUTE_RETURN_COLOR }}
+                  />
+                  <span className="text-muted-foreground">Vuelta (camiones cargados, más lenta)</span>
+                </div>
+              </div>
+              {routeSummary && (routeSummary.distanceKm != null || routeSummary.durationHours != null) && (
+                <div className="mt-2.5 space-y-1 border-t border-border/50 pt-2">
+                  {routeSummary.distanceKm != null && (
+                    <p className="text-muted-foreground">
+                      Distancia total: <span className="font-medium text-foreground">{routeSummary.distanceKm.toFixed(1)} km</span>
+                    </p>
+                  )}
+                  {routeSummary.durationHours != null && (
+                    <p className="text-muted-foreground">
+                      Tiempo estimado:{" "}
+                      <span className="font-medium text-foreground">{formatDuration(routeSummary.durationHours)}</span>
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </section>

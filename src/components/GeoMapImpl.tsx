@@ -15,6 +15,7 @@ import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
 import markerIcon from "leaflet/dist/images/marker-icon.png";
 import markerShadow from "leaflet/dist/images/marker-shadow.png";
 import type { GeoMapProps } from "@/components/GeoMap";
+import { ROUTE_OUTBOUND_COLOR, ROUTE_OUTLINE_COLOR, ROUTE_RETURN_COLOR } from "@/components/route-colors";
 
 /** Centro aproximado de la comuna de Maipú, Región Metropolitana. Sin
  *  exportar a propósito — nada afuera de este archivo lo usa, y exportar un
@@ -160,6 +161,20 @@ function FlyToPoint({ target }: { target: [number, number] | null }) {
   return null;
 }
 
+/** Encuadra el mapa para que quepan todos `points` (ej. una ruta recién
+ *  generada) — una sola vez cada vez que la referencia del array cambia
+ *  (una respuesta nueva del backend siempre trae arrays nuevos, así que
+ *  no hace falta clonar nada a mano como sí hace falta en FlyToPoint). */
+function FitBounds({ points }: { points: [number, number][] | null | undefined }) {
+  const map = useMap();
+  useEffect(() => {
+    if (points && points.length > 1) {
+      map.flyToBounds(L.latLngBounds(points), { padding: [48, 48], duration: 0.8 });
+    }
+  }, [points, map]);
+  return null;
+}
+
 export function GeoMapImpl({
   center = MAIPU_CENTER,
   zoom = 13,
@@ -169,6 +184,7 @@ export function GeoMapImpl({
   routePositions,
   outboundPaths,
   returnPaths,
+  fitBoundsTo,
   onMapClick,
   onPointClick,
   focusPoint,
@@ -183,32 +199,51 @@ export function GeoMapImpl({
       />
       <ClickHandler onMapClick={onMapClick} />
       <FlyToPoint target={focusPoint ?? null} />
+      <FitBounds points={fitBoundsTo ?? null} />
       {marker && <Marker position={marker} />}
       {hasRealPaths ? (
         <>
-          {/* Ida — trazo real (calles, OSRM), azul sólido. */}
+          {/* Borde oscuro debajo de ambos trazos ("casing") — separa la
+              línea del fondo del mapa sin importar qué colores tenga
+              debajo (antes el celeste/naranjo original se camuflaba
+              contra el agua y las calles de los tiles de OSM). */}
+          {outboundPaths?.map((path, i) => (
+            <Polyline
+              key={`outbound-outline-${i}`}
+              positions={path as [number, number][]}
+              pathOptions={{ color: ROUTE_OUTLINE_COLOR, weight: 8, opacity: 0.5 }}
+            />
+          ))}
+          {returnPaths?.map((path, i) => (
+            <Polyline
+              key={`return-outline-${i}`}
+              positions={path as [number, number][]}
+              pathOptions={{ color: ROUTE_OUTLINE_COLOR, weight: 8, opacity: 0.5 }}
+            />
+          ))}
+          {/* Ida — trazo real (calles, OSRM), violeta sólido. */}
           {outboundPaths?.map((path, i) => (
             <Polyline
               key={`outbound-${i}`}
               positions={path as [number, number][]}
-              pathOptions={{ color: "#0ea5e9", weight: 4 }}
+              pathOptions={{ color: ROUTE_OUTBOUND_COLOR, weight: 5 }}
             />
           ))}
           {/* Vuelta — mismo tramo tipo de calle, pero más lento (camiones
-              cargados, ver _RETURN_SPEED_FACTOR en routing.py) — naranjo
+              cargados, ver _RETURN_SPEED_FACTOR en routing.py) — rosa
               punteado para distinguirla de la ida a simple vista. */}
           {returnPaths?.map((path, i) => (
             <Polyline
               key={`return-${i}`}
               positions={path as [number, number][]}
-              pathOptions={{ color: "#f97316", weight: 4, dashArray: "8 8" }}
+              pathOptions={{ color: ROUTE_RETURN_COLOR, weight: 5, dashArray: "10 8" }}
             />
           ))}
         </>
       ) : (
         routePositions &&
         routePositions.length > 1 && (
-          <Polyline positions={routePositions} pathOptions={{ color: "#0ea5e9", weight: 4 }} />
+          <Polyline positions={routePositions} pathOptions={{ color: ROUTE_OUTBOUND_COLOR, weight: 4 }} />
         )
       )}
       {polygons?.map((poly) => (

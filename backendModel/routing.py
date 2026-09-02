@@ -133,6 +133,16 @@ def _utm_to_wgs84(x: float, y: float, crs: str) -> tuple[float, float] | None:
     return (lat, lng)
 
 
+def _format_number(value: float) -> str:
+    """"1.0" -> "1", "1.5" -> "1.5", "20.0" -> "20" — para cualquier número
+    (horas, m³) que se muestre en un mensaje de texto al usuario. `:g`
+    recorta ceros decimales sobrantes sin redondear de forma rara los casos
+    con decimales reales. Los campos numéricos de la respuesta JSON
+    (totalDistanceKm/totalDurationHours) NO pasan por acá — son datos, el
+    frontend decide cómo formatearlos para mostrar."""
+    return f"{round(value, 2):g}"
+
+
 def _haversine(a: tuple[float, float], b: tuple[float, float]) -> float:
     """Distancia en línea recta (metros) — SOLO para heurísticas baratas
     (ordenar candidatos, repartir zonas entre puntos) antes de pedirle a
@@ -409,7 +419,7 @@ async def generate_route(
         return RoutePlanInfeasibleOut(
             message=(
                 f"Ningún conjunto de puntos activos tiene camiones suficientes para cubrir "
-                f"los {round(total_volume, 2)} m³ requeridos por las zonas cargadas."
+                f"los {_format_number(total_volume)} m³ requeridos por las zonas cargadas."
             )
         )
 
@@ -435,7 +445,7 @@ async def generate_route(
                 message=(
                     f'El reparto de zonas entre los puntos elegidos no logró calzar dentro de la '
                     f'capacidad de camiones de "{point.get("name", "un punto")}" '
-                    f'({round(assigned_volume, 2)} m³ asignados, {round(_point_truck_capacity(point), 2)} m³ '
+                    f'({_format_number(assigned_volume)} m³ asignados, {_format_number(_point_truck_capacity(point))} m³ '
                     f'de capacidad) — intenta generar la ruta con menos zonas cargadas a la vez.'
                 )
             )
@@ -444,8 +454,8 @@ async def generate_route(
             return RoutePlanInfeasibleOut(
                 message=(
                     f'No se encontró una ruta desde "{point.get("name", "un punto")}" que respete '
-                    f"las {payload.availableHours} horas disponibles (ida + vuelta), o el servicio "
-                    f"de ruteo no respondió."
+                    f"las {_format_number(payload.availableHours)} horas disponibles (ida + vuelta), o el "
+                    f"servicio de ruteo no respondió."
                 )
             )
         sub_routes.append(result)

@@ -59,6 +59,11 @@ export interface GeoMapProps {
    *  propio estilo (ver GeoMapImpl.tsx). */
   outboundPaths?: [number, number][][] | null;
   returnPaths?: [number, number][][] | null;
+  /** Puntos a encuadrar (zoom+centrado automático) cada vez que cambian —
+   *  ej. todos los puntos de los trazos de una ruta recién generada, para
+   *  que quede completa en pantalla sin que el trabajador tenga que hacer
+   *  zoom out a mano. Necesita 2+ puntos; con menos no hace nada. */
+  fitBoundsTo?: [number, number][] | null;
   onMapClick?: (lat: number, lng: number) => void;
   /** Click en un marker de `points` — el padre decide qué hacer (ej. setSelectedPoint). */
   onPointClick?: (point: GeoMapPoint) => void;
