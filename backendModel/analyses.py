@@ -343,14 +343,17 @@ async def confirm_duplicate(
     principal de Vista Principal, sigue disponible bajo "Historial"), y
     este (el más reciente) queda como la versión vigente.
 
-    Encadenado (A→B→C): si el análisis que pasa a histórico (B) todavía
-    tenía SU PROPIA relación pendiente sin resolver (ej. se guardó C antes
-    de que alguien confirmara/rechazara si B ya era duplicado de A), esa
-    pregunta no puede quedar atrapada en un registro histórico — nadie
-    vuelve a mirarlo ahí. Se traslada al sobreviviente (C, este mismo
-    análisis) para que la pregunta "¿A es también esta zona?" se resuelva
-    sobre el análisis vigente, no sobre uno que ya no aparece en ningún
-    listado normal."""
+    Dos formas de quedar "huérfano" que hay que cubrir con más de 2
+    análisis del mismo dataset (ver CLAUDE.md/HDU7):
+    - Encadenado (A→B→C, B pasa a histórico): si B todavía tenía SU PROPIA
+      relación pendiente hacia atrás (B→A, sin resolver), esa pregunta no
+      puede quedar atrapada en un registro histórico — se hereda hacia
+      este mismo análisis (el sobreviviente, C).
+    - Hermanos (A→B pendiente y A→C pendiente al mismo tiempo, se confirma
+      C→A): cualquier OTRO análisis que también apuntaba a A como posible
+      duplicado (acá, B) queda señalando a un histórico si no se redirige
+      — se re-apunta hacia el sobreviviente (C) para que la pregunta se
+      pueda seguir resolviendo sobre un análisis vigente."""
     oid = _object_id(analysis_id)
     doc = await get_db().analyses.find_one({"_id": oid})
     if not doc:
@@ -375,10 +378,23 @@ async def confirm_duplicate(
             "supersededBy": analysis_id,
             # Se limpia acá: un análisis histórico no debe seguir mostrando
             # un banner de "posible duplicado" accionable — si tenía una
-            # pregunta pendiente, ya se trasladó al sobreviviente abajo.
+            # pregunta pendiente propia, ya se trasladó al sobreviviente
+            # abajo (caso "encadenado").
             "possibleDuplicateOf": None,
             "duplicateStatus": None,
         }},
+    )
+
+    # Caso "hermanos" — cualquier análisis DISTINTO de este que seguía
+    # esperando resolver si era la misma zona que older_doc, se redirige
+    # hacia el sobreviviente en vez de quedar apuntando a un histórico.
+    await get_db().analyses.update_many(
+        {
+            "possibleDuplicateOf": str(older_id),
+            "duplicateStatus": "pending",
+            "_id": {"$ne": oid},
+        },
+        {"$set": {"possibleDuplicateOf": analysis_id}},
     )
 
     new_fields = (
