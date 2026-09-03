@@ -852,7 +852,7 @@ function AnalysisPage() {
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-background text-foreground">
-      <main className="grid flex-1 grid-cols-[360px_1fr] min-h-0">
+      <main className="grid flex-1 grid-cols-[clamp(240px,22vw,360px)_1fr] min-h-0">
 
         {/* ── panel lateral ── */}
         <aside

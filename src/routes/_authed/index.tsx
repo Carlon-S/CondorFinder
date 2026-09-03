@@ -597,7 +597,7 @@ function MainPage() {
       <main className="flex flex-1">
 
         {/* ── Sidebar de HDU6 (recursos disponibles) ── */}
-        <aside className="flex w-[400px] flex-shrink-0 flex-col border-r border-border/25 p-6 animate-in fade-in slide-in-from-left-2 duration-500">
+        <aside className="flex w-[clamp(240px,22vw,400px)] flex-shrink-0 flex-col border-r border-border/25 p-6 animate-in fade-in slide-in-from-left-2 duration-500">
           <ResourcesSummaryPanel points={resourcePoints} loading={resourcePointsLoading} />
 
           <Link to="/recursos" className="pt-5">

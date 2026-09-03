@@ -341,7 +341,16 @@ async def confirm_duplicate(
     """AC3 — el trabajador confirma que es la misma zona: el análisis
     ANTERIOR (possibleDuplicateOf) pasa a histórico (se oculta del listado
     principal de Vista Principal, sigue disponible bajo "Historial"), y
-    este (el más reciente) queda como la versión vigente."""
+    este (el más reciente) queda como la versión vigente.
+
+    Encadenado (A→B→C): si el análisis que pasa a histórico (B) todavía
+    tenía SU PROPIA relación pendiente sin resolver (ej. se guardó C antes
+    de que alguien confirmara/rechazara si B ya era duplicado de A), esa
+    pregunta no puede quedar atrapada en un registro histórico — nadie
+    vuelve a mirarlo ahí. Se traslada al sobreviviente (C, este mismo
+    análisis) para que la pregunta "¿A es también esta zona?" se resuelva
+    sobre el análisis vigente, no sobre uno que ya no aparece en ningún
+    listado normal."""
     oid = _object_id(analysis_id)
     doc = await get_db().analyses.find_one({"_id": oid})
     if not doc:
@@ -350,13 +359,36 @@ async def confirm_duplicate(
         raise HTTPException(status_code=400, detail="Este análisis no tiene un posible duplicado pendiente")
 
     older_id = _object_id(doc["possibleDuplicateOf"])
+    older_doc = await get_db().analyses.find_one({"_id": older_id})
+
+    inherited_pending = (
+        older_doc is not None
+        and older_doc.get("duplicateStatus") == "pending"
+        and older_doc.get("possibleDuplicateOf")
+        and older_doc["possibleDuplicateOf"] != analysis_id
+    )
+
     await get_db().analyses.update_one(
         {"_id": older_id},
-        {"$set": {"historical": True, "supersededBy": analysis_id}},
+        {"$set": {
+            "historical": True,
+            "supersededBy": analysis_id,
+            # Se limpia acá: un análisis histórico no debe seguir mostrando
+            # un banner de "posible duplicado" accionable — si tenía una
+            # pregunta pendiente, ya se trasladó al sobreviviente abajo.
+            "possibleDuplicateOf": None,
+            "duplicateStatus": None,
+        }},
+    )
+
+    new_fields = (
+        {"possibleDuplicateOf": older_doc["possibleDuplicateOf"], "duplicateStatus": "pending"}
+        if inherited_pending
+        else {"duplicateStatus": "confirmed_same"}
     )
     result = await get_db().analyses.find_one_and_update(
         {"_id": oid},
-        {"$set": {"duplicateStatus": "confirmed_same"}},
+        {"$set": new_fields},
         return_document=ReturnDocument.AFTER,
     )
     return _to_out(result)
