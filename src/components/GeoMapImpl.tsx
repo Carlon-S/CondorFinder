@@ -364,13 +364,9 @@ export function GeoMapImpl({
       scrollWheelZoom
       renderer={ROUTE_CANVAS_RENDERER}
     >
-      {/* CartoDB Dark Matter en vez del OSM claro por defecto — con el tema
-          oscuro del resto de la app, un mapa claro pegado directo al aside
-          navy quedaba con un salto de contraste muy brusco en el borde.
-          Gratuito, sin API key, mismo esquema de {s}/{z}/{x}/{y} que OSM. */}
       <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-        url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
       <ClickHandler onMapClick={onMapClick} />
       <FlyToPoint target={focusPoint ?? null} />

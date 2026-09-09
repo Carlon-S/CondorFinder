@@ -121,34 +121,39 @@
   --radius: 0.625rem;
   --grid-color: oklch(0.6 0.04 90 / 0.04);
 
-  --background:         #0A0F1C;
+  /* Body en gris neutro (sin tinte azul) — el navy queda reservado para el
+     sidebar (abajo), en vez de repetirse en toda la superficie de la app.
+     Mismo patrón que Linear/Vercel/GitHub dark: riel de color de marca +
+     lienzo de contenido neutro, para que el azul no compita contra sí
+     mismo por toda la pantalla. */
+  --background:         #121316;
   --foreground:         #EEF1F8;
-  --card:               #141F38;
+  --card:               #1C1D21;
   --card-foreground:    #EEF1F8;
-  --popover:            #141F38;
+  --popover:            #1C1D21;
   --popover-foreground: #EEF1F8;
   --primary:            #FFD54A;
   --primary-foreground: #0F2244;
-  --secondary:          #1E2C4C;
+  --secondary:          #26272C;
   --secondary-foreground: #EEF1F8;
-  --muted:              #17213A;
-  --muted-foreground:   #96A2BC;
-  --accent:             #24365C;
+  --muted:              #202126;
+  --muted-foreground:   #9A9AA2;
+  --accent:             #2A2B31;
   --accent-foreground:  #EEF1F8;
   --destructive:        #ef4444;
   --destructive-foreground: #ffffff;
-  /* Antes #253352 — muy parecido a --card/--background, los bordes casi
-     no se veían (todo se sentía "una sola mancha" de navy). Más claro
-     para que separe de verdad las secciones. */
-  --border:             #2C3D63;
-  --input:              #2C3D63;
+  --border:             #303136;
+  --input:              #303136;
   --ring:               #FFD54A;
   --warning:            #fbbf24;
   --warning-foreground: #151414;
   --success:            #34d399;
   --success-foreground: #151414;
-  --chart-1: #FFD54A; --chart-2: #7EC8E3; --chart-3: #34d399;
-  --chart-4: #5B7FBD; --chart-5: #96A2BC;
+  /* chart-2 vuelve a ser navy: con el body neutro, el navy ya no está
+     "gastado" como fondo de todo, así que puede ser un color más entre
+     otros en vez de ser lo único que se ve. */
+  --chart-1: #FFD54A; --chart-2: #24487D; --chart-3: #34d399;
+  --chart-4: #5B7FBD; --chart-5: #9A9AA2;
   /* Sidebar: el tono más oscuro/negro de los tres (más oscuro que
      --background), separándolo del contenido — logo-dark-mode.svg
      (wordmark blanco/gris) va acá, ver AppSidebar.tsx. Ítem activo en
