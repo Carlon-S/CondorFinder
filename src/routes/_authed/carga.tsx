@@ -1036,15 +1036,19 @@ function Page() {
             este nav no representa ese progreso, solo cambia qué se ve. */}
         <FlowNav active={activeSlice} onNavigate={setActiveSlice} />
 
-        {/* Contenido de la slice activa: el bloque "cuadrado" ocupa 80% del
-            ancho y 80% del alto disponibles (reducido 20% simétricamente),
-            centrado en el espacio restante — antes ocupaba el 100%. */}
-        <div className="flex min-h-0 flex-1 items-center justify-center">
-        <div className="flex h-[80%] w-[80%] min-h-0 flex-col gap-5">
+        {/* Contenido de la slice activa: ocupa el espacio restante de la
+            página (flex-1 en toda la cadena, con min-h-0 en cada nivel para
+            que los overflow-y-auto internos sigan funcionando) — el
+            "cuadrado" al 100%, sin el recorte del 20% (revertido). */}
+        <div className="flex min-h-0 flex-1 flex-col gap-5">
 
         {activeSlice === "carga" && (
-        <section className="flex min-h-0 flex-1 flex-col rounded-xl border border-border bg-card p-5 animate-in fade-in slide-in-from-top-2 duration-500 fill-mode-both">
-        <div className="grid min-h-0 flex-1 gap-6 md:grid-cols-[2fr_3fr] md:divide-x md:divide-border/25">
+        <section className="flex flex-col rounded-xl border border-border bg-card p-5 animate-in fade-in slide-in-from-top-2 duration-500 fill-mode-both">
+        {/* Alto fijo (no flex-1): a diferencia de la slice "Mapa
+            unificado", este bloque no debe crecer para llenar el alto
+            disponible ni variar con la cantidad de imágenes adjuntas — el
+            scroll interno de "Imágenes adjuntas" ya absorbe eso. */}
+        <div className="grid h-[360px] flex-shrink-0 gap-6 md:grid-cols-[2fr_3fr] md:divide-x md:divide-border/25">
 
           {/* Zona de carga */}
           <section className="flex min-h-0 flex-col gap-4 md:pr-6">
@@ -1407,7 +1411,6 @@ function Page() {
           )}
         </section>
 
-        </div>
         </div>
       </main>
 
