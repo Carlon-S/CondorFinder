@@ -992,7 +992,7 @@ function Page() {
   // ---------------------------------------------------------------------------
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
-      <main className="flex w-full flex-1 flex-col gap-5 px-4 py-4 sm:px-6 sm:py-6">
+      <main className="flex w-full min-h-0 flex-1 flex-col gap-5 px-4 py-4 sm:px-6 sm:py-6">
 
         {/* Título de página — sin botón de volver, la navegación ya vive en
             el sidebar persistente (mismo criterio que analysis.tsx). El
@@ -1031,26 +1031,25 @@ function Page() {
             un flujo tipo "sistema de pedidos". `generate()` avanza acá solo
             de forma automática al arrancar; el usuario puede volver a
             "Carga de imágenes" en cualquier momento (p. ej. para cancelar,
-            ver el botón de abajo). */}
-        <FlowNav
-          active={activeSlice}
-          cargaComplete={phase !== "idle"}
-          mapaComplete={phase === "done"}
-          onNavigate={setActiveSlice}
-        />
+            ver el botón de abajo). El Stepper técnico (progreso real del
+            pipeline) vive aparte, debajo, y se muestra en ambas slices —
+            este nav no representa ese progreso, solo cambia qué se ve. */}
+        <FlowNav active={activeSlice} onNavigate={setActiveSlice} />
 
-        {/* Contenido de la slice activa, centrado verticalmente en el
-            espacio restante — evita que una sola tarjeta corta (p. ej. la
-            slice "Carga" antes de agregar imágenes) quede pegada arriba
-            dejando un tramo de fondo vacío hasta el borde inferior. */}
-        <div className="flex flex-1 flex-col justify-center">
+        {/* Contenido de la slice activa: ocupa el espacio restante de la
+            página (flex-1 en toda la cadena, con min-h-0 en cada nivel para
+            que los overflow-y-auto internos sigan funcionando) en vez de
+            tarjetas de alto fijo — así la tarjeta se ve "cuadrada" (llena
+            el alto disponible) en vez de un rectángulo angosto flotando
+            sobre fondo vacío. */}
+        <div className="flex min-h-0 flex-1 flex-col gap-5">
 
         {activeSlice === "carga" && (
-        <section className="rounded-xl border border-border bg-card p-5 animate-in fade-in slide-in-from-top-2 duration-500 fill-mode-both">
-        <div className="grid gap-6 md:grid-cols-[2fr_3fr] md:divide-x md:divide-border/25">
+        <section className="flex min-h-0 flex-1 flex-col rounded-xl border border-border bg-card p-5 animate-in fade-in slide-in-from-top-2 duration-500 fill-mode-both">
+        <div className="grid min-h-0 flex-1 gap-6 md:grid-cols-[2fr_3fr] md:divide-x md:divide-border/25">
 
           {/* Zona de carga */}
-          <section className="flex h-[460px] flex-col gap-4 md:pr-6">
+          <section className="flex min-h-0 flex-col gap-4 md:pr-6">
             <PanelHeader icon={<Upload className="h-3.5 w-3.5" />} title="Carga de imágenes" />
             <button
               type="button"
@@ -1082,7 +1081,7 @@ function Page() {
           </section>
 
           {/* Grid de imágenes */}
-          <section className="relative flex h-[460px] flex-col gap-3 overflow-hidden md:pl-6">
+          <section className="relative flex min-h-0 flex-col gap-3 overflow-hidden md:pl-6">
 
             {/* Overlay de carga — cubre todo el bloque independientemente del scroll */}
             {uploading && (
@@ -1223,15 +1222,12 @@ function Page() {
         </section>
         )}
 
-        {/* ── Slice "Mapa unificado" — el mapa (o su estado de carga/error/
-            vacío) va primero, y el stepper técnico de "Revisión técnica"
-            queda debajo de él (contenido de la slide), no arriba. ── */}
+        {/* ── Slice "Mapa unificado" ── */}
         {activeSlice === "mapa" && (
-        <div className="flex flex-col gap-5">
-        <section className="rounded-xl border border-border bg-card p-5 animate-in fade-in slide-in-from-top-2 duration-500 fill-mode-both">
+        <section className="flex min-h-0 flex-1 flex-col rounded-xl border border-border bg-card p-5 animate-in fade-in slide-in-from-top-2 duration-500 fill-mode-both">
 
           {/* Mapa unificado */}
-          <section className="flex flex-col overflow-hidden">
+          <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
             <div className="flex items-center justify-between border-b border-border/25 pb-3">
               <div className="flex items-center gap-2.5 border-l-2 border-primary/50 pl-3">
                 <Layers className="h-4 w-4 text-primary/75" />
@@ -1354,13 +1350,17 @@ function Page() {
             )}
           </section>
         </section>
+        )}
 
-        {/* Stepper técnico de "Revisión técnica" — debajo del mapa (es
-            contenido de esta slide, no un encabezado propio): mismos 5
-            estados (formatState/countState/overlapState/joinState/
-            detectState). El estado del proceso (fase + barra) y el detalle
-            de pares en conflicto de solapamiento, cuando existen, se
-            muestran justo debajo. */}
+        {/* Stepper técnico de "Revisión técnica" — persistente en ambas
+            slices (no depende de activeSlice): representa el progreso real
+            del pipeline, así que se mantiene visible tanto en "Carga de
+            imágenes" como en "Mapa unificado", a diferencia del FlowNav de
+            arriba (que solo cambia qué se ve). Mismos 5 estados
+            (formatState/countState/overlapState/joinState/detectState). El
+            estado del proceso (fase + barra) y el detalle de pares en
+            conflicto de solapamiento, cuando existen, se muestran justo
+            debajo. */}
         <section className="rounded-xl border border-border bg-card p-5 animate-in fade-in slide-in-from-top-2 duration-500 delay-100 fill-mode-both">
           <Stepper
             steps={[
@@ -1408,8 +1408,6 @@ function Page() {
             </div>
           )}
         </section>
-        </div>
-        )}
 
         </div>
       </main>
@@ -1485,57 +1483,43 @@ function MetaCell({ label, value, tone }: { label: string; value: string; tone?:
 }
 
 /**
- * Nav general de la vista (2 nodos: "Carga de imágenes" / "Mapa unificado")
- * — distinto del Stepper técnico de abajo: este es clickeable, navega entre
- * las dos slices de la página (como el flujo de un sistema de pedidos), no
- * representa el progreso interno del pipeline. Siempre navegable en ambos
- * sentidos (sin nodos deshabilitados) — la slice "mapa" ya sabe mostrar un
- * placeholder vacío cuando todavía no hay nada que generar.
+ * Nav general de la vista: switcher de 2 pestañas ("Carga de imágenes" /
+ * "Mapa unificado") — deliberadamente SIN forma de stepper (sin círculos
+ * numerados ni línea conectora): ese lenguaje visual queda reservado para
+ * el Stepper técnico de abajo, que sí representa progreso real del
+ * pipeline. Este nav es solo un selector de slice, siempre navegable en
+ * ambos sentidos — la slice "mapa" ya sabe mostrar un placeholder vacío
+ * cuando todavía no hay nada que generar.
  */
 function FlowNav({
   active,
-  cargaComplete,
-  mapaComplete,
   onNavigate,
 }: {
   active: "carga" | "mapa";
-  cargaComplete: boolean;
-  mapaComplete: boolean;
   onNavigate: (slice: "carga" | "mapa") => void;
 }) {
-  const items: { key: "carga" | "mapa"; label: string; complete: boolean }[] = [
-    { key: "carga", label: "Carga de imágenes", complete: cargaComplete },
-    { key: "mapa", label: "Mapa unificado", complete: mapaComplete },
+  const items: { key: "carga" | "mapa"; label: string }[] = [
+    { key: "carga", label: "Carga de imágenes" },
+    { key: "mapa", label: "Mapa unificado" },
   ];
   return (
-    <ol className="flex items-center rounded-xl border border-border bg-card px-4 py-3">
-      {items.map((item, i) => {
+    <div className="inline-flex w-fit items-center gap-1 self-start rounded-xl border border-border bg-card p-1">
+      {items.map((item) => {
         const isActive = active === item.key;
         return (
-          <li key={item.key} className="flex flex-1 items-center last:flex-none">
-            <button
-              type="button"
-              onClick={() => onNavigate(item.key)}
-              className={`flex cursor-pointer items-center gap-2.5 rounded-full py-1.5 pl-1.5 pr-4 text-sm font-semibold transition-colors ${
-                isActive ? "bg-primary/10 text-primary" : "text-foreground/60 hover:bg-accent hover:text-accent-foreground"
-              }`}
-            >
-              <span className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border-2 text-xs font-bold transition-colors ${
-                isActive ? "border-primary bg-primary text-primary-foreground"
-                : item.complete ? "border-success bg-success text-success-foreground"
-                : "border-border bg-card text-muted-foreground"
-              }`}>
-                {item.complete && !isActive ? <CheckCircle2 className="h-3.5 w-3.5" /> : i + 1}
-              </span>
-              {item.label}
-            </button>
-            {i < items.length - 1 && (
-              <div className={`mx-1 h-0.5 flex-1 rounded-full transition-colors duration-300 ${item.complete ? "bg-success" : "bg-border"}`} />
-            )}
-          </li>
+          <button
+            key={item.key}
+            type="button"
+            onClick={() => onNavigate(item.key)}
+            className={`cursor-pointer rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${
+              isActive ? "bg-primary text-primary-foreground" : "text-foreground/60 hover:bg-accent hover:text-accent-foreground"
+            }`}
+          >
+            {item.label}
+          </button>
         );
       })}
-    </ol>
+    </div>
   );
 }
 
