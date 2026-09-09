@@ -1036,13 +1036,11 @@ function Page() {
             este nav no representa ese progreso, solo cambia qué se ve. */}
         <FlowNav active={activeSlice} onNavigate={setActiveSlice} />
 
-        {/* Contenido de la slice activa: ocupa el espacio restante de la
-            página (flex-1 en toda la cadena, con min-h-0 en cada nivel para
-            que los overflow-y-auto internos sigan funcionando) en vez de
-            tarjetas de alto fijo — así la tarjeta se ve "cuadrada" (llena
-            el alto disponible) en vez de un rectángulo angosto flotando
-            sobre fondo vacío. */}
-        <div className="flex min-h-0 flex-1 flex-col gap-5">
+        {/* Contenido de la slice activa: el bloque "cuadrado" ocupa 80% del
+            ancho y 80% del alto disponibles (reducido 20% simétricamente),
+            centrado en el espacio restante — antes ocupaba el 100%. */}
+        <div className="flex min-h-0 flex-1 items-center justify-center">
+        <div className="flex h-[80%] w-[80%] min-h-0 flex-col gap-5">
 
         {activeSlice === "carga" && (
         <section className="flex min-h-0 flex-1 flex-col rounded-xl border border-border bg-card p-5 animate-in fade-in slide-in-from-top-2 duration-500 fill-mode-both">
@@ -1409,6 +1407,7 @@ function Page() {
           )}
         </section>
 
+        </div>
         </div>
       </main>
 
