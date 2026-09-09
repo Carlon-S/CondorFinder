@@ -1048,7 +1048,7 @@ function Page() {
             unificado", este bloque no debe crecer para llenar el alto
             disponible ni variar con la cantidad de imágenes adjuntas — el
             scroll interno de "Imágenes adjuntas" ya absorbe eso. */}
-        <div className="grid h-[360px] flex-shrink-0 gap-6 md:grid-cols-[2fr_3fr] md:divide-x md:divide-border/25">
+        <div className="grid h-[450px] flex-shrink-0 gap-6 md:grid-cols-[2fr_3fr] md:divide-x md:divide-border/25">
 
           {/* Zona de carga */}
           <section className="flex min-h-0 flex-col gap-4 md:pr-6">
@@ -1243,10 +1243,10 @@ function Page() {
             </div>
 
             {/* Mismo alto fijo que el bloque de "Carga de imágenes /
-                Imágenes adjuntas" (h-[360px]) — ambas slices muestran un
+                Imágenes adjuntas" (h-[450px]) — ambas slices muestran un
                 bloque del mismo tamaño en vez de que el mapa se estire a
                 llenar el alto disponible. */}
-            <div className="relative h-[360px] flex-shrink-0 w-full overflow-hidden bg-background/50">
+            <div className="relative h-[450px] flex-shrink-0 w-full overflow-hidden bg-background/50">
               {phase === "done" && resultUrl ? (
                 <>
                   <button
