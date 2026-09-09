@@ -296,6 +296,16 @@ function Page() {
     return saved === "done" || saved === "error" || saved === "generating_map" ? saved : "idle";
   });
 
+  /** Qué "slice" de la vista se muestra: navegable a mano (FlowNav, más
+   *  abajo) en vez de depender solo de `phase` — así el botón de cancelar
+   *  (que vive en la slice "carga") sigue siendo alcanzable aunque la
+   *  generación ya haya arrancado. `generate()` la cambia a "mapa" al
+   *  arrancar un proceso nuevo (avance automático), pero el usuario puede
+   *  volver a "carga" en cualquier momento con el nav. */
+  const [activeSlice, setActiveSlice] = useState<"carga" | "mapa">(() =>
+    phase === "idle" ? "carga" : "mapa",
+  );
+
   const [resultUrl, setResultUrl] = useState<string | null>(() => loadResultUrl());
   const [noWasteDetected, setNoWasteDetected] = useState<boolean>(() => loadNoWasteDetected());
   const [overlapDetail, setOverlapDetail] = useState<OverlapPair[]>([]);
@@ -443,6 +453,7 @@ function Page() {
         clearBackendStage();
         resetProcess();
         savePhase("idle");
+        setActiveSlice("carga");
         return;
       }
 
@@ -818,6 +829,7 @@ function Page() {
       modelPrecise ? "Tomará más tiempo, con mayor exactitud." : "Prioriza velocidad de generación.",
     );
     resetProcess();
+    setActiveSlice("mapa");
     const validFiles = items.filter((i) => i.status === "valid").map((i) => i.file);
     setPhase("validating_format"); setProgress(10);
     setPhase("checking_count"); setProgress(25);
@@ -839,6 +851,7 @@ function Page() {
           clearBackendStage();
           resetProcess();
           savePhase("idle");
+          setActiveSlice("carga");
           return;
         }
         const stageAtError = res.overlapDetail !== undefined ? "checking_overlap" : loadBackendStage();
@@ -978,125 +991,62 @@ function Page() {
   // RENDER
   // ---------------------------------------------------------------------------
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <main className="w-full px-4 py-4 sm:px-6 sm:py-6 space-y-5">
+    <div className="flex min-h-screen flex-col bg-background text-foreground">
+      <main className="flex w-full flex-1 flex-col gap-5 px-4 py-4 sm:px-6 sm:py-6">
 
         {/* Título de página — sin botón de volver, la navegación ya vive en
             el sidebar persistente (mismo criterio que analysis.tsx). El
             tooltip de "?" reemplaza la fila de 4 tarjetas de Instrucciones
             que vivía acá: mismo contenido, condensado, sin ocupar espacio
             permanente en la página. */}
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <h2 className="font-rubik text-3xl font-semibold tracking-normal text-foreground md:text-4xl">
-              Carga de imágenes
-            </h2>
-            <TooltipProvider delayDuration={150}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    aria-label="Cómo funciona esta vista"
-                    className="mt-1 flex h-6 w-6 flex-shrink-0 cursor-help items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-                  >
-                    <Info className="h-4 w-4" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="right" className="max-w-xs text-left">
-                  <ol className="list-decimal space-y-1 pl-4 text-xs">
-                    <li>Usa imágenes tomadas en un mismo sector para que el mapa final sea coherente y continuo.</li>
-                    <li>Arrastra las fotografías o selecciónalas desde tu equipo. Solo JPG/JPEG.</li>
-                    <li>Se necesitan al menos {MIN_IMAGES} imágenes válidas para procesar.</li>
-                    <li>Cuando todo esté aprobado, presiona el botón para generar el mapa unificado.</li>
-                  </ol>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          </div>
-
-          {/* Vuelve a ETAPA 2 (carga/edición de imágenes) sin perder el set
-              actual — resetProcess() solo reinicia fase/resultados, no
-              borra items (eso es clearAll, un paso más agresivo que sigue
-              viviendo junto a "Imágenes adjuntas"). Solo tiene sentido
-              ofrecerla cuando el proceso ya terminó (éxito o error): en
-              pleno "processing" cambiar el set de imágenes no aplica. */}
-          {(phase === "done" || phase === "error") && (
-            <Button variant="outline" size="sm" onClick={resetProcess} className="flex-shrink-0 gap-1.5">
-              <Upload className="h-3.5 w-3.5" /> Cambiar imágenes
-            </Button>
-          )}
+        <div className="flex items-center gap-2">
+          <h2 className="font-rubik text-3xl font-semibold tracking-normal text-foreground md:text-4xl">
+            Carga de imágenes
+          </h2>
+          <TooltipProvider delayDuration={150}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="Cómo funciona esta vista"
+                  className="mt-1 flex h-6 w-6 flex-shrink-0 cursor-help items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+                >
+                  <Info className="h-4 w-4" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right" className="max-w-xs text-left">
+                <ol className="list-decimal space-y-1 pl-4 text-xs">
+                  <li>Usa imágenes tomadas en un mismo sector para que el mapa final sea coherente y continuo.</li>
+                  <li>Arrastra las fotografías o selecciónalas desde tu equipo. Solo JPG/JPEG.</li>
+                  <li>Se necesitan al menos {MIN_IMAGES} imágenes válidas para procesar.</li>
+                  <li>Cuando todo esté aprobado, presiona el botón para generar el mapa unificado.</li>
+                </ol>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </div>
 
-        {/* ── Vista en dos etapas secuenciales: mientras no hay un proceso en
-            curso ni terminado (phase === "idle") se muestra solo la carga de
-            imágenes (ETAPA 2); en cuanto arranca la generación, esa etapa se
-            oculta y aparece el stepper + mapa unificado (ETAPAS 1 y 3) — así
-            el contenido principal de la vista va cambiando secuencialmente en
-            vez de mostrar las tres tarjetas siempre juntas. ── */}
-        {phase !== "idle" && (
-        /* ── ETAPA 1: stepper de "Revisión técnica" — antes una lista
-            vertical angosta al lado del mapa (ver ETAPA 3 más abajo), ahora
-            arriba de todo como progreso horizontal: mismos 5 estados
-            (formatState/countState/overlapState/joinState/detectState),
-            solo en otro formato. El estado del proceso (fase + barra) y el
-            detalle de pares en conflicto de solapamiento, cuando existen,
-            se muestran justo debajo — antes vivían en la misma columna. ── */
+        {/* Nav general de la página: 2 slices navegables en cualquier
+            momento (no bloqueadas por `phase`) — arriba de todo, como pide
+            un flujo tipo "sistema de pedidos". `generate()` avanza acá solo
+            de forma automática al arrancar; el usuario puede volver a
+            "Carga de imágenes" en cualquier momento (p. ej. para cancelar,
+            ver el botón de abajo). */}
+        <FlowNav
+          active={activeSlice}
+          cargaComplete={phase !== "idle"}
+          mapaComplete={phase === "done"}
+          onNavigate={setActiveSlice}
+        />
+
+        {/* Contenido de la slice activa, centrado verticalmente en el
+            espacio restante — evita que una sola tarjeta corta (p. ej. la
+            slice "Carga" antes de agregar imágenes) quede pegada arriba
+            dejando un tramo de fondo vacío hasta el borde inferior. */}
+        <div className="flex flex-1 flex-col justify-center">
+
+        {activeSlice === "carga" && (
         <section className="rounded-xl border border-border bg-card p-5 animate-in fade-in slide-in-from-top-2 duration-500 fill-mode-both">
-          <Stepper
-            steps={[
-              { label: "Formato JPG", state: formatState },
-              { label: "Cantidad mínima", state: countState },
-              { label: "Solapamiento", state: overlapState },
-              { label: "Generación de mapa", state: joinState },
-              { label: "Detección", state: detectState },
-            ]}
-          />
-
-          {(processing || phase === "error" || uploadProgress !== null) && (
-            <div className="mt-5 space-y-1.5 border-t border-border/60 pt-4">
-              <div className="flex items-center gap-2">
-                <Clock className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
-                <p className="text-xs text-foreground font-medium">{getPhaseLabel(phase, backendStage, cancelling)}</p>
-              </div>
-              <Progress value={progress} className="h-1" />
-              <p className="text-[10px] text-muted-foreground">{progress}% completado</p>
-              {uploadProgress !== null && (
-                <div className="mt-1.5 space-y-1">
-                  <p className="text-[10px] font-semibold text-primary">Subiendo imágenes al servidor...</p>
-                  <Progress value={uploadProgress} className="h-1" />
-                  <p className="text-[10px] text-muted-foreground">{uploadProgress}% subido</p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {overlapDetail.length > 0 && (
-            <div className="mt-4 rounded-lg border border-destructive/40 bg-destructive/10 p-3 space-y-2">
-              <p className="text-[10px] font-semibold text-destructive">Pares en conflicto ({overlapDetail.length})</p>
-              <ul className="space-y-1.5 max-h-[140px] overflow-y-auto pr-1">
-                {overlapDetail.map((pair, i) => (
-                  <li key={i} className="rounded border border-destructive/20 bg-background/40 px-2 py-1.5">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="mono text-[10px] font-semibold text-destructive">{pair.solape}%</span>
-                      <span className="mono text-[9px] text-muted-foreground">{pair.distancia_m} m</span>
-                    </div>
-                    <p className="mono text-[9px] text-muted-foreground truncate mt-0.5" title={pair.imagen_1}>{pair.imagen_1}</p>
-                    <p className="mono text-[9px] text-muted-foreground truncate" title={pair.imagen_2}>{pair.imagen_2}</p>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </section>
-        )}
-
-        {/* ── ETAPA 2: Carga | Imágenes + botón CTA — una sola tarjeta, el
-            botón queda adentro en vez de flotar solo entre dos secciones
-            sin relación. Solo se muestra en la etapa 1 de la secuencia
-            (phase === "idle") — una vez que arranca la generación, esta
-            tarjeta se oculta y las ETAPAS 1/3 (arriba/abajo) toman su lugar. ── */}
-        {phase === "idle" && (
-        <section className="rounded-xl border border-border bg-card p-5 animate-in fade-in slide-in-from-top-2 duration-500 delay-100 fill-mode-both">
         <div className="grid gap-6 md:grid-cols-[2fr_3fr] md:divide-x md:divide-border/25">
 
           {/* Zona de carga */}
@@ -1231,12 +1181,6 @@ function Page() {
               </Button>
             ) : (
               <Button onClick={() => setShowModelDialog(true)} disabled={!canGenerate} className="w-full btn-cta" size="lg">
-                {/* Esta tarjeta (ETAPA 2) ahora solo se muestra con
-                    phase === "idle" (ver la vista en dos etapas más
-                    arriba), así que siempre es una generación nueva —
-                    "Reprocesar mapa" ya no aplica acá: para reprocesar el
-                    mismo set tras un error/éxito, "Cambiar imágenes" en el
-                    encabezado ya devuelve a esta etapa. */}
                 <MapIcon className="mr-2 h-4 w-4" /> Generar mapa unificado
               </Button>
             )}
@@ -1279,12 +1223,12 @@ function Page() {
         </section>
         )}
 
-        {/* ── ETAPA 3: Mapa unificado — antes compartía esta tarjeta con
-            "Revisión técnica" (ahora el stepper de arriba), así que pasa a
-            ocupar el ancho completo. Igual que la ETAPA 1, solo aparece una
-            vez que arranca la generación (phase !== "idle"). ── */}
-        {phase !== "idle" && (
-        <section className="rounded-xl border border-border bg-card p-5 animate-in fade-in slide-in-from-top-2 duration-500 delay-200 fill-mode-both">
+        {/* ── Slice "Mapa unificado" — el mapa (o su estado de carga/error/
+            vacío) va primero, y el stepper técnico de "Revisión técnica"
+            queda debajo de él (contenido de la slide), no arriba. ── */}
+        {activeSlice === "mapa" && (
+        <div className="flex flex-col gap-5">
+        <section className="rounded-xl border border-border bg-card p-5 animate-in fade-in slide-in-from-top-2 duration-500 fill-mode-both">
 
           {/* Mapa unificado */}
           <section className="flex flex-col overflow-hidden">
@@ -1366,7 +1310,12 @@ function Page() {
                   )}
                 </>
               ) : processing ? (
-                <div className="flex h-full w-full flex-col items-center justify-center gap-3">
+                // absolute inset-0 en vez de h-full w-full: el padre es
+                // "relative" pero solo tiene min-height (no height fija),
+                // así que h-full no siempre resolvía una altura real —
+                // inset-0 sobre el padre relative sí centra de forma
+                // confiable sin depender de esa resolución.
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
                   <div className="scan-line relative h-24 w-24 overflow-hidden rounded-md border border-primary/40 bg-primary/10">
                     <Loader2 className="absolute left-1/2 top-1/2 h-8 w-8 -translate-x-1/2 -translate-y-1/2 animate-spin text-primary" />
                   </div>
@@ -1374,7 +1323,7 @@ function Page() {
                   <div className="w-64"><Progress value={progress} className="h-1" /></div>
                 </div>
               ) : phase === "error" ? (
-                <div className="flex h-full w-full flex-col items-center justify-center gap-3 p-6 text-center">
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center">
                   <div className="flex h-12 w-12 items-center justify-center rounded-full border border-destructive/40 bg-destructive/15 mb-1">
                     <XCircle className="h-6 w-6 text-destructive" />
                   </div>
@@ -1382,7 +1331,7 @@ function Page() {
                   <p className="text-xs text-muted-foreground leading-relaxed max-w-md">{errorMsg}</p>
                 </div>
               ) : (
-                <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-muted-foreground">
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-muted-foreground">
                   <MapIcon className="h-12 w-12 opacity-30" />
                   <p className="mono text-[11px] uppercase tracking-wider">El mapa aparecerá aquí</p>
                   <p className="text-xs opacity-60">Carga imágenes y presiona Generar mapa unificado</p>
@@ -1405,8 +1354,64 @@ function Page() {
             )}
           </section>
         </section>
+
+        {/* Stepper técnico de "Revisión técnica" — debajo del mapa (es
+            contenido de esta slide, no un encabezado propio): mismos 5
+            estados (formatState/countState/overlapState/joinState/
+            detectState). El estado del proceso (fase + barra) y el detalle
+            de pares en conflicto de solapamiento, cuando existen, se
+            muestran justo debajo. */}
+        <section className="rounded-xl border border-border bg-card p-5 animate-in fade-in slide-in-from-top-2 duration-500 delay-100 fill-mode-both">
+          <Stepper
+            steps={[
+              { label: "Formato JPG", state: formatState },
+              { label: "Cantidad mínima", state: countState },
+              { label: "Solapamiento", state: overlapState },
+              { label: "Generación de mapa", state: joinState },
+              { label: "Detección", state: detectState },
+            ]}
+          />
+
+          {(processing || phase === "error" || uploadProgress !== null) && (
+            <div className="mt-5 space-y-1.5 border-t border-border/60 pt-4">
+              <div className="flex items-center gap-2">
+                <Clock className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                <p className="text-xs text-foreground font-medium">{getPhaseLabel(phase, backendStage, cancelling)}</p>
+              </div>
+              <Progress value={progress} className="h-1" />
+              <p className="text-[10px] text-muted-foreground">{progress}% completado</p>
+              {uploadProgress !== null && (
+                <div className="mt-1.5 space-y-1">
+                  <p className="text-[10px] font-semibold text-primary">Subiendo imágenes al servidor...</p>
+                  <Progress value={uploadProgress} className="h-1" />
+                  <p className="text-[10px] text-muted-foreground">{uploadProgress}% subido</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {overlapDetail.length > 0 && (
+            <div className="mt-4 rounded-lg border border-destructive/40 bg-destructive/10 p-3 space-y-2">
+              <p className="text-[10px] font-semibold text-destructive">Pares en conflicto ({overlapDetail.length})</p>
+              <ul className="space-y-1.5 max-h-[140px] overflow-y-auto pr-1">
+                {overlapDetail.map((pair, i) => (
+                  <li key={i} className="rounded border border-destructive/20 bg-background/40 px-2 py-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="mono text-[10px] font-semibold text-destructive">{pair.solape}%</span>
+                      <span className="mono text-[9px] text-muted-foreground">{pair.distancia_m} m</span>
+                    </div>
+                    <p className="mono text-[9px] text-muted-foreground truncate mt-0.5" title={pair.imagen_1}>{pair.imagen_1}</p>
+                    <p className="mono text-[9px] text-muted-foreground truncate" title={pair.imagen_2}>{pair.imagen_2}</p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </section>
+        </div>
         )}
 
+        </div>
       </main>
 
       {/* SP1 — elegir modelo justo al presionar "Generar mapa unificado".
@@ -1480,9 +1485,60 @@ function MetaCell({ label, value, tone }: { label: string; value: string; tone?:
 }
 
 /**
- * Fila de verificacion en el panel de revision tecnica.
- * Muestra estado con icono, etiqueta, hint descriptivo y badge de texto.
+ * Nav general de la vista (2 nodos: "Carga de imágenes" / "Mapa unificado")
+ * — distinto del Stepper técnico de abajo: este es clickeable, navega entre
+ * las dos slices de la página (como el flujo de un sistema de pedidos), no
+ * representa el progreso interno del pipeline. Siempre navegable en ambos
+ * sentidos (sin nodos deshabilitados) — la slice "mapa" ya sabe mostrar un
+ * placeholder vacío cuando todavía no hay nada que generar.
  */
+function FlowNav({
+  active,
+  cargaComplete,
+  mapaComplete,
+  onNavigate,
+}: {
+  active: "carga" | "mapa";
+  cargaComplete: boolean;
+  mapaComplete: boolean;
+  onNavigate: (slice: "carga" | "mapa") => void;
+}) {
+  const items: { key: "carga" | "mapa"; label: string; complete: boolean }[] = [
+    { key: "carga", label: "Carga de imágenes", complete: cargaComplete },
+    { key: "mapa", label: "Mapa unificado", complete: mapaComplete },
+  ];
+  return (
+    <ol className="flex items-center rounded-xl border border-border bg-card px-4 py-3">
+      {items.map((item, i) => {
+        const isActive = active === item.key;
+        return (
+          <li key={item.key} className="flex flex-1 items-center last:flex-none">
+            <button
+              type="button"
+              onClick={() => onNavigate(item.key)}
+              className={`flex cursor-pointer items-center gap-2.5 rounded-full py-1.5 pl-1.5 pr-4 text-sm font-semibold transition-colors ${
+                isActive ? "bg-primary/10 text-primary" : "text-foreground/60 hover:bg-accent hover:text-accent-foreground"
+              }`}
+            >
+              <span className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border-2 text-xs font-bold transition-colors ${
+                isActive ? "border-primary bg-primary text-primary-foreground"
+                : item.complete ? "border-success bg-success text-success-foreground"
+                : "border-border bg-card text-muted-foreground"
+              }`}>
+                {item.complete && !isActive ? <CheckCircle2 className="h-3.5 w-3.5" /> : i + 1}
+              </span>
+              {item.label}
+            </button>
+            {i < items.length - 1 && (
+              <div className={`mx-1 h-0.5 flex-1 rounded-full transition-colors duration-300 ${item.complete ? "bg-success" : "bg-border"}`} />
+            )}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
 /**
  * Stepper horizontal de "Revisión técnica" (reemplaza el antiguo CheckRow
  * vertical) — mismos 5 estados/colores (TriState), en formato círculo
