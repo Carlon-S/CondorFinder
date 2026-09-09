@@ -28,7 +28,7 @@ import { Eye, EyeOff, Loader2, LogIn } from "@/components/icons/Icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { login } from "@/lib/auth";
-import logo from "@/assets/Logo/Logo Light Mode.svg";
+import logo from "@/assets/Logo/logo-light-mode.svg";
 
 export const Route = createFileRoute("/login")({
   validateSearch: (search: Record<string, unknown>) => ({

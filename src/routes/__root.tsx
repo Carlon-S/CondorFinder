@@ -10,11 +10,11 @@ import {
 } from "@tanstack/react-router";
 
 import appCss from "../styles.css?url";
-// Recorte del logo enfocado en el ave — el archivo original (Logo Dark
-// Mode.svg) tiene mucho margen vacío alrededor del isotipo + wordmark, así
-// que a tamaño de favicon (16-32px) se veía diminuto. Este archivo usa el
-// mismo path data, solo con un viewBox más ajustado.
-import favicon from "@/assets/Logo/favicon.svg";
+// Recorte del logo enfocado en el ave — ver logo-light-mode.svg, que
+// también tiene un viewBox recortado (sin el margen vacío que traía el
+// archivo original). Navy: el favicon del navegador se ve sobre una barra
+// de pestañas clara en la gran mayoría de los casos.
+import favicon from "@/assets/Logo/logo-icon-light.svg";
 import { Toaster } from "@/components/ui/sonner";
 import { AppSidebar } from "@/components/AppSidebar";
 

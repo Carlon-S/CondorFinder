@@ -11,7 +11,10 @@ import {
   CircleUserRound,
   LogOut,
 } from "@/components/icons/Icons";
-import logo from "@/assets/Logo/Logo Light Mode.svg";
+// Dark Mode (wordmark blanco/gris) porque el sidebar ahora es navy — ver
+// styles.css, --sidebar. login.tsx usa Light Mode (navy) porque su tarjeta
+// sigue siendo blanca.
+import logo from "@/assets/Logo/logo-dark-mode.svg";
 import { logout } from "@/lib/auth";
 
 const NAV_ITEMS = [

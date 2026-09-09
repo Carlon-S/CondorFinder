@@ -104,49 +104,54 @@
 
 
 /* =============================================================================
-   TEMA — NEGRO CLÁSICO (único tema de la aplicación)
+   TEMA — NAVY/AMARILLO (único tema de la aplicación)
+   Alineado con la paleta de feria-page (navy #0F2244 + amarillo #FFC53D):
+   el rojo anterior venía del logo viejo, que ya no se usa (ver AppSidebar.tsx
+   / login.tsx — ahora usan el cóndor navy). --primary sigue el mismo rol que
+   .btn-primary en feria-page (amarillo con texto navy); --destructive queda
+   igual (#ef4444 ya era un rojo funcional propio, no heredado del logo).
    ============================================================================= */
 :root {
   --radius: 0.625rem;
   --grid-color: oklch(0.6 0.04 90 / 0.04);
 
-  --background:         #FBF8F6;
-  --foreground:         #221614;
+  --background:         #F5F7FB;
+  --foreground:         #1B2431;
   --card:               #FFFFFF;
-  --card-foreground:    #221614;
+  --card-foreground:    #1B2431;
   --popover:            #FFFFFF;
-  --popover-foreground: #221614;
-  --primary:            #E10002;
-  --primary-foreground: #ffffff;
-  --secondary:          #F1EAE8;
-  --secondary-foreground: #221614;
-  --muted:              #F1EAE8;
-  --muted-foreground:   #78716C;
-  --accent:             #E10002;
+  --popover-foreground: #1B2431;
+  --primary:            #FFC53D;
+  --primary-foreground: #0F2244;
+  --secondary:          #EDF0F7;
+  --secondary-foreground: #1B2431;
+  --muted:              #EDF0F7;
+  --muted-foreground:   #647089;
+  --accent:             #0F2244;
   --accent-foreground:  #ffffff;
   --destructive:        #ef4444;
   --destructive-foreground: #ffffff;
-  --border:             #E8DFDC;
-  --input:              #E8DFDC;
-  --ring:               #E10002;
+  --border:             #E2E6EF;
+  --input:              #E2E6EF;
+  --ring:               #FFC53D;
   --warning:            #fbbf24;
   --warning-foreground: #151414;
   --success:            #34d399;
   --success-foreground: #151414;
-  --chart-1: #E10002; --chart-2: #34d399; --chart-3: #fbbf24;
-  --chart-4: #ef4444; --chart-5: #a8a29e;
-  /* Sidebar en gris claro neutro (no la familia cálida del resto de la
-     paleta) — separa visualmente el rail de navegación del contenido. El
-     logo (Logo Light Mode.svg, wordmark blanco) va sobre su propia placa
-     oscura en AppSidebar.tsx, no directo sobre este gris. */
-  --sidebar: #E9E9E9; --sidebar-foreground: #221614;
-  --sidebar-primary: #E10002; --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #DCDCDC; --sidebar-accent-foreground: #221614;
-  --sidebar-border: #D6D6D6; --sidebar-ring: #E10002;
+  --chart-1: #FFC53D; --chart-2: #0F2244; --chart-3: #34d399;
+  --chart-4: #7EC8E3; --chart-5: #a8a29e;
+  /* Sidebar en navy (igual que el header/footer de feria-page) — el logo
+     que corresponde acá es logo-dark-mode.svg (wordmark blanco/gris,
+     pensado para fondo oscuro), ver AppSidebar.tsx. El ítem activo usa el
+     mismo amarillo que feria-page usa para su link de nav activo. */
+  --sidebar: #0F2244; --sidebar-foreground: #FFFFFF;
+  --sidebar-primary: #FFC53D; --sidebar-primary-foreground: #0F2244;
+  --sidebar-accent: #1B3A66; --sidebar-accent-foreground: #FFFFFF;
+  --sidebar-border: #FFFFFF; --sidebar-ring: #FFC53D;
 
-  --scan-color:     rgba(225, 0, 2, 0.35);
-  --primary-glow:   rgba(225, 0, 2, 0.5);
-  --primary-glow-2: rgba(225, 0, 2, 0.25);
+  --scan-color:     rgba(255, 197, 61, 0.35);
+  --primary-glow:   rgba(255, 197, 61, 0.5);
+  --primary-glow-2: rgba(255, 197, 61, 0.25);
 }
 
 
