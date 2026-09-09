@@ -1226,10 +1226,10 @@ function Page() {
 
         {/* ── Slice "Mapa unificado" ── */}
         {activeSlice === "mapa" && (
-        <section className="flex min-h-0 flex-1 flex-col rounded-xl border border-border bg-card p-5 animate-in fade-in slide-in-from-top-2 duration-500 fill-mode-both">
+        <section className="flex flex-col rounded-xl border border-border bg-card p-5 animate-in fade-in slide-in-from-top-2 duration-500 fill-mode-both">
 
           {/* Mapa unificado */}
-          <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <section className="flex flex-col overflow-hidden">
             <div className="flex items-center justify-between border-b border-border/25 pb-3">
               <div className="flex items-center gap-2.5 border-l-2 border-primary/50 pl-3">
                 <Layers className="h-4 w-4 text-primary/75" />
@@ -1242,7 +1242,11 @@ function Page() {
               )}
             </div>
 
-            <div className="relative flex-1 min-h-[380px] w-full overflow-hidden bg-background/50">
+            {/* Mismo alto fijo que el bloque de "Carga de imágenes /
+                Imágenes adjuntas" (h-[360px]) — ambas slices muestran un
+                bloque del mismo tamaño en vez de que el mapa se estire a
+                llenar el alto disponible. */}
+            <div className="relative h-[360px] flex-shrink-0 w-full overflow-hidden bg-background/50">
               {phase === "done" && resultUrl ? (
                 <>
                   <button
