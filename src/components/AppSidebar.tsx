@@ -56,32 +56,37 @@ export function AppSidebar() {
         collapsed ? "w-20" : "w-64"
       }`}
     >
-      {/* Alto fijo (h-24) independiente de si el logo se muestra o no, para
+      {/* Alto fijo (h-16) independiente de si el logo se muestra o no, para
           que el botón de toggle quede siempre a la misma altura entre el
-          estado expandido y el colapsado. */}
-      {/* gap-0 en colapsado: el logo queda montado con ancho 0, pero un
-          gap sigue reservando espacio junto a un hijo de ancho 0 — eso
-          descentraba el botón de toggle respecto a los íconos de abajo. */}
-      <div
-        className={`flex h-24 items-center px-4 ${collapsed ? "justify-center gap-0" : "justify-between gap-2"}`}
-      >
+          estado expandido y el colapsado. Logo centrado de verdad (no
+          justify-between con el toggle al lado): el toggle queda con
+          position absolute para no descentrar el logo respecto al ancho
+          real del sidebar. */}
+      <div className="relative flex h-16 items-center justify-center px-4">
         {/* El logo queda siempre montado — se anima por max-width/opacity en
-            vez de aparecer/desaparecer de golpe con el toggle. */}
+            vez de aparecer/desaparecer de golpe con el toggle. Tamaño chico
+            (h-8): el SVG ya viene recortado sin margen invisible, así que a
+            diferencia del h-20 anterior esto es 100% dibujo visible, no
+            dibujo+relleno vacío. */}
         <Link
           to="/"
           className={`overflow-hidden transition-[max-width,opacity] duration-300 ease-in-out hover:scale-[1.02] ${
-            collapsed ? "max-w-0 opacity-0" : "max-w-[190px] opacity-100"
+            collapsed ? "max-w-0 opacity-0" : "max-w-[160px] opacity-100"
           }`}
         >
-          <img src={logo} alt="CondorFinder" className="h-20 w-auto" />
+          <img src={logo} alt="CondorFinder" className="h-8 w-auto" />
         </Link>
         <button
           type="button"
           onClick={() => setCollapsed((c) => !c)}
           aria-label={collapsed ? "Expandir menú" : "Colapsar menú"}
-          className="flex h-8 w-8 flex-shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-foreground/60 transition-colors duration-200 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+          className="absolute right-3 flex h-8 w-8 flex-shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-foreground/60 transition-colors duration-200 hover:bg-sidebar-accent hover:text-sidebar-foreground"
         >
-          {collapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+          {collapsed ? (
+            <PanelLeftOpen className="h-4 w-4" />
+          ) : (
+            <PanelLeftClose className="h-4 w-4" />
+          )}
         </button>
       </div>
 

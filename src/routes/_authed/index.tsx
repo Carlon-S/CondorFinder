@@ -39,11 +39,13 @@ import {
   Scale,
   Search,
   Trash2,
+  Truck,
 } from "@/components/icons/Icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ResourcesSummaryPanel } from "@/components/ResourcesSummaryPanel";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import {
   Table,
   TableBody,
@@ -343,15 +345,12 @@ function MainPage() {
   // carga.tsx) para que pase sola a "pendiente de análisis" sin necesitar F5.
   useEffect(() => {
     if (!zones.some((z) => z.state === "in_progress")) return;
-    const interval = setInterval(() => { refreshZones(); }, 5000);
+    const interval = setInterval(() => {
+      refreshZones();
+    }, 5000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zones]);
-
-  // AC3 — vuelve a resolver el listado de zonas y lo muestra.
-  const handleOpenAnalyses = () => {
-    refreshZones(true);
-  };
 
   // AC4 — abre una zona terminada en /analysis
   const openZone = (recordId: string) => {
@@ -587,25 +586,36 @@ function MainPage() {
 
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
-      {/* Encabezado de página */}
-      <div className="border-b border-border/25 px-6 py-5">
+      {/* Encabezado de página — "Recursos disponibles" (antes una columna
+          fija de hasta 400px, ver git history) ahora vive en un panel
+          deslizante (Sheet): sobre esta vista el contenido real es el
+          listado de zonas, no un resumen de HDU6 que ya tiene su propia
+          página completa en /recursos. */}
+      <div className="flex items-center justify-between border-b border-border/25 px-6 py-5">
         <h2 className="font-rubik text-3xl font-semibold tracking-normal text-foreground md:text-4xl">
           Zonas monitoreadas
         </h2>
+        <Sheet>
+          <SheetTrigger asChild>
+            <Button variant="secondary" size="sm">
+              <Truck className="mr-1.5 h-3.5 w-3.5" /> Recursos disponibles
+            </Button>
+          </SheetTrigger>
+          <SheetContent side="left" className="w-[clamp(280px,26vw,380px)] overflow-y-auto">
+            <SheetHeader>
+              <SheetTitle className="sr-only">Recursos disponibles</SheetTitle>
+            </SheetHeader>
+            <ResourcesSummaryPanel points={resourcePoints} loading={resourcePointsLoading} />
+            <Link to="/recursos" className="mt-5 block">
+              <Button size="lg" className="btn-cta w-full">
+                <MapPin className="mr-2 h-4 w-4" /> Definir punto
+              </Button>
+            </Link>
+          </SheetContent>
+        </Sheet>
       </div>
 
       <main className="flex flex-1">
-
-        {/* ── Sidebar de HDU6 (recursos disponibles) ── */}
-        <aside className="flex w-[clamp(240px,22vw,400px)] flex-shrink-0 flex-col border-r border-border/25 p-6 animate-in fade-in slide-in-from-left-2 duration-500">
-          <ResourcesSummaryPanel points={resourcePoints} loading={resourcePointsLoading} />
-
-          <Link to="/recursos" className="pt-5">
-            <Button size="lg" className="btn-cta w-full">
-              <MapPin className="mr-2 h-4 w-4" /> Definir punto
-            </Button>
-          </Link>
-        </aside>
 
         {/* ── Contenido: KPIs + listado de zonas ── */}
         <section className="flex min-w-0 flex-1 flex-col p-6">
@@ -670,9 +680,6 @@ function MainPage() {
               </div>
               <Button size="sm" onClick={() => setAddZoneOpen(true)}>
                 <Plus className="mr-1.5 h-3.5 w-3.5" /> Agregar zona
-              </Button>
-              <Button size="sm" variant="secondary" onClick={handleOpenAnalyses}>
-                <FolderOpen className="mr-1.5 h-3.5 w-3.5" /> Abrir análisis
               </Button>
             </div>
           </div>
