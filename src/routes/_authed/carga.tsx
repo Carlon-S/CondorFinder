@@ -31,15 +31,14 @@ import {
   Loader2,
   Layers,
   Info,
-  ListChecks,
   ImageIcon,
   Clock,
-  FileCheck,
   Lightning,
   Crosshair,
 } from "@/components/icons/Icons";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { unifyImages, uploadImages, deleteImage, deleteAllImages, listUploadedImages, pollTask, cancelTask, getPipelineStatus, getTaskStatus, type OverlapPair } from "@/lib/unify";
 import { notify } from "@/lib/notify";
@@ -984,24 +983,90 @@ function Page() {
       <main className="w-full px-4 py-4 sm:px-6 sm:py-6 space-y-5">
 
         {/* Título de página — sin botón de volver, la navegación ya vive en
-            el sidebar persistente (mismo criterio que analysis.tsx). */}
-        <div>
+            el sidebar persistente (mismo criterio que analysis.tsx). El
+            tooltip de "?" reemplaza la fila de 4 tarjetas de Instrucciones
+            que vivía acá: mismo contenido, condensado, sin ocupar espacio
+            permanente en la página. */}
+        <div className="flex items-center gap-2">
           <h2 className="font-rubik text-3xl font-semibold tracking-normal text-foreground md:text-4xl">
             Carga de imágenes
           </h2>
+          <TooltipProvider delayDuration={150}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="Cómo funciona esta vista"
+                  className="mt-1 flex h-6 w-6 flex-shrink-0 cursor-help items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+                >
+                  <Info className="h-4 w-4" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right" className="max-w-xs text-left">
+                <ol className="list-decimal space-y-1 pl-4 text-xs">
+                  <li>Usa imágenes tomadas en un mismo sector para que el mapa final sea coherente y continuo.</li>
+                  <li>Arrastra las fotografías o selecciónalas desde tu equipo. Solo JPG/JPEG.</li>
+                  <li>Se necesitan al menos {MIN_IMAGES} imágenes válidas para procesar.</li>
+                  <li>Cuando todo esté aprobado, presiona el botón para generar el mapa unificado.</li>
+                </ol>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </div>
 
-        {/* ── ETAPA 1: Instrucciones — tarjeta propia, GuideStep en modo
-            compacto (prop ya existía, sin usar) para no dominar la página
-            antes de llegar a lo importante. ── */}
+        {/* ── ETAPA 1: stepper de "Revisión técnica" — antes una lista
+            vertical angosta al lado del mapa (ver ETAPA 3 más abajo), ahora
+            arriba de todo como progreso horizontal: mismos 5 estados
+            (formatState/countState/overlapState/joinState/detectState),
+            solo en otro formato. El estado del proceso (fase + barra) y el
+            detalle de pares en conflicto de solapamiento, cuando existen,
+            se muestran justo debajo — antes vivían en la misma columna. ── */}
         <section className="rounded-xl border border-border bg-card p-5 animate-in fade-in slide-in-from-top-2 duration-500 fill-mode-both">
-          <PanelHeader icon={<Info className="h-3.5 w-3.5" />} title="Instrucciones" />
-          <ol className="mt-4 grid gap-3 sm:grid-cols-2 md:grid-cols-4">
-            <GuideStep compact number="1" title="Selecciona la zona" text="Usa imágenes tomadas en un mismo sector para que el mapa final sea coherente y continuo." />
-            <GuideStep compact number="2" title="Carga archivos JPG" text="Arrastra las fotografías o selecciónalas desde tu equipo. Solo se aceptan archivos JPG o JPEG." />
-            <GuideStep compact number="3" title="Verifica el requisito" text={`Se necesitan al menos ${MIN_IMAGES} imágenes JPG válidas para procesar.`} />
-            <GuideStep compact number="4" title="Genera el mapa" text="Cuando todo esté aprobado, presiona el botón para obtener el mapa unificado." />
-          </ol>
+          <Stepper
+            steps={[
+              { label: "Formato JPG", state: formatState },
+              { label: "Cantidad mínima", state: countState },
+              { label: "Solapamiento", state: overlapState },
+              { label: "Generación de mapa", state: joinState },
+              { label: "Detección", state: detectState },
+            ]}
+          />
+
+          {(processing || phase === "error" || uploadProgress !== null) && (
+            <div className="mt-5 space-y-1.5 border-t border-border/60 pt-4">
+              <div className="flex items-center gap-2">
+                <Clock className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                <p className="text-xs text-foreground font-medium">{getPhaseLabel(phase, backendStage, cancelling)}</p>
+              </div>
+              <Progress value={progress} className="h-1" />
+              <p className="text-[10px] text-muted-foreground">{progress}% completado</p>
+              {uploadProgress !== null && (
+                <div className="mt-1.5 space-y-1">
+                  <p className="text-[10px] font-semibold text-primary">Subiendo imágenes al servidor...</p>
+                  <Progress value={uploadProgress} className="h-1" />
+                  <p className="text-[10px] text-muted-foreground">{uploadProgress}% subido</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {overlapDetail.length > 0 && (
+            <div className="mt-4 rounded-lg border border-destructive/40 bg-destructive/10 p-3 space-y-2">
+              <p className="text-[10px] font-semibold text-destructive">Pares en conflicto ({overlapDetail.length})</p>
+              <ul className="space-y-1.5 max-h-[140px] overflow-y-auto pr-1">
+                {overlapDetail.map((pair, i) => (
+                  <li key={i} className="rounded border border-destructive/20 bg-background/40 px-2 py-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="mono text-[10px] font-semibold text-destructive">{pair.solape}%</span>
+                      <span className="mono text-[9px] text-muted-foreground">{pair.distancia_m} m</span>
+                    </div>
+                    <p className="mono text-[9px] text-muted-foreground truncate mt-0.5" title={pair.imagen_1}>{pair.imagen_1}</p>
+                    <p className="mono text-[9px] text-muted-foreground truncate" title={pair.imagen_2}>{pair.imagen_2}</p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </section>
 
         {/* ── ETAPA 2: Carga | Imágenes + botón CTA — una sola tarjeta, el
@@ -1185,93 +1250,13 @@ function Page() {
         </div>
         </section>
 
-        {/* ── ETAPA 3: Revisión técnica | Mapa unificado ── */}
+        {/* ── ETAPA 3: Mapa unificado — antes compartía esta tarjeta con
+            "Revisión técnica" (ahora el stepper de arriba), así que pasa a
+            ocupar el ancho completo. ── */}
         <section className="rounded-xl border border-border bg-card p-5 animate-in fade-in slide-in-from-top-2 duration-500 delay-200 fill-mode-both">
-        <div className="grid gap-6 md:grid-cols-[1fr_1.6fr] md:divide-x md:divide-border/25">
-
-          {/* Revisión técnica */}
-          <section className="flex flex-col md:pr-6">
-            <div className="flex-shrink-0 pb-4">
-              <PanelHeader icon={<ListChecks className="h-3.5 w-3.5" />} title="Revisión técnica" />
-            </div>
-
-            {/* Contenido scrollable — no desplaza el bloque del mapa */}
-            <div className="flex-1 overflow-y-auto space-y-4 min-h-0">
-
-              <div className="divide-y divide-border/60 rounded-lg border border-border/40 bg-background/20 overflow-hidden">
-                <CheckRow label="Formato JPG" state={formatState}
-                  hint={formatState === "error" ? `${invalidCount} archivo(s) rechazado(s): solo se aceptan imágenes JPG o JPEG`
-                    : formatState === "ok" ? "Todos los archivos son JPG y están listos para procesar"
-                    : "Sin archivos cargados aún"} />
-                <CheckRow label="Cantidad mínima" state={countState}
-                  hint={countState === "ok" ? `${validCount} imágenes JPG cargadas (mínimo requerido: ${MIN_IMAGES})`
-                    : countState === "warn" ? `Faltan ${MIN_IMAGES - validCount} imagen(es) para alcanzar el mínimo de ${MIN_IMAGES}`
-                    : `Se requieren al menos ${MIN_IMAGES} imágenes JPG válidas`} />
-                <CheckRow label="Solapamiento (~60%)" state={overlapState}
-                  hint={overlapState === "running" ? "Verificando solapamiento entre imágenes..."
-                    : overlapState === "ok" ? "Solapamiento entre imágenes aprobado"
-                    : overlapState === "error" ? (errorMsg ?? "Solapamiento insuficiente en uno o más pares")
-                    : "Pendiente: se verifica al iniciar la generación"} />
-                <CheckRow label="Generación de mapa" state={joinState}
-                  hint={joinState === "running" ? "Unificando imágenes..."
-                    : joinState === "ok" ? "Mapa unificado generado correctamente"
-                    : joinState === "error" ? "La unificación de imágenes falló"
-                    : "Pendiente: requiere solapamiento aprobado"} />
-                <CheckRow label="Detección de basura" state={detectState}
-                  hint={detectState === "running" ? "Detectando basura..."
-                    : detectState === "ok" ? "Detección completada"
-                    : detectState === "error" ? "La detección de basura falló"
-                    : "Pendiente: requiere mapa unificado"} />
-              </div>
-
-              {overlapDetail.length > 0 && (
-                <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 space-y-2">
-                  <p className="text-[10px] font-semibold text-destructive">Pares en conflicto ({overlapDetail.length})</p>
-                  <ul className="space-y-1.5 max-h-[140px] overflow-y-auto pr-1">
-                    {overlapDetail.map((pair, i) => (
-                      <li key={i} className="rounded border border-destructive/20 bg-background/40 px-2 py-1.5">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="mono text-[10px] font-semibold text-destructive">{pair.solape}%</span>
-                          <span className="mono text-[9px] text-muted-foreground">{pair.distancia_m} m</span>
-                        </div>
-                        <p className="mono text-[9px] text-muted-foreground truncate mt-0.5" title={pair.imagen_1}>{pair.imagen_1}</p>
-                        <p className="mono text-[9px] text-muted-foreground truncate" title={pair.imagen_2}>{pair.imagen_2}</p>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* Estado del proceso */}
-              <div className="space-y-1.5">
-                <p className="text-xs font-semibold text-muted-foreground">Estado del proceso</p>
-                <div className="flex items-center gap-2">
-                  <Clock className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
-                  <p className="text-xs text-foreground font-medium">{getPhaseLabel(phase, backendStage, cancelling)}</p>
-                </div>
-                <Progress value={progress} className="h-1" />
-                <p className="text-[10px] text-muted-foreground">{progress}% completado</p>
-                {uploadProgress !== null && (
-                  <div className="mt-1.5 space-y-1">
-                    <p className="text-[10px] font-semibold text-primary">Subiendo imágenes al servidor...</p>
-                    <Progress value={uploadProgress} className="h-1" />
-                    <p className="text-[10px] text-muted-foreground">{uploadProgress}% subido</p>
-                  </div>
-                )}
-              </div>
-
-              {/* Resumen de carga */}
-              <div className="grid grid-cols-2 gap-2">
-                <InfoTile icon={<ImageIcon className="h-3.5 w-3.5" />} label="Total imágenes" value={String(items.length)} />
-                <InfoTile icon={<FileCheck className="h-3.5 w-3.5" />} label="JPG cargadas" value={String(validCount)} tone={validCount >= MIN_IMAGES ? "ok" : undefined} />
-                <InfoTile icon={<XCircle className="h-3.5 w-3.5" />} label="Con error" value={String(invalidCount)} tone={invalidCount > 0 ? "error" : undefined} />
-              </div>
-
-            </div>
-          </section>
 
           {/* Mapa unificado */}
-          <section className="flex flex-col overflow-hidden md:pl-6">
+          <section className="flex flex-col overflow-hidden">
             <div className="flex items-center justify-between border-b border-border/25 pb-3">
               <div className="flex items-center gap-2.5 border-l-2 border-primary/50 pl-3">
                 <Layers className="h-4 w-4 text-primary/75" />
@@ -1388,7 +1373,6 @@ function Page() {
               </div>
             )}
           </section>
-        </div>
         </section>
 
       </main>
@@ -1452,20 +1436,6 @@ function PanelHeader({ icon, title, children }: { icon: React.ReactNode; title: 
   );
 }
 
-/** Tile de metrica para el resumen de carga */
-function InfoTile({ icon, label, value, tone }: { icon: React.ReactNode; label: string; value: string; tone?: "ok" | "warn" | "error"; }) {
-  const color = tone === "ok" ? "text-success" : tone === "warn" ? "text-warning" : tone === "error" ? "text-destructive" : "text-foreground";
-  return (
-    <div className="flex items-center gap-3 rounded-lg bg-background/60 px-3 py-2.5">
-      <span className="text-primary/60 flex-shrink-0 [&_svg]:h-4 [&_svg]:w-4">{icon}</span>
-      <div className="min-w-0">
-        <p className="text-[10px] text-muted-foreground leading-none mb-1">{label}</p>
-        <p className={`text-sm font-bold tabular-nums leading-none ${color}`}>{value}</p>
-      </div>
-    </div>
-  );
-}
-
 /** Celda de metadatos en la barra inferior del mapa unificado */
 function MetaCell({ label, value, tone }: { label: string; value: string; tone?: "ok" | "error"; }) {
   const color = tone === "ok" ? "text-success" : tone === "error" ? "text-destructive" : "text-foreground/80";
@@ -1477,49 +1447,66 @@ function MetaCell({ label, value, tone }: { label: string; value: string; tone?:
   );
 }
 
-/** Paso del panel de instrucciones — número fantasma como fondo editorial */
-function GuideStep({ number, title, text, compact }: { number: string; title: string; text: string; compact?: boolean }) {
-  return (
-    <li className={`relative overflow-hidden rounded-lg bg-background/30 flex flex-col justify-end gap-1 ${
-      compact ? "px-3 pb-3 pt-5 min-h-[88px]" : "px-4 pb-4 pt-6 min-h-[108px]"
-    }`}>
-      <span
-        className={`absolute -top-3 -left-1 font-SpaceGrotesk font-bold leading-none select-none pointer-events-none ${
-          compact ? "text-5xl" : "text-7xl"
-        }`}
-        style={{ color: "var(--primary)", opacity: 0.1 }}
-      >
-        {number}
-      </span>
-      <span className={`relative font-semibold text-foreground ${compact ? "text-xs" : "text-sm"}`}>{title}</span>
-      <span className={`relative text-muted-foreground leading-snug ${compact ? "text-[11px]" : "text-xs"}`}>{text}</span>
-    </li>
-  );
-}
-
 /**
  * Fila de verificacion en el panel de revision tecnica.
  * Muestra estado con icono, etiqueta, hint descriptivo y badge de texto.
  */
-function CheckRow({ label, state, hint }: { label: string; state: TriState; hint?: string; }) {
-  const cfg = useMemo(() => {
-    switch (state) {
-      case "ok":      return { icon: <CheckCircle2 className="h-4 w-4 text-success" />,               text: "Aprobado",     color: "text-success",          bar: "bg-success",              bg: "bg-success/5" };
-      case "warn":    return { icon: <AlertTriangle className="h-4 w-4 text-warning" />,               text: "Insuficiente", color: "text-warning",           bar: "bg-warning",              bg: "bg-warning/5" };
-      case "error":   return { icon: <XCircle className="h-4 w-4 text-destructive" />,                 text: "Error",        color: "text-destructive",       bar: "bg-destructive",          bg: "bg-destructive/5" };
-      case "running": return { icon: <Loader2 className="h-4 w-4 animate-spin text-primary" />,        text: "Analizando",   color: "text-primary",           bar: "bg-primary",              bg: "bg-primary/5" };
-      default:        return { icon: <span className="inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground/50 mt-1.5" />, text: "Pendiente", color: "text-muted-foreground", bar: "bg-muted-foreground/30", bg: "" };
-    }
-  }, [state]);
+/**
+ * Stepper horizontal de "Revisión técnica" (reemplaza el antiguo CheckRow
+ * vertical) — mismos 5 estados/colores (TriState), en formato círculo
+ * numerado + línea conectora + label debajo, estilo 1 de la referencia.
+ */
+function Stepper({ steps }: { steps: { label: string; state: TriState }[] }) {
   return (
-    <div className={`check-row relative flex items-start gap-3 px-3 py-3 ${cfg.bg}`}>
-      <span className={`absolute left-0 top-0 h-full w-[3px] rounded-r-full ${cfg.bar} transition-all duration-300`} />
-      <div className="mt-0.5 flex-shrink-0">{cfg.icon}</div>
-      <div className="min-w-0 flex-1">
-        <p className="text-xs font-semibold leading-tight text-foreground">{label}</p>
-        {hint && <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">{hint}</p>}
-      </div>
-      <span className={`text-[10px] font-semibold ${cfg.color} flex-shrink-0`}>{cfg.text}</span>
+    <ol className="flex items-start">
+      {steps.map((step, i) => (
+        <li key={step.label} className="flex flex-1 flex-col items-center last:flex-none">
+          <div className="flex w-full items-center">
+            {i > 0 && (
+              <div className={`h-0.5 flex-1 rounded-full transition-colors duration-300 ${stepLineColor(steps[i - 1].state)}`} />
+            )}
+            <StepCircle number={i + 1} state={step.state} />
+            {i < steps.length - 1 && (
+              <div className={`h-0.5 flex-1 rounded-full transition-colors duration-300 ${stepLineColor(step.state)}`} />
+            )}
+          </div>
+          <span className={`mt-2 max-w-[6.5rem] text-center text-[11px] font-semibold leading-tight ${stepLabelColor(step.state)}`}>
+            {step.label}
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function stepLineColor(state: TriState) {
+  return state === "ok" ? "bg-success" : "bg-border";
+}
+
+function stepLabelColor(state: TriState) {
+  switch (state) {
+    case "ok":      return "text-success";
+    case "warn":    return "text-warning";
+    case "error":   return "text-destructive";
+    case "running": return "text-primary";
+    default:        return "text-muted-foreground";
+  }
+}
+
+function StepCircle({ number, state }: { number: number; state: TriState }) {
+  const cfg =
+    state === "ok"      ? "border-success bg-success text-success-foreground" :
+    state === "warn"    ? "border-warning bg-warning text-warning-foreground" :
+    state === "error"   ? "border-destructive bg-destructive text-destructive-foreground" :
+    state === "running" ? "border-primary bg-primary text-primary-foreground" :
+    "border-border bg-card text-muted-foreground";
+  return (
+    <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full border-2 text-xs font-bold transition-colors duration-300 ${cfg}`}>
+      {state === "ok" ? <CheckCircle2 className="h-4 w-4" />
+        : state === "error" ? <XCircle className="h-4 w-4" />
+        : state === "warn" ? <AlertTriangle className="h-4 w-4" />
+        : state === "running" ? <Loader2 className="h-4 w-4 animate-spin" />
+        : number}
     </div>
   );
 }

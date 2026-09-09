@@ -104,68 +104,61 @@
 
 
 /* =============================================================================
-   TEMA — NAVY/NEGRO OSCURO + AMARILLO (único tema de la aplicación)
-   Full dark, alineado con feria-page pero llevado a un SaaS oscuro: en vez
-   de navy como acento sobre blanco (donde --primary se usa como texto/ícono
-   en decenas de lugares — index.tsx, rutas.tsx, analysis.tsx, carga.tsx — y
-   terminaba compitiendo mal con blanco), el navy pasa a ser la SUPERFICIE
-   (fondo/cards/sidebar, en 3 tonos escalonados para dar profundidad — "el
-   juego" entre azul oscuro y negro-azul pedido) y el amarillo pasa a ser
-   --primary de verdad: sobre fondo oscuro un amarillo tiene contraste real
-   (al contrario que sobre blanco, donde se veía apagado/anaranjado) y es el
-   mismo rol que .btn-primary en feria-page (amarillo con texto navy).
-   --destructive queda igual (#ef4444 ya era un rojo funcional propio, no
-   heredado del logo viejo).
+   TEMA — SIDEBAR NAVY + BODY CLARO (único tema de la aplicación)
+   Vuelta a body claro tras probar full-dark: quedaba "sobrecargado de azul"
+   incluso con el body en gris neutro. El sidebar se queda navy (identidad
+   de marca, logo-dark-mode.svg) pero el body pasa a un gris suave — no
+   blanco puro, no oscuro — con las cards en blanco real para que se
+   despeguen del body sin necesitar modo oscuro.
+   --primary vuelve a ser navy (no amarillo): es el color que se usa como
+   texto/ícono en decenas de lugares del código (index.tsx, rutas.tsx,
+   analysis.tsx, carga.tsx) y navy es el que tiene contraste real sobre
+   claro — el amarillo queda como acento puntual (ítem activo del sidebar,
+   algún CTA), nunca como texto general sobre el body.
    ============================================================================= */
 :root {
   --radius: 0.625rem;
   --grid-color: oklch(0.6 0.04 90 / 0.04);
 
-  /* Body en gris neutro (sin tinte azul) — el navy queda reservado para el
-     sidebar (abajo), en vez de repetirse en toda la superficie de la app.
-     Mismo patrón que Linear/Vercel/GitHub dark: riel de color de marca +
-     lienzo de contenido neutro, para que el azul no compita contra sí
-     mismo por toda la pantalla. */
-  --background:         #121316;
-  --foreground:         #EEF1F8;
-  --card:               #1C1D21;
-  --card-foreground:    #EEF1F8;
-  --popover:            #1C1D21;
-  --popover-foreground: #EEF1F8;
-  --primary:            #FFD54A;
-  --primary-foreground: #0F2244;
-  --secondary:          #26272C;
-  --secondary-foreground: #EEF1F8;
-  --muted:              #202126;
-  --muted-foreground:   #9A9AA2;
-  --accent:             #2A2B31;
-  --accent-foreground:  #EEF1F8;
+  --background:         #EEF0F4;
+  --foreground:         #1B2431;
+  --card:               #FFFFFF;
+  --card-foreground:    #1B2431;
+  --popover:            #FFFFFF;
+  --popover-foreground: #1B2431;
+  --primary:            #0F2244;
+  --primary-foreground: #FFFFFF;
+  --secondary:          #E4E8F0;
+  --secondary-foreground: #1B2431;
+  --muted:              #E4E8F0;
+  --muted-foreground:   #647089;
+  --accent:             #E4E8F0;
+  --accent-foreground:  #1B2431;
   --destructive:        #ef4444;
   --destructive-foreground: #ffffff;
-  --border:             #303136;
-  --input:              #303136;
-  --ring:               #FFD54A;
+  --border:             #DDE1EA;
+  --input:              #DDE1EA;
+  --ring:               #0F2244;
   --warning:            #fbbf24;
   --warning-foreground: #151414;
   --success:            #34d399;
   --success-foreground: #151414;
-  /* chart-2 vuelve a ser navy: con el body neutro, el navy ya no está
-     "gastado" como fondo de todo, así que puede ser un color más entre
-     otros en vez de ser lo único que se ve. */
-  --chart-1: #FFD54A; --chart-2: #24487D; --chart-3: #34d399;
-  --chart-4: #5B7FBD; --chart-5: #9A9AA2;
-  /* Sidebar: el tono más oscuro/negro de los tres (más oscuro que
-     --background), separándolo del contenido — logo-dark-mode.svg
-     (wordmark blanco/gris) va acá, ver AppSidebar.tsx. Ítem activo en
-     amarillo, mismo criterio que el link de nav activo de feria-page. */
+  --chart-1: #0F2244; --chart-2: #FFC53D; --chart-3: #34d399;
+  --chart-4: #5B7FBD; --chart-5: #96A2BC;
+  /* Sidebar: navy, sin cambios — sigue siendo donde vive la identidad de
+     marca (logo-dark-mode.svg). Ítem activo en amarillo, mismo criterio
+     que el link de nav activo de feria-page. */
   --sidebar: #070B14; --sidebar-foreground: #EEF1F8;
-  --sidebar-primary: #FFD54A; --sidebar-primary-foreground: #0F2244;
+  --sidebar-primary: #FFC53D; --sidebar-primary-foreground: #0F2244;
   --sidebar-accent: #16223D; --sidebar-accent-foreground: #EEF1F8;
-  --sidebar-border: #FFFFFF; --sidebar-ring: #FFD54A;
+  --sidebar-border: #FFFFFF; --sidebar-ring: #FFC53D;
 
-  --scan-color:     rgba(255, 213, 74, 0.35);
-  --primary-glow:   rgba(255, 213, 74, 0.5);
-  --primary-glow-2: rgba(255, 213, 74, 0.25);
+  /* scan-color se queda en amarillo a propósito (efecto decorativo del
+     barrido de escaneo, no depende de --primary) — primary-glow* sí sigue
+     a --primary porque es el resplandor del botón principal al hacer hover. */
+  --scan-color:     rgba(255, 197, 61, 0.35);
+  --primary-glow:   rgba(15, 34, 68, 0.35);
+  --primary-glow-2: rgba(15, 34, 68, 0.18);
 }
 
 
