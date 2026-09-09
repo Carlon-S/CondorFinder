@@ -123,22 +123,25 @@
 
   --background:         #0A0F1C;
   --foreground:         #EEF1F8;
-  --card:               #121B30;
+  --card:               #141F38;
   --card-foreground:    #EEF1F8;
-  --popover:            #121B30;
+  --popover:            #141F38;
   --popover-foreground: #EEF1F8;
   --primary:            #FFD54A;
   --primary-foreground: #0F2244;
-  --secondary:          #1B2740;
+  --secondary:          #1E2C4C;
   --secondary-foreground: #EEF1F8;
   --muted:              #17213A;
   --muted-foreground:   #96A2BC;
-  --accent:             #1F3355;
+  --accent:             #24365C;
   --accent-foreground:  #EEF1F8;
   --destructive:        #ef4444;
   --destructive-foreground: #ffffff;
-  --border:             #253352;
-  --input:              #253352;
+  /* Antes #253352 — muy parecido a --card/--background, los bordes casi
+     no se veían (todo se sentía "una sola mancha" de navy). Más claro
+     para que separe de verdad las secciones. */
+  --border:             #2C3D63;
+  --input:              #2C3D63;
   --ring:               #FFD54A;
   --warning:            #fbbf24;
   --warning-foreground: #151414;

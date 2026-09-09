@@ -597,7 +597,13 @@ function MainPage() {
         </h2>
         <Sheet>
           <SheetTrigger asChild>
-            <Button variant="secondary" size="sm">
+            {/* variant="secondary" quedaba casi invisible acá (mismo tono
+                navy que el header) — fondo bg-card + borde para que se lea
+                como botón real, no como parte del fondo. */}
+            <Button
+              size="sm"
+              className="border border-border bg-card text-foreground shadow-sm hover:bg-accent hover:text-accent-foreground"
+            >
               <Truck className="mr-1.5 h-3.5 w-3.5" /> Recursos disponibles
             </Button>
           </SheetTrigger>
@@ -650,7 +656,7 @@ function MainPage() {
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-card animate-in fade-in slide-in-from-top-2 duration-500 delay-100 fill-mode-both">
           <div className="flex flex-wrap items-center gap-3 border-b border-border px-5 py-4">
             <div className="flex items-center gap-2.5 border-l-2 border-primary/50 pl-3">
-              <Layers className="h-3.5 w-3.5 text-primary/75" />
+              <Layers className="h-3.5 w-3.5 text-foreground/70" />
               <h3 className="text-sm font-semibold tracking-tight text-foreground">Listado de zonas</h3>
             </div>
 
@@ -924,7 +930,7 @@ function MainPage() {
 function Kpi({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
     <div className="flex flex-1 items-center gap-3 px-5 py-4">
-      <span className="text-primary/60 flex-shrink-0">{icon}</span>
+      <span className="text-foreground/70 flex-shrink-0">{icon}</span>
       <div className="min-w-0">
         <p className="text-[10px] text-muted-foreground leading-none mb-1.5">{label}</p>
         <p className="mono text-xl font-bold tabular-nums leading-none md:text-2xl">{value}</p>

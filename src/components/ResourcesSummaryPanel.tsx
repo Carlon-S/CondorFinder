@@ -77,7 +77,7 @@ export function ResourcesSummaryPanel({ points, className, loading }: ResourcesS
   return (
     <div className={className}>
       <div className="flex items-center gap-2.5 border-l-2 border-primary/50 pl-3">
-        <Truck className="h-3.5 w-3.5 text-primary/75" />
+        <Truck className="h-3.5 w-3.5 text-foreground/70" />
         <h3 className="text-sm font-semibold tracking-tight text-foreground">Recursos disponibles</h3>
       </div>
 
@@ -100,7 +100,7 @@ export function ResourcesSummaryPanel({ points, className, loading }: ResourcesS
           <AccordionItem key={key} value={key} className="border-border/15">
             <AccordionTrigger className="py-3.5 hover:no-underline">
               <span className="flex flex-1 items-center gap-3">
-                <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md bg-background/50 text-primary/50">
+                <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md bg-background/50 text-foreground/60">
                   <Icon className="h-4 w-4" />
                 </span>
                 <span className="flex-1 text-sm font-medium text-foreground/70">

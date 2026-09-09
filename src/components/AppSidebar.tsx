@@ -74,7 +74,7 @@ export function AppSidebar() {
             collapsed ? "max-w-0 opacity-0" : "max-w-[160px] opacity-100"
           }`}
         >
-          <img src={logo} alt="CondorFinder" className="h-8 w-auto" />
+          <img src={logo} alt="CondorFinder" className="h-11 w-auto" />
         </Link>
         <button
           type="button"
