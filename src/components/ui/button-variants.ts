@@ -9,9 +9,11 @@ export const buttonVariants = cva(
   {
     variants: {
       variant: {
-        // Primary: hover lift con spring y glow de color del tema
+        // Default: amarillo (--cta), no --primary — --primary se usa como
+        // color de texto/ícono en el resto de la app y necesita navy para
+        // contraste; el CTA es un acento aparte, con su propio glow.
         default:
-          "bg-primary text-primary-foreground shadow hover:bg-primary/90 hover:-translate-y-0.5 hover:shadow-[0_6px_20px_-4px_var(--primary-glow)]",
+          "bg-cta text-cta-foreground shadow hover:bg-cta/90 hover:-translate-y-0.5 hover:shadow-[0_6px_20px_-4px_var(--primary-glow)]",
         destructive:
           "bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90 hover:-translate-y-0.5 hover:shadow-[0_4px_16px_-4px_rgba(0,0,0,0.3)]",
         outline:

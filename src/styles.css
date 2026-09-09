@@ -47,6 +47,8 @@
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-cta: var(--cta);
+  --color-cta-foreground: var(--cta-foreground);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
@@ -128,6 +130,14 @@
   --popover-foreground: #1B2431;
   --primary:            #0F2244;
   --primary-foreground: #FFFFFF;
+  /* --cta es un token aparte de --primary a propósito: --primary se usa
+     como color de texto/ícono en decenas de lugares (ver comentario del
+     bloque de arriba) y necesita navy para tener contraste sobre el body
+     claro; los botones, en cambio, deben ser amarillos — mismo acento que
+     el ítem activo del sidebar — sin arrastrar ese cambio a todo el texto
+     navy del resto de la app. */
+  --cta:                #FFC53D;
+  --cta-foreground:     #0F2244;
   --secondary:          #E4E8F0;
   --secondary-foreground: #1B2431;
   --muted:              #E4E8F0;
@@ -153,12 +163,12 @@
   --sidebar-accent: #16223D; --sidebar-accent-foreground: #EEF1F8;
   --sidebar-border: #FFFFFF; --sidebar-ring: #FFC53D;
 
-  /* scan-color se queda en amarillo a propósito (efecto decorativo del
-     barrido de escaneo, no depende de --primary) — primary-glow* sí sigue
-     a --primary porque es el resplandor del botón principal al hacer hover. */
+  /* scan-color y primary-glow* comparten el mismo amarillo del CTA a
+     propósito (efecto decorativo del barrido de escaneo + resplandor de
+     hover del botón principal, que ahora es --cta y no --primary). */
   --scan-color:     rgba(255, 197, 61, 0.35);
-  --primary-glow:   rgba(15, 34, 68, 0.35);
-  --primary-glow-2: rgba(15, 34, 68, 0.18);
+  --primary-glow:   rgba(255, 197, 61, 0.5);
+  --primary-glow-2: rgba(255, 197, 61, 0.25);
 }
 
 

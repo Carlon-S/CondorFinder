@@ -26,7 +26,6 @@ import {
   AlertTriangle,
   Map as MapIcon,
   Download,
-  RotateCcw,
   Trash2,
   Loader2,
   Layers,
@@ -987,40 +986,61 @@ function Page() {
             tooltip de "?" reemplaza la fila de 4 tarjetas de Instrucciones
             que vivía acá: mismo contenido, condensado, sin ocupar espacio
             permanente en la página. */}
-        <div className="flex items-center gap-2">
-          <h2 className="font-rubik text-3xl font-semibold tracking-normal text-foreground md:text-4xl">
-            Carga de imágenes
-          </h2>
-          <TooltipProvider delayDuration={150}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  aria-label="Cómo funciona esta vista"
-                  className="mt-1 flex h-6 w-6 flex-shrink-0 cursor-help items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-                >
-                  <Info className="h-4 w-4" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="right" className="max-w-xs text-left">
-                <ol className="list-decimal space-y-1 pl-4 text-xs">
-                  <li>Usa imágenes tomadas en un mismo sector para que el mapa final sea coherente y continuo.</li>
-                  <li>Arrastra las fotografías o selecciónalas desde tu equipo. Solo JPG/JPEG.</li>
-                  <li>Se necesitan al menos {MIN_IMAGES} imágenes válidas para procesar.</li>
-                  <li>Cuando todo esté aprobado, presiona el botón para generar el mapa unificado.</li>
-                </ol>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <h2 className="font-rubik text-3xl font-semibold tracking-normal text-foreground md:text-4xl">
+              Carga de imágenes
+            </h2>
+            <TooltipProvider delayDuration={150}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="Cómo funciona esta vista"
+                    className="mt-1 flex h-6 w-6 flex-shrink-0 cursor-help items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+                  >
+                    <Info className="h-4 w-4" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right" className="max-w-xs text-left">
+                  <ol className="list-decimal space-y-1 pl-4 text-xs">
+                    <li>Usa imágenes tomadas en un mismo sector para que el mapa final sea coherente y continuo.</li>
+                    <li>Arrastra las fotografías o selecciónalas desde tu equipo. Solo JPG/JPEG.</li>
+                    <li>Se necesitan al menos {MIN_IMAGES} imágenes válidas para procesar.</li>
+                    <li>Cuando todo esté aprobado, presiona el botón para generar el mapa unificado.</li>
+                  </ol>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
+
+          {/* Vuelve a ETAPA 2 (carga/edición de imágenes) sin perder el set
+              actual — resetProcess() solo reinicia fase/resultados, no
+              borra items (eso es clearAll, un paso más agresivo que sigue
+              viviendo junto a "Imágenes adjuntas"). Solo tiene sentido
+              ofrecerla cuando el proceso ya terminó (éxito o error): en
+              pleno "processing" cambiar el set de imágenes no aplica. */}
+          {(phase === "done" || phase === "error") && (
+            <Button variant="outline" size="sm" onClick={resetProcess} className="flex-shrink-0 gap-1.5">
+              <Upload className="h-3.5 w-3.5" /> Cambiar imágenes
+            </Button>
+          )}
         </div>
 
-        {/* ── ETAPA 1: stepper de "Revisión técnica" — antes una lista
+        {/* ── Vista en dos etapas secuenciales: mientras no hay un proceso en
+            curso ni terminado (phase === "idle") se muestra solo la carga de
+            imágenes (ETAPA 2); en cuanto arranca la generación, esa etapa se
+            oculta y aparece el stepper + mapa unificado (ETAPAS 1 y 3) — así
+            el contenido principal de la vista va cambiando secuencialmente en
+            vez de mostrar las tres tarjetas siempre juntas. ── */}
+        {phase !== "idle" && (
+        /* ── ETAPA 1: stepper de "Revisión técnica" — antes una lista
             vertical angosta al lado del mapa (ver ETAPA 3 más abajo), ahora
             arriba de todo como progreso horizontal: mismos 5 estados
             (formatState/countState/overlapState/joinState/detectState),
             solo en otro formato. El estado del proceso (fase + barra) y el
             detalle de pares en conflicto de solapamiento, cuando existen,
-            se muestran justo debajo — antes vivían en la misma columna. ── */}
+            se muestran justo debajo — antes vivían en la misma columna. ── */
         <section className="rounded-xl border border-border bg-card p-5 animate-in fade-in slide-in-from-top-2 duration-500 fill-mode-both">
           <Stepper
             steps={[
@@ -1068,10 +1088,14 @@ function Page() {
             </div>
           )}
         </section>
+        )}
 
         {/* ── ETAPA 2: Carga | Imágenes + botón CTA — una sola tarjeta, el
             botón queda adentro en vez de flotar solo entre dos secciones
-            sin relación. ── */}
+            sin relación. Solo se muestra en la etapa 1 de la secuencia
+            (phase === "idle") — una vez que arranca la generación, esta
+            tarjeta se oculta y las ETAPAS 1/3 (arriba/abajo) toman su lugar. ── */}
+        {phase === "idle" && (
         <section className="rounded-xl border border-border bg-card p-5 animate-in fade-in slide-in-from-top-2 duration-500 delay-100 fill-mode-both">
         <div className="grid gap-6 md:grid-cols-[2fr_3fr] md:divide-x md:divide-border/25">
 
@@ -1207,9 +1231,13 @@ function Page() {
               </Button>
             ) : (
               <Button onClick={() => setShowModelDialog(true)} disabled={!canGenerate} className="w-full btn-cta" size="lg">
-                {phase === "done" || phase === "error"
-                  ? (<><RotateCcw className="mr-2 h-4 w-4" /> Reprocesar mapa</>)
-                  : (<><MapIcon className="mr-2 h-4 w-4" /> Generar mapa unificado</>)}
+                {/* Esta tarjeta (ETAPA 2) ahora solo se muestra con
+                    phase === "idle" (ver la vista en dos etapas más
+                    arriba), así que siempre es una generación nueva —
+                    "Reprocesar mapa" ya no aplica acá: para reprocesar el
+                    mismo set tras un error/éxito, "Cambiar imágenes" en el
+                    encabezado ya devuelve a esta etapa. */}
+                <MapIcon className="mr-2 h-4 w-4" /> Generar mapa unificado
               </Button>
             )}
 
@@ -1249,10 +1277,13 @@ function Page() {
           </div>
         </div>
         </section>
+        )}
 
         {/* ── ETAPA 3: Mapa unificado — antes compartía esta tarjeta con
             "Revisión técnica" (ahora el stepper de arriba), así que pasa a
-            ocupar el ancho completo. ── */}
+            ocupar el ancho completo. Igual que la ETAPA 1, solo aparece una
+            vez que arranca la generación (phase !== "idle"). ── */}
+        {phase !== "idle" && (
         <section className="rounded-xl border border-border bg-card p-5 animate-in fade-in slide-in-from-top-2 duration-500 delay-200 fill-mode-both">
 
           {/* Mapa unificado */}
@@ -1374,6 +1405,7 @@ function Page() {
             )}
           </section>
         </section>
+        )}
 
       </main>
 
@@ -1460,15 +1492,18 @@ function Stepper({ steps }: { steps: { label: string; state: TriState }[] }) {
   return (
     <ol className="flex items-start">
       {steps.map((step, i) => (
-        <li key={step.label} className="flex flex-1 flex-col items-center last:flex-none">
+        // Cada <li> es una columna de ancho igual (flex-1 siempre, sin
+        // last:flex-none) — así el círculo queda centrado de verdad en su
+        // columna en vez de pegado a un borde. La línea conectora se arma
+        // en dos mitades (izquierda/derecha del círculo) en vez de una sola
+        // pieza que solo existe en los ítems interiores: los extremos usan
+        // una mitad transparente (mismo layout, sin línea visible) para que
+        // las 5 columnas midan exactamente lo mismo.
+        <li key={step.label} className="flex flex-1 flex-col items-center">
           <div className="flex w-full items-center">
-            {i > 0 && (
-              <div className={`h-0.5 flex-1 rounded-full transition-colors duration-300 ${stepLineColor(steps[i - 1].state)}`} />
-            )}
+            <div className={`h-0.5 flex-1 rounded-full transition-colors duration-300 ${i === 0 ? "bg-transparent" : stepLineColor(steps[i - 1].state)}`} />
             <StepCircle number={i + 1} state={step.state} />
-            {i < steps.length - 1 && (
-              <div className={`h-0.5 flex-1 rounded-full transition-colors duration-300 ${stepLineColor(step.state)}`} />
-            )}
+            <div className={`h-0.5 flex-1 rounded-full transition-colors duration-300 ${i === steps.length - 1 ? "bg-transparent" : stepLineColor(step.state)}`} />
           </div>
           <span className={`mt-2 max-w-[6.5rem] text-center text-[11px] font-semibold leading-tight ${stepLabelColor(step.state)}`}>
             {step.label}
