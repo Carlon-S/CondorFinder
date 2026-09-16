@@ -633,11 +633,13 @@ function RutasPage() {
   }, [routeOutboundPaths, routeReturnPaths]);
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
+    // topo-bg: curvas de nivel de feria-page (ver styles.css).
+    <div className="topo-bg flex h-screen flex-col overflow-hidden bg-background text-foreground">
       <main className="grid min-h-0 flex-1 grid-cols-[clamp(240px,22vw,360px)_1fr]">
         <aside className="overflow-y-auto border-r border-border/35 p-5">
           <div className="flex flex-col gap-4">
             <div className="animate-in fade-in slide-in-from-left-2 duration-300">
+              <p className="eyebrow">Recolección</p>
               <h1 className="font-rubik text-3xl font-semibold tracking-normal text-foreground md:text-4xl">
                 Generar ruta
               </h1>
@@ -968,7 +970,11 @@ function RutasPage() {
                   botón -- moverla afuera del botón, como último hijo de
                   este div, la deja arriba por simple orden de pintado, sin
                   depender de z-index contra un hermano de un ancestro. */}
-              <div className="group relative">
+              {/* detect-frame va en este contenedor, no en el <img>: así las
+                  esquinas quedan en el marco del visor y no se recortan con el
+                  rounded-md de la imagen. */}
+              <div className="group relative detect-frame">
+                <span className="detect-corners" aria-hidden="true" />
                 {zoomImgError ? (
                   // El PNG no cargó (404) — probablemente se eliminó desde
                   // otra pestaña/sesión mientras esta zona seguía en

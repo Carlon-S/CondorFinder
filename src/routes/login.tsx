@@ -28,7 +28,9 @@ import { Eye, EyeOff, Loader2, LogIn } from "@/components/icons/Icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { login } from "@/lib/auth";
-import logo from "@/assets/Logo/logo-light-mode.svg";
+// Versión para fondo oscuro: esta pantalla es la única de la app con el tema
+// oscuro de feria-page (ver .login-dark en styles.css).
+import logo from "@/assets/Logo/logo-dark-mode.svg";
 
 export const Route = createFileRoute("/login")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -76,13 +78,19 @@ function LoginPage() {
   };
 
   // Mismo bg de foco en los dos campos — se define una vez para no repetir
-  // la clase. "Más oscuro al escribir": el input parte transparente sobre
-  // la tarjeta blanca y se tiñe apenas se enfoca, no solo con el anillo.
+  // la clase. El input parte transparente sobre el fondo de la tarjeta y se
+  // tiñe apenas se enfoca, no solo con el anillo. Sigue funcionando con la
+  // tarjeta en oscuro: --muted también se redefine dentro de .login-dark.
   const fieldClassName = "h-11 bg-transparent transition-colors focus:bg-muted/50 focus-visible:bg-muted/50";
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <div className="w-full max-w-md rounded-2xl border border-border bg-card p-10 shadow-xl">
+    // login-dark redefine los tokens del tema solo para este subárbol, así que
+    // la tarjeta, los campos, el botón y el mensaje de error toman el oscuro
+    // de feria-page sin tocar ningún componente de ui/ (todos leen var(--card),
+    // var(--border), etc.). topo-bg agrega las curvas de nivel del sitio.
+    <div className="login-dark topo-bg flex min-h-screen items-center justify-center px-4">
+      <div className="detect-frame w-full max-w-md rounded-2xl border border-border bg-card p-10 shadow-xl">
+        <span className="detect-corners" aria-hidden="true" />
         <img
           src={logo}
           alt="CondorFinder"

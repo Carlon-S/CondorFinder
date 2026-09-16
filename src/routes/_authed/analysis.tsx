@@ -851,7 +851,8 @@ function AnalysisPage() {
   }
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden bg-background text-foreground">
+    // topo-bg: curvas de nivel de feria-page (ver styles.css).
+    <div className="topo-bg flex flex-col h-screen overflow-hidden bg-background text-foreground">
       <main className="grid flex-1 grid-cols-[clamp(240px,22vw,360px)_1fr] min-h-0">
 
         {/* ── panel lateral ── */}
@@ -865,6 +866,7 @@ function AnalysisPage() {
                 de imágenes": sin botón de volver (la navegación ya vive en
                 el sidebar persistente). */}
             <div>
+              <p className="eyebrow">Paso 2 de 2</p>
               <h1 className="font-rubik text-3xl font-semibold tracking-normal text-foreground md:text-4xl">
                 Análisis
               </h1>
@@ -1142,7 +1144,13 @@ function AnalysisPage() {
         </aside>
 
         {/* ── visor de mapa ── */}
-        <section className="relative min-w-0 overflow-hidden bg-background animate-in fade-in duration-500">
+        {/* Las esquinas decorativas van acá, en el marco del visor, y NO sobre
+            el <img>: la imagen vive dentro de un contenedor con transform de
+            zoom/paneo, así que colgadas ahí escalarían con la rueda. En el
+            visor quedan fijas, a 10px del borde, lejos de donde caen los
+            rectángulos que dibuja el modelo dentro de la imagen. */}
+        <section className="detect-frame relative min-w-0 overflow-hidden bg-background animate-in fade-in duration-500">
+          <span className="detect-corners" aria-hidden="true" />
           {usingGeneratedMap ? (
             <>
               <div className="absolute left-4 top-4 z-20 rounded-md border border-border bg-card/90 px-3 py-2 text-xs shadow-xl backdrop-blur">
@@ -1315,11 +1323,15 @@ function AnalysisPage() {
 
           {duplicateExisting && (
             <div className="flex items-center gap-3 rounded-lg border border-border/60 bg-background/40 p-3">
-              <img
-                src={duplicateExisting.thumbnailUrl ?? duplicateExisting.mapUrl}
-                alt={duplicateExisting.name}
-                className="h-16 w-16 flex-shrink-0 rounded object-cover"
-              />
+              {/* Misma miniatura enmarcada que en la tabla de zonas. */}
+              <div className="detect-frame detect-frame-sm h-16 w-16 flex-shrink-0 overflow-hidden rounded">
+                <span className="detect-corners" aria-hidden="true" />
+                <img
+                  src={duplicateExisting.thumbnailUrl ?? duplicateExisting.mapUrl}
+                  alt={duplicateExisting.name}
+                  className="h-full w-full object-cover"
+                />
+              </div>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">{duplicateExisting.name}</p>
                 <p className="text-[10px] text-muted-foreground mb-1.5">

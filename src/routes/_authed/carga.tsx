@@ -991,7 +991,8 @@ function Page() {
   // RENDER
   // ---------------------------------------------------------------------------
   return (
-    <div className="flex min-h-screen flex-col bg-background text-foreground">
+    // topo-bg: curvas de nivel de feria-page (ver styles.css).
+    <div className="topo-bg flex min-h-screen flex-col bg-background text-foreground">
       <main className="flex w-full min-h-0 flex-1 flex-col gap-5 px-4 py-4 sm:px-6 sm:py-6">
 
         {/* Título de página — sin botón de volver, la navegación ya vive en
@@ -999,11 +1000,13 @@ function Page() {
             tooltip de "?" reemplaza la fila de 4 tarjetas de Instrucciones
             que vivía acá: mismo contenido, condensado, sin ocupar espacio
             permanente en la página. */}
-        <div className="flex items-center gap-2">
-          <h2 className="font-rubik text-3xl font-semibold tracking-normal text-foreground md:text-4xl">
-            Carga de imágenes
-          </h2>
-          <TooltipProvider delayDuration={150}>
+        <div>
+          <p className="eyebrow">Paso 1 de 2</p>
+          <div className="flex items-center gap-2">
+            <h2 className="font-rubik text-3xl font-semibold tracking-normal text-foreground md:text-4xl">
+              Carga de imágenes
+            </h2>
+            <TooltipProvider delayDuration={150}>
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -1024,6 +1027,7 @@ function Page() {
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
+          </div>
         </div>
 
         {/* Nav general de la página: 2 slices navegables en cualquier

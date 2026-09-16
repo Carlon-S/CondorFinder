@@ -5,13 +5,18 @@
 
 /* =============================================================================
    FUENTES
-   - Shrikhand:     logotipo
-   - Space Grotesk: títulos de página y display
-   - Rubik:         título de la Vista Principal ("Zonas monitoreadas")
-   - Sora:          cuerpo — humanista geométrica, menos corporativa que Montserrat
-   - JetBrains Mono: etiquetas técnicas y datos
+   - Rubik:          títulos de página
+   - Sora:           cuerpo, humanista geométrica, menos corporativa que Montserrat
+   - JetBrains Mono: etiquetas técnicas y datos (clase .mono)
+
+   Las tres son exactamente las de feria-page, para que el sitio público y la
+   aplicación se lean del mismo producto.
+
+   Ya no se piden Shrikhand ni Space Grotesk: estaban en el @import y en los
+   tokens del tema, pero ninguna aparecía en un solo archivo del proyecto, así
+   que eran dos familias descargadas para nada en cada carga.
    ============================================================================= */
-@import url("https://fonts.googleapis.com/css2?family=Shrikhand&family=Space+Grotesk:wght@400;500;600;700&family=Rubik:wght@500;600;700;800&family=Sora:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Rubik:wght@500;600;700;800&family=Sora:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap");
 
 
 /* =============================================================================
@@ -80,8 +85,6 @@
   --color-success-foreground: var(--success-foreground);
   --color-info: var(--info);
 
-  --font-shrikhand:     "Shrikhand", cursive;
-  --font-SpaceGrotesk:  "Space Grotesk", sans-serif;
   --font-rubik:         "Rubik", sans-serif;
   --font-sora:          "Sora", sans-serif;
   --font-JetBrainsMono: "JetBrains Mono", monospace;
@@ -120,7 +123,6 @@
    ============================================================================= */
 :root {
   --radius: 0.625rem;
-  --grid-color: oklch(0.6 0.04 90 / 0.04);
 
   --background:         #EEF0F4;
   --foreground:         #1B2431;
@@ -138,6 +140,11 @@
      navy del resto de la app. */
   --cta:                #FFC53D;
   --cta-foreground:     #0F2244;
+  /* Amarillo oscurecido de feria-page. Se usa donde el amarillo de marca va
+     como TEXTO sobre oscuro (login): #FFC53D sobre #070B14 se lee bien, pero
+     sobre el cuerpo claro de la app da 1.38:1 y es ilegible, así que sobre
+     claro el acento nunca es texto, solo una barra o un borde. */
+  --yellow-dark:        #E6A800;
   --secondary:          #E4E8F0;
   --secondary-foreground: #1B2431;
   --muted:              #E4E8F0;
@@ -161,7 +168,11 @@
   --sidebar: #070B14; --sidebar-foreground: #EEF1F8;
   --sidebar-primary: #FFC53D; --sidebar-primary-foreground: #0F2244;
   --sidebar-accent: #16223D; --sidebar-accent-foreground: #EEF1F8;
-  --sidebar-border: #FFFFFF; --sidebar-ring: #FFC53D;
+  /* Blanco translúcido, no #FFFFFF: ui/sidebar.tsx lo usa a opacidad completa
+     (separador, borde del rail, borde de los submenús) y un blanco puro sobre
+     el navy casi negro del sidebar quedaba como una línea dura. Es el mismo
+     --border de feria-page. */
+  --sidebar-border: rgba(255, 255, 255, 0.09); --sidebar-ring: #FFC53D;
 
   /* scan-color y primary-glow* comparten el mismo amarillo del CTA a
      propósito (efecto decorativo del barrido de escaneo + resplandor de
@@ -183,6 +194,135 @@
     font-family: var(--font-sora), sans-serif;
   }
 }
+
+
+/* =============================================================================
+   MOTIVOS DE MARCA COMPARTIDOS CON feria-page
+   Los tres bloques que siguen están portados del sitio público para que la
+   aplicación se lea del mismo sistema. Son los mismos valores y la misma
+   estructura; donde hay diferencias están comentadas.
+   ============================================================================= */
+
+/* ---------------------------------------------------------------- 1. curvas de nivel */
+/* El SVG se repite en mosaico: el dibujo vive al centro del tile y los bordes
+   quedan vacíos, así no se ven costuras al repetir.
+   Trazo navy, no amarillo: el sitio usa amarillo porque su fondo es oscuro, y
+   sobre el cuerpo claro de la app esa variante desaparece. */
+.topo-bg { position: relative; isolation: isolate; }
+.topo-bg::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='620' height='620' viewBox='0 0 620 620' fill='none' stroke='%230F2244' stroke-width='1.1'%3E%3Cellipse cx='310' cy='300' rx='38' ry='27'/%3E%3Cellipse cx='308' cy='302' rx='74' ry='55'/%3E%3Cellipse cx='305' cy='305' rx='112' ry='84'/%3E%3Cellipse cx='302' cy='308' rx='152' ry='115'/%3E%3Cellipse cx='299' cy='311' rx='194' ry='148'/%3E%3Cellipse cx='296' cy='314' rx='238' ry='183'/%3E%3Cellipse cx='293' cy='317' rx='284' ry='220'/%3E%3C/svg%3E");
+  background-size: 620px 620px;
+  opacity: 0.055;
+}
+/* Sobre el fondo oscuro del login el trazo navy se pierde: va en amarillo.
+   Van los dos selectores porque en el login las clases .login-dark y .topo-bg
+   viven en el MISMO elemento (.login-dark.topo-bg), no anidadas. */
+.login-dark.topo-bg::before,
+.login-dark .topo-bg::before,
+.topo-bg.topo-bg-dark::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='620' height='620' viewBox='0 0 620 620' fill='none' stroke='%23FFC53D' stroke-width='1.1'%3E%3Cellipse cx='310' cy='300' rx='38' ry='27'/%3E%3Cellipse cx='308' cy='302' rx='74' ry='55'/%3E%3Cellipse cx='305' cy='305' rx='112' ry='84'/%3E%3Cellipse cx='302' cy='308' rx='152' ry='115'/%3E%3Cellipse cx='299' cy='311' rx='194' ry='148'/%3E%3Cellipse cx='296' cy='314' rx='238' ry='183'/%3E%3Cellipse cx='293' cy='317' rx='284' ry='220'/%3E%3C/svg%3E");
+  opacity: 0.07;
+}
+
+/* ---------------------------------------------------------------- 2. marco de detección */
+/* DECORATIVO. Cuatro esquinas en L (dos por pseudo-elemento) que citan la forma
+   de una caja de detección, en posición y tamaño fijos y sin ningún dato
+   detrás. Las detecciones REALES son otra cosa por completo: salen de bbox /
+   geo_polygon del modelo y se dibujan como capas SVG posicionadas según el
+   tamaño natural de la imagen (ver analysis.tsx y rutas.tsx). Los dos
+   mecanismos no se tocan: estas esquinas viven a 10px del borde del
+   contenedor, los rectángulos del modelo caen dentro de la imagen.
+   Van por DENTRO del elemento: colgadas hacia afuera se las come cualquier
+   contenedor con overflow:hidden. */
+.detect-frame { position: relative; }
+.detect-frame::before,
+.detect-frame::after {
+  content: "";
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  pointer-events: none;
+  border-color: var(--cta);
+  border-style: solid;
+  z-index: 2;
+}
+.detect-frame::before {
+  top: 10px; left: 10px;
+  border-width: 2px 0 0 2px;
+}
+.detect-frame::after {
+  bottom: 10px; right: 10px;
+  border-width: 0 2px 2px 0;
+}
+/* Las otras dos esquinas van en un hijo dedicado para no gastar los
+   pseudo-elementos del contenedor (que ya usa ::before/::after). */
+.detect-frame > .detect-corners { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+.detect-frame > .detect-corners::before,
+.detect-frame > .detect-corners::after {
+  content: "";
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  border-color: var(--cta);
+  border-style: solid;
+}
+.detect-frame > .detect-corners::before {
+  top: 10px; right: 10px;
+  border-width: 2px 2px 0 0;
+}
+.detect-frame > .detect-corners::after {
+  bottom: 10px; left: 10px;
+  border-width: 0 0 2px 2px;
+}
+/* En recuadros chicos (la miniatura de 96x64 de la tabla de zonas) las esquinas
+   de 26px se comen la imagen entera. Esta variante las achica y las pega más
+   al borde. */
+.detect-frame-sm::before,
+.detect-frame-sm::after,
+.detect-frame-sm > .detect-corners::before,
+.detect-frame-sm > .detect-corners::after {
+  width: 11px;
+  height: 11px;
+  border-width: 1.5px;
+}
+.detect-frame-sm::before        { top: 4px; left: 4px;     border-width: 1.5px 0 0 1.5px; }
+.detect-frame-sm::after         { bottom: 4px; right: 4px; border-width: 0 1.5px 1.5px 0; }
+.detect-frame-sm > .detect-corners::before { top: 4px; right: 4px;    border-width: 1.5px 1.5px 0 0; }
+.detect-frame-sm > .detect-corners::after  { bottom: 4px; left: 4px;  border-width: 0 0 1.5px 1.5px; }
+
+/* ---------------------------------------------------------------- 3. rótulo de sección */
+/* Equivalente de la .eyebrow de feria-page, pero NO en amarillo: sobre el
+   cuerpo claro de la app el amarillo de marca da 1.38:1 de contraste y el
+   oscurecido 1.85:1, muy por debajo del mínimo de 4.5:1 para texto chico. En
+   el sitio funciona porque su fondo es oscuro (9.34:1). Acá el texto va en
+   navy (13.81:1) y el acento de marca queda en la barra amarilla. */
+.eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-family: var(--font-JetBrainsMono), ui-monospace, monospace;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--primary);
+}
+.eyebrow::before {
+  content: "";
+  width: 18px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--cta);
+  flex: none;
+}
+/* Sobre oscuro sí puede ir el amarillo directo, como en el sitio. */
+.login-dark .eyebrow { color: var(--yellow-dark); }
 
 
 /* =============================================================================
@@ -532,16 +672,47 @@
 }
 
 /* =============================================================================
-   ACCESIBILIDAD: prefers-reduced-motion
-   Desactiva las animaciones decorativas/continuas (scan, pulse, sweeps) sin
-   tocar transiciones de estado puntuales (hover, colapsar/expandir).
+   LOGIN: tema oscuro acotado
+   El cuerpo de la aplicación se queda claro (ver el bloque del tema más
+   arriba: el oscuro completo ya se probó y se revirtió). El login es la
+   excepción: es la puerta de entrada desde el sitio público, que es oscuro, y
+   con esto no hay salto visual al pasar de uno al otro.
+
+   El mecanismo es redefinir los tokens SOLO para este subárbol. Todos los
+   componentes de ui/ leen var(--card), var(--border), var(--input), etc., así
+   que siguen el tema solos: no hay que editar ni un componente de shadcn ni
+   duplicar estilos. Los valores son los de feria-page.
    ============================================================================= */
-@media (prefers-reduced-motion: reduce) {
-  .scan-line::after,
-  .pulse-dot,
-  .btn-cta:not(:disabled):hover::after,
-  .upload-zone:hover .upload-icon,
-  .dropdown-enter {
-    animation: none;
-  }
+.login-dark {
+  --background:           #070B14;
+  --foreground:           #EDF1F9;
+  --card:                 #0E1626;
+  --card-foreground:      #EDF1F9;
+  --popover:              #0E1626;
+  --popover-foreground:   #EDF1F9;
+  --primary:              #EDF1F9;
+  --primary-foreground:   #0F2244;
+  --secondary:            #16223B;
+  --secondary-foreground: #EDF1F9;
+  --muted:                #16223B;
+  --muted-foreground:     #8E9CBA;
+  --accent:               #16223B;
+  --accent-foreground:    #EDF1F9;
+  --border:               rgba(255, 255, 255, 0.09);
+  --input:                rgba(255, 255, 255, 0.16);
+  --ring:                 #FFC53D;
+  --destructive:          #FF6B6B;
+
+  background-color: var(--background);
+  color: var(--foreground);
 }
+
+/* =============================================================================
+   ANIMACIONES SIEMPRE ACTIVAS
+   Acá vivía un bloque @media (prefers-reduced-motion: reduce) que apagaba las
+   animaciones decorativas (scan, pulse, barridos). Se quitó por decisión
+   explícita del usuario, para que la aplicación se comporte igual que
+   feria-page: las animaciones se reproducen aunque el sistema operativo tenga
+   los efectos desactivados. Es a propósito, no un olvido: no volver a
+   agregarlo sin que lo pidan.
+   ============================================================================= */

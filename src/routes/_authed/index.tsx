@@ -585,16 +585,22 @@ function MainPage() {
   }, [zones, stateFilter, nameQuery, sortBy, sortDir]);
 
   return (
-    <div className="flex min-h-screen flex-col bg-background text-foreground">
+    // topo-bg: curvas de nivel de feria-page, el mismo motivo de fondo del
+    // sitio público (ver styles.css).
+    <div className="topo-bg flex min-h-screen flex-col bg-background text-foreground">
       {/* Encabezado de página — "Recursos disponibles" (antes una columna
           fija de hasta 400px, ver git history) ahora vive en un panel
           deslizante (Sheet): sobre esta vista el contenido real es el
           listado de zonas, no un resumen de HDU6 que ya tiene su propia
           página completa en /recursos. */}
       <div className="flex items-center justify-between border-b border-border/25 px-6 py-5">
-        <h2 className="font-rubik text-3xl font-semibold tracking-normal text-foreground md:text-4xl">
-          Zonas monitoreadas
-        </h2>
+        <div>
+          {/* Rótulo sobre el título, equivalente de la .eyebrow del sitio. */}
+          <p className="eyebrow">Vista principal</p>
+          <h2 className="font-rubik text-3xl font-semibold tracking-normal text-foreground md:text-4xl">
+            Zonas monitoreadas
+          </h2>
+        </div>
         <Sheet>
           <SheetTrigger asChild>
             {/* variant="secondary" quedaba casi invisible acá (mismo tono
@@ -747,7 +753,10 @@ function MainPage() {
                     >
                       <TableCell>
                         {z.mapUrl ? (
-                          <div className="h-16 w-24 overflow-hidden rounded-md bg-muted">
+                          // detect-frame-sm: variante chica de las esquinas, la
+                          // de 26px se comería una miniatura de 96x64.
+                          <div className="detect-frame detect-frame-sm h-16 w-24 overflow-hidden rounded-md bg-muted">
+                            <span className="detect-corners" aria-hidden="true" />
                             <img
                               src={z.thumbnailUrl ?? z.mapUrl}
                               alt={`Mapa de ${z.name}`}

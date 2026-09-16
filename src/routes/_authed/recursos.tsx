@@ -389,11 +389,13 @@ function RecursosPage() {
     }));
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
+    // topo-bg: curvas de nivel de feria-page (ver styles.css).
+    <div className="topo-bg flex h-screen flex-col overflow-hidden bg-background text-foreground">
       <main className="grid min-h-0 flex-1 grid-cols-[clamp(240px,22vw,360px)_1fr]">
         <aside className="overflow-y-auto border-r border-border/35 p-5">
           <div className="flex flex-col gap-4">
             <div>
+              <p className="eyebrow">Planificación</p>
               <h1 className="font-rubik text-3xl font-semibold tracking-normal text-foreground md:text-4xl">
                 Recursos disponibles
               </h1>
