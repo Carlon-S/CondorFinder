@@ -348,6 +348,23 @@ function AnalysisPage() {
   // una posición levemente distinta. Ver backendModel/analyses.py.
   const [orthoBounds, setOrthoBounds] = useState<[number, number, number, number] | null>(null);
 
+  // ── zona, versión y sello del cálculo ──────────────────────────────────────
+  // Una zona agrupa las versiones (vuelos) de un mismo terreno, y cada versión
+  // agrupa sus análisis. Estos campos viajan con el análisis al guardarlo para
+  // que la evolución pueda ordenarlos en el tiempo y distinguir un cambio real
+  // del basural de un cambio en cómo se mide.
+  const [zoneId, setZoneId] = useState<string | null>(null);
+  /** Fecha en que se voló el terreno, del EXIF de las fotos. */
+  const [captureDate, setCaptureDate] = useState<string | null>(null);
+  /** true cuando ninguna foto traía fecha y se usó la de carga. */
+  const [captureDateEstimated, setCaptureDateEstimated] = useState(false);
+  const [algorithmVersion, setAlgorithmVersion] = useState<number | null>(null);
+  /** false cuando los modelos de elevación de este vuelo ya se liberaron
+   *  porque existe una captura más reciente de la zona. En ese caso el vuelo
+   *  se puede consultar pero no volver a medir. */
+  const [canAnalyze, setCanAnalyze] = useState(true);
+  const [cannotAnalyzeReason, setCannotAnalyzeReason] = useState<string | null>(null);
+
   // ── HDU4 / AC1 — guardar análisis: pide nombre ─────────────────────────────
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [analysisName, setAnalysisName]     = useState("");
@@ -438,12 +455,20 @@ function AnalysisPage() {
       {
         mapUrl,
         thumbnailUrl,
-        detections: displayDetections,
+        // Cada detección viaja con si estaba activa o no. Antes se guardaban
+        // todas sin la marca, así que el total guardado (que solo cuenta las
+        // activas) no se podía reconciliar con el detalle, y al reabrir el
+        // análisis volvían todas activas y el total cambiaba.
+        detections: displayDetections.map(d => ({ ...d, enabled: enabledIds.has(d.id) })),
         summary: activeSummary,
         sourceTaskId: taskId ?? undefined,
         crs,
         orthoCenter,
         orthoBounds,
+        zoneId,
+        captureDate,
+        captureDateEstimated,
+        algorithmVersion,
       },
       overwriteId,
     );
@@ -606,12 +631,20 @@ function AnalysisPage() {
           setThumbnailUrl(record.thumbnailUrl ?? null);
           saveThumbnailUrl(record.thumbnailUrl ?? null);
 
-          const detections = (record.detections as DisplayDetection[]) ?? [];
+          const detections = (record.detections as (DisplayDetection & { enabled?: boolean })[]) ?? [];
           setDisplayDetections(detections);
-          setEnabledIds(new Set(detections.map(d => d.id)));
+          // Se restaura la selección tal como se guardó. Una detección sin la
+          // marca cuenta como activa: es como se comportaban los análisis
+          // anteriores a que la selección se persistiera, así que abrirlos
+          // sigue dando lo mismo que antes.
+          setEnabledIds(new Set(detections.filter(d => d.enabled !== false).map(d => d.id)));
           setCrs(record.crs);
           setOrthoCenter(record.orthoCenter ?? null);
           setOrthoBounds(record.orthoBounds ?? null);
+          setZoneId(record.zoneId ?? null);
+          setCaptureDate(record.captureDate ?? null);
+          setCaptureDateEstimated(record.captureDateEstimated ?? false);
+          setAlgorithmVersion(record.algorithmVersion ?? null);
           setStatus("done");
 
           setCurrentAnalysisId(record.id);
@@ -648,6 +681,17 @@ function AnalysisPage() {
               if (s?.result_json_url) {
                 saveDetectionJsonUrl(s.result_json_url);
                 setDetectionJsonUrl(s.result_json_url);
+              }
+              // Si los modelos de elevación de este vuelo ya se liberaron
+              // porque hay una captura más reciente, el vuelo se puede
+              // consultar pero no volver a medir. Se resuelve acá, al abrir,
+              // para deshabilitar el botón con el motivo en vez de dejar que
+              // el usuario lo presione y reciba un error.
+              if (s && s.can_analyze === false) {
+                setCanAnalyze(false);
+                setCannotAnalyzeReason(
+                  "Existe una captura más reciente de esta zona, así que este vuelo solo se puede consultar.",
+                );
               }
             });
           } else {
@@ -748,6 +792,16 @@ function AnalysisPage() {
         setStatus("error");
         return;
       }
+      // El vuelo perdió sus modelos de elevación porque hay una captura más
+      // reciente de la zona. No es un error del sistema, es una regla: se
+      // deja el motivo a la vista y se deshabilita el botón.
+      if (startResult.status === "unavailable") {
+        setCanAnalyze(false);
+        setCannotAnalyzeReason(startResult.message ?? null);
+        setAnalysisMessage(startResult.message ?? null);
+        setStatus("error");
+        return;
+      }
 
       const response = await pollVolumeAnalysis(taskId, detectionJsonUrl, setProgress);
       if (response.status === "success") {
@@ -758,6 +812,19 @@ function AnalysisPage() {
         setCrs(response.crs || undefined);
         setOrthoCenter(response.orthoCenter ?? null);
         setOrthoBounds(response.orthoBounds ?? null);
+        // Datos de la captura y sello del cálculo: se leen del estado de la
+        // tarea recién analizada y viajan con el análisis al guardarlo.
+        const estado = await getTaskStatus(taskId);
+        if (estado?.capture_date) {
+          setCaptureDate(estado.capture_date);
+          setCaptureDateEstimated(Boolean(estado.capture_date_estimated));
+        }
+        if (estado?.algorithm_version != null) setAlgorithmVersion(estado.algorithm_version);
+        // Una medición nueva es un análisis nuevo, no una corrección del
+        // anterior: se suelta la identidad del guardado para que "Guardar"
+        // cree un registro con su propia fecha en vez de sobrescribir.
+        setCurrentAnalysisId(null);
+        clearCurrentAnalysisId();
         setStatus("done");
       } else if (response.status === "empty") {
         setAnalysisMessage(response.message);
@@ -942,7 +1009,7 @@ function AnalysisPage() {
             <div className="rounded-lg bg-background/40 p-3 animate-in fade-in slide-in-from-left-2 duration-500 fill-mode-both space-y-4">
               <Button
                 onClick={runAnalysis}
-                disabled={status === "running" || !usingGeneratedMap || status === "empty"}
+                disabled={status === "running" || !usingGeneratedMap || status === "empty" || !canAnalyze}
                 className="w-full"
               >
                 {status === "running" ? (
@@ -951,6 +1018,16 @@ function AnalysisPage() {
                   <><Search className="mr-2 h-4 w-4" /> Analizar volumen</>
                 )}
               </Button>
+
+              {/* El vuelo ya no se puede volver a medir porque sus modelos de
+                  elevación se liberaron al aparecer una captura más reciente.
+                  Se explica el motivo en vez de dejar un botón apagado sin
+                  razón aparente. */}
+              {!canAnalyze && cannotAnalyzeReason && (
+                <p className="rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-[0.69rem] leading-relaxed text-muted-foreground">
+                  {cannotAnalyzeReason}
+                </p>
+              )}
 
               {/* HDU4/AC1 — guardar análisis */}
               <Button

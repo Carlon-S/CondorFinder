@@ -8,10 +8,10 @@ Sistema web municipal para el monitoreo automatizado de basurales mediante imág
 
 El sistema está desplegado y funcionando en la nube, sin depender de `localhost`:
 
-- **Frontend**: [https://condorfinder.cl](https://condorfinder.cl) — Cloudflare Workers, desplegado automáticamente con cada `git push` a `main`.
-- **Backend**: `https://api.condorfinder.cl` — VM de Google Cloud (`southamerica-west1`, Santiago) con Docker Compose; el despliegue **no** es automático, requiere entrar por SSH y correr `git pull && docker compose up -d --build`.
+- **Frontend**: [https://condorfinder.cl](https://condorfinder.cl), Cloudflare Workers, desplegado automáticamente con cada `git push` a `main`.
+- **Backend**: `https://api.condorfinder.cl`, VM de Google Cloud (`southamerica-west1`, Santiago) con Docker Compose; el despliegue **no** es automático, requiere entrar por SSH y correr `git pull && docker compose up -d --build`.
 
-Todo lo que sigue en este documento (Requisitos, Instalación, Ejecución) describe cómo levantar el sistema **en local para desarrollo** — no es necesario para usar la aplicación ya desplegada. Cómo subir cambios a producción está en la sección [Despliegue a producción](#despliegue-a-producción) más abajo; detalles adicionales de la infraestructura están en `CLAUDE.md`.
+Todo lo que sigue en este documento (Requisitos, Instalación, Ejecución) describe cómo levantar el sistema **en local para desarrollo**, no es necesario para usar la aplicación ya desplegada. Cómo subir cambios a producción está en la sección [Despliegue a producción](#despliegue-a-producción) más abajo; detalles adicionales de la infraestructura están en `CLAUDE.md`.
 
 ---
 
@@ -26,7 +26,7 @@ Todo lo que sigue en este documento (Requisitos, Instalación, Ejecución) descr
 | Git | cualquiera | Windows + WSL |
 | MongoDB Atlas | cuenta gratuita (M0) | servicio externo, no requiere instalación local |
 
-> El frontend se levanta en **Windows**. El backend y Docker se ejecutan en **WSL (Ubuntu)**. El backend usa MongoDB Atlas para persistir usuarios, tareas del pipeline, puntos y análisis — crea un cluster gratuito en https://www.mongodb.com/cloud/atlas antes de continuar.
+> El frontend se levanta en **Windows**. El backend y Docker se ejecutan en **WSL (Ubuntu)**. El backend usa MongoDB Atlas para persistir usuarios, tareas del pipeline, puntos y análisis, crea un cluster gratuito en https://www.mongodb.com/cloud/atlas antes de continuar.
 
 ### Instalar Node.js y pnpm (Windows)
 
@@ -120,10 +120,10 @@ Edita `backendModel/.env` y completa:
 |---|---|
 | `MONGODB_URI` | Connection string del cluster de Atlas (Database → Connect → Drivers) |
 | `MONGODB_DB_NAME` | Nombre de la base dentro del cluster (se crea sola en el primer insert, ej. `condorfinder`) |
-| `JWT_SECRET` | Secreto para firmar la sesión — genera uno con `python -c "import secrets; print(secrets.token_hex(32))"` |
+| `JWT_SECRET` | Secreto para firmar la sesión, genera uno con `python -c "import secrets; print(secrets.token_hex(32))"` |
 | `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD` | Credenciales del usuario admin que el backend siembra automáticamente al arrancar (solo si no existe ya en Mongo) |
 
-> `backendModel/.env` está en `.gitignore` — nunca se sube al repositorio. Solo `.env.example` (con placeholders) se versiona.
+> `backendModel/.env` está en `.gitignore`, nunca se sube al repositorio. Solo `.env.example` (con placeholders) se versiona.
 
 ---
 
@@ -131,7 +131,7 @@ Edita `backendModel/.env` y completa:
 
 El sistema requiere **tres terminales corriendo simultáneamente**.
 
-### Terminal 1 — NodeODM (WSL)
+### Terminal 1: NodeODM (WSL)
 
 ```bash
 docker run -ti -p 3000:3000 opendronemap/nodeodm
@@ -144,7 +144,7 @@ info: Server has started on port 3000
 
 Mantén esta terminal abierta durante todo el uso del sistema.
 
-### Terminal 2 — Backend (WSL)
+### Terminal 2: Backend (WSL)
 
 Abre una nueva terminal WSL, navega a la raíz del proyecto y ejecuta:
 
@@ -153,14 +153,14 @@ source backendModel/joining/venv/bin/activate
 backendModel/joining/venv/bin/uvicorn backendModel.orquestador:app --port 8000
 ```
 
-> **Importante:** no uses `--reload`. El flag de recarga automática mata el hilo que corre el pipeline a mitad de proceso — el estado de la tarea sobrevive un reinicio (se persiste en MongoDB), pero un hilo interrumpido no se puede retomar solo.
+> **Importante:** no uses `--reload`. El flag de recarga automática mata el hilo que corre el pipeline a mitad de proceso, el estado de la tarea sobrevive un reinicio (se persiste en MongoDB), pero un hilo interrumpido no se puede retomar solo.
 
 Espera hasta ver:
 ```
 INFO: Application startup complete.
 ```
 
-### Terminal 3 — Frontend (Windows PowerShell)
+### Terminal 3: Frontend (Windows PowerShell)
 
 Desde la raíz del proyecto:
 
@@ -184,19 +184,19 @@ No siempre hace falta levantar las 3 terminales. Si solo quieres probar un cambi
    pnpm.cmd dev
    ```
 
-La app en `http://localhost:8080` va a hablar con el backend real (login, zonas guardadas, recursos — todo con datos reales de producción) sin necesitar NodeODM ni el backend local. **No sirve para probar cambios de backend que todavía no subiste a la VM** — para eso, el modo 100% local de arriba es el único que funciona, porque ahí sí estás corriendo tu propio código modificado.
+La app en `http://localhost:8080` va a hablar con el backend real (login, zonas guardadas, recursos, todo con datos reales de producción) sin necesitar NodeODM ni el backend local. **No sirve para probar cambios de backend que todavía no subiste a la VM**, para eso, el modo 100% local de arriba es el único que funciona, porque ahí sí estás corriendo tu propio código modificado.
 
-> Recuerda volver a comentar la línea de producción y descomentar la de `localhost` cuando quieras volver al modo 100% local — es fácil olvidarlo y quedar sin querer apuntando siempre a producción.
+> Recuerda volver a comentar la línea de producción y descomentar la de `localhost` cuando quieras volver al modo 100% local, es fácil olvidarlo y quedar sin querer apuntando siempre a producción.
 
 ---
 
 ## Despliegue a producción
 
-El sistema vive en `https://condorfinder.cl` (frontend) y `https://api.condorfinder.cl` (backend). **Frontend y backend se despliegan de formas completamente distintas** — no asumas que un `git push` alcanza para todo.
+El sistema vive en `https://condorfinder.cl` (frontend) y `https://api.condorfinder.cl` (backend). **Frontend y backend se despliegan de formas completamente distintas**, no asumas que un `git push` alcanza para todo.
 
-### Frontend — automático
+### Frontend: automático
 
-Cloudflare Workers está conectado directamente a este repositorio de GitHub. Cada `git push origin main` dispara un build y deploy automático — no hay que hacer nada más ahí:
+Cloudflare Workers está conectado directamente a este repositorio de GitHub. Cada `git push origin main` dispara un build y deploy automático, no hay que hacer nada más ahí:
 
 ```powershell
 git add <archivos-modificados>
@@ -204,13 +204,13 @@ git commit -m "..."
 git push origin main
 ```
 
-**Cuidado con el botón "Retry build"** en el dashboard de Cloudflare (Compute → `condorfinder` → Deployments): repite el build de un commit **específico que ya existía**, no trae el código más reciente del repo. Si un build falla y quieres reintentarlo, primero confirma en "Recent builds" que ese build corresponda al commit que esperas — si el push más reciente ya generó su propio build (aunque sea en paralelo), usar "Retry build" sobre uno viejo puede terminar sirviendo código desactualizado sin ningún error visible.
+**Cuidado con el botón "Retry build"** en el dashboard de Cloudflare (Compute → `condorfinder` → Deployments): repite el build de un commit **específico que ya existía**, no trae el código más reciente del repo. Si un build falla y quieres reintentarlo, primero confirma en "Recent builds" que ese build corresponda al commit que esperas, si el push más reciente ya generó su propio build (aunque sea en paralelo), usar "Retry build" sobre uno viejo puede terminar sirviendo código desactualizado sin ningún error visible.
 
-Para confirmar qué versión está realmente activa: **Deployments → Version History** — la fila de arriba (100% de tráfico) debe corresponder al commit más reciente que esperas.
+Para confirmar qué versión está realmente activa: **Deployments → Version History**, la fila de arriba (100% de tráfico) debe corresponder al commit más reciente que esperas.
 
 Las variables de entorno del build (`VITE_BACKEND_URL`, `VITE_CLIENT_BACKEND_URL`) se configuran en Cloudflare, **no** en este repo: **Settings → Builds → Variables and secrets**.
 
-### Backend — manual
+### Backend: manual
 
 El backend en la VM **no se actualiza solo** con un push. Hay que entrar y hacerlo a mano cada vez:
 
@@ -239,7 +239,7 @@ nano backendModel/.env
 
 #### Variables de entorno exclusivas de producción
 
-Ninguna de estas existe en tu `backendModel/.env` local — todas tienen un valor por defecto seguro para desarrollo cuando faltan, así que no rompen nada en local si nunca las agregas ahí:
+Ninguna de estas existe en tu `backendModel/.env` local, todas tienen un valor por defecto seguro para desarrollo cuando faltan, así que no rompen nada en local si nunca las agregas ahí:
 
 | Variable | Dónde vive | Para qué sirve |
 |---|---|---|
@@ -252,8 +252,8 @@ Ninguna de estas existe en tu `backendModel/.env` local — todas tienen un valo
 
 ### Checklist para un cambio que toca frontend y backend a la vez
 
-1. Verifica en local primero (ver "Ejecución" arriba — modo 100% local para cambios de backend).
-2. `git push origin main` — espera a que el build de Cloudflare termine solo (Deployments → Recent builds), sin usar "Retry build".
+1. Verifica en local primero (ver "Ejecución" arriba, modo 100% local para cambios de backend).
+2. `git push origin main`, espera a que el build de Cloudflare termine solo (Deployments → Recent builds), sin usar "Retry build".
 3. SSH a la VM → `git pull && docker compose up -d --build`.
 4. Prueba en `https://condorfinder.cl` con datos reales.
 
@@ -263,19 +263,19 @@ Ninguna de estas existe en tu `backendModel/.env` local — todas tienen un valo
 
 ### Inicio de sesión (`/login`)
 
-1. Abre http://localhost:8080 — sin sesión activa, redirige automáticamente a `/login`
+1. Abre http://localhost:8080, sin sesión activa, redirige automáticamente a `/login`
 2. Ingresa el usuario y contraseña sembrados en `backendModel/.env` (`SEED_ADMIN_USERNAME`/`SEED_ADMIN_PASSWORD`). La sesión se guarda en una cookie httpOnly y persiste aunque se reinicie el backend
 
 ### Vista Principal (`/`)
 
-Dashboard con las zonas guardadas, las tareas del pipeline en curso o pendientes de análisis (consultadas directo al backend, ya no dependen de que el mismo navegador las haya iniciado), y el panel **"Recursos disponibles"** con el resumen de tolvas/retroexcavadoras/camiones/puntos/personal. Las zonas reemplazadas por un análisis más reciente de la misma zona física (HDU7) no aparecen en los filtros normales ni se cuentan en los totales — quedan disponibles aparte bajo el filtro **"Historial"**, con un subtítulo indicando por cuál análisis fueron reemplazadas.
+Dashboard con las zonas guardadas, las tareas del pipeline en curso o pendientes de análisis (consultadas directo al backend, ya no dependen de que el mismo navegador las haya iniciado), y el panel **"Recursos disponibles"** con el resumen de tolvas/retroexcavadoras/camiones/puntos/personal. Las zonas reemplazadas por un análisis más reciente de la misma zona física (HDU7) no aparecen en los filtros normales ni se cuentan en los totales, quedan disponibles aparte bajo el filtro **"Historial"**, con un subtítulo indicando por cuál análisis fueron reemplazadas.
 
 ### Vista de Carga (`/carga`)
 
 1. Arrastra o selecciona las imágenes JPG tomadas con drone (mínimo 16)
-2. Las imágenes se suben automáticamente al backend mientras se generan sus thumbnails — el bloque de imágenes adjuntas muestra un spinner por imagen hasta que el thumbnail esté listo
+2. Las imágenes se suben automáticamente al backend mientras se generan sus thumbnails, el bloque de imágenes adjuntas muestra un spinner por imagen hasta que el thumbnail esté listo
 3. El sistema valida el formato y la cantidad antes de habilitar la generación
-4. Presiona **Generar mapa unificado** — el proceso pasa por cuatro fases secuenciales: verificación de solapamiento (~60%), unificación con ODM, detección con YOLOv8 y cálculo automático de volúmenes
+4. Presiona **Generar mapa unificado**, el proceso pasa por cuatro fases secuenciales: verificación de solapamiento (~60%), unificación con ODM, detección con YOLOv8 y cálculo automático de volúmenes
 5. Al terminar, el mapa aparece en el visor con los polígonos de detección superpuestos:
    - Si se detectó basura: el mapa es clicable y navega a la vista de análisis
    - Si no se detectó basura: el mapa igual se muestra con un aviso informativo
@@ -285,31 +285,31 @@ Dashboard con las zonas guardadas, las tareas del pipeline en curso o pendientes
 ### Vista de Análisis (`/analysis`)
 
 6. Accede desde el mapa generado o directamente desde la barra de navegación
-7. Las zonas detectadas aparecen en la lista — puedes activar o desactivar cada una antes de analizar
+7. Las zonas detectadas aparecen en la lista, puedes activar o desactivar cada una antes de analizar
 8. Presiona **Analizar volumen** para revelar los resultados ya calculados durante la generación
 9. Los polígonos se colorean con un degradé **verde → rojo** según su volumen relativo (más rojo = mayor volumen)
 10. Zonas solapadas se fusionan automáticamente como **"Varios tipos"** mostrando el desglose por cada clase contenida
 11. Si el mapa no contenía basura detectada, el botón de análisis queda deshabilitado y se muestra un aviso
 12. **Guardar análisis** le pide un nombre y lo agrega al listado de análisis disponibles del sistema (pide confirmación antes de sobrescribir si el nombre ya existe)
-13. **Fusión de duplicados (HDU7)**: si el análisis recién guardado (o uno reabierto desde el listado) se superpone más de un 50% en área con un análisis guardado anteriormente, aparece un aviso comparando el volumen de ambos — "Es la misma zona" vincula ambos registros y envía el anterior al historial de Vista Principal; "Son zonas distintas" cierra el aviso y mantiene ambos registros por separado
+13. **Fusión de duplicados (HDU7)**: si el análisis recién guardado (o uno reabierto desde el listado) se superpone más de un 50% en área con un análisis guardado anteriormente, aparece un aviso comparando el volumen de ambos, "Es la misma zona" vincula ambos registros y envía el anterior al historial de Vista Principal; "Son zonas distintas" cierra el aviso y mantiene ambos registros por separado
 
-### Vista de Recursos Disponibles (`/recursos`) — HDU6
+### Vista de Recursos Disponibles (`/recursos`): HDU6
 
-13. **Definir punto**: clickea un punto en el mapa (o escribe una dirección) para ubicar un punto que el sistema usará como origen o destino de vehículos y maquinaria — dirección y comuna se completan solas vía geocodificación (Nominatim/OpenStreetMap), o puedes escribirlas a mano y el punto se reubica en el mapa automáticamente
+13. **Definir punto**: clickea un punto en el mapa (o escribe una dirección) para ubicar un punto que el sistema usará como origen o destino de vehículos y maquinaria, dirección y comuna se completan solas vía geocodificación (Nominatim/OpenStreetMap), o puedes escribirlas a mano y el punto se reubica en el mapa automáticamente
 14. Configura cantidad y capacidad individual de tolvas y camiones (no un valor agregado), y cantidad de retroexcavadoras y personal disponible
 15. **Modificar puntos** lista todos los puntos guardados con opciones para editar o eliminar (con confirmación)
-16. Cada punto tiene un switch de **punto activo** — solo los puntos activos participan en la generación de ruta (HDU5)
+16. Cada punto tiene un switch de **punto activo**, solo los puntos activos participan en la generación de ruta (HDU5)
 
-### Vista de Generación de Ruta (`/rutas`) — HDU5
+### Vista de Generación de Ruta (`/rutas`): HDU5
 
-17. **Cargar archivo de análisis** abre un listado de análisis guardados (HDU4) para seleccionar uno o más — cada fila completa es clickable y muestra si el análisis ya está cargado o no es ubicable; los análisis reemplazados por uno más reciente de la misma zona (HDU7, ver Vista Principal) no aparecen en este listado
-18. Los análisis seleccionados se agregan al mapa como un círculo grande de color, ubicado en la posición geográfica real del ortomosaico (no depende de las detecciones puntuales, así dos análisis del mismo set de fotos caen siempre en el mismo lugar); un círculo **sólido** indica que ese análisis está cargado en la ruta actual, **hueco** que no lo está — click en un círculo ya cargado, o en su fila en la lista lateral "Análisis cargados", lo descarga
+17. **Cargar archivo de análisis** abre un listado de análisis guardados (HDU4) para seleccionar uno o más, cada fila completa es clickable y muestra si el análisis ya está cargado o no es ubicable; los análisis reemplazados por uno más reciente de la misma zona (HDU7, ver Vista Principal) no aparecen en este listado
+18. Los análisis seleccionados se agregan al mapa como un círculo grande de color, ubicado en la posición geográfica real del ortomosaico (no depende de las detecciones puntuales, así dos análisis del mismo set de fotos caen siempre en el mismo lugar); un círculo **sólido** indica que ese análisis está cargado en la ruta actual, **hueco** que no lo está, click en un círculo ya cargado, o en su fila en la lista lateral "Análisis cargados", lo descarga
 19. Pasar el mouse sobre un círculo muestra una miniatura del mapa real de esa zona con sus polígonos de detección superpuestos; hacer click abre una vista ampliada con el mapa completo, sus polígonos en precisión de píxel, y el resumen de volumen/peso/área
 20. **Generar ruta** queda deshabilitado sin ningún análisis cargado
-21. Al presionar, se pide confirmar los puntos activos, las horas disponibles y el tipo de basura prioritario — "Cancelar" cierra la confirmación sin tocar el mapa
+21. Al presionar, se pide confirmar los puntos activos, las horas disponibles y el tipo de basura prioritario, "Cancelar" cierra la confirmación sin tocar el mapa
 22. El sistema genera la ruta óptima, o informa que no fue posible generarla y sugiere revisar los recursos disponibles (`/recursos`)
 
-> El algoritmo real de optimización de ruta todavía no está implementado (`backendModel/routing.py`) — hoy `/rutas` siempre reporta que no fue posible generar una ruta. El resto del flujo (confirmación, carga de análisis, validaciones) está completo y verificado.
+> El algoritmo real de optimización de ruta todavía no está implementado (`backendModel/routing.py`), hoy `/rutas` siempre reporta que no fue posible generar una ruta. El resto del flujo (confirmación, carga de análisis, validaciones) está completo y verificado.
 
 ---
 
@@ -351,7 +351,7 @@ CondorFinder/
 │   ├── orquestador.py       ← API FastAPI principal (pipeline + wiring de routers)
 │   ├── auth.py               ← Login/sesión (JWT en cookie httpOnly)
 │   ├── resources.py          ← Puntos y recursos (HDU6)
-│   ├── routing.py            ← Base de generación de ruta (HDU5) — algoritmo pendiente
+│   ├── routing.py            ← Base de generación de ruta (HDU5), algoritmo pendiente
 │   ├── analyses.py           ← Análisis guardados (HDU4) + fusión de duplicados (HDU7)
 │   ├── task_store.py         ← Persistencia de tareas del pipeline en MongoDB
 │   ├── storage.py            ← Cliente de Google Cloud Storage (resultados guardados en producción)
@@ -418,15 +418,107 @@ CondorFinder/
 | HDU7 (Deseable) | Fusión de detecciones entre cargas de la misma zona: al guardar un nuevo análisis, el sistema compara sus polígonos georreferenciados contra los análisis guardados y, si detecta >50% de superposición con uno anterior, permite marcarlos como duplicados o mantenerlos por separado | ✅ Cumplido |
 | SP1 (Spike, 21 pts) | Investigación e implementación de mejoras al modelo de reconocimiento de imágenes: precisión ≥75% en detección/volumen, distinguir construcciones de basurales, mejorar el umbral de solapamiento. AC: dado un set de imágenes, cuando el trabajador genere el mapa georreferenciado, el sistema le dará la opción de elegir un modelo preciso y lento o uno más óptimo y rápido | ✅ Cumplido el AC del selector (verificado en vivo); el resto del spike (investigación de precisión ≥75%, distinguir construcciones de basurales) es de otros integrantes del equipo, estado a confirmar con ellos |
 
-**Detalles adicionales de HDU4** (más allá del texto literal de los AC): reabrir un análisis ya guardado sobrevive a un F5 — antes, la identidad del análisis (`currentAnalysisId`/`currentAnalysisName`, de dónde sale si el botón dice "Guardar cambios" o "Guardar análisis") vivía solo en memoria de React, así que un F5 la perdía y ofrecía guardar el mismo análisis de nuevo como si fuera uno nuevo (duplicándolo), pese a que `mapUrl`/`thumbnailUrl` sí sobrevivían por estar en `sessionStorage`. Se corrigió persistiendo esa identidad también, y — en vez de intentar sincronizar cada campo derivado (estado, detecciones, resumen del banner de HDU7) por separado — un F5 sobre un análisis guardado simplemente vuelve a pedir el registro completo a Mongo con el mismo `id` persistido, la misma ruta que ya usa "Abrir análisis" desde Vista Principal.
+---
 
-**Detalles adicionales de HDU6** (más allá del texto literal de los AC): el recurso "tolvas" también permite capacidad individual por unidad, con el mismo modelo que camiones (no un valor de capacidad único compartido). Los puntos incluyen dirección y comuna, con geocodificación bidireccional vía Nominatim/OpenStreetMap: al ubicar un punto en el mapa se completan solas, y al escribir/corregir la dirección a mano el punto se reubica en el mapa automáticamente. Cada punto tiene además un switch de "punto activo" que HDU5 consume en la pantalla de confirmación.
+## Estado de Sprint 2
 
-**Detalles adicionales de HDU5** (más allá del texto literal de los AC): los polígonos de un análisis cargado no se dibujan literalmente sobre Leaflet (ilegibles a la escala de toda la comuna) — cada análisis se representa como un círculo grande de color, sólido si está cargado en la ruta actual y hueco si no, ubicado en el centro geográfico real del ortomosaico (`orthoCenter`, determinístico entre corridas del mismo set de fotos — ver HDU7 más abajo); al pasar el mouse se ve una miniatura con los polígonos superpuestos, y al hacer click se abre una vista ampliada con el mapa real en precisión de píxel. Esto sigue cumpliendo el AC4 literal ("cargará los polígonos asociados en el mapa junto con su metadata") sin perder precisión geográfica — el `geo_polygon` real (en su CRS UTM original) es el que efectivamente resuelve `POST /routes/generate` a partir de los `analysisIds` seleccionados, no algo que arme el navegador.
+Historias comprometidas: HDU5.1 (13), HDU8 (5), HDU9 (5), HDU10 (5) y SP2 (13). Suman 41 puntos sobre un mínimo de 40, porque el ramo comunicó un cambio respecto al plan y bajó el mínimo del Sprint 2 de 50 a 40.
 
-**Detalles adicionales de HDU7** (más allá del texto literal de los AC): la comparación de superposición corre en el backend (`shapely`, IoU real en metros — no en el navegador ni sobre bounding boxes en píxeles), comparando la **huella geográfica completa del ortomosaico** (`orthoBounds`) del análisis nuevo contra la de cada análisis guardado anterior con el mismo CRS, quedándose con el mejor candidato si supera el 50%. No compara las detecciones de basura individuales — se probó ese enfoque primero y resultó frágil: el mismo set de fotos produce un ortomosaico casi idéntico entre corridas (georreferenciado por GPS/EXIF, variación de un par de metros), pero las detecciones puntuales de YOLO pueden correrse esos mismos metros, suficiente para tirar el IoU muy por debajo de 50% en objetos chicos aunque sea la misma basura real. Comparando la imagen completa (decenas de metros de lado en vez de unos pocos m² por detección), esa misma variación de GPS queda como una fracción mínima, dejando el umbral de 50% con margen real. El "historial" del AC3 no es una vista aparte con datos duplicados: el análisis anterior se marca `historical` y sigue siendo el mismo documento, accesible desde Vista Principal bajo el filtro "Historial" — funciona igual con cadenas de varias zonas iguales encadenadas (A reemplazada por B, B reemplazada por C) y con múltiples pares de duplicados independientes coexistiendo, verificado en ambos casos.
+> **Verificación pendiente.** HDU9 y HDU10 están implementadas y compilan (`tsc`, `pnpm build`, `py_compile`), pero **todavía no se recorrieron en vivo**. La tabla de abajo refleja lo que quedó construido, no lo que quedó comprobado. Ver "Qué falta verificar" al final de esta sección.
 
-**Detalles adicionales de SP1** (más allá del texto literal del AC): el selector de modelo se presenta como un modal (mismo patrón visual que "Agregar zona" en Vista Principal) que se abre al presionar "Generar mapa unificado" — elegir "Óptimo" o "Preciso" ahí cierra el modal y arranca la generación de inmediato con ese modo, en vez de un control aparte que hubiera que configurar antes. Verificar esto en vivo destapó un bug real preexistente en `backendModel/joining/joinOrtho.py`: el preset `presethigh` (modo "Preciso") nunca le pedía a NodeODM generar los modelos de elevación (`dtm`/`dsm`), a diferencia de `presetfast` que sí lo hacía — el mapa y las detecciones salían bien igual (no dependen de esos archivos), pero "Analizar volumen" fallaba siempre con "Archivos DEM no disponibles" en modo Preciso. Quedó dormido hasta esta verificación porque `opc` estaba hardcodeado a 0 (siempre `presetfast`) antes de que este AC lo conectara a la elección real del trabajador.
+| Historia | Criterio de aceptación | Estado |
+|---|---|---|
+| HDU5.1 | Solo se consideran vehículos cuyo personal requerido esté completo con perfiles disponibles | 🔲 Pendiente |
+| HDU5.1 | Un mismo perfil de trabajador no puede cubrir dos vehículos que operan a la vez | 🔲 Pendiente |
+| HDU5.1 | Se descarta toda subruta cuya distancia total supere la autonomía del vehículo | 🔲 Pendiente |
+| HDU5.1 | Se prioriza la coincidencia de tipo de residuo, y solo se usa un vehículo no compatible si no hay alternativa | 🔲 Pendiente |
+| HDU5.1 | Los tiempos de cada tramo se ajustan por las condiciones de tráfico vigentes, sin intervención del trabajador | 🔲 Pendiente |
+| HDU5.1 | Las zonas sin vehículo posible quedan marcadas "sin asignar" con el motivo, sin invalidar el resto del plan | 🔲 Pendiente |
+| HDU5.1 | Cada tramo del plan muestra qué vehículo lo recorre, por patente y tipo, y su personal asociado | 🔲 Pendiente |
+| HDU8 | "Agregar recurso" pide el tipo de recurso a añadir | 🔲 Pendiente |
+| HDU8 | Al elegir el tipo, el sistema pide los detalles relevantes de ese tipo | 🔲 Pendiente |
+| HDU8 | "Editar" sobre un recurso registrado permite modificar su registro | 🔲 Pendiente |
+| HDU8 | El botón de disponibilidad alterna el recurso entre disponible y no disponible | 🔲 Pendiente |
+| HDU8 | Un recurso no disponible queda excluido al armar la asignación de una ruta | 🔲 Pendiente |
+| HDU9 | Al seleccionar una o más zonas y presionar "generar informe", se exporta un PDF con el volumen total y por zona | 🟡 Implementado, sin verificar |
+| HDU9 | Con zonas de distintos tipos de residuo, el PDF detalla el volumen por tipo además del total | 🟡 Implementado, sin verificar |
+| HDU9 | Con dos versiones guardadas de la misma zona, el PDF muestra la comparación de volumen entre ambos períodos | 🟡 Implementado, sin verificar |
+| HDU9 | Sin ninguna zona guardada, el botón queda deshabilitado con un mensaje que lo explica | 🟡 Implementado, sin verificar |
+| HDU10 | "Ver evolución" muestra la cadena completa de versiones anteriores, ordenada cronológicamente | 🟡 Implementado, sin verificar |
+| HDU10 | Se grafica el volumen estimado de cada versión por fecha | 🟡 Implementado, sin verificar |
+| HDU10 | Una zona sin versiones anteriores lo indica explícitamente | 🟡 Implementado, sin verificar |
+| HDU10 | Al hacer click en una versión, se abre en modo solo lectura con el visor de HDU4 | 🟡 Implementado, sin verificar |
+| SP2 (Spike, 13 pts) | Primer entregable: tabla comparando el desempeño con una única imagen, para demostrar estabilidad de las estimaciones | 🔲 Pendiente |
+| SP2 (Spike, 13 pts) | Segundo entregable: tabla con una imagen con datos reales validados por la municipalidad | 🔲 Pendiente |
+
+### El cambio de fondo: zona, versión y análisis
+
+HDU9 y HDU10 son la capa visible de un cambio bastante mayor que vive debajo, y que toca el modelo de datos de HDU4 y el significado de la cadena de HDU7, ambas ya entregadas en el Sprint 1.
+
+Antes, el volumen se calculaba una sola vez dentro del pipeline, justo antes de marcar la tarea como terminada. El botón "Analizar volumen" no recalculaba nada: el endpoint cortaba de inmediato y el frontend releía un archivo ya enriquecido. Por eso todo reanálisis daba el mismo número y una zona no podía tener historia propia.
+
+El modelo nuevo tiene tres niveles:
+
+```
+Zona                   nombre, identidad estable en el tiempo
+ └─ Versión            un set de imágenes = un vuelo = un mapa unificado
+     └─ Análisis       un cálculo de volumen, con su fecha y su algoritmo
+```
+
+- Una **versión** es una carga de imágenes, identificada por la tarea que la generó. No tiene colección propia.
+- **Una versión nace cuando se guarda su primer análisis, no al generar el mapa.** Esta regla es la que hace imposible una versión sin cifras, así que la evolución de una zona nunca tiene tramos vacíos.
+- Las versiones se ordenan por **fecha de captura**, leída del EXIF de las fotos. Si ninguna la trae, se cae a la fecha de carga y queda marcada como estimada. Empate de fechas: manda cuál se cargó primero.
+- Cada análisis registra **con qué versión del algoritmo** se calculó. Sin ese sello, cuando SP2 mejore la precisión, un salto de volumen sería indistinguible de un cambio real en el basural.
+- Solo la versión más reciente se puede volver a medir. Las anteriores conservan su mapa y sus análisis, en modo consulta.
+
+### Qué cambió en el backend
+
+- El pipeline termina en la detección. `POST /analyze/{task_id}` recalcula siempre, y cada llamada es una medición nueva que el frontend guarda con su propia fecha.
+- Los modelos de elevación pasan a guardarse **por vuelo** en `joining/finals/`, junto al ortomosaico. Antes vivían en una carpeta compartida que cada vuelo sobrescribía: inofensivo mientras el cálculo era inmediato, y causa de cifras incorrectas sin ningún error visible ahora que ocurre después.
+- Colección nueva `zones`. Los análisis ganan zona, fecha de captura, fecha de carga, versión de algoritmo y qué cambió respecto al análisis anterior.
+- `POST /analyses/versions/{sourceTaskId}/reassign` separa una versión mal agrupada en una zona propia. Hace falta porque agrupar por HDU7 es una heurística, y con el modelo nuevo una confirmación equivocada fusiona dos historias de forma permanente.
+- Retención automática de disco: al terminar una generación se liberan los archivos pesados de los vuelos anteriores, y se limpia la salida cruda de ODM una vez rescatado lo que el sistema usa. Antes esa carpeta ocupaba unos 100 MB de forma permanente y nadie la limpiaba.
+
+### Qué cambió en el frontend
+
+- Cada detección guardada lleva si estaba activa. Antes se guardaban todas sin esa marca, así que el total guardado no se podía reconciliar con el detalle, y reabrir un análisis cambiaba su total al reactivarlas todas. Corrige de paso ese defecto de HDU4.
+- `src/lib/volumeReport.ts` concentra la aritmética que comparten el informe y el gráfico, para que nunca cuenten historias distintas de la misma zona.
+- El volumen por tipo de residuo se reparte en proporción sobre el volumen ya consolidado. Una detección fusionada vale el promedio o el máximo del grupo, no la suma, justamente para no contar doble; sumar el desglose crudo haría que el detalle excediera el total.
+- El PDF se arma en el navegador. El frontend corre en Cloudflare Workers, que escala solo, mientras el backend es una sola máquina que además corre la fotogrametría de a una tarea por vez.
+- Las dos librerías pesadas van con carga diferida y deben seguir así: `jspdf` dentro del manejador del botón, y el componente de evolución, que arrastra unos 850 kB de recharts, con `React.lazy`. Importarlas de forma normal duplica el bundle inicial.
+
+### Migración
+
+`backendModel/scripts/migrar_zonas.py` agrupa en zonas los análisis que ya existen, usando las cadenas de HDU7 como semilla. **Corre en simulación por defecto**: revisa la agrupación propuesta antes de aplicar.
+
+```bash
+cd ~/CondorFinder/backendModel
+python scripts/migrar_zonas.py            # simulación, no escribe
+python scripts/migrar_zonas.py --aplicar  # escribe
+```
+
+Es idempotente: los análisis que ya tienen zona se saltan.
+
+### Qué falta verificar
+
+Nada de esto está comprobado todavía. En orden de importancia:
+
+1. Generar un mapa y confirmar que la tarea queda pendiente de análisis, **sin** volumen.
+2. Calcular dos veces seguidas sobre el mismo vuelo y confirmar que el resultado es idéntico y no acumulado.
+3. Generar una versión nueva de la misma zona y confirmar que la anterior deja de permitir cálculo, con el motivo en pantalla, y que sus análisis guardados siguen visibles.
+4. Generar un mapa, no analizarlo, generar otro, y confirmar que el primero nunca apareció como versión.
+5. Contrastar las cifras del PDF contra la vista de análisis, y que el detalle por tipo sume el total.
+6. Sobre una zona con varias versiones: orden cronológico, gráfico, y que una versión antigua no ofrezca calcular ni guardar.
+7. Correr la migración en simulación sobre los análisis reales y revisar la agrupación.
+
+### Orden de despliegue
+
+El backend va primero: el frontend nuevo espera campos que solo existen después de desplegarlo.
+
+```bash
+ssh <vm>
+cd ~/CondorFinder && git pull && docker compose up -d --build && docker builder prune -f
+```
 
 ---
 
@@ -466,6 +558,6 @@ CondorFinder/
 | Nicolaz Muñoz | CMO / COO | +56 9 9044 4894 |
 | Francisco González | CTO | +56 9 7537 9965 |
 
-**Cliente:** Paloma Valenzuela, Directora de Aseo, Ornato y Gestión Ambiental — Municipalidad de Maipú.
+**Cliente:** Paloma Valenzuela, Directora de Aseo, Ornato y Gestión Ambiental, Municipalidad de Maipú.
 
-**Institución:** Universidad Técnica Federico Santa María — Departamento de Informática — Ingeniería de Software 2026
+**Institución:** Universidad Técnica Federico Santa María, Departamento de Informática, Ingeniería de Software 2026

@@ -61,6 +61,11 @@ async def lifespan(app: FastAPI):
     # HDU7 en cada guardado).
     await db.users.create_index("username", unique=True)
     await db.analyses.create_index([("crs", 1), ("historical", 1)])
+    # Zona y versión: la evolución de una zona ordena sus análisis por fecha
+    # de captura, y reasignar una versión los busca por su tarea de origen.
+    await db.analyses.create_index([("zoneId", 1), ("captureDate", 1)])
+    await db.analyses.create_index("sourceTaskId")
+    await db.zones.create_index("owner")
     # GCS_BUCKET_NAME sin setear => modo local (ver storage.py) — así el
     # backend sigue corriendo 100% en WSL sin depender de ninguna cuenta de
     # GCP; solo la VM en producción lo setea de verdad.
@@ -131,9 +136,17 @@ NODEODM_HOST = os.environ.get("NODEODM_HOST", "localhost")
 UPLOAD_DIR  = os.path.join(BASE_DIR, "joining", "images")
 FINALS_DIR  = os.path.join(BASE_DIR, "joining", "finals")
 OUTPUT_DIR  = os.path.join(BASE_DIR, "detecting", "output")
-DSM_PATH   = os.path.join(BASE_DIR, "joining","output","odm_dem","dsm.tif")
-DTM_PATH   = os.path.join(BASE_DIR, "joining","output","odm_dem","dtm.tif")
-NDSM_PATH  = os.path.join(BASE_DIR, "joining","output","odm_dem","ndsm.tif")
+
+# Los modelos de elevación ya NO viven en rutas fijas compartidas: cada vuelo
+# guarda los suyos en FINALS_DIR junto a su ortomosaico. Ver dem_paths_for().
+
+# Versión del algoritmo de cálculo de volumen. Cada análisis guardado queda
+# sellado con este valor. Sirve para que la evolución de una zona pueda
+# distinguir un cambio real en el basural de un cambio en cómo se mide:
+# cuando SP2 mejore la precisión, dos análisis con distinta versión no son
+# comparables como si nada hubiera cambiado. Subirlo a mano al tocar
+# volumeCalc.py de forma que altere los resultados.
+VOLUME_ALGORITHM_VERSION = 1
 
 # joining/images/ es una carpeta COMPARTIDA — se reusa para cada carga nueva.
 # Si se guarda una "foto" (snapshot) de las imágenes de cada tarea aquí, se
@@ -307,6 +320,22 @@ def run_pipeline(task_id: str, opc: int):
             )
             return
 
+        # Fecha del vuelo, leída del EXIF de las fotos. Es la que ordena las
+        # versiones de una zona en el tiempo, así que se captura acá, mientras
+        # las imágenes originales todavía están en UPLOAD_DIR: después del
+        # unificado solo queda el ortomosaico, que ya no la trae.
+        #
+        # Si ninguna foto la tiene se cae a la fecha de carga y se marca como
+        # estimada, para que la interfaz pueda advertirlo y permitir
+        # corregirla. Un None silencioso desordenaría la historia de la zona
+        # sin que nadie se entere.
+        fecha_captura = solapamiento.fecha_captura_set(UPLOAD_DIR)
+        task_store.update_task_sync(
+            task_id,
+            capture_date=fecha_captura or datetime.now(timezone.utc).isoformat(),
+            capture_date_estimated=fecha_captura is None,
+        )
+
         # Punto de chequeo de cancelación — solo puede interrumpir AQUÍ, entre
         # fases. Una vez que empieza joinOrtho.join() (llamada bloqueante a
         # ODM) o detectingOrtho.detect() (inferencia YOLO), no hay forma de
@@ -405,18 +434,16 @@ def run_pipeline(task_id: str, opc: int):
                     pass
             return
 
-        if os.path.exists(DSM_PATH) and os.path.exists(DTM_PATH):
-            if not os.path.exists(NDSM_PATH):
-                volumeCalc.compute_ndsm(DSM_PATH, DTM_PATH, NDSM_PATH)
-
-        # Análisis de volumen automático — corre en este mismo hilo antes de marcar done
-        run_analysis(task_id)
-
-        # Recién ACÁ el PNG/JSON en OUTPUT_DIR quedan en su versión final
-        # (run_analysis ya los enriqueció con volumen/área/peso) — subirlos
-        # antes de esto guardaría en GCS una versión sin esos datos. En modo
-        # local (sin GCS_BUCKET_NAME) esto no hace nada — los archivos ya
-        # están en su lugar final, igual que antes de storage.py.
+        # El pipeline termina en la detección. El volumen YA NO se calcula
+        # acá: se calcula cuando el trabajador entra a la vista de análisis y
+        # lo pide, para que cada medición quede registrada con su propia fecha
+        # y una zona tenga historia real en el tiempo. La tarea queda
+        # "pendiente de análisis", que pasa de ser una excepción a ser el
+        # estado normal después de generar un mapa.
+        #
+        # Antes esta subida a GCS esperaba a run_analysis porque el JSON no
+        # tenía volumen hasta entonces. Ahora sube el JSON con las detecciones
+        # crudas, y cada análisis lo vuelve a subir ya enriquecido.
         for fname, ctype in (
             (result_filename, "image/png"),
             (result_json_filename, "application/json"),
@@ -446,6 +473,12 @@ def run_pipeline(task_id: str, opc: int):
         snapshot_dir = os.path.join(TASK_IMAGES_DIR, task_id)
         if os.path.isdir(snapshot_dir):
             shutil.rmtree(snapshot_dir, ignore_errors=True)
+
+        # Retención: solo el vuelo recién generado queda medible. Los archivos
+        # pesados de las generaciones anteriores (modelos de elevación y
+        # ortomosaico) se liberan acá. Ver la docstring de la función para por
+        # qué esto nunca deja una versión sin cifras.
+        liberar_archivos_de_vuelos_previos(conservar_task_id=task_id)
 
         # odm_task ya no hace falta una vez terminado el pipeline — liberar el
         # handle en memoria (nunca iba a sobrevivir un reinicio de todos
@@ -565,8 +598,89 @@ async def cancel_task(task_id: str):
 # Se ejecuta separado del pipeline — requiere que el mapa ya esté generado.
 # =============================================================================
 
+def dem_paths_for(task: dict) -> tuple[str, str, str]:
+    """Rutas de los modelos de elevación de ESTA tarea: dsm, dtm y ndsm.
+
+    Se derivan del nombre del ortomosaico, que joinOrtho.join() guarda como
+    "ortho_<uuid>.tif" junto a "dsm_<uuid>.tif" y "dtm_<uuid>.tif". El nDSM se
+    calcula a partir de esos dos y se cachea con el mismo sufijo.
+
+    Antes esto eran tres constantes globales apuntando a una carpeta
+    compartida que cada vuelo sobrescribía. Mientras el volumen se calculaba
+    dentro del pipeline no importaba, porque se usaban en el acto; ahora que
+    el cálculo ocurre después, usar las compartidas significaría medir un
+    vuelo con el terreno de otro.
+    """
+    ortho_name = os.path.basename(task.get("ortho_path") or "")
+    sufijo = ortho_name[len("ortho_"):-len(".tif")] if ortho_name.startswith("ortho_") else ""
+    return (
+        os.path.join(FINALS_DIR, f"dsm_{sufijo}.tif"),
+        os.path.join(FINALS_DIR, f"dtm_{sufijo}.tif"),
+        os.path.join(FINALS_DIR, f"ndsm_{sufijo}.tif"),
+    )
+
+
+def liberar_archivos_de_vuelos_previos(conservar_task_id: str) -> None:
+    """Borra de FINALS_DIR los archivos de todos los vuelos menos el indicado.
+
+    Se llama al terminar una generación: desde ese momento, el único vuelo que
+    se puede volver a medir es el recién generado. Se van tres tipos de
+    archivo, todos pesados y todos inútiles para un vuelo que dejó de ser el
+    vigente:
+
+      - dsm/dtm/ndsm: sin ellos no se puede calcular volumen, que es
+        justamente la regla de retención acordada.
+      - ortho: el .tif solo lo lee volumeCalc.enrich(), o sea el cálculo de
+        volumen. Lo que se ve en pantalla es el PNG que vive en la nube, no
+        este archivo. Sin sus modelos de elevación, el ortomosaico de un vuelo
+        antiguo no lo puede usar nadie.
+
+    Esto NO deja versiones sin cifras: una versión solo entra en la historia de
+    una zona cuando ya tiene un análisis guardado, así que lo único que se
+    pierde es poder re-medir un vuelo viejo.
+
+    Es best-effort: si un borrado falla, se sigue con el resto. Un archivo que
+    quede sin borrar cuesta disco, pero un error acá no debe tumbar un
+    pipeline que ya terminó bien.
+    """
+    task = task_store.get_task_sync(conservar_task_id) or {}
+    _, _, ndsm_vigente = dem_paths_for(task)
+    sufijo_vigente = os.path.basename(ndsm_vigente)[len("ndsm_"):-len(".tif")]
+
+    if not sufijo_vigente:
+        # Sin sufijo no se puede saber cuál conservar, y borrar a ciegas se
+        # llevaría también el vuelo vigente. Mejor no tocar nada: el costo es
+        # disco, no datos.
+        print("No se liberaron archivos: la tarea no tiene ortomosaico asociado", file=sys.stderr)
+        return
+
+    prefijos = ("dsm_", "dtm_", "ndsm_", "ortho_")
+    try:
+        for nombre in os.listdir(FINALS_DIR):
+            if not nombre.endswith(".tif"):
+                continue
+            if not nombre.startswith(prefijos):
+                continue
+            if sufijo_vigente in nombre:
+                continue
+            try:
+                os.remove(os.path.join(FINALS_DIR, nombre))
+                print(f"Liberado archivo de vuelo antiguo: {nombre}", file=sys.stderr)
+            except Exception:
+                pass
+    except FileNotFoundError:
+        pass
+
+
 def run_analysis(task_id: str):
-    """Calcula volumen por detección usando el nDSM generado por ODM."""
+    """Calcula volumen por detección usando el nDSM del vuelo de esta tarea.
+
+    Recalcula siempre, incluso si ya se había analizado antes: cada llamada es
+    una medición nueva que el frontend guarda con su propia fecha. Es seguro
+    repetirla porque volumeCalc.enrich() parte de los campos crudos de cada
+    detección (bbox/polygon/class) y sobrescribe los derivados, sin acumular
+    sobre un resultado anterior.
+    """
     try:
         task_store.update_task_sync(task_id, analysis_status="running", analysis_message="Calculando volúmenes con datos del modelo 3D...")
 
@@ -574,18 +688,39 @@ def run_analysis(task_id: str):
         detections_json = task["detections_json_path"]
         ortho_path = task["ortho_path"]
 
-        if not os.path.exists(NDSM_PATH):
-            if os.path.exists(DSM_PATH) and os.path.exists(DTM_PATH):
-                volumeCalc.compute_ndsm(DSM_PATH, DTM_PATH, NDSM_PATH)
+        dsm_path, dtm_path, ndsm_path = dem_paths_for(task)
+
+        if not os.path.exists(ndsm_path):
+            if os.path.exists(dsm_path) and os.path.exists(dtm_path):
+                volumeCalc.compute_ndsm(dsm_path, dtm_path, ndsm_path)
             else:
+                # El caso normal de que falten es que este vuelo ya no sea el
+                # más reciente de su zona y sus modelos se hayan liberado. El
+                # mensaje lo dice así para que el frontend lo muestre tal cual
+                # en vez de un error técnico.
                 raise FileNotFoundError(
-                    "Archivos DEM no disponibles (dsm.tif / dtm.tif). "
-                    "Verifica que ODM generó los modelos de elevación."
+                    "Los modelos de elevación de este vuelo ya no están disponibles. "
+                    "Existe una captura más reciente de esta zona, así que este vuelo "
+                    "solo se puede consultar, no volver a medir."
                 )
 
-        volumeCalc.enrich(detections_json, ortho_path, NDSM_PATH, detections_json)
+        volumeCalc.enrich(detections_json, ortho_path, ndsm_path, detections_json)
 
-        task_store.update_task_sync(task_id, analysis_status="done", analysis_message="Análisis de volumen completado")
+        # El JSON recién enriquecido reemplaza al que se subió con las
+        # detecciones crudas al terminar el pipeline.
+        json_name = task.get("result_json_filename", "")
+        if json_name and os.path.exists(detections_json):
+            try:
+                storage_module.upload_result_file(detections_json, json_name, "application/json")
+            except Exception:
+                pass
+
+        task_store.update_task_sync(
+            task_id,
+            analysis_status="done",
+            analysis_message="Análisis de volumen completado",
+            algorithm_version=VOLUME_ALGORITHM_VERSION,
+        )
 
     except Exception as e:
         task_store.update_task_sync(task_id, analysis_status="error", analysis_message=str(e))
@@ -599,10 +734,28 @@ async def start_analysis(task_id: str):
         return {"status": "error", "message": "Tarea no encontrada"}
     if task["status"] != "done":
         return {"status": "error", "message": "El mapa aún no está generado"}
-    if task.get("analysis_status") == "done":
-        return {"status": "already_done", "message": "El análisis ya fue calculado durante la generación del mapa"}
     if task.get("analysis_status") == "running":
         return {"status": "already_running", "message": "El análisis ya está en curso"}
+
+    # Ya NO se corta con "already_done". Cada llamada es una medición nueva,
+    # que el frontend guarda como un análisis aparte con su propia fecha: es
+    # lo que le da historia a una zona. El atajo anterior existía porque el
+    # pipeline calculaba el volumen solo y este endpoint nunca tenía trabajo
+    # real que hacer.
+
+    # Sin los modelos de elevación de este vuelo no hay nada que calcular, y
+    # conviene decirlo antes de lanzar el hilo para que el frontend reciba el
+    # motivo de inmediato en vez de tener que sondear un estado de error.
+    dsm_path, dtm_path, ndsm_path = dem_paths_for(task)
+    if not os.path.exists(ndsm_path) and not (os.path.exists(dsm_path) and os.path.exists(dtm_path)):
+        return {
+            "status": "unavailable",
+            "message": (
+                "Los modelos de elevación de este vuelo ya no están disponibles. "
+                "Existe una captura más reciente de esta zona, así que este vuelo "
+                "solo se puede consultar, no volver a medir."
+            ),
+        }
 
     thread = threading.Thread(target=run_analysis, args=(task_id,), daemon=True)
     thread.start()
@@ -673,6 +826,24 @@ async def get_status(task_id: str):
     stage_progress = task.get("stage_progress")
     if task["status"] == "joining" and stage_progress is not None:
         response["stage_progress"] = float(stage_progress)
+
+    # Datos de la captura: el frontend los guarda en el análisis para poder
+    # ordenar las versiones de una zona en el tiempo.
+    if task.get("capture_date"):
+        response["capture_date"] = task["capture_date"]
+        response["capture_date_estimated"] = bool(task.get("capture_date_estimated"))
+    if task.get("algorithm_version") is not None:
+        response["algorithm_version"] = task["algorithm_version"]
+
+    # Si este vuelo todavía se puede volver a medir. Es falso cuando sus
+    # modelos de elevación ya se liberaron porque hay una captura más nueva de
+    # la misma zona; la vista de análisis usa esto para deshabilitar el botón
+    # con el motivo, en vez de dejar que el usuario lo presione y falle.
+    if task["status"] == "done":
+        dsm_path, dtm_path, ndsm_path = dem_paths_for(task)
+        response["can_analyze"] = os.path.exists(ndsm_path) or (
+            os.path.exists(dsm_path) and os.path.exists(dtm_path)
+        )
 
     if task["status"] == "done" and task["result_filename"]:
         response["result_url"] = f"{PUBLIC_BASE_URL}/result/{task['result_filename']}"

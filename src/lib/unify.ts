@@ -126,6 +126,17 @@ export interface RawTaskStatus {
    *  "joining", donde es el porcentaje que reporta NodeODM: es la fase larga
    *  y la única con un avance medible. Ausente en el resto. */
   stage_progress?: number;
+  /** Fecha en que se capturaron las fotos de esta tarea, del EXIF. Es la que
+   *  ordena las versiones de una zona en el tiempo. */
+  capture_date?: string;
+  /** true cuando ninguna foto traía fecha y se usó la de carga. */
+  capture_date_estimated?: boolean;
+  /** Versión del algoritmo con que se calculó el último análisis. */
+  algorithm_version?: number;
+  /** false cuando los modelos de elevación de este vuelo ya se liberaron
+   *  porque existe una captura más reciente de la zona: el vuelo se puede
+   *  consultar, pero no volver a medir. */
+  can_analyze?: boolean;
 }
 
 /**

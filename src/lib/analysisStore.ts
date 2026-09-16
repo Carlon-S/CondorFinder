@@ -80,6 +80,41 @@ export interface SavedAnalysisRecord {
   /** HDU7/AC3 — id del análisis más reciente que reemplazó a este (se setea
    *  junto con `historical: true`). */
   supersededBy?: string | null;
+  /** Zona a la que pertenece este análisis. La zona es la identidad que
+   *  persiste entre vuelos: el nombre vive ahí, no en cada análisis. La
+   *  resuelve el backend (hereda la de la zona que HDU7 reconozca por huella
+   *  del ortomosaico, o crea una nueva). Ausente en análisis anteriores a la
+   *  migración. */
+  zoneId?: string | null;
+  /** Fecha en que se CAPTURARON las fotos, del EXIF — no la de guardado. Es
+   *  la que ordena las versiones de una zona en el tiempo. */
+  captureDate?: string | null;
+  /** true cuando ninguna foto traía fecha y se cayó a la de carga. La vista
+   *  lo advierte y permite corregirla: un EXIF malo desordenaría la historia
+   *  de la zona sin que nadie lo note. */
+  captureDateEstimated?: boolean;
+  /** Momento de la carga del set. Solo desempata dos versiones con la misma
+   *  fecha de captura. */
+  uploadedAt?: string | null;
+  /** Versión del algoritmo con que se calculó este volumen. Sin esto, cuando
+   *  SP2 mejore la precisión, un salto entre dos análisis sería
+   *  indistinguible de un cambio real en el basural. */
+  algorithmVersion?: number | null;
+  /** Qué cambió respecto al análisis anterior del MISMO vuelo: "primero",
+   *  "seleccion", "algoritmo" o "sin-cambios". Lo calcula el backend. Los
+   *  marcados "sin-cambios" repiten la cifra anterior por construcción, así
+   *  que la evolución y el informe los agrupan en vez de dibujar un punto
+   *  redundante. */
+  changeKind?: "primero" | "seleccion" | "algoritmo" | "sin-cambios" | null;
+}
+
+/** Una zona geográfica seguida en el tiempo. Agrupa versiones (vuelos) y,
+ *  dentro de cada una, sus análisis. */
+export interface ZoneRecord {
+  id: string;
+  owner: string;
+  name: string;
+  createdAt: string;
 }
 
 async function parseErrorMessage(res: Response, fallback: string): Promise<string> {
@@ -153,6 +188,11 @@ export async function saveAnalysis(
     crs?: string;
     orthoCenter?: [number, number] | null;
     orthoBounds?: [number, number, number, number] | null;
+    zoneId?: string | null;
+    captureDate?: string | null;
+    captureDateEstimated?: boolean;
+    uploadedAt?: string | null;
+    algorithmVersion?: number | null;
   },
   overwriteId?: string,
 ): Promise<SaveAnalysisResult> {
@@ -167,6 +207,11 @@ export async function saveAnalysis(
       crs: data.crs ?? null,
       orthoCenter: data.orthoCenter ?? null,
       orthoBounds: data.orthoBounds ?? null,
+      zoneId: data.zoneId ?? null,
+      captureDate: data.captureDate ?? null,
+      captureDateEstimated: data.captureDateEstimated ?? false,
+      uploadedAt: data.uploadedAt ?? null,
+      algorithmVersion: data.algorithmVersion ?? null,
     };
     const res = await fetch(
       overwriteId
@@ -272,6 +317,54 @@ export async function rejectDuplicate(id: string): Promise<SavedAnalysisRecord |
     return await res.json();
   } catch {
     return null;
+  }
+}
+
+// ── zonas ──────────────────────────────────────────────────────────────────
+
+/** Lista las zonas. La ruta lleva el sufijo /all porque /analyses/{id} ya
+ *  captura cualquier segmento suelto (ver el comentario en analyses.py). */
+export async function listZones(): Promise<ZoneRecord[]> {
+  const res = await fetch(`${BACKEND_URL}/analyses/zones/all`, { credentials: "include" });
+  if (!res.ok) {
+    throw new Error(await parseErrorMessage(res, "No se pudieron cargar las zonas."));
+  }
+  return res.json();
+}
+
+export async function renameZone(zoneId: string, name: string): Promise<ZoneRecord | null> {
+  try {
+    const res = await fetch(`${BACKEND_URL}/analyses/zones/${encodeURIComponent(zoneId)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ name }),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+/** Separa una versión completa (todos los análisis de un mismo vuelo) en una
+ *  zona nueva. Es la salida cuando HDU7 agrupó mal dos terrenos distintos:
+ *  sin esto, una confirmación equivocada de duplicado dejaría fusionadas dos
+ *  historias para siempre. */
+export async function reassignVersion(sourceTaskId: string, newZoneName: string): Promise<boolean> {
+  try {
+    const res = await fetch(
+      `${BACKEND_URL}/analyses/versions/${encodeURIComponent(sourceTaskId)}/reassign`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ name: newZoneName }),
+      },
+    );
+    return res.ok;
+  } catch {
+    return false;
   }
 }
 

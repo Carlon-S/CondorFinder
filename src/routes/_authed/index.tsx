@@ -22,7 +22,7 @@
 // =============================================================================
 
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { notify } from "@/lib/notify";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import {
@@ -31,6 +31,7 @@ import {
   ChartLineUp,
   Crosshair,
   Eye,
+  FileText,
   FolderOpen,
   Layers,
   Loader2,
@@ -56,11 +57,20 @@ import {
 } from "@/components/ui/table";
 import {
   listAnalyses,
+  listZones,
   deleteAnalysis,
   setPendingOpenId,
   type SavedAnalysisRecord,
   type AnalysisSummary,
+  type ZoneRecord,
 } from "@/lib/analysisStore";
+// Carga diferida por el mismo motivo que jspdf en el informe: ZoneEvolution
+// arrastra recharts (cerca de 900 kB), y quien nunca abre la evolución de una
+// zona no tiene por qué descargarlo. Importado de forma normal, recharts caía
+// dentro del bundle principal y lo duplicaba de tamaño.
+const ZoneEvolution = lazy(() =>
+  import("@/components/ZoneEvolution").then((m) => ({ default: m.ZoneEvolution })),
+);
 import { listResourcePoints, type ResourcePoint } from "@/lib/resources";
 import {
   listPendingTasks,
@@ -299,6 +309,40 @@ function MainPage() {
   // Búsqueda por nombre de zona — se combina con el filtro de estado.
   const [nameQuery, setNameQuery] = useState("");
 
+  // ── HDU9 (informe PDF) y HDU10 (evolución) ────────────────────────────────
+  // Las dos historias se apoyan en los mismos datos: los análisis guardados
+  // agrupados por zona. Se cargan una vez acá y se comparten, en vez de que
+  // cada diálogo pida lo suyo.
+  const [savedAnalyses, setSavedAnalyses] = useState<SavedAnalysisRecord[]>([]);
+  // zoneRecords, no "zones": en este archivo `zones` ya son las filas de la
+  // tabla (ZoneRow), que mezclan análisis guardados con tareas en curso. Esto
+  // otro son las zonas del modelo nuevo, la identidad que agrupa versiones.
+  const [zoneRecords, setZoneRecords] = useState<ZoneRecord[]>([]);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportZoneIds, setReportZoneIds] = useState<Set<string>>(new Set());
+  const [generatingReport, setGeneratingReport] = useState(false);
+  /** Zona cuya evolución se está viendo, o null si el diálogo está cerrado. */
+  const [evolutionZone, setEvolutionZone] = useState<ZoneRecord | null>(null);
+
+  useEffect(() => {
+    // Degrada en silencio igual que listResourcePoints en este mismo archivo:
+    // si falla, los botones de informe y evolución simplemente no tienen con
+    // qué trabajar, no es motivo para romper la vista principal.
+    listAnalyses().then(setSavedAnalyses).catch(() => {});
+    listZones().then(setZoneRecords).catch(() => {});
+  }, []);
+
+  /** La zona a la que pertenece un análisis guardado. Una fila de la tabla es
+   *  un análisis; la evolución se abre sobre su zona, que es lo que agrupa
+   *  todas las capturas del mismo terreno. Devuelve null para los análisis
+   *  anteriores a la migración, que todavía no tienen zona. */
+  const zoneOf = (recordId?: string): ZoneRecord | null => {
+    if (!recordId) return null;
+    const analisis = savedAnalyses.find((a) => a.id === recordId);
+    if (!analisis?.zoneId) return null;
+    return zoneRecords.find((z) => z.id === analisis.zoneId) ?? null;
+  };
+
   // Orden estilo Excel: click en el encabezado de columna.
   // Solo aplica a las zonas terminadas — en progreso/pendientes siempre van primero.
   const [sortBy, setSortBy] = useState<"fecha" | "volumen" | "peso" | "area">("fecha");
@@ -459,6 +503,13 @@ function MainPage() {
       const filename = target.mapUrl?.split("/").pop();
       if (filename) {
         deleteResultFile(filename);
+        // La miniatura (<nombre>_thumb.png, ver detectingOrtho.py) no se
+        // derivaba de aquí y sobrevivía a cada borrado: el bucket acumulaba
+        // una por zona eliminada, para siempre. Se confirmó mirando el
+        // bucket real, donde quedaron 27 huérfanas de ~640 KB cada una
+        // después de borrar todas las zonas.
+        const thumbName = filename.replace(/\.png$/i, "_thumb.png");
+        if (thumbName !== filename) deleteResultFile(thumbName);
         const jsonName = filename.replace(/\.png$/i, ".json");
         if (jsonName !== filename) deleteResultFile(jsonName);
         // El .tif del ortomosaico vive en joining/finals/, no en
@@ -495,6 +546,9 @@ function MainPage() {
         const filename = target.resultUrl.split("/").pop();
         if (filename) {
           deleteResultFile(filename);
+          // Misma miniatura huérfana que en el camino de arriba.
+          const thumbName = filename.replace(/\.png$/i, "_thumb.png");
+          if (thumbName !== filename) deleteResultFile(thumbName);
           const tifName = filename.replace(/\.png$/i, ".tif");
           if (tifName !== filename) deleteFinalsFile(tifName);
         }
@@ -690,6 +744,22 @@ function MainPage() {
                 <FilterChip active={stateFilter === "pending_analysis"} onClick={() => setStateFilter("pending_analysis")}>Pendientes</FilterChip>
                 <FilterChip active={stateFilter === "historical"} onClick={() => setStateFilter("historical")}>Historial</FilterChip>
               </div>
+              {/* HDU9/AC4 — sin ninguna zona guardada no hay informe posible.
+                  El botón queda deshabilitado con el motivo en el tooltip,
+                  en vez de abrir un diálogo vacío. */}
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => setReportOpen(true)}
+                disabled={savedAnalyses.length === 0}
+                title={
+                  savedAnalyses.length === 0
+                    ? "No hay análisis guardados todavía. Guarda al menos uno para poder generar un informe."
+                    : undefined
+                }
+              >
+                <FileText className="mr-1.5 h-3.5 w-3.5" /> Generar informe
+              </Button>
               <Button size="sm" onClick={() => setAddZoneOpen(true)}>
                 <Plus className="mr-1.5 h-3.5 w-3.5" /> Agregar zona
               </Button>
@@ -817,9 +887,35 @@ function MainPage() {
                       </TableCell>
                       <TableCell className="text-right">
                         {z.state === "done" && (
-                          <Button size="sm" onClick={() => openZone(z.recordId!)}>
-                            <Eye className="mr-1.5 h-3.5 w-3.5" /> Ver Análisis
-                          </Button>
+                          <div className="flex items-center justify-end gap-2">
+                            {/* HDU10 — solo aparece si la zona tiene más de
+                                una captura: con una sola no hay nada que
+                                comparar y el diálogo lo único que diría es
+                                justamente eso. */}
+                            {(() => {
+                              const zona = zoneOf(z.recordId);
+                              if (!zona) return null;
+                              const capturas = new Set(
+                                savedAnalyses
+                                  .filter((a) => a.zoneId === zona.id)
+                                  .map((a) => a.sourceTaskId ?? a.id),
+                              ).size;
+                              if (capturas < 2) return null;
+                              return (
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  onClick={() => setEvolutionZone(zona)}
+                                  title="Ver cómo cambió el volumen de esta zona"
+                                >
+                                  <ChartLineUp className="mr-1.5 h-3.5 w-3.5" /> Evolución
+                                </Button>
+                              );
+                            })()}
+                            <Button size="sm" onClick={() => openZone(z.recordId!)}>
+                              <Eye className="mr-1.5 h-3.5 w-3.5" /> Ver Análisis
+                            </Button>
+                          </div>
                         )}
                         {z.state === "in_progress" && (
                           <Button size="sm" variant="secondary" onClick={() => resumeInCarga(z)}>
@@ -873,6 +969,134 @@ function MainPage() {
       </main>
 
       {/* Popup de "Agregar zona": nueva zona vs. modificar una existente */}
+      {/* ── HDU9 — selección de zonas para el informe ── */}
+      {/* El listado incluye TODAS las versiones de cada zona, incluidas las
+          reemplazadas: sin ellas el criterio de comparar una versión con la
+          que la sucedió sería inalcanzable, porque los filtros de la tabla
+          las ocultan. */}
+      <Dialog open={reportOpen} onOpenChange={setReportOpen}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Generar informe de volumen</DialogTitle>
+            <DialogDescription>
+              Elige las zonas a incluir. El informe detalla el volumen total, el desglose por
+              tipo de residuo y, cuando una zona tiene más de una captura, cómo cambió entre ellas.
+            </DialogDescription>
+          </DialogHeader>
+
+          <ul className="max-h-[21.25rem] space-y-1.5 overflow-y-auto pr-1">
+            {zoneRecords.map((z) => {
+              const deLaZona = savedAnalyses.filter((a) => a.zoneId === z.id);
+              const versiones = new Set(deLaZona.map((a) => a.sourceTaskId ?? a.id)).size;
+              const marcada = reportZoneIds.has(z.id);
+              return (
+                <li key={z.id}>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setReportZoneIds((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(z.id)) next.delete(z.id);
+                        else next.add(z.id);
+                        return next;
+                      })
+                    }
+                    className={`flex w-full items-center gap-3 rounded-lg border p-2.5 text-left transition-colors ${
+                      marcada ? "border-primary bg-primary/5" : "border-border/60 hover:bg-muted/40"
+                    }`}
+                  >
+                    <span
+                      className={`flex h-4 w-4 flex-shrink-0 items-center justify-center rounded border ${
+                        marcada ? "border-primary bg-primary text-primary-foreground" : "border-border"
+                      }`}
+                    >
+                      {marcada && <span className="text-[0.58rem] leading-none">✓</span>}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium">{z.name}</span>
+                      <span className="mono block text-[0.63rem] text-muted-foreground">
+                        {versiones} captura(s) · {deLaZona.length} análisis
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+            {zoneRecords.length === 0 && (
+              <li className="py-6 text-center text-xs text-muted-foreground">
+                No hay zonas guardadas todavía.
+              </li>
+            )}
+          </ul>
+
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setReportOpen(false)}>Cancelar</Button>
+            <Button
+              disabled={reportZoneIds.size === 0 || generatingReport}
+              onClick={async () => {
+                setGeneratingReport(true);
+                try {
+                  // Carga diferida: jspdf solo se descarga cuando alguien
+                  // realmente genera un informe, y nunca durante el
+                  // renderizado en servidor.
+                  const { generateVolumeReport } = await import("@/lib/pdfReport");
+                  const seleccion = zoneRecords
+                    .filter((z) => reportZoneIds.has(z.id))
+                    .map((zone) => ({
+                      zone,
+                      analyses: savedAnalyses.filter((a) => a.zoneId === zone.id),
+                    }))
+                    .filter((s) => s.analyses.length > 0);
+                  const nombre = await generateVolumeReport(seleccion);
+                  notify.success("Informe generado", nombre);
+                  setReportOpen(false);
+                } catch {
+                  notify.error("No se pudo generar el informe", "Intenta nuevamente.");
+                } finally {
+                  setGeneratingReport(false);
+                }
+              }}
+            >
+              {generatingReport ? (
+                <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generando...</>
+              ) : (
+                <><FileText className="mr-2 h-4 w-4" /> Descargar PDF</>
+              )}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── HDU10 — evolución de una zona ── */}
+      <Dialog open={evolutionZone !== null} onOpenChange={(open) => !open && setEvolutionZone(null)}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Evolución de {evolutionZone?.name}</DialogTitle>
+            <DialogDescription>
+              Cómo cambió el volumen de esta zona entre sus distintas capturas.
+            </DialogDescription>
+          </DialogHeader>
+          {evolutionZone && (
+            <Suspense
+              fallback={
+                <div className="flex h-[13rem] items-center justify-center">
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                </div>
+              }
+            >
+              <ZoneEvolution
+                zone={evolutionZone}
+                analyses={savedAnalyses}
+                onOpenAnalysis={(id) => {
+                  setPendingOpenId(id);
+                  navigate({ to: "/analysis" });
+                }}
+              />
+            </Suspense>
+          )}
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={addZoneOpen} onOpenChange={setAddZoneOpen}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>

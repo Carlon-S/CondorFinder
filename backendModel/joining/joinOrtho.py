@@ -9,6 +9,30 @@ class TaskCancelledError(Exception):
     """Se lanza cuando la tarea de ODM fue cancelada (status CANCELED)."""
     pass
 
+
+def limpiar_salida_cruda(output_dir: str) -> None:
+    """Vacía la carpeta de salida de ODM conservando la carpeta en sí.
+
+    Se llama una vez rescatados el ortomosaico y los modelos de elevación. La
+    carpeta tiene que seguir existiendo porque la próxima corrida descarga ahí
+    sus assets.
+
+    No usa shutil.rmtree sobre la carpeta entera a propósito: borrarla y
+    recrearla cambiaría su dueño y sus permisos, y esta ruta está montada
+    desde el disco de la máquina hacia el contenedor.
+    """
+    if not os.path.isdir(output_dir):
+        return
+    for nombre in os.listdir(output_dir):
+        ruta = os.path.join(output_dir, nombre)
+        try:
+            if os.path.isdir(ruta):
+                shutil.rmtree(ruta, ignore_errors=True)
+            else:
+                os.remove(ruta)
+        except Exception as e:
+            print(f"No se pudo liberar {ruta}: {e}", file=sys.stderr)
+
 presetfast = {
         'orthophoto-resolution': 8,
         'fast-orthophoto': False,
@@ -134,6 +158,41 @@ def join(opc: int, on_task_created=None, on_progress=None) -> str:
 
 
     print(f"Orthomosaic guardado en ./finals/ortho_{task.uuid}.tif", file=sys.stderr)
+
+    # Los modelos de elevación se mueven junto al ortomosaico, con el mismo
+    # nombre por tarea. Antes se quedaban en output/odm_dem/, que es una
+    # carpeta COMPARTIDA que el siguiente vuelo sobrescribe: mientras el
+    # volumen se calculaba dentro del pipeline daba igual, porque se usaban
+    # de inmediato. Ahora que el cálculo ocurre después, desde la vista de
+    # análisis, un relieve compartido significaría medir un vuelo con el
+    # terreno de otro y devolver cifras incorrectas sin ningún error visible.
+    #
+    # Si ODM no los generó (no debería pasar: los dos presets piden dsm/dtm),
+    # se sigue adelante sin ellos y el análisis avisará que faltan, en vez de
+    # tumbar acá una unificación que sí salió bien.
+    for nombre in ("dsm", "dtm"):
+        origen = os.path.join(output_dir, "odm_dem", f"{nombre}.tif")
+        if os.path.exists(origen):
+            shutil.move(origen, os.path.join(final_dir, f"{nombre}_{task.uuid}.tif"))
+            print(f"{nombre.upper()} guardado en ./finals/{nombre}_{task.uuid}.tif", file=sys.stderr)
+        else:
+            print(f"Advertencia: ODM no generó {nombre}.tif", file=sys.stderr)
+
+    # Ya se rescató todo lo que el sistema usa: el ortomosaico y los dos
+    # modelos de elevación. Lo que queda en output/ es la salida cruda de ODM
+    # (modelo texturizado, nube de puntos, informe), que nada del sistema lee
+    # y que se medía en unos 100 MB por vuelo.
+    #
+    # Antes no se borraba nunca. Como ODM reescribe esta misma carpeta en cada
+    # corrida, no crecía sin techo, pero dejaba permanentemente ocupado el
+    # espacio de un vuelo completo. Limpiarla acá es lo que evita que esto sea
+    # mantención manual del servidor.
+    #
+    # Best-effort: si un borrado falla, la unificación ya terminó bien y no
+    # tiene por qué caerse por no poder liberar espacio.
+    limpiar_salida_cruda(output_dir)
+
+    print(f"Salida cruda de ODM liberada en {output_dir}", file=sys.stderr)
 
     """Probablmente este se tiene que cambiar al archivo en si en vez del nombre? Funciona asi pero podria ser nesesario"""
     return f"ortho_{task.uuid}.tif"

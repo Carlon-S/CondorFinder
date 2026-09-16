@@ -31,6 +31,51 @@ def obtener_datos_exif(ruta_imagen):
         return None, None
 
 
+def fecha_captura_set(ruta_carpeta):
+    """Fecha en que se capturó este set de imágenes, leída del EXIF.
+
+    Se asume que todas las fotos de una carga corresponden al mismo vuelo y
+    por lo tanto a la misma fecha, así que alcanza con la primera imagen que
+    traiga el dato. Se recorren las demás solo por si las primeras vienen sin
+    metadatos.
+
+    Es una función aparte, y no un valor más de obtener_datos_exif(), para no
+    cambiarle la firma a algo que se llama dos veces por cada par dentro del
+    bucle de solapamiento.
+
+    Devuelve la fecha en formato "YYYY-MM-DD HH:MM:SS" tal como la escribe el
+    EXIF, o None si ninguna imagen la trae. Quien llama decide el reemplazo:
+    el orquestador cae a la fecha de carga y la marca como estimada, porque
+    de esta fecha depende el orden de las versiones de una zona y un None
+    silencioso desordenaría la historia sin que nadie lo note.
+    """
+    imagenes = sorted(
+        glob.glob(os.path.join(ruta_carpeta, '*.jpg')) +
+        glob.glob(os.path.join(ruta_carpeta, '*.jpeg')) +
+        glob.glob(os.path.join(ruta_carpeta, '*.JPG')) +
+        glob.glob(os.path.join(ruta_carpeta, '*.JPEG'))
+    )
+
+    for ruta in imagenes:
+        try:
+            with open(ruta, 'rb') as img_file:
+                img = Image(img_file)
+            fecha = img.get('datetime_original') or img.get('datetime')
+            if fecha:
+                # El EXIF usa "YYYY:MM:DD HH:MM:SS"; los dos primeros dos
+                # puntos son separadores de fecha, no de hora.
+                texto = str(fecha).strip()
+                if len(texto) >= 10 and texto[4] == ':' and texto[7] == ':':
+                    texto = texto[:4] + '-' + texto[5:7] + '-' + texto[8:]
+                return texto
+        except Exception:
+            # Una imagen corrupta o sin bloque EXIF no debe cortar la
+            # búsqueda: puede que la siguiente sí tenga la fecha.
+            continue
+
+    return None
+
+
 def verificar_set_vuelo(ruta_carpeta, fov_horizontal=82.1, altitud_vuelo=50, umbral_min_solape=60):
     """
     Verifica si el conjunto de imágenes cumple el margen mínimo de solapamiento.

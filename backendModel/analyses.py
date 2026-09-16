@@ -69,9 +69,48 @@ class AnalysisSummaryModel(BaseModel):
     totalAreaM2: float
 
 
+class ZoneOut(BaseModel):
+    """Una zona geográfica seguida en el tiempo.
+
+    La zona es la que tiene nombre y persiste; lo que va cambiando son sus
+    versiones (cada vuelo) y, dentro de cada versión, sus análisis (cada
+    medición de volumen). Antes el nombre vivía en cada análisis guardado, lo
+    que hacía imposible hablar de "la misma zona" sin recorrer la cadena de
+    duplicados de HDU7 a mano.
+    """
+    id: str
+    owner: str
+    name: str
+    createdAt: datetime
+
+
+class ZoneIn(BaseModel):
+    name: str
+
+
 class SavedAnalysisIn(BaseModel):
     name: str
     mapUrl: str
+    # Zona a la que pertenece este análisis. Si no viene, el backend la
+    # resuelve: hereda la de la zona que HDU7 haya reconocido por huella del
+    # ortomosaico, o crea una nueva. Ver _resolve_zone().
+    zoneId: str | None = None
+    # Fecha en que se CAPTURARON las fotos (EXIF), no en que se guardó el
+    # análisis. Es la que ordena las versiones de una zona en el tiempo: dos
+    # vuelos se comparan por cuándo se voló el terreno, no por cuándo alguien
+    # se sentó a medirlos.
+    captureDate: datetime | None = None
+    # True cuando ninguna foto traía fecha y se cayó a la de carga. La
+    # interfaz lo advierte y permite corregirla, porque un EXIF malo
+    # desordenaría la historia de la zona sin que nadie lo note.
+    captureDateEstimated: bool = False
+    # Momento en que se subió el set. Solo se usa para desempatar dos
+    # versiones con la misma fecha de captura.
+    uploadedAt: datetime | None = None
+    # Con qué versión del algoritmo se calculó este volumen. Sin este sello,
+    # cuando SP2 mejore la precisión, un salto entre dos análisis sería
+    # indistinguible de un cambio real en el basural.
+    algorithmVersion: int | None = None
     # Miniatura liviana (orquestador.py::result_thumbnail_filename) para
     # vistas de lista/tarjeta — Optional porque los análisis guardados antes
     # de que existiera este campo no la tienen (mismo criterio que
@@ -108,6 +147,12 @@ class SavedAnalysisOut(SavedAnalysisIn):
     duplicateStatus: str | None = None
     historical: bool = False
     supersededBy: str | None = None
+    # Qué cambió respecto al análisis anterior de la MISMA versión:
+    # "primero", "seleccion", "algoritmo" o "sin-cambios". Lo calcula el
+    # backend al guardar. Sirve para que la evolución y el informe agrupen los
+    # análisis que repiten la misma cifra en vez de dibujar una línea plana
+    # que parece un error. Ver _describe_change().
+    changeKind: str | None = None
 
 
 def _object_id(analysis_id: str) -> ObjectId:
@@ -135,6 +180,12 @@ def _to_out(doc: dict) -> SavedAnalysisOut:
         duplicateStatus=doc.get("duplicateStatus"),
         historical=doc.get("historical", False),
         supersededBy=doc.get("supersededBy"),
+        zoneId=doc.get("zoneId"),
+        captureDate=doc.get("captureDate"),
+        captureDateEstimated=doc.get("captureDateEstimated", False),
+        uploadedAt=doc.get("uploadedAt"),
+        algorithmVersion=doc.get("algorithmVersion"),
+        changeKind=doc.get("changeKind"),
     )
 
 
@@ -246,6 +297,62 @@ async def _release_source_task(source_task_id: str | None) -> None:
         pass
 
 
+def _enabled_ids(detections: list[dict]) -> set:
+    """Ids de las detecciones marcadas como activas.
+
+    Una detección sin la marca cuenta como activa: así se comportan los
+    análisis guardados antes de que existiera, y es el mismo criterio de
+    compatibilidad que ya usan thumbnailUrl y orthoCenter.
+    """
+    return {d.get("id") for d in detections if d.get("enabled", True)}
+
+
+def _describe_change(nuevo: dict, anterior: dict | None) -> str:
+    """Qué cambió entre este análisis y el anterior de la misma versión.
+
+    Sobre un mismo vuelo, el volumen solo puede moverse por dos motivos: que
+    el trabajador haya cambiado qué detecciones deja activas, o que haya
+    cambiado el algoritmo de cálculo (SP2). Si no pasó ninguno de los dos, el
+    resultado es idéntico por construcción, y conviene decirlo en vez de
+    dibujar un punto más en el gráfico de evolución que parezca un dato nuevo.
+    """
+    if anterior is None:
+        return "primero"
+    if nuevo.get("algorithmVersion") != anterior.get("algorithmVersion"):
+        return "algoritmo"
+    if _enabled_ids(nuevo.get("detections", [])) != _enabled_ids(anterior.get("detections", [])):
+        return "seleccion"
+    return "sin-cambios"
+
+
+async def _resolve_zone(doc: dict, owner: str, duplicate_of: str | None) -> str:
+    """Devuelve el zoneId que le corresponde a este análisis.
+
+    Tres caminos, en orden:
+      1. El frontend lo mandó explícito (por ejemplo al analizar de nuevo una
+         versión que ya pertenece a una zona conocida).
+      2. HDU7 reconoció el terreno como una zona ya vista: se hereda la suya.
+         Es el mismo cálculo de superposición de huella que ya existía, solo
+         cambia que ahora también agrupa, no solo advierte.
+      3. No se parece a nada: nace una zona nueva, con el nombre que el
+         trabajador le puso al análisis.
+    """
+    if doc.get("zoneId"):
+        return doc["zoneId"]
+
+    if duplicate_of:
+        otro = await get_db().analyses.find_one({"_id": _object_id(duplicate_of)})
+        if otro and otro.get("zoneId"):
+            return otro["zoneId"]
+
+    zona = await get_db().zones.insert_one({
+        "owner": owner,
+        "name": doc.get("name") or "Zona sin nombre",
+        "createdAt": datetime.now(timezone.utc),
+    })
+    return str(zona.inserted_id)
+
+
 @router.post("", response_model=SavedAnalysisOut)
 async def create_analysis(
     payload: SavedAnalysisIn,
@@ -260,22 +367,48 @@ async def create_analysis(
         "historical": False,
         "supersededBy": None,
     }
-    result = await get_db().analyses.insert_one(doc)
-    doc["_id"] = result.inserted_id
-    await _release_source_task(payload.sourceTaskId)
 
     # AC1 — solo se dispara al crear un análisis NUEVO, nunca al sobrescribir
     # uno existente (update_analysis) — una sobrescritura es la misma zona
     # por definición, no hace falta volver a compararla contra las demás.
-    match = await _find_possible_duplicate(doc, exclude_id=result.inserted_id)
+    #
+    # Se compara ANTES de insertar (y no después, como antes) porque el
+    # resultado ahora decide también a qué zona pertenece el análisis, y esa
+    # decisión tiene que quedar escrita en el mismo documento que se inserta.
+    match = await _find_possible_duplicate(doc, exclude_id=None)
+    duplicate_of = None
     if match:
-        other_id, _ratio = match
-        await get_db().analyses.update_one(
-            {"_id": result.inserted_id},
-            {"$set": {"possibleDuplicateOf": other_id, "duplicateStatus": "pending"}},
+        duplicate_of, _ratio = match
+        # Un análisis nuevo del MISMO vuelo calza consigo mismo con
+        # superposición perfecta, porque comparten ortomosaico. Eso no es un
+        # duplicado de zona, es otra medición de la misma versión: sirve para
+        # heredar la zona, pero no debe levantar el aviso de "¿es la misma
+        # zona?" cada vez que alguien vuelve a medir.
+        otro = await get_db().analyses.find_one({"_id": _object_id(duplicate_of)})
+        mismo_vuelo = bool(
+            doc.get("sourceTaskId")
+            and otro
+            and otro.get("sourceTaskId") == doc["sourceTaskId"]
         )
-        doc["possibleDuplicateOf"] = other_id
-        doc["duplicateStatus"] = "pending"
+        if not mismo_vuelo:
+            doc["possibleDuplicateOf"] = duplicate_of
+            doc["duplicateStatus"] = "pending"
+
+    doc["zoneId"] = await _resolve_zone(doc, current_user.username, duplicate_of)
+
+    # Análisis anterior de ESTA MISMA versión, para saber qué cambió. La
+    # versión es la tarea de origen: un vuelo, un mapa unificado.
+    anterior = None
+    if doc.get("sourceTaskId"):
+        anterior = await get_db().analyses.find_one(
+            {"sourceTaskId": doc["sourceTaskId"]},
+            sort=[("savedAt", -1)],
+        )
+    doc["changeKind"] = _describe_change(doc, anterior)
+
+    result = await get_db().analyses.insert_one(doc)
+    doc["_id"] = result.inserted_id
+    await _release_source_task(payload.sourceTaskId)
 
     return _to_out(doc)
 
@@ -286,6 +419,84 @@ async def list_analyses(
 ):
     docs = await get_db().analyses.find().to_list(length=None)
     return [_to_out(d) for d in docs]
+
+
+# =============================================================================
+# ZONAS — la identidad que persiste entre vuelos
+# Van en este mismo router (prefijo /analyses) y no en uno aparte porque una
+# zona no existe sin análisis: se crea al guardar el primero y se consulta
+# siempre junto a ellos, igual que HDU7 vive acá y no en su propio módulo.
+# =============================================================================
+
+@router.get("/zones/all", response_model=list[ZoneOut])
+async def list_zones(
+    current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
+):
+    """La ruta es /zones/all y no /zones porque /{analysis_id} ya captura
+    cualquier segmento suelto: sin el segundo tramo, FastAPI resolvería
+    /analyses/zones como "el análisis con id 'zones'"."""
+    docs = await get_db().zones.find().to_list(length=None)
+    return [
+        ZoneOut(
+            id=str(d["_id"]),
+            owner=d["owner"],
+            name=d["name"],
+            createdAt=d["createdAt"],
+        )
+        for d in docs
+    ]
+
+
+@router.put("/zones/{zone_id}", response_model=ZoneOut)
+async def rename_zone(
+    zone_id: str,
+    payload: ZoneIn,
+    current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
+):
+    doc = await get_db().zones.find_one_and_update(
+        {"_id": _object_id(zone_id)},
+        {"$set": {"name": payload.name}},
+        return_document=ReturnDocument.AFTER,
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="Zona no encontrada")
+    return ZoneOut(id=str(doc["_id"]), owner=doc["owner"], name=doc["name"], createdAt=doc["createdAt"])
+
+
+@router.post("/versions/{source_task_id}/reassign")
+async def reassign_version(
+    source_task_id: str,
+    payload: ZoneIn | None = None,
+    current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
+):
+    """Mueve una versión completa (todos los análisis de un mismo vuelo) a otra
+    zona, o la separa en una zona propia si se manda un nombre.
+
+    Existe porque agrupar por HDU7 es una heurística: compara la huella del
+    ortomosaico y puede equivocarse, y hasta ahora una confirmación errónea
+    solo escondía un registro bajo "Historial". Con el modelo de zonas esa
+    misma equivocación fusiona dos historias de forma permanente, así que
+    tiene que haber forma de deshacerla.
+
+    Se mueve la versión entera y no un análisis suelto: todos los análisis de
+    un mismo vuelo miden el mismo terreno, no tiene sentido que queden
+    repartidos entre zonas distintas.
+    """
+    if payload and payload.name:
+        zona = await get_db().zones.insert_one({
+            "owner": current_user.username,
+            "name": payload.name,
+            "createdAt": datetime.now(timezone.utc),
+        })
+        destino = str(zona.inserted_id)
+    else:
+        raise HTTPException(status_code=400, detail="Falta el nombre de la zona de destino")
+
+    result = await get_db().analyses.update_many(
+        {"sourceTaskId": source_task_id},
+        {"$set": {"zoneId": destino}},
+    )
+    return {"status": "ok", "zoneId": destino, "movidos": result.modified_count}
 
 
 @router.get("/{analysis_id}", response_model=SavedAnalysisOut)

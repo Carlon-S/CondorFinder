@@ -2,5 +2,11 @@ packages:
   - "."
 
 allowBuilds:
+  # core-js llegó como dependencia transitiva de jspdf-autotable (HDU9). Su
+  # script de postinstall solo imprime un mensaje pidiendo financiamiento: no
+  # compila nada ni hace falta para el build, así que queda en false. pnpm
+  # dejó acá un marcador pendiente al instalarlo y, sin resolverlo, el build
+  # falla antes de empezar.
+  core-js: false
   esbuild: false
   workerd: true
