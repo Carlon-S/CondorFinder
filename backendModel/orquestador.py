@@ -328,7 +328,27 @@ def run_pipeline(task_id: str, opc: int):
                 except Exception:
                     pass
 
-        filename = joinOrtho.join(opc, on_task_created=on_odm_task_created)
+        # Progreso real de ODM (0-100) guardado en el documento de la tarea,
+        # para que /status/{task_id} lo exponga y la barra del frontend avance
+        # de verdad durante la unificación en vez de quedarse en un valor fijo.
+        # Se escribe solo cuando cambia en al menos un punto porcentual: el
+        # sondeo es cada 10s, pero ODM puede repetir el mismo número varias
+        # veces seguidas y no tiene sentido escribir en Mongo por eso.
+        ultimo_reportado = [-1.0]
+
+        def on_odm_progress(pct: float):
+            pct = max(0.0, min(100.0, pct))
+            if abs(pct - ultimo_reportado[0]) < 1.0:
+                return
+            ultimo_reportado[0] = pct
+            task_store.update_task_sync(task_id, stage_progress=pct)
+
+        task_store.update_task_sync(task_id, stage_progress=0.0)
+        filename = joinOrtho.join(
+            opc,
+            on_task_created=on_odm_task_created,
+            on_progress=on_odm_progress,
+        )
         fileplace = os.path.join(FINALS_DIR, filename)
 
         if task_store.get_task_sync(task_id).get("cancel_requested"):
@@ -644,6 +664,15 @@ async def get_status(task_id: str):
         "status": task["status"],
         "message": task["message"],
     }
+
+    # Progreso real de la etapa en curso (0-100). Hoy solo lo reporta la
+    # unificación con ODM, que es la fase larga; el resto de las etapas no
+    # tiene un avance medible y el frontend las trata como bloques. Se omite
+    # cuando no hay dato en vez de mandar un 0 que la barra leería como
+    # "recién empezando".
+    stage_progress = task.get("stage_progress")
+    if task["status"] == "joining" and stage_progress is not None:
+        response["stage_progress"] = float(stage_progress)
 
     if task["status"] == "done" and task["result_filename"]:
         response["result_url"] = f"{PUBLIC_BASE_URL}/result/{task['result_filename']}"

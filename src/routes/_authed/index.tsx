@@ -649,7 +649,7 @@ function MainPage() {
             {inProgressCount > 0 && (
               <div className="flex flex-shrink-0 items-center gap-2 px-5 py-3.5">
                 <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-primary" />
-                <span className="text-[11px] font-medium uppercase tracking-wide text-primary/80">
+                <span className="text-[0.6875rem] font-medium uppercase tracking-wide text-primary/80">
                   {inProgressCount} en vivo
                 </span>
               </div>
@@ -667,7 +667,7 @@ function MainPage() {
             </div>
 
             {/* Búsqueda por nombre de zona — centrada entre el título y los filtros */}
-            <div className="flex min-w-[240px] flex-1 justify-center">
+            <div className="flex min-w-[15rem] flex-1 justify-center">
               <div className="relative w-full max-w-md">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -702,14 +702,14 @@ function MainPage() {
               <Table>
                 <TableHeader>
                   <TableRow className="bg-muted/50 hover:bg-muted/50">
-                    <TableHead className="w-[120px]"></TableHead>
+                    <TableHead className="w-[7.5rem]"></TableHead>
                     <TableHead>Zona</TableHead>
                     <TableHead>Fecha</TableHead>
                     <TableHead className="text-right">Volumen</TableHead>
                     <TableHead className="text-right">Peso</TableHead>
                     <TableHead className="text-right">Área</TableHead>
                     <TableHead className="text-right"></TableHead>
-                    <TableHead className="w-[44px]"></TableHead>
+                    <TableHead className="w-[2.75rem]"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -733,14 +733,14 @@ function MainPage() {
               <Table>
                 <TableHeader>
                   <TableRow className="bg-muted/50 hover:bg-muted/50">
-                    <TableHead className="w-[120px]"></TableHead>
+                    <TableHead className="w-[7.5rem]"></TableHead>
                     <TableHead>Zona</TableHead>
                     <SortableHead field="fecha" label="Fecha" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} />
                     <SortableHead field="volumen" label="Volumen" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="right" />
                     <SortableHead field="peso" label="Peso" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="right" />
                     <SortableHead field="area" label="Área" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="right" />
                     <TableHead className="text-right"></TableHead>
-                    <TableHead className="w-[44px]"></TableHead>
+                    <TableHead className="w-[2.75rem]"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -781,7 +781,7 @@ function MainPage() {
                         {z.name}
                         {z.state !== "done" && (
                           <span
-                            className={`ml-2 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${
+                            className={`ml-2 rounded px-1.5 py-0.5 text-[0.5625rem] font-semibold uppercase tracking-wide ${
                               z.state === "in_progress"
                                 ? "bg-primary/15 text-primary"
                                 : "bg-warning/15 text-warning"
@@ -791,14 +791,14 @@ function MainPage() {
                           </span>
                         )}
                         {z.historical && (
-                          <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[0.5625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                             Histórico
                           </span>
                         )}
                         {/* HDU7/AC3 — solo tiene sentido bajo el filtro "Historial", los
                             demás filtros ya excluyen las filas históricas. */}
                         {z.historical && z.supersededByName && (
-                          <p className="mt-0.5 text-[10px] font-normal text-muted-foreground">
+                          <p className="mt-0.5 text-[0.625rem] font-normal text-muted-foreground">
                             Reemplazado por: {z.supersededByName}
                           </p>
                         )}
@@ -905,7 +905,7 @@ function MainPage() {
                 <ChartLineUp className="h-7 w-7" />
               </span>
               <span className="text-sm font-semibold text-foreground">Modificar zona existente</span>
-              <span className="rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide bg-warning/15 text-warning">
+              <span className="rounded px-1.5 py-0.5 text-[0.5625rem] font-semibold uppercase tracking-wide bg-warning/15 text-warning">
                 Próximamente
               </span>
             </div>
@@ -941,7 +941,7 @@ function Kpi({ icon, label, value }: { icon: React.ReactNode; label: string; val
     <div className="flex flex-1 items-center gap-3 px-5 py-4">
       <span className="text-foreground/70 flex-shrink-0">{icon}</span>
       <div className="min-w-0">
-        <p className="text-[10px] text-muted-foreground leading-none mb-1.5">{label}</p>
+        <p className="text-[0.625rem] text-muted-foreground leading-none mb-1.5">{label}</p>
         <p className="mono text-xl font-bold tabular-nums leading-none md:text-2xl">{value}</p>
       </div>
     </div>

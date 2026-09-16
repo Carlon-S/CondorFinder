@@ -978,7 +978,7 @@ function AnalysisPage() {
                   <p className="text-xs font-medium">{statusLabel[status]}</p>
                 </div>
                 <Progress value={progress} className="mt-2.5 h-1" />
-                <p className="mt-1 text-[10px] text-muted-foreground">{progress}% completado</p>
+                <p className="mt-1 text-[0.625rem] text-muted-foreground">{progress}% completado</p>
               </div>
             </div>
 
@@ -1037,7 +1037,7 @@ function AnalysisPage() {
                     {displayDetections.length > 0 && (
                       <button
                         onClick={toggleAll}
-                        className="text-[10px] text-primary hover:underline"
+                        className="text-[0.625rem] text-primary hover:underline"
                       >
                         {allEnabled ? "Desactivar todas" : "Activar todas"}
                       </button>
@@ -1051,7 +1051,7 @@ function AnalysisPage() {
                       ))}
                     </div>
                   ) : displayDetections.length > 0 ? (
-                    <ul className="space-y-1.5 max-h-[340px] overflow-y-auto pr-0.5">
+                    <ul className="space-y-1.5 max-h-[21.25rem] overflow-y-auto pr-0.5">
                       {displayDetections.map(d => {
                         const enabled = enabledIds.has(d.id);
                         const color   = classColor(d.class);
@@ -1086,7 +1086,7 @@ function AnalysisPage() {
                                     // Zona fusionada — resumen promedio + desglose por tipo
                                     <div className="mt-1.5 space-y-1.5">
                                       <div className="rounded border border-primary/30 bg-primary/10 px-1.5 py-1">
-                                        <p className="mono text-[8px] font-semibold uppercase tracking-wider text-primary mb-1">
+                                        <p className="mono text-[0.5rem] font-semibold uppercase tracking-wider text-primary mb-1">
                                           Promedio
                                         </p>
                                         <div className="grid grid-cols-3 gap-1">
@@ -1102,7 +1102,7 @@ function AnalysisPage() {
                                               className="h-2 w-2 rounded-sm flex-shrink-0"
                                               style={{ background: classColor(b.class) }}
                                             />
-                                            <p className="text-[9px] font-semibold text-muted-foreground truncate">
+                                            <p className="text-[0.5625rem] font-semibold text-muted-foreground truncate">
                                               {b.class}
                                             </p>
                                           </div>
@@ -1122,7 +1122,7 @@ function AnalysisPage() {
                                     </div>
                                   )
                                 ) : (
-                                  <p className="mono text-[10px] text-muted-foreground mt-0.5">
+                                  <p className="mono text-[0.625rem] text-muted-foreground mt-0.5">
                                     {status === "done" ? "Sin datos de volumen" : "Pendiente de análisis"}
                                   </p>
                                 )}
@@ -1334,11 +1334,11 @@ function AnalysisPage() {
               </div>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">{duplicateExisting.name}</p>
-                <p className="text-[10px] text-muted-foreground mb-1.5">
+                <p className="text-[0.625rem] text-muted-foreground mb-1.5">
                   Guardado el {new Date(duplicateExisting.savedAt).toLocaleString("es-CL")}
                 </p>
                 {duplicateExisting.summary && (
-                  <div className="flex gap-2 text-[10px] text-muted-foreground">
+                  <div className="flex gap-2 text-[0.625rem] text-muted-foreground">
                     <span>{duplicateExisting.summary.totalVolumeM3} m³</span>
                     <span>·</span>
                     <span>{duplicateExisting.summary.totalWeightKg} kg</span>
@@ -1387,7 +1387,7 @@ function Metric({ label, value, icon }: { label: string; value: string; icon: Re
   return (
     <div className="rounded-lg bg-background/60 px-3 py-3">
       <div className="mb-2.5 text-primary/65 [&_svg]:h-4 [&_svg]:w-4">{icon}</div>
-      <p className="text-[10px] text-muted-foreground leading-none mb-1">{label}</p>
+      <p className="text-[0.625rem] text-muted-foreground leading-none mb-1">{label}</p>
       <p className="text-base font-bold tabular-nums">{value}</p>
     </div>
   );
@@ -1396,8 +1396,8 @@ function Metric({ label, value, icon }: { label: string; value: string; icon: Re
 function StatBadge({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded bg-background/80 px-1.5 py-1 text-center">
-      <p className="mono text-[8px] uppercase tracking-wider text-muted-foreground">{label}</p>
-      <p className="mono text-[10px] font-semibold tabular-nums leading-tight">{value}</p>
+      <p className="mono text-[0.5rem] uppercase tracking-wider text-muted-foreground">{label}</p>
+      <p className="mono text-[0.625rem] font-semibold tabular-nums leading-tight">{value}</p>
     </div>
   );
 }

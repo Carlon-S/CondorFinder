@@ -153,7 +153,7 @@ export function ResourcesSummaryPanel({ points, className, loading }: ResourcesS
                         <AccordionPrimitive.Content className="overflow-hidden text-sm data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down">
                           <div className="space-y-1 py-1 pb-2 pl-9">
                             {(key === "trucks" ? point.trucks : point.tolvas).map((unit, i) => (
-                              <p key={i} className="text-[11px] text-muted-foreground">
+                              <p key={i} className="text-[0.6875rem] text-muted-foreground">
                                 {key === "trucks" ? "Camión" : "Tolva"} {i + 1} — {unit.capacity_m3} m³
                               </p>
                             ))}

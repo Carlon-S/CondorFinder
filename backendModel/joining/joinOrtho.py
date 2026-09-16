@@ -30,7 +30,7 @@ presethigh = {
         'dsm': True,
     }
 
-def join(opc: int, on_task_created=None) -> str:
+def join(opc: int, on_task_created=None, on_progress=None) -> str:
 
     output_dir = os.path.join(BASE_DIR, "output")
     os.makedirs(output_dir, exist_ok=True)
@@ -82,8 +82,23 @@ def join(opc: int, on_task_created=None) -> str:
     if on_task_created:
         on_task_created(task)
 
+    # NodeODM reporta su propio porcentaje estimado (TaskInfo.progress, 0-100)
+    # y pyodm lo entrega en cada sondeo a través de status_callback. Esta es la
+    # fase larga del pipeline, así que es la única con progreso real que vale
+    # la pena mostrar: sin esto el frontend solo podía saltar de un número fijo
+    # al siguiente al cambiar de etapa.
+    # El callback nunca debe reventar la unificación: si falla al guardar el
+    # avance (Mongo caído, por ejemplo) se ignora y ODM sigue trabajando.
+    def _report(info):
+        if on_progress is None:
+            return
+        try:
+            on_progress(float(getattr(info, "progress", 0.0) or 0.0))
+        except Exception:
+            pass
+
     try:
-        task.wait_for_completion(interval=10)
+        task.wait_for_completion(status_callback=_report, interval=10)
     except Exception as wait_err:
         # pyodm lanza su propia excepción cuando la tarea no termina en
         # COMPLETED (incluyendo cuando se cancela) — antes de asumir que es

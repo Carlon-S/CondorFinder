@@ -286,6 +286,32 @@ function Page() {
   });
 
   const [backendStage, setBackendStage] = useState<"checking_overlap" | "joining" | "detecting" | null>(null);
+  /**
+   * Avance real de la etapa en curso (0-100), o null si esa etapa no lo
+   * reporta. Hoy solo lo entrega la unificación, donde es el porcentaje que
+   * calcula NodeODM. El chequeo de solapamiento es corto y la detección con
+   * YOLO/SAHI no publica avance, así que ahí se muestra la fase sin número:
+   * un porcentaje inventado es peor que no mostrar ninguno.
+   */
+  const [stageProgress, setStageProgress] = useState<number | null>(null);
+
+  /**
+   * Traduce la etapa del backend (y su avance interno, cuando lo hay) al
+   * 0-100 global que consume el stepper. Los cortes son los mismos `reach` de
+   * cada paso: 25 cierra "Cantidad mínima", 45 "Solapamiento", 75
+   * "Generación de mapa" y 100 "Detección".
+   */
+  function progresoDeEtapa(
+    stage: "checking_overlap" | "joining" | "detecting",
+    avance: number | null,
+  ): number {
+    if (stage === "checking_overlap") return 35;
+    if (stage === "joining") {
+      // 45 a 75 mapeado sobre el porcentaje real de ODM.
+      return avance === null ? 45 : 45 + (Math.max(0, Math.min(100, avance)) / 100) * 30;
+    }
+    return 85;
+  }
 
   const navigate = useNavigate();
 
@@ -442,10 +468,11 @@ function Page() {
       setProgress(40);
     }
 
-    pollTask(savedTaskId, (stage) => {
+    pollTask(savedTaskId, (stage, avance) => {
       setBackendStage(stage);
       saveBackendStage(stage);
-      setProgress(stage === "checking_overlap" ? 45 : stage === "joining" ? 60 : 75);
+      setStageProgress(avance);
+      setProgress(progresoDeEtapa(stage, avance));
     }, controller.signal).then((res) => {
       if (res.status === "error" && res.reason === "cancelled") {
         clearBackendStage();
@@ -493,6 +520,10 @@ function Page() {
       }
       setProgress(100);
       setPhase("done"); savePhase("done");
+      // Reemplaza a la franja fija de "Mapa generado exitosamente" que vivía
+      // bajo el mapa: el aviso aparece una vez y el mapa se queda con todo el
+      // alto del panel.
+      notify.success("Mapa generado exitosamente");
     }).catch((err: unknown) => {
       if (err instanceof DOMException && err.name === "AbortError") return;
       clearTaskId();
@@ -850,10 +881,11 @@ function Page() {
     clearBackendStage();
 
     try {
-      const res = await unifyImages(validFiles, { precise: modelPrecise }, (stage) => {
+      const res = await unifyImages(validFiles, { precise: modelPrecise }, (stage, avance) => {
         setBackendStage(stage);
         saveBackendStage(stage);
-        setProgress(stage === "checking_overlap" ? 45 : stage === "joining" ? 60 : 75);
+        setStageProgress(avance);
+        setProgress(progresoDeEtapa(stage, avance));
       }, (taskId) => {
         saveTaskId(taskId);
       });
@@ -902,6 +934,9 @@ function Page() {
       setProgress(100);
       setPhase("done"); savePhase("done");
       clearBackendStage();
+      // Ver el comentario del otro setPhase("done"): el aviso de éxito es un
+      // toast, ya no una franja fija bajo el mapa.
+      notify.success("Mapa generado exitosamente");
 
     } catch {
       clearTaskId(); clearBackendStage();
@@ -999,10 +1034,29 @@ function Page() {
     uploadProgress !== null ? "Subiendo imágenes al servidor"
     : activeIndex === -1 ? null
     : getPhaseLabel(phase, backendStage, cancelling);
+
+  /**
+   * El porcentaje se muestra SOLO cuando es un dato real: la subida (que mide
+   * bytes enviados) y la unificación (que reporta NodeODM). Durante el chequeo
+   * de solapamiento y la detección no hay avance publicado, así que no se
+   * escribe ningún número. Antes se mostraba el valor interno de la barra
+   * global, que era un 60 y un 75 fijos y daba la impresión de estar trabado.
+   */
   const activePercent =
     uploadProgress !== null ? uploadProgress
-    : runningIndex !== -1 ? progress
+    : backendStage === "joining" && stageProgress !== null ? Math.round(stageProgress)
     : null;
+
+  /**
+   * Tramo animado en vez de relleno: cuando el paso en curso pertenece a una
+   * etapa sin avance medible, la línea que llega a él recorre en loop para
+   * mostrar actividad sin afirmar cuánto falta.
+   */
+  const indeterminateAt =
+    uploadProgress !== null ? -1
+    : runningIndex === -1 ? -1
+    : backendStage === "joining" && stageProgress !== null ? -1
+    : runningIndex;
 
   /**
    * Estado del tooltip del boton principal.
@@ -1123,7 +1177,7 @@ function Page() {
               <p className="mt-1 text-xs text-muted-foreground">
                 {processing ? "Espera a que termine o cancélalo para poder modificar el set." : "o haz clic para seleccionar desde tu equipo"}
               </p>
-              <p className="mt-3 text-[10px] text-muted-foreground/60">Solo JPG · JPEG · Mínimo {MIN_IMAGES} imágenes</p>
+              <p className="mt-3 text-[0.625rem] text-muted-foreground/60">Solo JPG · JPEG · Mínimo {MIN_IMAGES} imágenes</p>
               <input ref={inputRef} type="file" accept="image/jpeg,.jpg,.jpeg" multiple className="hidden"
                 disabled={uploading || processing}
                 onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }}
@@ -1140,17 +1194,17 @@ function Page() {
                 <div className="scan-line relative h-20 w-20 overflow-hidden rounded-md border border-primary/40 bg-primary/10">
                   <Loader2 className="absolute left-1/2 top-1/2 h-7 w-7 -translate-x-1/2 -translate-y-1/2 animate-spin text-primary" />
                 </div>
-                <p className="text-[11px] font-semibold text-primary">Subiendo imágenes al servidor...</p>
+                <p className="text-[0.6875rem] font-semibold text-primary">Subiendo imágenes al servidor...</p>
               </div>
             )}
 
             <div className="flex items-center justify-between">
               <PanelHeader icon={<ImageIcon className="h-3.5 w-3.5" />} title="Imágenes adjuntas">
-                <p className="text-[10px] text-muted-foreground ml-2">{validCount} JPG · {invalidCount} rechazadas</p>
+                <p className="text-[0.625rem] text-muted-foreground ml-2">{validCount} JPG · {invalidCount} rechazadas</p>
               </PanelHeader>
               <div className="flex items-center gap-2">
                 {skippedCount > 0 && (
-                  <p className="text-[10px] rounded px-2 py-0.5 bg-warning/15 text-warning border border-warning/20">
+                  <p className="text-[0.625rem] rounded px-2 py-0.5 bg-warning/15 text-warning border border-warning/20">
                     {skippedCount} omitido(s) — nombre duplicado
                   </p>
                 )}
@@ -1192,7 +1246,7 @@ function Page() {
                         </button>
                       </div>
                       <div className="min-w-0 p-2">
-                        <p className="truncate text-[10px] font-medium" title={it.file.name}>{it.file.name}</p>
+                        <p className="truncate text-[0.625rem] font-medium" title={it.file.name}>{it.file.name}</p>
                       </div>
                     </li>
                   ))}
@@ -1252,7 +1306,7 @@ function Page() {
                 tooltipState.color === "warning" ? "opacity-100 scale-100 pointer-events-auto"
                 : "scale-95 opacity-0 group-hover:scale-100 group-hover:opacity-100 pointer-events-none"
               } z-50`}>
-                <div className={`relative rounded-md p-2.5 text-[11px] font-medium shadow-xl ${
+                <div className={`relative rounded-md p-2.5 text-[0.6875rem] font-medium shadow-xl ${
                   tooltipState.color === "empty" ? "bg-secondary text-secondary-foreground"
                   : tooltipState.color === "warning" ? "bg-warning text-warning-foreground"
                   : tooltipState.color === "destructive" ? "bg-destructive text-destructive-foreground"
@@ -1387,7 +1441,7 @@ function Page() {
               ) : (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-muted-foreground">
                   <MapIcon className="h-12 w-12 opacity-30" />
-                  <p className="mono text-[11px] uppercase tracking-wider">El mapa aparecerá aquí</p>
+                  <p className="mono text-[0.6875rem] uppercase tracking-wider">El mapa aparecerá aquí</p>
                   <p className="text-xs opacity-60">Carga imágenes y presiona Generar mapa unificado</p>
                 </div>
               )}
@@ -1401,11 +1455,10 @@ function Page() {
               </div>
             )}
 
-            {phase === "done" && (
-              <div className="flex items-center justify-end gap-2 px-4 py-2.5 border-t border-border/30 bg-success/5">
-                <p className="text-xs text-success font-semibold">Mapa generado exitosamente</p>
-              </div>
-            )}
+            {/* El aviso de éxito era una franja fija acá abajo que le comía
+                alto a la imagen del mapa de forma permanente. Ahora se avisa
+                con un toast (ver el efecto de más arriba): se ve una vez,
+                cuando de verdad importa, y el mapa recupera ese espacio. */}
           </section>
 
           {/* Misma fila de acción que la slice de carga, para que las dos
@@ -1452,20 +1505,21 @@ function Page() {
             activeIndex={activeIndex}
             activeLabel={activeLabel}
             activePercent={activePercent}
+            indeterminateAt={indeterminateAt}
           />
 
           {overlapDetail.length > 0 && (
             <div className="mt-4 rounded-lg border border-destructive/40 bg-destructive/10 p-3 space-y-2">
-              <p className="text-[10px] font-semibold text-destructive">Pares en conflicto ({overlapDetail.length})</p>
-              <ul className="space-y-1.5 max-h-[140px] overflow-y-auto pr-1">
+              <p className="text-[0.625rem] font-semibold text-destructive">Pares en conflicto ({overlapDetail.length})</p>
+              <ul className="space-y-1.5 max-h-[8.75rem] overflow-y-auto pr-1">
                 {overlapDetail.map((pair, i) => (
                   <li key={i} className="rounded border border-destructive/20 bg-background/40 px-2 py-1.5">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="mono text-[10px] font-semibold text-destructive">{pair.solape}%</span>
-                      <span className="mono text-[9px] text-muted-foreground">{pair.distancia_m} m</span>
+                      <span className="mono text-[0.625rem] font-semibold text-destructive">{pair.solape}%</span>
+                      <span className="mono text-[0.5625rem] text-muted-foreground">{pair.distancia_m} m</span>
                     </div>
-                    <p className="mono text-[9px] text-muted-foreground truncate mt-0.5" title={pair.imagen_1}>{pair.imagen_1}</p>
-                    <p className="mono text-[9px] text-muted-foreground truncate" title={pair.imagen_2}>{pair.imagen_2}</p>
+                    <p className="mono text-[0.5625rem] text-muted-foreground truncate mt-0.5" title={pair.imagen_1}>{pair.imagen_1}</p>
+                    <p className="mono text-[0.5625rem] text-muted-foreground truncate" title={pair.imagen_2}>{pair.imagen_2}</p>
                   </li>
                 ))}
               </ul>
@@ -1540,7 +1594,7 @@ function MetaCell({ label, value, tone }: { label: string; value: string; tone?:
   const color = tone === "ok" ? "text-success" : tone === "error" ? "text-destructive" : "text-foreground/80";
   return (
     <div className="px-3 py-2">
-      <p className="text-[10px] text-muted-foreground leading-none mb-1">{label}</p>
+      <p className="text-[0.625rem] text-muted-foreground leading-none mb-1">{label}</p>
       <p className={`text-xs font-semibold truncate ${color}`}>{value}</p>
     </div>
   );
@@ -1629,6 +1683,7 @@ function Stepper({
   activeIndex,
   activeLabel,
   activePercent,
+  indeterminateAt,
 }: {
   steps: StepDef[];
   progress: number;
@@ -1636,6 +1691,9 @@ function Stepper({
   activeIndex: number;
   activeLabel: string | null;
   activePercent: number | null;
+  /** Paso en curso cuya etapa no reporta avance: el tramo que llega a él se
+   *  anima en vez de llenarse con un porcentaje que no existe. -1 si no aplica. */
+  indeterminateAt: number;
 }) {
   return (
     <ol className="flex items-start">
@@ -1655,9 +1713,17 @@ function Stepper({
                 avance) y la derecha después (de 50% a 100%). Sin este
                 reparto cada mitad se llenaba desde su propio borde y a medio
                 camino la línea quedaba cortada en el medio. */}
-            <StepSegment fill={i === 0 ? 0 : Math.max(0, segmentFill(steps, i - 1, progress) * 2 - 1)} hidden={i === 0} />
+            <StepSegment
+              fill={i === 0 ? 0 : Math.max(0, segmentFill(steps, i - 1, progress) * 2 - 1)}
+              hidden={i === 0}
+              indeterminate={indeterminateAt === i}
+            />
             <StepCircle number={i + 1} state={step.state} />
-            <StepSegment fill={Math.min(1, segmentFill(steps, i, progress) * 2)} hidden={i === steps.length - 1} />
+            <StepSegment
+              fill={Math.min(1, segmentFill(steps, i, progress) * 2)}
+              hidden={i === steps.length - 1}
+              indeterminate={indeterminateAt === i + 1}
+            />
           </div>
           <span className={`mt-2 max-w-[6.5rem] text-center text-[0.69rem] font-semibold leading-tight ${stepLabelColor(step.state)}`}>
             {step.label}
@@ -1690,13 +1756,16 @@ function Stepper({
  * avance lo resuelva el compositor y no dispare layout en cada actualización
  * del polling.
  */
-function StepSegment({ fill, hidden }: { fill: number; hidden?: boolean }) {
+function StepSegment({ fill, hidden, indeterminate }: { fill: number; hidden?: boolean; indeterminate?: boolean }) {
   if (hidden) return <div className="h-0.5 flex-1 bg-transparent" />;
   return (
-    <div className="relative h-0.5 flex-1 overflow-hidden rounded-full bg-border">
+    <div className={`relative h-0.5 flex-1 overflow-hidden rounded-full bg-border ${indeterminate ? "step-indeterminate" : ""}`}>
       <div
         className="absolute inset-0 origin-left rounded-full bg-success transition-transform duration-500 ease-out"
-        style={{ transform: `scaleX(${fill})` }}
+        // En un tramo indeterminado el relleno va en cero a propósito: el
+        // valor que se calcularía viene del punto medio del rango de esa
+        // etapa, o sea un número inventado. Ahí solo corre el barrido.
+        style={{ transform: `scaleX(${indeterminate ? 0 : fill})` }}
       />
     </div>
   );

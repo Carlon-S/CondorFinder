@@ -71,7 +71,7 @@ export function AppSidebar() {
         <Link
           to="/"
           className={`overflow-hidden transition-[max-width,opacity] duration-300 ease-in-out hover:scale-[1.02] ${
-            collapsed ? "max-w-0 opacity-0" : "max-w-[160px] opacity-100"
+            collapsed ? "max-w-0 opacity-0" : "max-w-[10rem] opacity-100"
           }`}
         >
           <img src={logo} alt="CondorFinder" className="h-11 w-auto" />
@@ -111,7 +111,7 @@ export function AppSidebar() {
                   desvanece en vez de desaparecer de golpe. */}
               <span
                 className={`overflow-hidden whitespace-nowrap transition-[max-width,opacity] duration-300 ease-in-out ${
-                  collapsed ? "max-w-0 opacity-0" : "max-w-[160px] opacity-100"
+                  collapsed ? "max-w-0 opacity-0" : "max-w-[10rem] opacity-100"
                 }`}
               >
                 {label}
@@ -139,7 +139,7 @@ export function AppSidebar() {
           <span
             title={collapsed ? user.username : undefined}
             className={`overflow-hidden truncate whitespace-nowrap text-sm font-medium transition-[max-width,opacity] duration-300 ease-in-out ${
-              collapsed ? "max-w-0 opacity-0" : "max-w-[160px] opacity-100"
+              collapsed ? "max-w-0 opacity-0" : "max-w-[10rem] opacity-100"
             }`}
           >
             {user.username}
@@ -157,7 +157,7 @@ export function AppSidebar() {
           <LogOut className="h-4 w-4 flex-shrink-0" />
           <span
             className={`overflow-hidden whitespace-nowrap transition-[max-width,opacity] duration-300 ease-in-out ${
-              collapsed ? "max-w-0 opacity-0" : "max-w-[160px] opacity-100"
+              collapsed ? "max-w-0 opacity-0" : "max-w-[10rem] opacity-100"
             }`}
           >
             Cerrar sesión

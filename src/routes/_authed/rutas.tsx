@@ -693,7 +693,7 @@ function RutasPage() {
                         />
                         <span className="min-w-0 flex-1 truncate">
                           {a.name}
-                          <span className="ml-1 text-[10px] font-normal text-muted-foreground">
+                          <span className="ml-1 text-[0.625rem] font-normal text-muted-foreground">
                             ({a.detections.length})
                           </span>
                         </span>
@@ -754,7 +754,7 @@ function RutasPage() {
                       key={s.order}
                       className="flex items-center gap-2 rounded-md border border-border/60 bg-background/60 p-2 text-sm"
                     >
-                      <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary">
+                      <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-primary/15 text-[0.625rem] font-semibold text-primary">
                         {s.order}
                       </span>
                       <span className="min-w-0 flex-1 truncate">{s.label}</span>
@@ -792,7 +792,7 @@ function RutasPage() {
               derecha -- el control de zoom de Leaflet vive arriba a la
               izquierda, así no compiten por el mismo espacio. */}
           {routeSegments && routeSegments.length > 0 && (
-            <div className="pointer-events-none absolute right-3 top-3 z-[1000] max-w-[240px] rounded-lg border border-border/60 bg-background/90 p-3 text-xs shadow-lg backdrop-blur">
+            <div className="pointer-events-none absolute right-3 top-3 z-[1000] max-w-[15rem] rounded-lg border border-border/60 bg-background/90 p-3 text-xs shadow-lg backdrop-blur">
               <p className="mb-2 font-semibold text-foreground">Ruta generada</p>
               <div className="space-y-1.5">
                 <div className="flex items-center gap-2">
@@ -899,17 +899,17 @@ function RutasPage() {
                     <MapPin className="h-3.5 w-3.5 flex-shrink-0 text-primary/70" />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium">{record.name}</p>
-                      <p className="text-[10px] text-muted-foreground">
+                      <p className="text-[0.625rem] text-muted-foreground">
                         {new Date(record.savedAt).toLocaleDateString("es-CL")}
                         {record.summary && ` · ${record.summary.totalVolumeM3} m³`}
                       </p>
                     </div>
                     {alreadyLoaded ? (
-                      <span className="flex-shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium text-primary">
+                      <span className="flex-shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[0.625rem] font-medium text-primary">
                         En la ruta
                       </span>
                     ) : !placeable ? (
-                      <span className="flex-shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                      <span className="flex-shrink-0 rounded-full bg-muted px-2 py-0.5 text-[0.625rem] font-medium text-muted-foreground">
                         No ubicable
                       </span>
                     ) : null}
@@ -945,7 +945,7 @@ function RutasPage() {
               <DialogTitle>{zoomAnalysis?.name}</DialogTitle>
               {zoomAnalysis && (
                 <span
-                  className={`flex-shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                  className={`flex-shrink-0 rounded-full px-2 py-0.5 text-[0.625rem] font-medium ${
                     loadedIds.has(zoomAnalysis.id)
                       ? "bg-primary/15 text-primary"
                       : "bg-muted text-muted-foreground"
@@ -1090,7 +1090,7 @@ function RutasPage() {
 
               <div className="flex min-h-0 flex-col gap-3">
                 {zoomAnalysis.partial && (
-                  <div className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 p-2.5 text-[10px] text-muted-foreground">
+                  <div className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 p-2.5 text-[0.625rem] text-muted-foreground">
                     <TriangleAlert className="h-3.5 w-3.5 flex-shrink-0 text-warning" />
                     <span>
                       Algunas zonas de este análisis no se pudieron ubicar en el mapa y no aparecen
@@ -1139,7 +1139,7 @@ function RutasPage() {
                   <p className="mb-2 text-xs font-semibold text-muted-foreground">
                     Zonas detectadas
                   </p>
-                  <ul className="max-h-[280px] space-y-1.5 overflow-y-auto pr-0.5">
+                  <ul className="max-h-[17.5rem] space-y-1.5 overflow-y-auto pr-0.5">
                     {zoomAnalysis.detections.map((d) => (
                       <li
                         key={d.id}
@@ -1182,7 +1182,7 @@ function RutasPage() {
               <DialogTitle>{zoomPoint?.name}</DialogTitle>
               {zoomPoint && (
                 <span
-                  className={`flex-shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                  className={`flex-shrink-0 rounded-full px-2 py-0.5 text-[0.625rem] font-medium ${
                     zoomPoint.active
                       ? "bg-primary/15 text-primary"
                       : "bg-muted text-muted-foreground"
@@ -1218,7 +1218,7 @@ function RutasPage() {
                         zoomPoint.tolvas.map((t, i) => (
                           <span
                             key={i}
-                            className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary"
+                            className="rounded-full bg-primary/10 px-2 py-0.5 text-[0.6875rem] font-semibold text-primary"
                           >
                             {t.capacity_m3} m³
                           </span>
@@ -1237,7 +1237,7 @@ function RutasPage() {
                         zoomPoint.trucks.map((t, i) => (
                           <span
                             key={i}
-                            className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary"
+                            className="rounded-full bg-primary/10 px-2 py-0.5 text-[0.6875rem] font-semibold text-primary"
                           >
                             {t.capacity_m3} m³
                           </span>
@@ -1335,7 +1335,7 @@ function RutasPage() {
                 }
               />
               {!hoursValid && (
-                <p className="text-[10px] text-destructive">
+                <p className="text-[0.625rem] text-destructive">
                   Ingresa un número de horas mayor a 0.
                 </p>
               )}

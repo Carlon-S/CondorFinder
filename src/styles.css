@@ -431,6 +431,27 @@ html {
 
 
 /* =============================================================================
+   ANIMACIÓN: tramo indeterminado del stepper
+   Para las etapas que no publican avance (el chequeo de solapamiento, y la
+   detección con YOLO/SAHI): en vez de rellenar la línea con un porcentaje
+   inventado, una franja recorre el tramo para mostrar que hay trabajo en
+   curso sin afirmar cuánto falta.
+   ============================================================================= */
+@keyframes step-sweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.step-indeterminate::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, var(--primary), transparent);
+  animation: step-sweep 1.5s ease-in-out infinite;
+}
+
+
+/* =============================================================================
    ANIMACIÓN: pulse-dot
    ============================================================================= */
 @keyframes pulse-dot {

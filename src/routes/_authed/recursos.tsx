@@ -546,7 +546,7 @@ function RecursosPage() {
                         <MapPin className="h-3.5 w-3.5 flex-shrink-0 text-primary/70" />
                         <span className="min-w-0 flex-1 truncate text-sm font-medium">
                           {p.name}
-                          {!p.active && <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">(inactivo)</span>}
+                          {!p.active && <span className="ml-1.5 text-[0.625rem] font-normal text-muted-foreground">(inactivo)</span>}
                         </span>
                         <button
                           type="button"
@@ -573,7 +573,7 @@ function RecursosPage() {
 
             {mode === "configuring" && (
               <div className="animate-in fade-in slide-in-from-left-2 duration-300 space-y-5">
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-[0.6875rem] text-muted-foreground">
                   ¿La ubicación no quedó bien? Haz clic en otro lugar del mapa para corregirla.
                 </p>
 
@@ -595,7 +595,7 @@ function RecursosPage() {
                     <label htmlFor="point-active" className="text-xs font-medium text-foreground">
                       Punto activo
                     </label>
-                    <p className="text-[10px] text-muted-foreground">
+                    <p className="text-[0.625rem] text-muted-foreground">
                       Participa como origen al generar una ruta.
                     </p>
                   </div>
@@ -612,7 +612,7 @@ function RecursosPage() {
                       Dirección
                     </label>
                     {geocodingAddress && (
-                      <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                      <span className="flex items-center gap-1 text-[0.625rem] text-muted-foreground">
                         <Loader2 className="h-3 w-3 animate-spin" /> Buscando dirección…
                       </span>
                     )}
@@ -628,7 +628,7 @@ function RecursosPage() {
                     onBlur={ensureAddressGeocoded}
                   />
                   {geocodeNotFound && (
-                    <p className="text-[10px] text-muted-foreground">
+                    <p className="text-[0.625rem] text-muted-foreground">
                       No se encontró esta dirección en el mapa — el punto no se movió.
                     </p>
                   )}
@@ -656,7 +656,7 @@ function RecursosPage() {
                     <button
                       type="button"
                       onClick={addTolva}
-                      className="cursor-pointer text-[10px] text-primary hover:underline"
+                      className="cursor-pointer text-[0.625rem] text-primary hover:underline"
                     >
                       + Agregar tolva
                     </button>
@@ -713,7 +713,7 @@ function RecursosPage() {
                     <button
                       type="button"
                       onClick={addTruck}
-                      className="cursor-pointer text-[10px] text-primary hover:underline"
+                      className="cursor-pointer text-[0.625rem] text-primary hover:underline"
                     >
                       + Agregar camión
                     </button>

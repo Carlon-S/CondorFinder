@@ -83,7 +83,12 @@ const POLLING_INTERVAL_MS = 5000;
 export async function unifyImages(
   files: File[],
   options: UnifyOptions = {},
-  onProgress?: (stage: "checking_overlap" | "joining" | "detecting") => void,
+  /** Ver el comentario de la misma callback en pollTask: `stageProgress` solo
+   *  trae dato durante "joining". */
+  onProgress?: (
+    stage: "checking_overlap" | "joining" | "detecting",
+    stageProgress: number | null,
+  ) => void,
   onTaskCreated?: (taskId: string) => void,
 ): Promise<UnifyResponse> {
 
@@ -117,6 +122,10 @@ export interface RawTaskStatus {
   result_json_url?: string;
   thumbnail_url?: string;
   detection_count?: number;
+  /** Avance real de la etapa en curso, 0-100. Hoy solo viene durante
+   *  "joining", donde es el porcentaje que reporta NodeODM: es la fase larga
+   *  y la única con un avance medible. Ausente en el resto. */
+  stage_progress?: number;
 }
 
 /**
@@ -184,7 +193,13 @@ export async function listPendingTasks(): Promise<PendingTask[]> {
 
 export async function pollTask(
   taskId: string,
-  onProgress?: (stage: "checking_overlap" | "joining" | "detecting") => void,
+  /** `stageProgress` llega solo durante "joining", donde es el porcentaje
+   *  real de NodeODM (0-100); en el resto de las etapas viene null porque no
+   *  hay un avance medible que reportar. */
+  onProgress?: (
+    stage: "checking_overlap" | "joining" | "detecting",
+    stageProgress: number | null,
+  ) => void,
   signal?: AbortSignal,
 ): Promise<UnifyResponse> {
   while (true) {
@@ -229,7 +244,10 @@ export async function pollTask(
         statusData.status === "detecting") &&
       onProgress
     ) {
-      onProgress(statusData.status);
+      onProgress(
+        statusData.status,
+        typeof statusData.stage_progress === "number" ? statusData.stage_progress : null,
+      );
     }
 
     // Espera DESPUÉS del chequeo: la primera iteración es siempre inmediata
