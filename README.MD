@@ -424,7 +424,7 @@ CondorFinder/
 
 Historias comprometidas: HDU5.1 (13), HDU8 (5), HDU9 (5), HDU10 (5) y SP2 (13). Suman 41 puntos sobre un mínimo de 40, porque el ramo comunicó un cambio respecto al plan y bajó el mínimo del Sprint 2 de 50 a 40.
 
-> **Verificación pendiente.** HDU9 y HDU10 están implementadas y compilan (`tsc`, `pnpm build`, `py_compile`), pero **todavía no se recorrieron en vivo**. La tabla de abajo refleja lo que quedó construido, no lo que quedó comprobado. Ver "Qué falta verificar" al final de esta sección.
+> **Verificación pendiente.** HDU9 y HDU10 están implementadas y compilan (`tsc`, `pnpm build`, `py_compile`), pero **todavía no se recorrieron en vivo**. La tabla de abajo refleja lo que quedó construido, no lo que quedó comprobado.
 
 | Historia | Criterio de aceptación | Estado |
 |---|---|---|
@@ -451,74 +451,6 @@ Historias comprometidas: HDU5.1 (13), HDU8 (5), HDU9 (5), HDU10 (5) y SP2 (13). 
 | SP2 (Spike, 13 pts) | Primer entregable: tabla comparando el desempeño con una única imagen, para demostrar estabilidad de las estimaciones | 🔲 Pendiente |
 | SP2 (Spike, 13 pts) | Segundo entregable: tabla con una imagen con datos reales validados por la municipalidad | 🔲 Pendiente |
 
-### El cambio de fondo: zona, versión y análisis
-
-HDU9 y HDU10 son la capa visible de un cambio bastante mayor que vive debajo, y que toca el modelo de datos de HDU4 y el significado de la cadena de HDU7, ambas ya entregadas en el Sprint 1.
-
-Antes, el volumen se calculaba una sola vez dentro del pipeline, justo antes de marcar la tarea como terminada. El botón "Analizar volumen" no recalculaba nada: el endpoint cortaba de inmediato y el frontend releía un archivo ya enriquecido. Por eso todo reanálisis daba el mismo número y una zona no podía tener historia propia.
-
-El modelo nuevo tiene tres niveles:
-
-```
-Zona                   nombre, identidad estable en el tiempo
- └─ Versión            un set de imágenes = un vuelo = un mapa unificado
-     └─ Análisis       un cálculo de volumen, con su fecha y su algoritmo
-```
-
-- Una **versión** es una carga de imágenes, identificada por la tarea que la generó. No tiene colección propia.
-- **Una versión nace cuando se guarda su primer análisis, no al generar el mapa.** Esta regla es la que hace imposible una versión sin cifras, así que la evolución de una zona nunca tiene tramos vacíos.
-- Las versiones se ordenan por **fecha de captura**, leída del EXIF de las fotos. Si ninguna la trae, se cae a la fecha de carga y queda marcada como estimada. Empate de fechas: manda cuál se cargó primero.
-- Cada análisis registra **con qué versión del algoritmo** se calculó. Sin ese sello, cuando SP2 mejore la precisión, un salto de volumen sería indistinguible de un cambio real en el basural.
-- Solo la versión más reciente se puede volver a medir. Las anteriores conservan su mapa y sus análisis, en modo consulta.
-
-### Qué cambió en el backend
-
-- El pipeline termina en la detección. `POST /analyze/{task_id}` recalcula siempre, y cada llamada es una medición nueva que el frontend guarda con su propia fecha.
-- Los modelos de elevación pasan a guardarse **por vuelo** en `joining/finals/`, junto al ortomosaico. Antes vivían en una carpeta compartida que cada vuelo sobrescribía: inofensivo mientras el cálculo era inmediato, y causa de cifras incorrectas sin ningún error visible ahora que ocurre después.
-- Colección nueva `zones`. Los análisis ganan zona, fecha de captura, fecha de carga, versión de algoritmo y qué cambió respecto al análisis anterior.
-- `POST /analyses/versions/{sourceTaskId}/reassign` separa una versión mal agrupada en una zona propia. Hace falta porque agrupar por HDU7 es una heurística, y con el modelo nuevo una confirmación equivocada fusiona dos historias de forma permanente.
-- Retención automática de disco: al terminar una generación se liberan los archivos pesados de los vuelos anteriores, y se limpia la salida cruda de ODM una vez rescatado lo que el sistema usa. Antes esa carpeta ocupaba unos 100 MB de forma permanente y nadie la limpiaba.
-
-### Qué cambió en el frontend
-
-- Cada detección guardada lleva si estaba activa. Antes se guardaban todas sin esa marca, así que el total guardado no se podía reconciliar con el detalle, y reabrir un análisis cambiaba su total al reactivarlas todas. Corrige de paso ese defecto de HDU4.
-- `src/lib/volumeReport.ts` concentra la aritmética que comparten el informe y el gráfico, para que nunca cuenten historias distintas de la misma zona.
-- El volumen por tipo de residuo se reparte en proporción sobre el volumen ya consolidado. Una detección fusionada vale el promedio o el máximo del grupo, no la suma, justamente para no contar doble; sumar el desglose crudo haría que el detalle excediera el total.
-- El PDF se arma en el navegador. El frontend corre en Cloudflare Workers, que escala solo, mientras el backend es una sola máquina que además corre la fotogrametría de a una tarea por vez.
-- Las dos librerías pesadas van con carga diferida y deben seguir así: `jspdf` dentro del manejador del botón, y el componente de evolución, que arrastra unos 850 kB de recharts, con `React.lazy`. Importarlas de forma normal duplica el bundle inicial.
-
-### Migración
-
-`backendModel/scripts/migrar_zonas.py` agrupa en zonas los análisis que ya existen, usando las cadenas de HDU7 como semilla. **Corre en simulación por defecto**: revisa la agrupación propuesta antes de aplicar.
-
-```bash
-cd ~/CondorFinder/backendModel
-python scripts/migrar_zonas.py            # simulación, no escribe
-python scripts/migrar_zonas.py --aplicar  # escribe
-```
-
-Es idempotente: los análisis que ya tienen zona se saltan.
-
-### Qué falta verificar
-
-Nada de esto está comprobado todavía. En orden de importancia:
-
-1. Generar un mapa y confirmar que la tarea queda pendiente de análisis, **sin** volumen.
-2. Calcular dos veces seguidas sobre el mismo vuelo y confirmar que el resultado es idéntico y no acumulado.
-3. Generar una versión nueva de la misma zona y confirmar que la anterior deja de permitir cálculo, con el motivo en pantalla, y que sus análisis guardados siguen visibles.
-4. Generar un mapa, no analizarlo, generar otro, y confirmar que el primero nunca apareció como versión.
-5. Contrastar las cifras del PDF contra la vista de análisis, y que el detalle por tipo sume el total.
-6. Sobre una zona con varias versiones: orden cronológico, gráfico, y que una versión antigua no ofrezca calcular ni guardar.
-7. Correr la migración en simulación sobre los análisis reales y revisar la agrupación.
-
-### Orden de despliegue
-
-El backend va primero: el frontend nuevo espera campos que solo existen después de desplegarlo.
-
-```bash
-ssh <vm>
-cd ~/CondorFinder && git pull && docker compose up -d --build && docker builder prune -f
-```
 
 ---
 
