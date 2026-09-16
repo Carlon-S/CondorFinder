@@ -31,12 +31,10 @@ import {
   Layers,
   Info,
   ImageIcon,
-  Clock,
   Lightning,
   Crosshair,
 } from "@/components/icons/Icons";
 import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { unifyImages, uploadImages, deleteImage, deleteAllImages, listUploadedImages, pollTask, cancelTask, getPipelineStatus, getTaskStatus, type OverlapPair } from "@/lib/unify";
@@ -620,6 +618,20 @@ function Page() {
     : phase === "done" ? "ok"
     : "pending";
 
+  /**
+   * Los cinco pasos con el hito de `progress` en que cada uno se da por
+   * terminado. Los números son los mismos que setea el pipeline más arriba
+   * (10 formato, 25 cantidad, 45 solapamiento, 75 unión, 100 detección), así
+   * que el tramo que se va llenando entre círculos refleja avance real.
+   */
+  const steps: StepDef[] = [
+    { label: "Formato JPG",        state: formatState,  reach: 10 },
+    { label: "Cantidad mínima",    state: countState,   reach: 25 },
+    { label: "Solapamiento",       state: overlapState, reach: 45 },
+    { label: "Generación de mapa", state: joinState,    reach: 75 },
+    { label: "Detección",          state: detectState,  reach: 100 },
+  ];
+
   // ---------------------------------------------------------------------------
   // MANEJO DE ARCHIVOS
   // ---------------------------------------------------------------------------
@@ -965,6 +977,34 @@ function Page() {
   }
 
   /**
+   * Bajo qué paso del stepper se escribe el detalle, y qué dice. Reemplaza a
+   * la barra de progreso separada que vivía debajo: la información es la
+   * misma, pero pegada al paso al que se refiere.
+   *
+   * Va acá abajo, y no junto a la definición de `steps`, porque necesita
+   * `cancelling` y `getPhaseLabel`, que se declaran más abajo en el cuerpo
+   * del componente.
+   *
+   * La subida de imágenes al servidor se cuelga de "Cantidad mínima": ocurre
+   * antes de que el pipeline arranque, cuando todavía no hay ningún paso en
+   * "running" del que colgarla.
+   */
+  const runningIndex = steps.findIndex((s) => s.state === "running");
+  const errorIndex = steps.findIndex((s) => s.state === "error");
+  const activeIndex =
+    uploadProgress !== null ? 1
+    : runningIndex !== -1 ? runningIndex
+    : errorIndex;
+  const activeLabel =
+    uploadProgress !== null ? "Subiendo imágenes al servidor"
+    : activeIndex === -1 ? null
+    : getPhaseLabel(phase, backendStage, cancelling);
+  const activePercent =
+    uploadProgress !== null ? uploadProgress
+    : runningIndex !== -1 ? progress
+    : null;
+
+  /**
    * Estado del tooltip del boton principal.
    * Determina color y mensaje segun la condicion actual del sistema.
    * Colores: empty (gris), warning (amarillo), destructive (rojo), success (verde).
@@ -1004,7 +1044,7 @@ function Page() {
           <p className="eyebrow">Paso 1 de 2</p>
           <div className="flex items-center gap-2">
             <h2 className="font-rubik text-3xl font-semibold tracking-normal text-foreground md:text-4xl">
-              Carga de imágenes
+              Carga De Imágenes
             </h2>
             <TooltipProvider delayDuration={150}>
             <Tooltip>
@@ -1047,12 +1087,17 @@ function Page() {
         <div className="flex min-h-0 flex-1 flex-col gap-5">
 
         {activeSlice === "carga" && (
-        <section className="flex flex-col rounded-xl border border-border bg-card p-5 animate-in fade-in slide-in-from-top-2 duration-500 fill-mode-both">
-        {/* Alto fijo (no flex-1): a diferencia de la slice "Mapa
-            unificado", este bloque no debe crecer para llenar el alto
-            disponible ni variar con la cantidad de imágenes adjuntas — el
-            scroll interno de "Imágenes adjuntas" ya absorbe eso. */}
-        <div className="grid h-[495px] flex-shrink-0 gap-6 md:grid-cols-[2fr_3fr] md:divide-x md:divide-border/25">
+        // SLICE_H: las dos slices comparten este alto exacto (SLICE_H) para que cambiar
+        // de pestaña no mueva nada de lo que viene debajo (el stepper). El
+        // alto va en la tarjeta, no en el bloque interior: así cada slice
+        // reparte ese espacio entre su propio contenido (la de mapa tiene
+        // cabecera y fila de datos, esta no) y el resultado sigue midiendo
+        // lo mismo por construcción, sin cuadrar números a mano.
+        <section className="flex h-[35.5rem] flex-col rounded-xl border border-border bg-card p-5 animate-in fade-in slide-in-from-top-2 duration-500 fill-mode-both">
+        {/* flex-1 con min-h-0: absorbe lo que sobre del alto de la tarjeta.
+            El scroll interno de "Imágenes adjuntas" sigue funcionando porque
+            min-h-0 está en toda la cadena. */}
+        <div className="grid min-h-0 flex-1 gap-6 md:grid-cols-[2fr_3fr] md:divide-x md:divide-border/25">
 
           {/* Zona de carga */}
           <section className="flex min-h-0 flex-col gap-4 md:pr-6">
@@ -1230,10 +1275,11 @@ function Page() {
 
         {/* ── Slice "Mapa unificado" ── */}
         {activeSlice === "mapa" && (
-        <section className="flex flex-col rounded-xl border border-border bg-card p-5 animate-in fade-in slide-in-from-top-2 duration-500 fill-mode-both">
+        // Mismo alto que la slice de carga, ver SLICE_H más arriba.
+        <section className="flex h-[35.5rem] flex-col rounded-xl border border-border bg-card p-5 animate-in fade-in slide-in-from-top-2 duration-500 fill-mode-both">
 
           {/* Mapa unificado */}
-          <section className="flex flex-col overflow-hidden">
+          <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
             <div className="flex items-center justify-between border-b border-border/25 pb-3">
               <div className="flex items-center gap-2.5 border-l-2 border-primary/50 pl-3">
                 <Layers className="h-4 w-4 text-primary/75" />
@@ -1246,11 +1292,11 @@ function Page() {
               )}
             </div>
 
-            {/* Mismo alto fijo que el bloque de "Carga de imágenes /
-                Imágenes adjuntas" (h-[495px]) — ambas slices muestran un
-                bloque del mismo tamaño en vez de que el mapa se estire a
-                llenar el alto disponible. */}
-            <div className="relative h-[495px] flex-shrink-0 w-full overflow-hidden bg-background/50">
+            {/* Toma el alto que sobra dentro de la tarjeta, una vez
+                descontadas la cabecera, la fila de datos y la fila de
+                acción. La imagen va con object-contain, así que se adapta
+                sola al espacio que quede. */}
+            <div className="relative min-h-0 flex-1 w-full overflow-hidden bg-background/50">
               {phase === "done" && resultUrl ? (
                 <>
                   <button
@@ -1325,8 +1371,10 @@ function Page() {
                   <div className="scan-line relative h-24 w-24 overflow-hidden rounded-md border border-primary/40 bg-primary/10">
                     <Loader2 className="absolute left-1/2 top-1/2 h-8 w-8 -translate-x-1/2 -translate-y-1/2 animate-spin text-primary" />
                   </div>
-                  <p className="mono text-[11px] uppercase tracking-wider text-primary">{getPhaseLabel(phase, backendStage, cancelling)}</p>
-                  <div className="w-64"><Progress value={progress} className="h-1" /></div>
+                  {/* Solo la etiqueta de fase: el avance numérico lo lleva
+                      ahora el stepper de abajo, que es la única barra de
+                      progreso de la vista. */}
+                  <p className="mono text-[0.69rem] uppercase tracking-wider text-primary">{getPhaseLabel(phase, backendStage, cancelling)}</p>
                 </div>
               ) : phase === "error" ? (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center">
@@ -1359,6 +1407,32 @@ function Page() {
               </div>
             )}
           </section>
+
+          {/* Misma fila de acción que la slice de carga, para que las dos
+              midan igual de alto y no salte nada al cambiar de pestaña.
+              Mientras el pipeline corre ofrece cancelar sin obligar a volver
+              al paso 1, que era la única forma de hacerlo antes. */}
+          <div className="mt-6 flex flex-col items-center gap-4 border-t border-border/25 pt-5">
+            <div className="relative mx-auto w-full max-w-sm">
+              {processing ? (
+                <Button onClick={handleCancel} disabled={cancelling} variant="destructive" className="w-full" size="lg">
+                  {cancelling
+                    ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Cancelando...</>)
+                    : (<><XCircle className="mr-2 h-4 w-4" /> Cancelar generación del mapa unificado</>)}
+                </Button>
+              ) : phase === "done" ? (
+                <Button onClick={() => navigate({ to: "/analysis" })} className="w-full btn-cta" size="lg">
+                  <Layers className="mr-2 h-4 w-4" /> Ver análisis de detección
+                </Button>
+              ) : (
+                // Botón fantasma: no hay acción disponible todavía, pero la
+                // fila tiene que ocupar el mismo alto igual.
+                <Button disabled className="w-full" size="lg" variant="secondary">
+                  <MapIcon className="mr-2 h-4 w-4" /> El mapa aún no se ha generado
+                </Button>
+              )}
+            </div>
+          </div>
         </section>
         )}
 
@@ -1373,32 +1447,12 @@ function Page() {
             debajo. */}
         <section className="rounded-xl border border-border bg-card p-5 animate-in fade-in slide-in-from-top-2 duration-500 delay-100 fill-mode-both">
           <Stepper
-            steps={[
-              { label: "Formato JPG", state: formatState },
-              { label: "Cantidad mínima", state: countState },
-              { label: "Solapamiento", state: overlapState },
-              { label: "Generación de mapa", state: joinState },
-              { label: "Detección", state: detectState },
-            ]}
+            steps={steps}
+            progress={progress}
+            activeIndex={activeIndex}
+            activeLabel={activeLabel}
+            activePercent={activePercent}
           />
-
-          {(processing || phase === "error" || uploadProgress !== null) && (
-            <div className="mt-5 space-y-1.5 border-t border-border/60 pt-4">
-              <div className="flex items-center gap-2">
-                <Clock className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
-                <p className="text-xs text-foreground font-medium">{getPhaseLabel(phase, backendStage, cancelling)}</p>
-              </div>
-              <Progress value={progress} className="h-1" />
-              <p className="text-[10px] text-muted-foreground">{progress}% completado</p>
-              {uploadProgress !== null && (
-                <div className="mt-1.5 space-y-1">
-                  <p className="text-[10px] font-semibold text-primary">Subiendo imágenes al servidor...</p>
-                  <Progress value={uploadProgress} className="h-1" />
-                  <p className="text-[10px] text-muted-foreground">{uploadProgress}% subido</p>
-                </div>
-              )}
-            </div>
-          )}
 
           {overlapDetail.length > 0 && (
             <div className="mt-4 rounded-lg border border-destructive/40 bg-destructive/10 p-3 space-y-2">
@@ -1538,7 +1592,51 @@ function FlowNav({
  * vertical) — mismos 5 estados/colores (TriState), en formato círculo
  * numerado + línea conectora + label debajo, estilo 1 de la referencia.
  */
-function Stepper({ steps }: { steps: { label: string; state: TriState }[] }) {
+interface StepDef {
+  label: string;
+  state: TriState;
+  /** Valor de `progress` (0-100) con el que este paso se da por terminado.
+   *  Es lo que permite que el tramo hacia el paso siguiente se llene de a
+   *  poco en vez de saltar de vacío a lleno. Los valores salen de los
+   *  setProgress() reales del pipeline, no son inventados. */
+  reach: number;
+}
+
+/**
+ * Qué tan lleno va el tramo que sale del paso `i` hacia el `i + 1`, de 0 a 1.
+ *
+ * Si el paso siguiente ya se alcanzó (terminó bien, con aviso o con error) el
+ * tramo va completo. Si no, y el paso actual ya terminó, se interpola con el
+ * progreso real entre los dos hitos. En cualquier otro caso va vacío.
+ *
+ * El caso sin proceso corriendo también queda cubierto: al adjuntar imágenes,
+ * "Formato JPG" y "Cantidad mínima" pasan a ok con progress en 0, y el tramo
+ * entre ambos se llena por la primera regla, sin depender del pipeline.
+ */
+function segmentFill(steps: StepDef[], i: number, progress: number): number {
+  const next = steps[i + 1];
+  if (!next) return 0;
+  if (next.state === "ok" || next.state === "warn" || next.state === "error") return 1;
+  if (steps[i].state !== "ok") return 0;
+  const span = next.reach - steps[i].reach;
+  if (span <= 0) return 0;
+  return Math.max(0, Math.min(1, (progress - steps[i].reach) / span));
+}
+
+function Stepper({
+  steps,
+  progress,
+  activeIndex,
+  activeLabel,
+  activePercent,
+}: {
+  steps: StepDef[];
+  progress: number;
+  /** Paso bajo el cual se escribe el detalle, o -1 si no hay ninguno activo. */
+  activeIndex: number;
+  activeLabel: string | null;
+  activePercent: number | null;
+}) {
   return (
     <ol className="flex items-start">
       {steps.map((step, i) => (
@@ -1551,21 +1649,57 @@ function Stepper({ steps }: { steps: { label: string; state: TriState }[] }) {
         // las 5 columnas midan exactamente lo mismo.
         <li key={step.label} className="flex flex-1 flex-col items-center">
           <div className="flex w-full items-center">
-            <div className={`h-0.5 flex-1 rounded-full transition-colors duration-300 ${i === 0 ? "bg-transparent" : stepLineColor(steps[i - 1].state)}`} />
+            {/* El tramo entre dos círculos está partido en dos mitades que
+                viven en <li> distintos, pero tiene que leerse como UNA barra
+                continua: la mitad izquierda se llena primero (de 0 a 50% del
+                avance) y la derecha después (de 50% a 100%). Sin este
+                reparto cada mitad se llenaba desde su propio borde y a medio
+                camino la línea quedaba cortada en el medio. */}
+            <StepSegment fill={i === 0 ? 0 : Math.max(0, segmentFill(steps, i - 1, progress) * 2 - 1)} hidden={i === 0} />
             <StepCircle number={i + 1} state={step.state} />
-            <div className={`h-0.5 flex-1 rounded-full transition-colors duration-300 ${i === steps.length - 1 ? "bg-transparent" : stepLineColor(step.state)}`} />
+            <StepSegment fill={Math.min(1, segmentFill(steps, i, progress) * 2)} hidden={i === steps.length - 1} />
           </div>
-          <span className={`mt-2 max-w-[6.5rem] text-center text-[11px] font-semibold leading-tight ${stepLabelColor(step.state)}`}>
+          <span className={`mt-2 max-w-[6.5rem] text-center text-[0.69rem] font-semibold leading-tight ${stepLabelColor(step.state)}`}>
             {step.label}
           </span>
+          {/* Ranura de alto fijo reservada siempre, no solo cuando hay texto:
+              si apareciera y desapareciera, el stepper cambiaría de alto al
+              arrancar el proceso y las dos slices dejarían de medir lo mismo. */}
+          <div className="mt-1 flex h-[2.1rem] w-full flex-col items-center justify-start">
+            {i === activeIndex && activeLabel && (
+              <>
+                <span className="max-w-[7.5rem] text-center text-[0.63rem] font-medium leading-tight text-foreground animate-in fade-in duration-300">
+                  {activeLabel}
+                </span>
+                {activePercent !== null && (
+                  <span className="mono text-[0.58rem] text-muted-foreground">{activePercent}%</span>
+                )}
+              </>
+            )}
+          </div>
         </li>
       ))}
     </ol>
   );
 }
 
-function stepLineColor(state: TriState) {
-  return state === "ok" ? "bg-success" : "bg-border";
+/**
+ * Mitad de línea entre dos círculos. Son dos capas superpuestas: la gris de
+ * fondo siempre completa, y encima la verde escalada horizontalmente por
+ * `fill`. La transición va sobre transform (no sobre width) para que el
+ * avance lo resuelva el compositor y no dispare layout en cada actualización
+ * del polling.
+ */
+function StepSegment({ fill, hidden }: { fill: number; hidden?: boolean }) {
+  if (hidden) return <div className="h-0.5 flex-1 bg-transparent" />;
+  return (
+    <div className="relative h-0.5 flex-1 overflow-hidden rounded-full bg-border">
+      <div
+        className="absolute inset-0 origin-left rounded-full bg-success transition-transform duration-500 ease-out"
+        style={{ transform: `scaleX(${fill})` }}
+      />
+    </div>
+  );
 }
 
 function stepLabelColor(state: TriState) {

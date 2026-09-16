@@ -397,7 +397,7 @@ function RecursosPage() {
             <div>
               <p className="eyebrow">Planificación</p>
               <h1 className="font-rubik text-3xl font-semibold tracking-normal text-foreground md:text-4xl">
-                Recursos disponibles
+                Recursos Disponibles
               </h1>
               <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
                 Define puntos y los recursos disponibles en cada uno

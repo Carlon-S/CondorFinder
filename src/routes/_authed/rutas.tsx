@@ -641,7 +641,7 @@ function RutasPage() {
             <div className="animate-in fade-in slide-in-from-left-2 duration-300">
               <p className="eyebrow">Recolección</p>
               <h1 className="font-rubik text-3xl font-semibold tracking-normal text-foreground md:text-4xl">
-                Generar ruta
+                Generar Ruta
               </h1>
               <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
                 Carga análisis guardados para ubicar sus basurales en el mapa y genera una ruta

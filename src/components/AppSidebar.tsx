@@ -18,11 +18,11 @@ import logo from "@/assets/Logo/logo-dark-mode.svg";
 import { logout } from "@/lib/auth";
 
 const NAV_ITEMS = [
-  { to: "/", label: "Zonas monitoreadas", icon: LayoutDashboard },
-  { to: "/carga", label: "Carga de imágenes", icon: UploadCloud },
+  { to: "/", label: "Zonas Monitoreadas", icon: LayoutDashboard },
+  { to: "/carga", label: "Carga De Imágenes", icon: UploadCloud },
   { to: "/analysis", label: "Análisis", icon: BarChart3 },
-  { to: "/recursos", label: "Recursos disponibles", icon: Truck },
-  { to: "/rutas", label: "Generar ruta", icon: Route },
+  { to: "/recursos", label: "Recursos Disponibles", icon: Truck },
+  { to: "/rutas", label: "Generar Ruta", icon: Route },
 ] as const;
 
 export function AppSidebar() {

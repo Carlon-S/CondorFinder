@@ -596,9 +596,9 @@ function MainPage() {
       <div className="flex items-center justify-between border-b border-border/25 px-6 py-5">
         <div>
           {/* Rótulo sobre el título, equivalente de la .eyebrow del sitio. */}
-          <p className="eyebrow">Vista principal</p>
+          <p className="eyebrow">Listado de Zonas</p>
           <h2 className="font-rubik text-3xl font-semibold tracking-normal text-foreground md:text-4xl">
-            Zonas monitoreadas
+            Zonas Monitoreadas
           </h2>
         </div>
         <Sheet>

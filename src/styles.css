@@ -184,6 +184,31 @@
 
 
 /* =============================================================================
+   ESCALA PROPORCIONAL A LA RESOLUCIÓN
+   Tailwind dimensiona casi todo en rem (tipografía, padding, gap, alturas),
+   así que mover el tamaño de fuente raíz escala la interfaz completa de forma
+   proporcional en vez de dejarla fija y que sobre espacio en pantallas
+   grandes. En 2560x1440 la vista se ve igual que en 1920x1080, un tercio más
+   grande, sin el hueco al pie.
+
+   La referencia es 1920x1080 con 16px, que es el caso que se tomó como
+   correcto: ahí el alto útil de la ventana ronda los 951px una vez descontada
+   la barra del navegador.
+
+   Se escala por el MENOR de los dos factores (alto y ancho) para que una
+   ventana angosta y alta no infle la tipografía, y el clamp evita los dos
+   extremos: nunca baja de 13px en pantallas chicas ni pasa de 22px en
+   monitores muy grandes.
+
+   Cualquier medida nueva debe ir en rem o en clases de Tailwind. Un valor en
+   px fijo queda fuera de esta escala y vuelve a producir el hueco.
+   ============================================================================= */
+html {
+  font-size: clamp(13px, calc(16 * min(100vh / 951, 100vw / 1920)), 22px);
+}
+
+
+/* =============================================================================
    ESTILOS BASE GLOBALES
    ============================================================================= */
 @layer base {
