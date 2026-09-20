@@ -366,6 +366,14 @@ function MainPage() {
   const refreshZones = async (announce?: boolean) => {
     const rows = await loadZoneRows();
     setZones(rows);
+    // Los análisis y las zonas se recargan JUNTO con la tabla, no solo una vez
+    // al montar. De ellos dependen el botón "Generar informe" (se deshabilita
+    // con savedAnalyses vacío), el contenido de su diálogo y la evolución; al
+    // cargarse una sola vez, después de eliminar una zona el botón seguía
+    // habilitado y el diálogo seguía ofreciendo zonas que ya no existían,
+    // hasta que alguien recargaba la página con F5.
+    listAnalyses().then(setSavedAnalyses).catch(() => {});
+    listZones().then(setZoneRecords).catch(() => {});
     setLoading(false);
     if (announce) {
       notify.success(

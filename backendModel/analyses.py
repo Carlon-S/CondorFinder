@@ -13,11 +13,11 @@ import auth as auth_module
 import task_store
 
 # =============================================================================
-# CONDORFINDER — ANÁLISIS GUARDADOS (HDU4) + FUSIÓN DE DUPLICADOS (HDU7)
+# CONDORFINDER, ANÁLISIS GUARDADOS (HDU4) + FUSIÓN DE DUPLICADOS (HDU7)
 # Archivo: backendModel/analyses.py
 #
 # Reemplaza src/lib/analysisStore.ts's localStorage por persistencia real en
-# Mongo — localStorage era un placeholder documentado desde el principio
+# Mongo, localStorage era un placeholder documentado desde el principio
 # ("cuando exista backend con persistencia real, este módulo se reemplaza
 # por llamadas a la API"), y quedó como un bloqueante real para la nube:
 # no sincroniza entre dispositivos/navegadores del mismo trabajador, se
@@ -25,12 +25,12 @@ import task_store
 #
 # Mismo patrón que resources.py: set_db()/get_db() inyectado desde el
 # lifespan de orquestador.py, router protegido con la misma dependency de
-# sesión (get_current_user), y — igual que resources.py — NO se filtra por
+# sesión (get_current_user), y, igual que resources.py, NO se filtra por
 # owner al listar (se guarda quién lo creó, pero todavía no hay roles ni
 # necesidad real de aislar datos entre cuentas; un solo criterio en todo
 # el backend, no vale la pena que este módulo sea la excepción).
 #
-# Modelos en camelCase (no snake_case) A PROPÓSITO — mismo motivo que
+# Modelos en camelCase (no snake_case) A PROPÓSITO, mismo motivo que
 # routing.py: src/lib/analysisStore.ts ya definía SavedAnalysisRecord con
 # esos nombres de campo antes de que este archivo existiera, y los tres
 # consumidores (analysis.tsx, index.tsx, rutas.tsx) leen esa forma tal
@@ -41,7 +41,7 @@ import task_store
 # proyecto vía volumeCalc.py) y los campos de vínculo son parte natural del
 # ciclo de vida de un análisis guardado, no ameritan un módulo aparte.
 # possibleDuplicateOf/duplicateStatus/historical/supersededBy son
-# EXCLUSIVOS de SavedAnalysisOut — el frontend nunca los manda al guardar,
+# EXCLUSIVOS de SavedAnalysisOut, el frontend nunca los manda al guardar,
 # solo el backend los calcula/actualiza.
 # =============================================================================
 
@@ -55,7 +55,7 @@ def set_db(db: AsyncDatabase) -> None:
 
 def get_db() -> AsyncDatabase:
     if _db is None:
-        raise RuntimeError("La base de datos no fue inicializada — set_db() debe llamarse en el lifespan.")
+        raise RuntimeError("La base de datos no fue inicializada, set_db() debe llamarse en el lifespan.")
     return _db
 
 
@@ -112,12 +112,12 @@ class SavedAnalysisIn(BaseModel):
     # indistinguible de un cambio real en el basural.
     algorithmVersion: int | None = None
     # Miniatura liviana (orquestador.py::result_thumbnail_filename) para
-    # vistas de lista/tarjeta — Optional porque los análisis guardados antes
+    # vistas de lista/tarjeta, Optional porque los análisis guardados antes
     # de que existiera este campo no la tienen (mismo criterio que
     # orthoCenter/orthoBounds más abajo): el frontend cae de vuelta a mapUrl
     # cuando es None.
     thumbnailUrl: str | None = None
-    # Blob opaco para el backend — cada detección trae bbox/geo_polygon/
+    # Blob opaco para el backend, cada detección trae bbox/geo_polygon/
     # volumen/etc., ya validados y calculados aguas arriba (volumeCalc.py);
     # acá no hace falta re-tipar cada campo, solo guardarlo y devolverlo tal
     # cual (mismo criterio que "detections: unknown" en el lado TypeScript).
@@ -126,13 +126,13 @@ class SavedAnalysisIn(BaseModel):
     sourceTaskId: str | None = None
     crs: str | None = None
     # Centro geográfico real del ortomosaico (volumeCalc.py::ortho_center,
-    # mismo CRS que `crs`) — HDU5/rutas.tsx lo usa para ubicar el círculo de
+    # mismo CRS que `crs`), HDU5/rutas.tsx lo usa para ubicar el círculo de
     # la zona en el mapa de forma consistente entre distintas corridas de
     # análisis del mismo set de fotos, en vez de promediar las detecciones
     # (que varían si YOLO encuentra algo distinto entre corridas).
     orthoCenter: list[float] | None = None
     # Huella geográfica COMPLETA del ortomosaico: [left, bottom, right, top]
-    # (volumeCalc.py::ortho_bounds, mismo CRS que `crs`) — HDU7 compara ESTO
+    # (volumeCalc.py::ortho_bounds, mismo CRS que `crs`), HDU7 compara ESTO
     # entre análisis para detectar duplicados, no las detecciones puntuales
     # (ver _find_possible_duplicate).
     orthoBounds: list[float] | None = None
@@ -142,7 +142,7 @@ class SavedAnalysisOut(SavedAnalysisIn):
     id: str
     owner: str
     savedAt: datetime
-    # HDU7 — gestionados solo por el backend, ver docstring del módulo.
+    # HDU7, gestionados solo por el backend, ver docstring del módulo.
     possibleDuplicateOf: str | None = None
     duplicateStatus: str | None = None
     historical: bool = False
@@ -190,17 +190,17 @@ def _to_out(doc: dict) -> SavedAnalysisOut:
 
 
 # =============================================================================
-# HDU7 — DETECCIÓN DE POSIBLES DUPLICADOS ENTRE CARGAS DISTINTAS
+# HDU7, DETECCIÓN DE POSIBLES DUPLICADOS ENTRE CARGAS DISTINTAS
 #
 # Distinto del fusionado "Varios tipos" del MVP (mergeOverlapping en
 # analysis.tsx), que combina detecciones DENTRO de una misma imagen
-# unificada — esto compara ANÁLISIS GUARDADOS distintos.
+# unificada, esto compara ANÁLISIS GUARDADOS distintos.
 #
 # Compara la huella COMPLETA del ortomosaico (orthoBounds), no las
 # detecciones puntuales de basura. Motivo (encontrado probando el
 # despliegue en la nube): el centro/extensión del ortomosaico, anclado por
 # GPS/EXIF, varía muy poco entre corridas del mismo set de fotos (un par de
-# metros, típico de GPS de dron sin RTK) — pero las detecciones de YOLO
+# metros, típico de GPS de dron sin RTK), pero las detecciones de YOLO
 # pueden correrse esos mismos metros, y en objetos chicos (pocos m²) eso
 # basta para tirar el IoU muy por debajo del umbral aunque sea literalmente
 # la misma basura en el mismo lugar. Comparando la imagen completa en vez
@@ -213,7 +213,7 @@ OVERLAP_THRESHOLD = 0.5
 
 
 def _polygon_iou(coords_a: list[list[float]], coords_b: list[list[float]]) -> float:
-    """Intersección sobre unión — mismo criterio (y mismo umbral, 0.5) que
+    """Intersección sobre unión, mismo criterio (y mismo umbral, 0.5) que
     ya usa mergeOverlapping() en analysis.tsx para el fusionado intra-imagen,
     solo que acá corre en el backend sobre geometría real (metros), no
     sobre bbox en píxeles."""
@@ -240,13 +240,13 @@ def _bounds_to_rect(bounds: list[float]) -> list[list[float]]:
 
 
 async def _find_possible_duplicate(new_doc: dict, exclude_id: ObjectId) -> tuple[str, float] | None:
-    """AC1 — compara la huella del ortomosaico (orthoBounds) del análisis
+    """AC1, compara la huella del ortomosaico (orthoBounds) del análisis
     recién guardado contra la de todos los análisis guardados anteriormente
-    (mismo crs — no se reproyecta entre zonas UTM distintas, ver "Fuera de
+    (mismo crs, no se reproyecta entre zonas UTM distintas, ver "Fuera de
     alcance" del plan), excluyendo históricos (ya reemplazados) y el propio
     documento. Devuelve el mejor candidato (mayor IoU) si supera
     OVERLAP_THRESHOLD, o None. Análisis guardados antes de que existiera
-    orthoBounds no tienen con qué compararse — se excluyen (no hay forma de
+    orthoBounds no tienen con qué compararse, se excluyen (no hay forma de
     inferir su huella real retroactivamente)."""
     new_crs = new_doc.get("crs")
     new_bounds = new_doc.get("orthoBounds")
@@ -284,7 +284,7 @@ router = APIRouter(prefix="/analyses", tags=["analyses"])
 
 async def _release_source_task(source_task_id: str | None) -> None:
     """Al guardar un análisis, su tarea de origen deja de necesitar
-    aparecer como "pendiente de revisión" en GET /tasks/pending — pero el
+    aparecer como "pendiente de revisión" en GET /tasks/pending, pero el
     documento se CONSERVA (no se borra) para que "Analizar volumen" pueda
     seguir recalculando sobre esta misma tarea después, aunque el análisis
     ya esté guardado (ver task_store.mark_reviewed). Best-effort: si falla,
@@ -368,8 +368,8 @@ async def create_analysis(
         "supersededBy": None,
     }
 
-    # AC1 — solo se dispara al crear un análisis NUEVO, nunca al sobrescribir
-    # uno existente (update_analysis) — una sobrescritura es la misma zona
+    # AC1, solo se dispara al crear un análisis NUEVO, nunca al sobrescribir
+    # uno existente (update_analysis), una sobrescritura es la misma zona
     # por definición, no hace falta volver a compararla contra las demás.
     #
     # Se compara ANTES de insertar (y no después, como antes) porque el
@@ -422,7 +422,7 @@ async def list_analyses(
 
 
 # =============================================================================
-# ZONAS — la identidad que persiste entre vuelos
+# ZONAS, la identidad que persiste entre vuelos
 # Van en este mismo router (prefijo /analyses) y no en uno aparte porque una
 # zona no existe sin análisis: se crea al guardar el primero y se consulta
 # siempre junto a ellos, igual que HDU7 vive acá y no en su propio módulo.
@@ -516,11 +516,11 @@ async def update_analysis(
     payload: SavedAnalysisIn,
     current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
 ):
-    # AC6 de HDU4 (sobrescribir un análisis con el mismo nombre) — el
+    # AC6 de HDU4 (sobrescribir un análisis con el mismo nombre), el
     # frontend decide CUÁNDO sobrescribir (ya sabe el id del existente),
     # este endpoint solo reemplaza el documento entero. payload no trae los
     # campos de HDU7 (SavedAnalysisIn no los incluye), así que $set no los
-    # toca — un análisis ya vinculado/histórico sigue así tras sobrescribirse.
+    # toca, un análisis ya vinculado/histórico sigue así tras sobrescribirse.
     oid = _object_id(analysis_id)
     result = await get_db().analyses.find_one_and_update(
         {"_id": oid},
@@ -538,9 +538,56 @@ async def delete_analysis(
     analysis_id: str,
     current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
 ):
-    result = await get_db().analyses.delete_one({"_id": _object_id(analysis_id)})
-    if result.deleted_count == 0:
+    """Borra un análisis y deshace las referencias que quedaban apuntándole.
+
+    Antes esto era un delete_one pelado, y dejaba tres clases de huérfano:
+
+    1. El análisis al que este había REEMPLAZADO seguía marcado `historical`
+       con `supersededBy` apuntando a un id que ya no existía. En la práctica
+       esa captura desaparecía de todos los filtros salvo "Historial", y ahí
+       su "Reemplazado por:" salía en blanco: quedaba inalcanzable.
+    2. El análisis que lo tenía como POSIBLE duplicado se quedaba en
+       `duplicateStatus: "pending"` contra la nada. El banner no aparecía
+       (loadAnalysisById devolvía null) y el registro quedaba mal para
+       siempre, en silencio.
+    3. Si era el último análisis de su zona, el documento de la zona quedaba
+       en la colección para siempre: no existe ningún otro borrado de zonas
+       en la API. Se veían como filas "0 capturas · 0 análisis" en el diálogo
+       de informe, y se iban acumulando con cada borrado.
+    """
+    doc = await get_db().analyses.find_one_and_delete({"_id": _object_id(analysis_id)})
+    if not doc:
         raise HTTPException(status_code=404, detail="Análisis no encontrado")
+
+    # (1) Quien había sido reemplazado POR este vuelve a estar vigente. Es lo
+    # esperable: si se borra la captura más nueva de una zona, la anterior pasa
+    # a ser la vigente otra vez.
+    #
+    # Al borrar un eslabón del MEDIO de una cadena (A→B→C, se borra B), A
+    # vuelve a vigente y convive con C. Las dos son capturas reales de la zona
+    # y la barra de versiones las ordena igual por fecha, así que se prefiere
+    # eso antes que re-enlazar A→C adivinando una intención que nadie expresó.
+    await get_db().analyses.update_many(
+        {"supersededBy": analysis_id},
+        {"$set": {"historical": False, "supersededBy": None}},
+    )
+
+    # (2) Quien lo tenía como posible duplicado se queda sin con qué comparar:
+    # se vuelve al estado inicial en vez de dejar una comparación pendiente
+    # contra un registro inexistente.
+    await get_db().analyses.update_many(
+        {"possibleDuplicateOf": analysis_id},
+        {"$set": {"possibleDuplicateOf": None, "duplicateStatus": None}},
+    )
+
+    # (3) Si era el último análisis de su zona, la zona se va con él. Una zona
+    # sin ningún análisis no es nada: no tiene capturas, ni volumen, ni mapa.
+    zone_id = doc.get("zoneId")
+    if zone_id:
+        quedan = await get_db().analyses.count_documents({"zoneId": zone_id})
+        if quedan == 0:
+            await get_db().zones.delete_one({"_id": _object_id(zone_id)})
+
     return {"message": "Análisis eliminado"}
 
 
@@ -549,7 +596,7 @@ async def confirm_duplicate(
     analysis_id: str,
     current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
 ):
-    """AC3 — el trabajador confirma que es la misma zona: el análisis
+    """AC3, el trabajador confirma que es la misma zona: el análisis
     ANTERIOR (possibleDuplicateOf) pasa a histórico (se oculta del listado
     principal de Vista Principal, sigue disponible bajo "Historial"), y
     este (el más reciente) queda como la versión vigente.
@@ -558,12 +605,12 @@ async def confirm_duplicate(
     análisis del mismo dataset (ver CLAUDE.md/HDU7):
     - Encadenado (A→B→C, B pasa a histórico): si B todavía tenía SU PROPIA
       relación pendiente hacia atrás (B→A, sin resolver), esa pregunta no
-      puede quedar atrapada en un registro histórico — se hereda hacia
+      puede quedar atrapada en un registro histórico, se hereda hacia
       este mismo análisis (el sobreviviente, C).
     - Hermanos (A→B pendiente y A→C pendiente al mismo tiempo, se confirma
       C→A): cualquier OTRO análisis que también apuntaba a A como posible
       duplicado (acá, B) queda señalando a un histórico si no se redirige
-      — se re-apunta hacia el sobreviviente (C) para que la pregunta se
+     , se re-apunta hacia el sobreviviente (C) para que la pregunta se
       pueda seguir resolviendo sobre un análisis vigente."""
     oid = _object_id(analysis_id)
     doc = await get_db().analyses.find_one({"_id": oid})
@@ -588,7 +635,7 @@ async def confirm_duplicate(
             "historical": True,
             "supersededBy": analysis_id,
             # Se limpia acá: un análisis histórico no debe seguir mostrando
-            # un banner de "posible duplicado" accionable — si tenía una
+            # un banner de "posible duplicado" accionable, si tenía una
             # pregunta pendiente propia, ya se trasladó al sobreviviente
             # abajo (caso "encadenado").
             "possibleDuplicateOf": None,
@@ -596,7 +643,7 @@ async def confirm_duplicate(
         }},
     )
 
-    # Caso "hermanos" — cualquier análisis DISTINTO de este que seguía
+    # Caso "hermanos", cualquier análisis DISTINTO de este que seguía
     # esperando resolver si era la misma zona que older_doc, se redirige
     # hacia el sobreviviente en vez de quedar apuntando a un histórico.
     await get_db().analyses.update_many(
@@ -626,7 +673,7 @@ async def reject_duplicate(
     analysis_id: str,
     current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
 ):
-    """AC4 — el trabajador indica que son zonas distintas: ambos registros se
+    """AC4, el trabajador indica que son zonas distintas: ambos registros se
     mantienen por separado y se cierra el aviso de "posible duplicado".
 
     Además hay que DESHACER la herencia de zona. _resolve_zone() le asigna al

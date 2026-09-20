@@ -548,6 +548,20 @@ function AnalysisPage() {
     // puede traer un possibleDuplicateOf recién calculado; una sobrescritura
     // nunca lo dispara (ver analyses.py), así que esto es un no-op ahí.
     checkDuplicateWarning(result.record);
+
+    // La zona la RESUELVE el backend al guardar (_resolve_zone en analyses.py:
+    // hereda la que HDU7 reconoció por huella, o crea una nueva), así que hasta
+    // acá la vista no la conoce. Sin adoptarla, recién guardado el análisis
+    // quedaba sin nombre de zona en el título, sin barra de capturas, y con
+    // "Informe de esta zona" y "Ver evolución" ocultos, porque los tres
+    // dependen de zoneId. Había que salir de la vista y volver a entrar para
+    // que apareciera todo.
+    //
+    // También corre en una sobrescritura: la zona no cambia, pero el análisis
+    // sí, y la barra de capturas y el informe tienen que reflejarlo.
+    const zonaResuelta = result.record.zoneId ?? null;
+    setZoneId(zonaResuelta);
+    cargarVersionesDeLaZona(zonaResuelta);
   };
 
   // AC6 (sobrescribir): la sobrescritura REEMPLAZA sourceTaskId/mapUrl en el
@@ -710,6 +724,12 @@ function AnalysisPage() {
     setScale(1);
     setOffset({ x: 0, y: 0 });
     setImgNaturalSize(null);
+
+    // El desglose desplegado tampoco se hereda. Los ids de detección son
+    // enteros que arrancan bajo en CADA análisis, así que chocan entre
+    // versiones: dejar el conjunto puesto abría el desglose de una zona
+    // distinta solo porque le tocó el mismo id.
+    setExpandedIds(new Set());
 
     // taskId y detectionJsonUrl se resuelven por captura. Sin esto, "Analizar
     // volumen" trabajaría sobre lo que hubiera quedado en sessionStorage de la
