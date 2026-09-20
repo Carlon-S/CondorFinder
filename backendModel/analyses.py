@@ -626,15 +626,48 @@ async def reject_duplicate(
     analysis_id: str,
     current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
 ):
-    """AC4 — el trabajador indica que son zonas distintas: ambos registros
-    se mantienen por separado tal cual estaban, solo se cierra el aviso de
-    "posible duplicado" para que no se vuelva a mostrar."""
+    """AC4 — el trabajador indica que son zonas distintas: ambos registros se
+    mantienen por separado y se cierra el aviso de "posible duplicado".
+
+    Además hay que DESHACER la herencia de zona. _resolve_zone() le asigna al
+    análisis nuevo la zona del candidato apenas se guarda, antes de que nadie
+    responda, porque en la mayoría de los casos acierta. Si el trabajador dice
+    que son distintas, ese análisis quedó colgando de una zona ajena: la
+    evolución de una mostraba la historia de la otra.
+
+    Se mueve la versión COMPLETA (todos los análisis del mismo vuelo), no solo
+    este documento: todos miden el mismo terreno, no tiene sentido repartirlos.
+    """
     oid = _object_id(analysis_id)
+    doc = await get_db().analyses.find_one({"_id": oid})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Análisis no encontrado")
+
+    cambios: dict[str, Any] = {"duplicateStatus": "confirmed_different"}
+
+    otro_id = doc.get("possibleDuplicateOf")
+    if otro_id and doc.get("zoneId"):
+        otro = await get_db().analyses.find_one({"_id": _object_id(otro_id)})
+        # Solo si de verdad comparten zona. Si ya estaban separadas (porque el
+        # frontend mandó una zona explícita, o porque alguien las reasignó a
+        # mano), no hay nada que deshacer.
+        if otro and otro.get("zoneId") == doc["zoneId"]:
+            zona = await get_db().zones.insert_one({
+                "owner": doc.get("owner", current_user.username),
+                "name": doc.get("name") or "Zona sin nombre",
+                "createdAt": datetime.now(timezone.utc),
+            })
+            nueva_zona = str(zona.inserted_id)
+            if doc.get("sourceTaskId"):
+                await get_db().analyses.update_many(
+                    {"sourceTaskId": doc["sourceTaskId"]},
+                    {"$set": {"zoneId": nueva_zona}},
+                )
+            cambios["zoneId"] = nueva_zona
+
     result = await get_db().analyses.find_one_and_update(
         {"_id": oid},
-        {"$set": {"duplicateStatus": "confirmed_different"}},
+        {"$set": cambios},
         return_document=ReturnDocument.AFTER,
     )
-    if not result:
-        raise HTTPException(status_code=404, detail="Análisis no encontrado")
     return _to_out(result)
