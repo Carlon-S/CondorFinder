@@ -971,7 +971,14 @@ function AnalysisPage() {
                     spinner solo se agregaba al texto de "Es la misma zona",
                     lo que le cambiaba el ancho al botón en pleno click y lo
                     sacaba del borde del banner. */}
-                <div className="mt-3 flex gap-2">
+                {/* Uno debajo del otro, no lado a lado. Este banner vive en el
+                    panel lateral, que mide entre 240 y 360px; dos botones al
+                    50% no alcanzaban para "Son zonas distintas" ni "Es la misma
+                    zona", y los textos terminaban montados uno sobre otro.
+                    Apilados, entran completos a cualquier ancho. */}
+                <div className="mt-3 flex flex-col gap-2">
+                  {/* La acción principal va arriba: es la respuesta esperada
+                      cuando el sistema acertó en la superposición. */}
                   {/* El spinner va absolute (fuera del flujo) en vez de un
                       span reservado en línea con el texto -- ese span le
                       agregaba margen solo a la izquierda, corriendo el
@@ -980,19 +987,7 @@ function AnalysisPage() {
                       superpone a su izquierda sin mover nada. */}
                   <Button
                     size="sm"
-                    variant="secondary"
-                    className="relative min-w-0 flex-1"
-                    disabled={resolvingDuplicate !== null}
-                    onClick={handleRejectDuplicate}
-                  >
-                    {resolvingDuplicate === "reject" && (
-                      <Loader2 className="absolute left-3 h-3.5 w-3.5 animate-spin" />
-                    )}
-                    Son zonas distintas
-                  </Button>
-                  <Button
-                    size="sm"
-                    className="relative min-w-0 flex-1"
+                    className="relative w-full"
                     disabled={resolvingDuplicate !== null}
                     onClick={handleConfirmDuplicate}
                   >
@@ -1000,6 +995,18 @@ function AnalysisPage() {
                       <Loader2 className="absolute left-3 h-3.5 w-3.5 animate-spin" />
                     )}
                     Es la misma zona
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="relative w-full"
+                    disabled={resolvingDuplicate !== null}
+                    onClick={handleRejectDuplicate}
+                  >
+                    {resolvingDuplicate === "reject" && (
+                      <Loader2 className="absolute left-3 h-3.5 w-3.5 animate-spin" />
+                    )}
+                    Son zonas distintas
                   </Button>
                 </div>
               </div>
