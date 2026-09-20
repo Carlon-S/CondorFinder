@@ -47,6 +47,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ResourcesSummaryPanel } from "@/components/ResourcesSummaryPanel";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Table,
   TableBody,
@@ -744,22 +745,37 @@ function MainPage() {
                 <FilterChip active={stateFilter === "pending_analysis"} onClick={() => setStateFilter("pending_analysis")}>Pendientes</FilterChip>
                 <FilterChip active={stateFilter === "historical"} onClick={() => setStateFilter("historical")}>Historial</FilterChip>
               </div>
-              {/* HDU9/AC4 — sin ninguna zona guardada no hay informe posible.
-                  El botón queda deshabilitado con el motivo en el tooltip,
-                  en vez de abrir un diálogo vacío. */}
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => setReportOpen(true)}
-                disabled={savedAnalyses.length === 0}
-                title={
-                  savedAnalyses.length === 0
-                    ? "No hay análisis guardados todavía. Guarda al menos uno para poder generar un informe."
-                    : undefined
-                }
-              >
-                <FileText className="mr-1.5 h-3.5 w-3.5" /> Generar informe
-              </Button>
+              {/* HDU9/AC4 — sin ninguna zona guardada no hay informe posible:
+                  el botón queda deshabilitado y el motivo aparece al pasar el
+                  puntero por encima.
+
+                  El tooltip NO puede colgar del botón. Un elemento con
+                  `disabled` no emite eventos de puntero, así que ni el `title`
+                  nativo ni el disparador de Radix llegan a activarse: el
+                  mensaje existía pero era inalcanzable, que es justo lo que
+                  pide el criterio. Por eso el disparador va en un <span> que
+                  envuelve al botón y sí recibe el hover. */}
+              <TooltipProvider delayDuration={150}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span tabIndex={savedAnalyses.length === 0 ? 0 : -1}>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => setReportOpen(true)}
+                        disabled={savedAnalyses.length === 0}
+                      >
+                        <FileText className="mr-1.5 h-3.5 w-3.5" /> Generar informe
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
+                  {savedAnalyses.length === 0 && (
+                    <TooltipContent side="bottom" className="max-w-xs text-left">
+                      No hay análisis guardados todavía. Guarda al menos uno para poder generar un informe.
+                    </TooltipContent>
+                  )}
+                </Tooltip>
+              </TooltipProvider>
               <Button size="sm" onClick={() => setAddZoneOpen(true)}>
                 <Plus className="mr-1.5 h-3.5 w-3.5" /> Agregar zona
               </Button>
