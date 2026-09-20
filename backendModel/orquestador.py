@@ -34,7 +34,7 @@ import storage as storage_module
 
 
 # =============================================================================
-# CONEXIÓN A MONGODB (Atlas) — un solo cliente para todo el proceso, creado
+# CONEXIÓN A MONGODB (Atlas), un solo cliente para todo el proceso, creado
 # al arrancar y cerrado al apagar. auth.py recibe la referencia vía
 # set_db() en vez de abrir su propia conexión.
 # =============================================================================
@@ -43,7 +43,7 @@ import storage as storage_module
 async def lifespan(app: FastAPI):
     # No se usa get_default_database(): depende de que el connection string
     # de Atlas incluya el nombre de la base en el path, y la plantilla que
-    # da Atlas por defecto no lo trae — se pide explícito por env var para
+    # da Atlas por defecto no lo trae, se pide explícito por env var para
     # no romper en el setup de cada uno.
     mongo_client = AsyncMongoClient(os.environ["MONGODB_URI"])
     db = mongo_client[os.environ.get("MONGODB_DB_NAME", "condorfinder")]
@@ -52,10 +52,10 @@ async def lifespan(app: FastAPI):
     routing_module.set_db(db)
     analyses_module.set_db(db)
 
-    # Índices — create_index es idempotente (no rompe nada si ya existen),
+    # Índices, create_index es idempotente (no rompe nada si ya existen),
     # así que se piden cada vez que arranca el proceso en vez de una
     # migración aparte. Ninguna colección tenía más que el índice por
-    # defecto de _id hasta ahora — estos cubren los filtros que sí corren en
+    # defecto de _id hasta ahora, estos cubren los filtros que sí corren en
     # cada request (get_current_user por username) o con frecuencia
     # (list_pending_tasks/is_pipeline_busy, la detección de duplicados de
     # HDU7 en cada guardado).
@@ -66,13 +66,13 @@ async def lifespan(app: FastAPI):
     await db.analyses.create_index([("zoneId", 1), ("captureDate", 1)])
     await db.analyses.create_index("sourceTaskId")
     await db.zones.create_index("owner")
-    # GCS_BUCKET_NAME sin setear => modo local (ver storage.py) — así el
+    # GCS_BUCKET_NAME sin setear => modo local (ver storage.py), así el
     # backend sigue corriendo 100% en WSL sin depender de ninguna cuenta de
     # GCP; solo la VM en producción lo setea de verdad.
     storage_module.set_bucket(os.environ.get("GCS_BUCKET_NAME"))
     storage_module.set_local_fallback_dir(OUTPUT_DIR)
 
-    # Segunda conexión, síncrona — run_pipeline/run_analysis corren en
+    # Segunda conexión, síncrona, run_pipeline/run_analysis corren en
     # threading.Thread normal (no en una corutina), y el driver async no es
     # seguro de usar ahí. Misma URI/base, dos conexiones al mismo lugar.
     sync_mongo_client = MongoClient(os.environ["MONGODB_URI"])
@@ -83,7 +83,7 @@ async def lifespan(app: FastAPI):
     await auth_module.seed_admin_user(db)
 
     # Cualquier tarea que haya quedado "en curso" es de la vida ANTERIOR del
-    # proceso — su hilo ya no existe, nada la va a volver a mover. Se marca
+    # proceso, su hilo ya no existe, nada la va a volver a mover. Se marca
     # como error acá antes de aceptar tráfico, en vez de dejarla mostrando
     # progreso que nunca va a avanzar.
     await task_store.reconcile_orphaned_tasks()
@@ -95,7 +95,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# localhost:8080 siempre permitido (desarrollo local) — EXTRA_CORS_ORIGINS
+# localhost:8080 siempre permitido (desarrollo local), EXTRA_CORS_ORIGINS
 # (coma-separado) agrega el/los orígenes del frontend desplegado sin
 # reemplazar el de desarrollo. Ej: "https://condorfinder.diegogcs2003.workers.dev,https://condorfinder.cl"
 _extra_origins = [o.strip() for o in os.environ.get("EXTRA_CORS_ORIGINS", "").split(",") if o.strip()]
@@ -115,14 +115,14 @@ app.include_router(analyses_module.router)
 # =============================================================================
 # CONFIGURACIÓN DE RED
 #
-# PUBLIC_BASE_URL: host desde el que el FRONTEND alcanza este backend — se
+# PUBLIC_BASE_URL: host desde el que el FRONTEND alcanza este backend, se
 # usa para construir result_url/result_json_url en las respuestas. Default
 # localhost:8000 no rompe nada en desarrollo local; en la VM de producción
 # se setea a http://<IP_VM>:8000 vía backendModel/.env.
 #
 # NODEODM_HOST: host desde el que ESTE PROCESO alcanza a NodeODM. En WSL
 # local, NodeODM corre en la misma máquina (localhost). En docker-compose,
-# backend y nodeodm son contenedores distintos — el backend le habla a
+# backend y nodeodm son contenedores distintos, el backend le habla a
 # NodeODM por el nombre del servicio de compose ("nodeodm"), no localhost.
 # =============================================================================
 
@@ -148,7 +148,7 @@ OUTPUT_DIR  = os.path.join(BASE_DIR, "detecting", "output")
 # volumeCalc.py de forma que altere los resultados.
 VOLUME_ALGORITHM_VERSION = 1
 
-# joining/images/ es una carpeta COMPARTIDA — se reusa para cada carga nueva.
+# joining/images/ es una carpeta COMPARTIDA, se reusa para cada carga nueva.
 # Si se guarda una "foto" (snapshot) de las imágenes de cada tarea aquí, se
 # puede seguir mostrando el set ORIGINAL de una tarea aunque después se haya
 # subido un set distinto para otra generación.
@@ -161,7 +161,7 @@ os.makedirs(TASK_IMAGES_DIR, exist_ok=True)
 
 # =============================================================================
 # ESTADO DE TAREAS
-# Persistido en Mongo vía task_store.py (colección "tasks") — antes era un
+# Persistido en Mongo vía task_store.py (colección "tasks"), antes era un
 # dict en memoria del proceso, que se perdía por completo en cada reinicio
 # de uvicorn (incluso tareas ya terminadas). Ver task_store.py para el
 # porqué de las versiones sync/async separadas.
@@ -190,18 +190,18 @@ async def is_pipeline_busy() -> bool:
     True si alguna tarea está usando activamente UPLOAD_DIR (entre
     'checking_overlap' y 'detecting', inclusive).
 
-    UPLOAD_DIR es una única carpeta compartida por TODO el backend — no por
+    UPLOAD_DIR es una única carpeta compartida por TODO el backend, no por
     sesión ni por usuario. En local, con una sola persona probando, nunca se
     nota. Pero al desplegar en la nube para el Sprint 1, dos personas
     (compañeros de equipo, jurado) pueden pegarle al mismo backend a la vez:
     si el usuario B sube imágenes o inicia una generación mientras la tarea
     del usuario A todavía está leyendo esa carpeta, se mezclan sets de
     imágenes de zonas distintas silenciosamente. Este chequeo bloquea esa
-    ventana — ver uso en /upload, /upload (DELETE) y /generate.
+    ventana, ver uso en /upload, /upload (DELETE) y /generate.
 
     "running" se incluye porque es el estado inicial de una tarea recién
     creada en /generate, antes de que su hilo en background alcance a
-    marcarla "checking_overlap" — sin esto, dos /generate casi simultáneos
+    marcarla "checking_overlap", sin esto, dos /generate casi simultáneos
     podían colarse los dos antes de que el primero apareciera como "busy".
     """
     return await task_store.is_pipeline_busy()
@@ -248,7 +248,7 @@ async def pipeline_status():
     consultar el estado REAL del servidor al montar /carga (o después de un
     F5) en vez de confiar en su propio estado local (uploadDone,
     uploadBlockedMessage), que se resetea en cada recarga y puede quedar
-    desincronizado de lo que realmente está pasando en el backend — el
+    desincronizado de lo que realmente está pasando en el backend, el
     botón "Generar mapa unificado" podía verse habilitado después de un F5
     aunque el servidor siguiera ocupado con otra tarea.
     """
@@ -256,7 +256,7 @@ async def pipeline_status():
 
 @app.get("/upload/{filename}")
 async def get_uploaded_image(filename: str):
-    """Sirve una imagen ya subida — usado para mostrar las miniaturas al
+    """Sirve una imagen ya subida, usado para mostrar las miniaturas al
     retomar una generación en curso desde la Vista Principal, donde el
     frontend ya no tiene los archivos originales en memoria."""
     file_path = os.path.join(UPLOAD_DIR, filename)
@@ -336,7 +336,7 @@ def run_pipeline(task_id: str, opc: int):
             capture_date_estimated=fecha_captura is None,
         )
 
-        # Punto de chequeo de cancelación — solo puede interrumpir AQUÍ, entre
+        # Punto de chequeo de cancelación, solo puede interrumpir AQUÍ, entre
         # fases. Una vez que empieza joinOrtho.join() (llamada bloqueante a
         # ODM) o detectingOrtho.detect() (inferencia YOLO), no hay forma de
         # interrumpirla a mitad de camino: la cancelación recién se aplica
@@ -383,7 +383,7 @@ def run_pipeline(task_id: str, opc: int):
         if task_store.get_task_sync(task_id).get("cancel_requested"):
             task_store.update_task_sync(task_id, status="cancelled", message="Cancelado por el usuario")
             # El .tif ya se generó y se movió a FINALS_DIR antes de que se
-            # notara la cancelación (varios MB cada uno) — sin este cleanup
+            # notara la cancelación (varios MB cada uno), sin este cleanup
             # quedaba huérfano ahí para siempre, ya que esta tarea nunca va
             # a llegar a "done" ni a guardarse.
             if os.path.exists(fileplace):
@@ -417,7 +417,7 @@ def run_pipeline(task_id: str, opc: int):
             # OUTPUT_DIR antes de que se notara la cancelación. El frontend
             # nunca llega a conocer estos nombres (result_filename solo se
             # expone en /status cuando el estado es "done"), así que sin
-            # este cleanup quedaban huérfanos para siempre — es la causa de
+            # este cleanup quedaban huérfanos para siempre, es la causa de
             # los archivos sueltos en detecting/output/ que no correspondían
             # a ninguna zona del listado.
             for fname in (result_filename, result_json_filename, result_thumbnail_filename):
@@ -464,7 +464,7 @@ def run_pipeline(task_id: str, opc: int):
         )
 
         # El snapshot de task_images/ solo sirve para retomar la vista de
-        # carga de una tarea "en progreso" (botón "Ir a Carga") — apenas el
+        # carga de una tarea "en progreso" (botón "Ir a Carga"), apenas el
         # pipeline llega a "done" la tarea pasa a "pendiente de análisis" en
         # el frontend, que usa "Ir a Análisis" en su lugar y ya no necesita
         # esas imágenes. Se borra acá mismo para que la vista de carga
@@ -480,7 +480,7 @@ def run_pipeline(task_id: str, opc: int):
         # qué esto nunca deja una versión sin cifras.
         liberar_archivos_de_vuelos_previos(conservar_task_id=task_id)
 
-        # odm_task ya no hace falta una vez terminado el pipeline — liberar el
+        # odm_task ya no hace falta una vez terminado el pipeline, liberar el
         # handle en memoria (nunca iba a sobrevivir un reinicio de todos
         # modos, pero no hay razón para dejarlo colgado hasta entonces).
         task_store.pop_odm_task_handle(task_id)
@@ -495,7 +495,7 @@ def run_pipeline(task_id: str, opc: int):
 
 
 class GenerateRequest(BaseModel):
-    # SP1 — 0 = joinOrtho.presetfast (óptimo/rápido, el único preset que se
+    # SP1, 0 = joinOrtho.presetfast (óptimo/rápido, el único preset que se
     # usaba hasta ahora), 1 (o cualquier valor != 0) = joinOrtho.presethigh
     # (preciso/lento). Default 0 para no romper ningún caller que todavía no
     # mande este campo.
@@ -531,17 +531,17 @@ async def generate_map(request: GenerateRequest = GenerateRequest()):
         "analysis_status": None,
         "analysis_message": None,
         "cancel_requested": False,
-        # Reemplaza taskRegistry.ts (localStorage) — GET /tasks/pending usa
+        # Reemplaza taskRegistry.ts (localStorage), GET /tasks/pending usa
         # esto para ordenar la lista que ve Vista Principal.
         "created_at": datetime.now(timezone.utc),
         # true una vez que el análisis se guardó (analyses.py::mark_reviewed)
-        # — deja de aparecer en GET /tasks/pending sin borrar el documento,
+        #, deja de aparecer en GET /tasks/pending sin borrar el documento,
         # así "Analizar volumen" puede seguir recalculando sobre esta misma
         # tarea aunque el análisis ya esté guardado.
         "reviewed": False,
     })
 
-    # UPLOAD_DIR es compartido entre todas las tareas — se sobreescribe con
+    # UPLOAD_DIR es compartido entre todas las tareas, se sobreescribe con
     # cada carga nueva. Se guarda una copia ("foto") del set de imágenes con
     # el que ESTA tarea arrancó, para poder mostrarlo correctamente después
     # (ej. al retomar desde la Vista Principal) aunque para entonces
@@ -565,10 +565,10 @@ async def generate_map(request: GenerateRequest = GenerateRequest()):
 # de cancel_requested en run_pipeline).
 #
 # Durante "joining": se le pide a ODM (Docker) que cancele su propia tarea
-# vía odm_task.cancel() — cancelación real, no solo dejar de avanzar.
+# vía odm_task.cancel(), cancelación real, no solo dejar de avanzar.
 #
 # Durante "detecting" (inferencia YOLO): no hay a quién pedirle cancelar,
-# es una llamada local bloqueante — solo se marca cancel_requested, pero
+# es una llamada local bloqueante, solo se marca cancel_requested, pero
 # no se aplica hasta que esa llamada termine sola.
 # =============================================================================
 
@@ -586,7 +586,7 @@ async def cancel_task(task_id: str):
     if odm_task is not None:
         try:
             odm_task.cancel()
-            return {"status": "ok", "message": "Cancelación solicitada — se aplica de inmediato en ODM"}
+            return {"status": "ok", "message": "Cancelación solicitada, se aplica de inmediato en ODM"}
         except Exception:
             pass  # sigue como cancel_requested para el próximo punto de control
 
@@ -595,7 +595,7 @@ async def cancel_task(task_id: str):
 
 # =============================================================================
 # ENDPOINT: CALCULAR VOLUMEN (HDU2)
-# Se ejecuta separado del pipeline — requiere que el mapa ya esté generado.
+# Se ejecuta separado del pipeline, requiere que el mapa ya esté generado.
 # =============================================================================
 
 def dem_paths_for(task: dict) -> tuple[str, str, str]:
@@ -623,22 +623,27 @@ def dem_paths_for(task: dict) -> tuple[str, str, str]:
 def liberar_archivos_de_vuelos_previos(conservar_task_id: str) -> None:
     """Borra de FINALS_DIR los archivos de los vuelos que ya no se necesitan.
 
-    Se llama al terminar una generación. Se conservan dos grupos: el vuelo
-    recién generado, y los que tienen el mapa hecho pero todavía sin análisis
-    guardado (ver task_store.list_unreviewed_done_sync para el porqué). Del
-    resto se van tres tipos de archivo, todos pesados y todos inútiles para un
-    vuelo que ya tiene sus cifras guardadas y dejó de ser el vigente:
+    Se llama al terminar una generación. Se conservan TRES grupos:
 
-      - dsm/dtm/ndsm: sin ellos no se puede calcular volumen, que es
-        justamente la regla de retención acordada.
-      - ortho: el .tif solo lo lee volumeCalc.enrich(), o sea el cálculo de
-        volumen. Lo que se ve en pantalla es el PNG que vive en la nube, no
-        este archivo. Sin sus modelos de elevación, el ortomosaico de un vuelo
-        antiguo no lo puede usar nadie.
+      1. El vuelo recién generado.
+      2. Los que tienen el mapa hecho pero todavía sin análisis guardado (ver
+         task_store.list_unreviewed_done_sync para el porqué).
+      3. Los que SÍ tienen análisis guardado, o sea toda versión que forma
+         parte de la historia de alguna zona.
 
-    Esto NO deja versiones sin cifras: una versión solo entra en la historia de
-    una zona cuando ya tiene un análisis guardado, así que lo único que se
-    pierde es poder re-medir un vuelo viejo.
+    El grupo 3 es nuevo. Antes se podaban justamente esos, con el argumento de
+    que un vuelo ya medido y superado no necesitaba poder volver a medirse. Eso
+    dejó de ser cierto cuando el borrado pasó a devolver a vigente la versión
+    anterior: al eliminar la captura más nueva de una zona, la anterior
+    resucitaba sin sus modelos de elevación, imposible de re-medir para
+    siempre, y encima la interfaz seguía diciendo "existe una captura más
+    reciente", que ya era falso.
+
+    Con esto la poda queda casi sin trabajo, y está bien: su función ahora es
+    de red de seguridad, recoger archivos de vuelos que no le pertenecen a
+    nadie (por ejemplo restos de una versión borrada antes de este cambio). El
+    costo es disco, y se asumió a conciencia a cambio de que cualquier versión
+    guardada se pueda volver a medir siempre.
 
     Es best-effort: si un borrado falla, se sigue con el resto. Un archivo que
     quede sin borrar cuesta disco, pero un error acá no debe tumbar un
@@ -669,10 +674,24 @@ def liberar_archivos_de_vuelos_previos(conservar_task_id: str) -> None:
             s = sufijo_de(pendiente)
             if s:
                 protegidos.add(s)
+
+        # Grupo 3: todo vuelo que tenga al menos un análisis guardado. Se
+        # resuelve por sourceTaskId, que es lo que identifica a la versión, y
+        # de ahí al sufijo de sus archivos.
+        sync_db = task_store.get_sync_db()
+        for source_task_id in sync_db.analyses.distinct("sourceTaskId"):
+            if not source_task_id:
+                continue
+            t = task_store.get_task_sync(source_task_id)
+            if not t:
+                continue
+            s = sufijo_de(t)
+            if s:
+                protegidos.add(s)
     except Exception as e:
-        # Si no se puede saber cuáles están pendientes, no se poda nada: el
-        # costo de equivocarse acá es perder un vuelo, el de no podar es disco.
-        print(f"No se liberaron archivos, no se pudo listar pendientes: {e}", file=sys.stderr)
+        # Si no se puede saber a quién proteger, no se poda nada: el costo de
+        # equivocarse acá es perder un vuelo, el de no podar es disco.
+        print(f"No se liberaron archivos, no se pudo listar protegidos: {e}", file=sys.stderr)
         return
 
     prefijos = ("dsm_", "dtm_", "ndsm_", "ortho_")
@@ -811,13 +830,13 @@ async def start_analysis(task_id: str):
 @app.get("/tasks/pending")
 async def list_pending_tasks():
     """Vista Principal consulta esto directo en vez de mantener su propia
-    lista de task_id en localStorage — ver docstring de
+    lista de task_id en localStorage, ver docstring de
     task_store.list_pending_tasks() para el motivo completo. Devuelve las
     tareas "en progreso" o "done pero todavía no guardadas como análisis"
-    (una vez guardada, analyses.py marca la tarea como reviewed=True — ver
-    task_store.mark_reviewed — y deja de aparecer acá, sin borrar el
+    (una vez guardada, analyses.py marca la tarea como reviewed=True, ver
+    task_store.mark_reviewed, y deja de aparecer acá, sin borrar el
     documento). "cancelled" se incluye para que el frontend la descubra,
-    limpie sus archivos, y la borre — igual que hacía antes al encontrarla
+    limpie sus archivos, y la borre, igual que hacía antes al encontrarla
     en su registro local."""
     tasks = await task_store.list_pending_tasks()
     result = []
@@ -892,7 +911,7 @@ async def get_status(task_id: str):
         json_name = task.get("result_json_filename", "")
         # Importante: solo se usa el JSON propio de ESTA tarea. Antes, si no
         # existía todavía, se sustituía por "cualquier JSON disponible" en la
-        # carpeta — con varias tareas corriendo/guardadas, eso terminaba
+        # carpeta, con varias tareas corriendo/guardadas, eso terminaba
         # devolviendo las detecciones de una zona completamente distinta.
         # Si el propio no existe, se omite result_json_url (el frontend no
         # debe recibir datos que no le corresponden).
@@ -916,7 +935,7 @@ async def get_status(task_id: str):
 
 @app.delete("/status/{task_id}")
 async def delete_status(task_id: str):
-    """Borra el documento de la tarea — llamado por el frontend al eliminar
+    """Borra el documento de la tarea, llamado por el frontend al eliminar
     una zona (guardada o no) desde Vista Principal, junto con la limpieza de
     archivos que ya hacía (deleteResultFile/deleteFinalsFile/deleteTaskImages).
     Antes esto no hacía falta: `tasks` vivía en memoria y se perdía solo al
@@ -932,12 +951,12 @@ async def delete_status(task_id: str):
 
 @app.get("/result/{filename}")
 async def get_result(filename: str):
-    """Sirve la imagen anotada o el JSON de detecciones — vive en Google
+    """Sirve la imagen anotada o el JSON de detecciones, vive en Google
     Cloud Storage (ver storage.py), no en disco local, para que sobreviva a
     un redeploy/pérdida de disco de la VM y sea visible para todo el equipo
     sin importar quién generó la zona. El bucket es privado; este endpoint
     (que ya exige sesión válida, como el resto de la API) sigue siendo el
-    único punto de acceso — mismo control que existía con disco local."""
+    único punto de acceso, mismo control que existía con disco local."""
     content = storage_module.download_result_file(filename)
     if content is None:
         return {"status": "error", "message": "Archivo no encontrado"}
@@ -947,7 +966,7 @@ async def get_result(filename: str):
 
 @app.delete("/result/{filename}")
 async def delete_result(filename: str):
-    """Borra un archivo de resultado (imagen o JSON) de GCS — usado por
+    """Borra un archivo de resultado (imagen o JSON) de GCS, usado por
     "Eliminar zona" en la Vista Principal para no dejar los archivos
     huérfanos cuando se borra un análisis guardado."""
     if storage_module.result_file_exists(filename):
@@ -959,14 +978,14 @@ async def delete_result(filename: str):
 @app.delete("/finals/{filename}")
 async def delete_finals(filename: str):
     """
-    Borra el ortomosaico .tif de joining/finals/ — usado al eliminar una zona
+    Borra el ortomosaico .tif de joining/finals/, usado al eliminar una zona
     guardada desde la Vista Principal.
 
     Sin este endpoint, joining/finals/ nunca se limpiaba para NINGUNA zona
     (ni siquiera las guardadas y luego borradas correctamente desde la UI):
     deleteResultFile solo apuntaba a detecting/output/. Cada .tif pesa varios
     MB, y se confirmó que ya había 80 archivos (912 MB) acumulados desde
-    junio — un problema real de espacio en disco de cara a un despliegue en
+    junio, un problema real de espacio en disco de cara a un despliegue en
     la nube con disco limitado.
     """
     file_path = os.path.join(FINALS_DIR, filename)
@@ -979,7 +998,7 @@ async def delete_finals(filename: str):
 # =============================================================================
 # ENDPOINT: IMÁGENES DE UNA TAREA (snapshot)
 #
-# UPLOAD_DIR es una carpeta compartida — al retomar la vista de carga de una
+# UPLOAD_DIR es una carpeta compartida, al retomar la vista de carga de una
 # tarea antigua, listar UPLOAD_DIR mostraría las imágenes de la carga MÁS
 # RECIENTE, no las de la tarea que se está retomando. Estos endpoints sirven
 # la copia ("foto") tomada en /generate al momento de crear cada tarea.
@@ -1005,7 +1024,7 @@ async def get_task_image(task_id: str, filename: str):
 
 @app.delete("/task-images/{task_id}")
 async def delete_task_images(task_id: str):
-    """Borra el snapshot completo de una tarea — usado al eliminar una zona
+    """Borra el snapshot completo de una tarea, usado al eliminar una zona
     (en progreso, pendiente de revisión o guardada) para no dejar copias
     huérfanas en el servidor."""
     snapshot_dir = os.path.join(TASK_IMAGES_DIR, task_id)

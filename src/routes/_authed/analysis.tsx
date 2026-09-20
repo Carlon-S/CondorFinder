@@ -658,6 +658,27 @@ function AnalysisPage() {
     [displayDetections],
   );
 
+  /**
+   * Cuántas detecciones tienen en pantalla una selección distinta a la que
+   * quedó guardada.
+   *
+   * El informe se arma SIEMPRE con los análisis guardados, no con lo que está
+   * marcado en ese momento: si saliera del estado en pantalla, dos personas
+   * generarían informes distintos de la misma zona y el documento dejaría de
+   * corresponder a una medición guardada. Pero sin avisarlo, ver el informe
+   * ignorar lo que uno acaba de desmarcar se lee como un error de cálculo.
+   */
+  const cambiosSinGuardar = useMemo(() => {
+    if (!currentAnalysisId) return 0;
+    const guardado = zoneAnalyses.find((a) => a.id === currentAnalysisId);
+    if (!guardado) return 0;
+    const detGuardadas = (guardado.detections ?? []) as { id?: number; enabled?: boolean }[];
+    // Una detección sin la marca cuenta como activa, igual que en
+    // volumeReport.ts: es como se comportaban los registros anteriores a que
+    // la selección se persistiera.
+    return detGuardadas.filter((d) => (d.enabled !== false) !== enabledIds.has(d.id ?? -1)).length;
+  }, [currentAnalysisId, zoneAnalyses, enabledIds]);
+
   // ── resumen calculado solo con zonas activas ───────────────────────────────
 
   const activeSummary = useMemo(() => {
@@ -747,10 +768,19 @@ function AnalysisPage() {
         }
         // Respaldo: si además faltan los modelos de elevación de este vuelo,
         // tampoco se puede medir. El motivo principal sigue siendo `historical`.
+        //
+        // El texto NO repite "existe una captura más reciente": ese era el
+        // motivo cuando la poda se llevaba los modelos de cualquier vuelo ya
+        // superado, pero desde que el borrado devuelve a vigente la versión
+        // anterior, una captura sin captura posterior puede igual haber
+        // perdido sus modelos (si se podaron antes de que la retención
+        // cambiara). Afirmar que existe una más reciente era mentir sobre el
+        // estado real. Se dice lo único que se sabe con certeza: faltan los
+        // archivos con los que se mide.
         if (s && s.can_analyze === false) {
           setCanAnalyze(false);
           setCannotAnalyzeReason(
-            "Existe una captura más reciente de esta zona, así que este vuelo solo se puede consultar.",
+            "Los modelos de elevación de este vuelo ya no están disponibles, así que se puede consultar pero no volver a medir.",
           );
         }
       });
@@ -1728,6 +1758,11 @@ function AnalysisPage() {
       <ReportPreview
         open={reportOpen}
         onOpenChange={setReportOpen}
+        unsavedWarning={
+          cambiosSinGuardar > 0
+            ? `Tienes ${cambiosSinGuardar} zona(s) activadas o desactivadas sin guardar. Este informe refleja el análisis guardado, no lo que ves en pantalla: guarda los cambios y vuelve a generarlo para incluirlos.`
+            : null
+        }
         selections={
           zoneId && zoneAnalyses.length > 0
             ? [{

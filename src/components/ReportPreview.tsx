@@ -16,7 +16,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Printer } from "lucide-react";
-import { Download, FileText, Loader2 } from "@/components/icons/Icons";
+import { AlertTriangle, Download, FileText, Loader2 } from "@/components/icons/Icons";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { notify } from "@/lib/notify";
 import type { ReportSelection } from "@/lib/pdfReport";
@@ -25,11 +25,20 @@ export function ReportPreview({
   selections,
   open,
   onOpenChange,
+  unsavedWarning,
 }: {
   /** Zonas a incluir. null mientras no hay nada que previsualizar. */
   selections: ReportSelection[] | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Aviso a mostrar sobre el documento cuando lo que hay en pantalla no
+   *  coincide con lo guardado. El informe sale SIEMPRE de los análisis
+   *  guardados, nunca del estado sin guardar: si se armara con lo que está
+   *  marcado en ese momento, dos personas generarían informes distintos de la
+   *  misma zona y el documento dejaría de corresponder a una medición. Pero
+   *  sin decirlo, ver el informe ignorar lo que acabas de desmarcar parece un
+   *  error de cálculo. */
+  unsavedWarning?: string | null;
 }) {
   const [url, setUrl] = useState<string | null>(null);
   const [saveDoc, setSaveDoc] = useState<(() => void) | null>(null);
@@ -113,6 +122,16 @@ export function ReportPreview({
             Imprimir
           </AccionVisor>
         </div>
+
+        {/* El aviso va DENTRO del visor, sobre el documento, no como un toast:
+            tiene que seguir visible mientras se revisa el PDF, que es cuando
+            uno se pregunta por qué las cifras no cuadran con la pantalla. */}
+        {unsavedWarning && (
+          <div className="flex flex-shrink-0 items-start gap-2 border-b border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+            <span>{unsavedWarning}</span>
+          </div>
+        )}
 
         <div className="min-h-0 flex-1 bg-neutral-800">
           {error ? (

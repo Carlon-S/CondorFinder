@@ -349,6 +349,21 @@ function MainPage() {
     return zoneRecords.find((z) => z.id === analisis.zoneId) ?? null;
   };
 
+  /** Todas las capturas guardadas de la zona a la que pertenece la fila que se
+   *  va a eliminar, de la más antigua a la más reciente. Con más de una, el
+   *  diálogo ofrece borrar solo esa captura o la zona completa; con una sola no
+   *  hay distinción que hacer. Se calcula sobre deleteTargetDisplay y no sobre
+   *  deleteTarget por el mismo motivo que el texto: para que no se vacíe
+   *  durante la animación de cierre. */
+  const capturasDelObjetivo = useMemo(() => {
+    if (deleteTargetDisplay?.state !== "done" || !deleteTargetDisplay.recordId) return [];
+    const zonaId = savedAnalyses.find((a) => a.id === deleteTargetDisplay.recordId)?.zoneId;
+    if (!zonaId) return [];
+    return savedAnalyses
+      .filter((a) => a.zoneId === zonaId)
+      .sort((a, b) => Date.parse(a.savedAt) - Date.parse(b.savedAt));
+  }, [deleteTargetDisplay, savedAnalyses]);
+
   // Orden estilo Excel: click en el encabezado de columna.
   // Solo aplica a las zonas terminadas, en progreso/pendientes siempre van primero.
   const [sortBy, setSortBy] = useState<"fecha" | "volumen" | "peso" | "area">("fecha");
@@ -499,7 +514,43 @@ function MainPage() {
     navigate({ to: "/analysis" });
   };
 
-  const confirmDelete = async () => {
+  /**
+   * Borra todos los archivos de UNA VERSIÓN (un vuelo) del servidor.
+   *
+   * Se llama solo cuando esa versión se quedó sin ningún análisis guardado.
+   * Mientras le quede alguno, sus archivos siguen haciendo falta: los modelos
+   * de elevación son con lo que se vuelve a medir, y el ortomosaico es lo que
+   * lee ese cálculo.
+   *
+   * Los `dsm_`/`dtm_`/`ndsm_` no se derivaban de acá y sobrevivían a cada
+   * borrado. Solo desaparecían cuando la poda automática pasaba por encima en
+   * la siguiente generación, así que si alguien borraba mucho y generaba poco,
+   * quedaban ocupando disco sin que nada los leyera.
+   */
+  const borrarArchivosDeVersion = (mapUrl?: string | null, taskId?: string) => {
+    const filename = mapUrl?.split("/").pop();
+    if (filename) {
+      deleteResultFile(filename);
+      const thumbName = filename.replace(/\.png$/i, "_thumb.png");
+      if (thumbName !== filename) deleteResultFile(thumbName);
+      const jsonName = filename.replace(/\.png$/i, ".json");
+      if (jsonName !== filename) deleteResultFile(jsonName);
+
+      // El nombre del mapa es "ortho_<uuid>.png"; los cuatro archivos del
+      // vuelo comparten ese <uuid> y solo cambian de prefijo.
+      const base = filename.replace(/\.png$/i, "");
+      for (const prefijo of ["ortho_", "dsm_", "dtm_", "ndsm_"]) {
+        const nombre = `${base.replace(/^ortho_/, prefijo)}.tif`;
+        deleteFinalsFile(nombre);
+      }
+    }
+    if (taskId) {
+      deleteTaskImages(taskId);
+      deleteTask(taskId);
+    }
+  };
+
+  const confirmDelete = async (alcance: "captura" | "zona" = "captura") => {
     if (!deleteTarget) return;
     // Cierra el diálogo de inmediato y deja la carga visible EN LA FILA
     // (deletingRowKey) en vez de mantener el diálogo abierto durante todo
@@ -509,64 +560,79 @@ function MainPage() {
     setDeleteTarget(null);
     setDeletingRowKey(target.key);
     const deletedName = target.name;
+
+    // "Toda la zona": se borran TODOS sus análisis, no solo el de la fila. El
+    // botón decía "Eliminar zona" y borraba una captura, así que quien tenía
+    // una zona de varios vuelos creía haberla eliminado cuando en realidad
+    // solo había retrocedido una captura, y el resto quedaba escondido bajo
+    // el filtro "Historial".
+    if (alcance === "zona" && target.state === "done" && target.recordId) {
+      const zonaId = savedAnalyses.find((a) => a.id === target.recordId)?.zoneId;
+      const deLaZona = zonaId
+        ? savedAnalyses.filter((a) => a.zoneId === zonaId)
+        : savedAnalyses.filter((a) => a.id === target.recordId);
+
+      for (const analisis of deLaZona) {
+        await deleteAnalysis(analisis.id);
+      }
+      // Los archivos se borran por VERSIÓN, no por análisis: varios análisis
+      // del mismo vuelo comparten mapa y modelos de elevación, y borrarlos una
+      // vez por análisis dispararía la misma eliminación varias veces.
+      const versiones = new Map<string, SavedAnalysisRecord>();
+      for (const a of deLaZona) {
+        versiones.set(a.sourceTaskId ?? `sin-tarea:${a.id}`, a);
+      }
+      for (const a of versiones.values()) {
+        borrarArchivosDeVersion(a.mapUrl, a.sourceTaskId);
+      }
+
+      setDeletingRowKey(null);
+      await refreshZones();
+      notify.success(
+        "Zona eliminada",
+        `"${deletedName}" y sus ${deLaZona.length} captura(s) ya no aparecen en tu listado.`,
+      );
+      return;
+    }
+
     if (target.state === "done" && target.recordId) {
       await deleteAnalysis(target.recordId);
 
-      // Borra también los archivos en el servidor (imagen + json), si no,
-      // quedan huérfanos ocupando espacio aunque la zona ya no aparezca.
-      const filename = target.mapUrl?.split("/").pop();
-      if (filename) {
-        deleteResultFile(filename);
-        // La miniatura (<nombre>_thumb.png, ver detectingOrtho.py) no se
-        // derivaba de aquí y sobrevivía a cada borrado: el bucket acumulaba
-        // una por zona eliminada, para siempre. Se confirmó mirando el
-        // bucket real, donde quedaron 27 huérfanas de ~640 KB cada una
-        // después de borrar todas las zonas.
-        const thumbName = filename.replace(/\.png$/i, "_thumb.png");
-        if (thumbName !== filename) deleteResultFile(thumbName);
-        const jsonName = filename.replace(/\.png$/i, ".json");
-        if (jsonName !== filename) deleteResultFile(jsonName);
-        // El .tif del ortomosaico vive en joining/finals/, no en
-        // detecting/output/, sin este borrado quedaba huérfano ahí para
-        // siempre (varios MB por zona) aunque el resto se limpiara bien.
-        const tifName = filename.replace(/\.png$/i, ".tif");
-        if (tifName !== filename) deleteFinalsFile(tifName);
+      // Los archivos del vuelo solo se van si NINGÚN análisis los sigue
+      // necesitando. Otro análisis del mismo vuelo comparte mapa y modelos de
+      // elevación, y borrarlos lo dejaría sin con qué volver a medirse.
+      const quedanDeEsteVuelo = savedAnalyses.some(
+        (a) =>
+          a.id !== target.recordId &&
+          target.taskId != null &&
+          a.sourceTaskId === target.taskId,
+      );
+      if (!quedanDeEsteVuelo) {
+        borrarArchivosDeVersion(target.mapUrl, target.taskId);
       }
-      // También el snapshot de imágenes originales de la tarea, y el
-      // documento de la tarea en sí (colección `tasks`), si se guardó con
-      // una versión que ya trackeaba sourceTaskId. Sin borrar el documento,
-      // quedaba huérfano en Mongo para siempre (ya no se pierde solo con
-      // reiniciar uvicorn, a diferencia de cuando `tasks` vivía en memoria).
-      if (target.taskId) {
-        deleteTaskImages(target.taskId);
-        deleteTask(target.taskId);
-      }
-    } else if (target.taskId) {
+
+      setDeletingRowKey(null);
+      await refreshZones();
+      notify.success("Captura eliminada", `"${deletedName}" ya no aparece en tu listado.`);
+      return;
+    }
+
+    // Resto de estados: "en progreso" y "pendiente de análisis". Nunca
+    // llegaron a ser un análisis guardado, así que no hay registro en
+    // `analyses` que borrar, solo la tarea y lo que alcanzó a dejar en disco.
+    if (target.taskId) {
       // "En progreso" también cancela el proceso en el backend, no solo
       // deja de trackearlo, si no, seguiría corriendo invisible.
       if (target.state === "in_progress") {
         await cancelTask(target.taskId);
       }
-      deleteTaskImages(target.taskId);
-      deleteTask(target.taskId);
 
       // "Pendiente de revisión": el mapa y el JSON de detecciones ya se
-      // generaron en el servidor (detecting/output/) aunque nunca se hayan
-      // guardado como análisis, sin este cleanup quedaban huérfanos ahí
-      // para siempre, ya que nunca llegaron a tener un registro guardado
-      // desde el cual borrarlos. Para "en progreso" estos campos son
-      // undefined (el mapa todavía no existe), así que no hace nada.
-      if (target.resultUrl) {
-        const filename = target.resultUrl.split("/").pop();
-        if (filename) {
-          deleteResultFile(filename);
-          // Misma miniatura huérfana que en el camino de arriba.
-          const thumbName = filename.replace(/\.png$/i, "_thumb.png");
-          if (thumbName !== filename) deleteResultFile(thumbName);
-          const tifName = filename.replace(/\.png$/i, ".tif");
-          if (tifName !== filename) deleteFinalsFile(tifName);
-        }
-      }
+      // generaron en el servidor aunque nunca se hayan guardado como
+      // análisis. Para "en progreso" resultUrl es undefined (el mapa todavía
+      // no existe) y borrarArchivosDeVersion solo elimina la tarea.
+      borrarArchivosDeVersion(target.resultUrl, target.taskId);
+
       if (target.resultJsonUrl) {
         const jsonName = target.resultJsonUrl.split("/").pop();
         if (jsonName) deleteResultFile(jsonName);
@@ -1250,22 +1316,75 @@ function MainPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Confirmación de eliminar zona */}
+      {/* Confirmación de eliminar.
+          Con una zona de varias capturas hay DOS acciones distintas, y antes
+          el diálogo ofrecía una sola diciendo "Eliminar zona ... y todos sus
+          datos guardados" mientras borraba una única captura. Quien tenía dos
+          vuelos creía haber eliminado la zona y lo que había hecho era
+          retroceder a la captura anterior, con el resto escondido bajo el
+          filtro "Historial". */}
       <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Eliminar zona</AlertDialogTitle>
+            <AlertDialogTitle>
+              {capturasDelObjetivo.length > 1 ? "Eliminar de esta zona" : "Eliminar zona"}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              {deleteTargetDisplay?.state === "done"
-                ? `Esto elimina permanentemente "${deleteTargetDisplay?.name}" y todos sus datos guardados.`
-                : deleteTargetDisplay?.state === "in_progress"
-                ? "Esto cancela la generación en curso en el servidor y deja de mostrarla en tu listado."
-                : "Esto deja de mostrar este análisis pendiente en tu listado. El mapa generado sigue en el servidor, pero ya no se te va a ofrecer para revisarlo."}
+              {deleteTargetDisplay?.state !== "done"
+                ? deleteTargetDisplay?.state === "in_progress"
+                  ? "Esto cancela la generación en curso en el servidor y deja de mostrarla en tu listado."
+                  : "Esto deja de mostrar este análisis pendiente en tu listado. El mapa generado sigue en el servidor, pero ya no se te va a ofrecer para revisarlo."
+                : capturasDelObjetivo.length > 1
+                  ? `Esta zona tiene ${capturasDelObjetivo.length} capturas guardadas. Puedes eliminar solo la que seleccionaste, y la anterior vuelve a ser la vigente, o la zona completa con todo su historial.`
+                  : `Esto elimina permanentemente "${deleteTargetDisplay?.name}" y todos sus datos guardados.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
+
+          {/* Qué capturas hay en juego, para no borrar a ciegas. */}
+          {capturasDelObjetivo.length > 1 && (
+            <ul className="space-y-1 rounded-lg border border-border/60 bg-muted/30 p-2">
+              {capturasDelObjetivo.map((a) => {
+                const esLaSeleccionada = a.id === deleteTargetDisplay?.recordId;
+                return (
+                  <li key={a.id} className="flex items-center gap-2 text-xs">
+                    <span
+                      className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${
+                        esLaSeleccionada ? "bg-primary" : "bg-muted-foreground/40"
+                      }`}
+                    />
+                    <span
+                      className={`min-w-0 flex-1 truncate ${
+                        esLaSeleccionada ? "font-semibold text-foreground" : "text-muted-foreground"
+                      }`}
+                    >
+                      {a.name}
+                    </span>
+                    <span className="flex-shrink-0 text-[0.6875rem] text-muted-foreground">
+                      {a.historical ? "historial" : "vigente"}
+                    </span>
+                    <span className="mono flex-shrink-0 text-[0.6875rem] tabular-nums text-muted-foreground">
+                      {zoneTotals(a).volumeM3} m³
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+
           <AlertDialogFooter>
             <AlertDialogCancel onClick={() => setDeleteTarget(null)}>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmDelete}>Eliminar</AlertDialogAction>
+            {capturasDelObjetivo.length > 1 ? (
+              <>
+                <AlertDialogAction onClick={() => confirmDelete("captura")}>
+                  Solo esta captura
+                </AlertDialogAction>
+                <AlertDialogAction onClick={() => confirmDelete("zona")}>
+                  Toda la zona ({capturasDelObjetivo.length})
+                </AlertDialogAction>
+              </>
+            ) : (
+              <AlertDialogAction onClick={() => confirmDelete("captura")}>Eliminar</AlertDialogAction>
+            )}
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
