@@ -1,5 +1,5 @@
 /* =============================================================================
-   CONDORFINDER — ESTILOS GLOBALES
+   CONDORFINDER, ESTILOS GLOBALES
    ============================================================================= */
 
 
@@ -34,7 +34,7 @@
 
 
 /* =============================================================================
-   TEMA — TOKENS DE DISEÑO
+   TEMA, TOKENS DE DISEÑO
    ============================================================================= */
 @theme inline {
   --radius-sm: calc(var(--radius) - 4px);
@@ -91,7 +91,7 @@
 
   /* Tailwind v4 genera las utilidades animate-accordion-down/up a partir de
      estos --animate-*, igual que --color-*/--font-* generan sus propias
-     utilidades más arriba — accordion.tsx (shadcn) ya referencia esas
+     utilidades más arriba, accordion.tsx (shadcn) ya referencia esas
      clases, pero el proyecto usa config en CSS (no tailwind.config.js), así
      que sin esto no existían y el accordion abría/cerraba de golpe. */
   --animate-accordion-down: accordion-down 0.2s ease-out;
@@ -109,16 +109,16 @@
 
 
 /* =============================================================================
-   TEMA — SIDEBAR NAVY + BODY CLARO (único tema de la aplicación)
+   TEMA, SIDEBAR NAVY + BODY CLARO (único tema de la aplicación)
    Vuelta a body claro tras probar full-dark: quedaba "sobrecargado de azul"
    incluso con el body en gris neutro. El sidebar se queda navy (identidad
-   de marca, logo-dark-mode.svg) pero el body pasa a un gris suave — no
-   blanco puro, no oscuro — con las cards en blanco real para que se
+   de marca, logo-dark-mode.svg) pero el body pasa a un gris suave, no
+   blanco puro, no oscuro, con las cards en blanco real para que se
    despeguen del body sin necesitar modo oscuro.
    --primary vuelve a ser navy (no amarillo): es el color que se usa como
    texto/ícono en decenas de lugares del código (index.tsx, rutas.tsx,
    analysis.tsx, carga.tsx) y navy es el que tiene contraste real sobre
-   claro — el amarillo queda como acento puntual (ítem activo del sidebar,
+   claro, el amarillo queda como acento puntual (ítem activo del sidebar,
    algún CTA), nunca como texto general sobre el body.
    ============================================================================= */
 :root {
@@ -135,8 +135,8 @@
   /* --cta es un token aparte de --primary a propósito: --primary se usa
      como color de texto/ícono en decenas de lugares (ver comentario del
      bloque de arriba) y necesita navy para tener contraste sobre el body
-     claro; los botones, en cambio, deben ser amarillos — mismo acento que
-     el ítem activo del sidebar — sin arrastrar ese cambio a todo el texto
+     claro; los botones, en cambio, deben ser amarillos, mismo acento que
+     el ítem activo del sidebar, sin arrastrar ese cambio a todo el texto
      navy del resto de la app. */
   --cta:                #FFC53D;
   --cta-foreground:     #0F2244;
@@ -162,7 +162,7 @@
   --success-foreground: #151414;
   --chart-1: #0F2244; --chart-2: #FFC53D; --chart-3: #34d399;
   --chart-4: #5B7FBD; --chart-5: #96A2BC;
-  /* Sidebar: navy, sin cambios — sigue siendo donde vive la identidad de
+  /* Sidebar: navy, sin cambios, sigue siendo donde vive la identidad de
      marca (logo-dark-mode.svg). Ítem activo en amarillo, mismo criterio
      que el link de nav activo de feria-page. */
   --sidebar: #070B14; --sidebar-foreground: #EEF1F8;
@@ -197,14 +197,20 @@
 
    Se escala por el MENOR de los dos factores (alto y ancho) para que una
    ventana angosta y alta no infle la tipografía, y el clamp evita los dos
-   extremos: nunca baja de 13px en pantallas chicas ni pasa de 22px en
+   extremos: nunca baja de 13px en pantallas chicas ni pasa de 18px en
    monitores muy grandes.
+
+   El techo es 18px y no 22px porque en 2560x1440 el factor da 1.33, o sea
+   21.3px, y ahí el contenido se veía claramente sobredimensionado frente a
+   1920x1080, que es la referencia que se tomó como correcta. Con el techo en
+   18px, 1080p no cambia en absoluto (su 16px está muy por debajo del tope) y
+   1440p crece apenas lo necesario para no dejar el hueco al pie.
 
    Cualquier medida nueva debe ir en rem o en clases de Tailwind. Un valor en
    px fijo queda fuera de esta escala y vuelve a producir el hueco.
    ============================================================================= */
 html {
-  font-size: clamp(13px, calc(16 * min(100vh / 951, 100vw / 1920)), 22px);
+  font-size: clamp(13px, calc(16 * min(100vh / 951, 100vw / 1920)), 18px);
 }
 
 
@@ -480,7 +486,7 @@ html {
   overflow: hidden;
 }
 
-/* Barrido de luz único en hover — natural, no loop */
+/* Barrido de luz único en hover, natural, no loop */
 .btn-cta:not(:disabled)::after {
   content: "";
   position: absolute;
@@ -523,7 +529,7 @@ html {
 
 /* =============================================================================
    ANIMACIÓN: dropdown
-   Entrada del menú de selección de tema — escala desde la esquina superior
+   Entrada del menú de selección de tema, escala desde la esquina superior
    derecha con overshoot suave, sobre el origen del botón disparador.
    ============================================================================= */
 @keyframes dropdown-enter {
@@ -544,11 +550,11 @@ html {
 
 
 /* =============================================================================
-   TOASTS (sonner) — animación horizontal + fix de altura
+   TOASTS (sonner), animación horizontal + fix de altura
    Por defecto sonner solo anima translateY (entra/sale vertical, sin importar
    position="bottom-right") y, mientras el puntero está sobre el toast, fija
    su altura a la medida original ([data-expanded=true]{height:var(--initial-
-   height)} — pensado para su propio hover-to-expand-stack, que aquí no usamos
+   height)}, pensado para su propio hover-to-expand-stack, que aquí no usamos
    porque visibleToasts={1}). Eso chocaba con nuestra descripción colapsable:
    se recortaba al desplegar y solo recalculaba altura al sacar el mouse.
    Se pisa con !important porque el <style> de sonner se inyecta en runtime y
@@ -567,7 +573,7 @@ html {
 }
 
 /* sonner trae su propio "@media (prefers-reduced-motion){[data-sonner-toast]
-   {transition:none!important}}" — respeta la preferencia de accesibilidad del
+   {transition:none!important}}", respeta la preferencia de accesibilidad del
    SO por defecto, pero aquí se pide explícitamente que el toast siempre
    deslice, sin importar esa opción. Se restaura con un selector de mayor
    especificidad (dos atributos vs. uno) para ganarle sin depender del orden
@@ -583,7 +589,7 @@ html {
 /* =============================================================================
    GEOMAP: tooltip de puntos guardados (HDU6)
    Leaflet trae su propio estilo de tooltip (fondo blanco liso, sombra
-   genérica) sin relación con la paleta del proyecto — no se puede pisar
+   genérica) sin relación con la paleta del proyecto, no se puede pisar
    solo con className de Tailwind porque .leaflet-tooltip ya define
    background/border/box-shadow con su propia especificidad. direction="top"
    en el <Tooltip> de GeoMap.tsx fija qué flecha hay que estilar acá
@@ -604,7 +610,7 @@ html {
   border-top-color: var(--card);
 }
 
-/* Variante con preview de imagen (HDU5) — al pasar el mouse sobre una zona
+/* Variante con preview de imagen (HDU5), al pasar el mouse sobre una zona
    cargada, se ve el mapa unificado real en miniatura en vez de solo el
    nombre. Mismo mecanismo de estilos que el tooltip de texto de arriba. */
 .leaflet-tooltip.condorfinder-map-tooltip-image {
@@ -617,7 +623,7 @@ html {
 .leaflet-tooltip.condorfinder-map-tooltip-image::before {
   border-top-color: var(--card);
 }
-/* La imagen llena TODO el cuadrado — el nombre/datos van superpuestos como
+/* La imagen llena TODO el cuadrado, el nombre/datos van superpuestos como
    una franja al pie (degradado oscuro), no agregados debajo. Así el
    tooltip completo mide 260x260 en vez de crecer en alto con el texto. */
 .condorfinder-map-tooltip-image .tooltip-image-wrap {
@@ -633,7 +639,7 @@ html {
   height: 100%;
   object-fit: cover;
 }
-/* El PNG no cargó (404) — ej. la zona se eliminó desde otra pestaña/sesión
+/* El PNG no cargó (404), ej. la zona se eliminó desde otra pestaña/sesión
    mientras seguía en memoria acá. Mismo tamaño que la imagen real. */
 .condorfinder-map-tooltip-image .tooltip-image-error {
   display: flex;
@@ -680,7 +686,7 @@ html {
   text-align: center;
 }
 
-/* Ventana flotante sobre un tramo de ruta (HDU5/AC2, estilo Google Maps) —
+/* Ventana flotante sobre un tramo de ruta (HDU5/AC2, estilo Google Maps) ,
    tooltip PERMANENTE (siempre visible, no solo al hover), atado a un
    marker invisible (ver RouteSegmentLabel en GeoMapImpl.tsx) en vez de
    directo al Polyline, con direction="top" -- por eso SÍ necesita la
@@ -706,11 +712,11 @@ html {
    Un <input type="password"> no puede animar su cambio a type="text" (salto
    de atributo, sin transición CSS posible). -webkit-text-security hace que
    el navegador enmascare el texto REAL carácter por carácter al dibujarlo
-   — a diferencia de una capa de puntos superpuesta aparte, esto garantiza
+  , a diferencia de una capa de puntos superpuesta aparte, esto garantiza
    ancho proporcional exacto (es el mismo texto, mismo glyph, solo se
    sustituye el dibujo) y que la selección nativa resalte los puntos, nunca
    el texto real. Se aplica solo si el navegador la soporta (Chrome/Edge/
-   Safari; no Firefox) — login.tsx detecta el soporte en el cliente y usa
+   Safari; no Firefox), login.tsx detecta el soporte en el cliente y usa
    type="password" nativo sin animación como fallback seguro si no.
    ============================================================================= */
 .password-mask {

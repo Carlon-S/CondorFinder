@@ -10,15 +10,7 @@
 
 import { useEffect, useState } from "react";
 import { Loader2 } from "@/components/icons/Icons";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { notify } from "@/lib/notify";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import type { ReportSelection } from "@/lib/pdfReport";
 
 export function ReportPreview({
@@ -32,7 +24,6 @@ export function ReportPreview({
   onOpenChange: (open: boolean) => void;
 }) {
   const [url, setUrl] = useState<string | null>(null);
-  const [saveDoc, setSaveDoc] = useState<(() => void) | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -52,9 +43,6 @@ export function ReportPreview({
         if (cancelado) return;
         creada = doc.blobUrl();
         setUrl(creada);
-        // Envuelto en una función porque setState interpreta una función como
-        // actualizador y llamaría a save() en vez de guardarla.
-        setSaveDoc(() => doc.save);
       } catch {
         if (!cancelado) setError("No se pudo generar el informe. Intenta nuevamente.");
       }
@@ -69,17 +57,16 @@ export function ReportPreview({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      {/* Alto por viewport, no fijo: el visor de PDF del navegador necesita
-          espacio real para mostrar la primera plana completa. Con un alto
-          chico mostraba solo la cabecera y había que desplazar para ver si el
-          documento estaba bien. */}
-      <DialogContent className="flex h-[90vh] max-h-[90vh] flex-col sm:max-w-5xl">
-        <DialogHeader>
-          <DialogTitle>Vista previa del informe</DialogTitle>
-          <DialogDescription>
-            Así queda el documento. Revísalo antes de descargarlo.
-          </DialogDescription>
-        </DialogHeader>
+      {/* Solo el visor, sin encabezado ni barra de acciones propias.
+          El visor de PDF del navegador ya trae su botón de descarga, de
+          impresión y su control de zoom; duplicarlos abajo repetía la misma
+          acción dos veces y le robaba alto a lo único que importa acá, que es
+          ver la primera plana completa. El diálogo aporta su propia X para
+          cerrar (ver dialog.tsx). */}
+      <DialogContent className="flex h-[90vh] max-h-[90vh] flex-col gap-0 overflow-hidden p-2 sm:max-w-5xl">
+        {/* Radix exige un título para lectores de pantalla; visualmente sobra,
+            así que va oculto en vez de ocupar una franja del diálogo. */}
+        <DialogTitle className="sr-only">Vista previa del informe</DialogTitle>
 
         <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-border bg-muted/30">
           {error ? (
@@ -99,22 +86,6 @@ export function ReportPreview({
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>
           )}
-        </div>
-
-        <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={() => onOpenChange(false)}>
-            Cerrar
-          </Button>
-          <Button
-            disabled={!saveDoc}
-            onClick={() => {
-              saveDoc?.();
-              notify.success("Informe descargado");
-              onOpenChange(false);
-            }}
-          >
-            Descargar PDF
-          </Button>
         </div>
       </DialogContent>
     </Dialog>

@@ -12,13 +12,18 @@
 // según la cantidad de versiones movía el resto de la vista y hacía dudar de si
 // la barra existía; con una sola captura simplemente se ve una casilla.
 //
+// Se puede plegar: en pantallas de poco alto, o cuando ya se eligió la captura
+// con la que se va a trabajar, esas casillas son espacio que le sirve más al
+// mapa. Plegada deja su encabezado a la vista, que es lo que permite volver a
+// abrirla.
+//
 // No consulta nada por su cuenta. Recibe las versiones ya agrupadas por
 // buildVersions() y avisa cuál se eligió: la vista es la dueña del estado.
 // =============================================================================
 
 import { useEffect, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
-import { Skeleton } from "@/components/ui/skeleton";
+import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
+import { Loader2 } from "@/components/icons/Icons";
 import type { ZoneVersion } from "@/lib/volumeReport";
 import { zoneTotals } from "@/lib/volumeReport";
 
@@ -46,9 +51,11 @@ export function VersionBar({
   const pista = useRef<HTMLOListElement>(null);
   const [puedeIzquierda, setPuedeIzquierda] = useState(false);
   const [puedeDerecha, setPuedeDerecha] = useState(false);
+  const [plegada, setPlegada] = useState(false);
 
   // Las flechas solo tienen sentido cuando hay más casillas que ancho. Se
-  // recalcula al cambiar las versiones, al desplazar y al redimensionar.
+  // recalcula al cambiar las versiones, al desplazar, al plegar y al
+  // redimensionar.
   const revisarFlechas = () => {
     const el = pista.current;
     if (!el) return;
@@ -60,7 +67,7 @@ export function VersionBar({
     revisarFlechas();
     window.addEventListener("resize", revisarFlechas);
     return () => window.removeEventListener("resize", revisarFlechas);
-  }, [versions]);
+  }, [versions, plegada]);
 
   const desplazar = (direccion: -1 | 1) => {
     const el = pista.current;
@@ -69,35 +76,63 @@ export function VersionBar({
   };
 
   return (
-    <div className="flex-shrink-0 border-t border-border/40 bg-card/60 px-4 py-3">
-      <div className="mb-2 flex items-baseline justify-center gap-2">
-        <p className="text-xs font-semibold text-muted-foreground">Capturas de esta zona</p>
-        {!loading && (
-          <span className="mono text-[0.58rem] text-muted-foreground">
+    <div className="flex-shrink-0 border-t border-border/40 bg-card/60 px-4 py-2.5">
+      {/* El encabezado es también el control de plegado: es la única parte que
+          queda visible cerrada, así que tiene que ser lo que la vuelve a
+          abrir. */}
+      <button
+        type="button"
+        onClick={() => setPlegada((v) => !v)}
+        aria-expanded={!plegada}
+        className="mx-auto flex items-center gap-2 rounded px-2 py-0.5 transition-colors hover:bg-muted/50"
+      >
+        <span className="text-xs font-semibold text-muted-foreground">Capturas de esta zona</span>
+        {loading ? (
+          <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+        ) : (
+          <span className="text-[0.63rem] text-muted-foreground">
             {versions.length === 1 ? "1 versión" : `${versions.length} versiones`}
           </span>
         )}
-      </div>
+        <ChevronDown
+          className={`h-3.5 w-3.5 text-muted-foreground transition-transform duration-300 ${
+            plegada ? "-rotate-90" : ""
+          }`}
+          aria-hidden="true"
+        />
+      </button>
 
-      <div className="relative">
-        {puedeIzquierda && <Flecha lado="izquierda" onClick={() => desplazar(-1)} />}
-        {puedeDerecha && <Flecha lado="derecha" onClick={() => desplazar(1)} />}
+      {/* Se pliega animando el alto máximo, no montando y desmontando: así el
+          cierre y la apertura se ven como un movimiento y no como un salto. */}
+      <div
+        className={`overflow-hidden transition-all duration-300 ease-out ${
+          plegada ? "max-h-0 opacity-0" : "mt-2 max-h-[12rem] opacity-100"
+        }`}
+      >
+        <div className="relative">
+          {puedeIzquierda && <Flecha lado="izquierda" onClick={() => desplazar(-1)} />}
+          {puedeDerecha && <Flecha lado="derecha" onClick={() => desplazar(1)} />}
 
-        {/* justify-center centra las casillas cuando caben; cuando no, el
-            navegador ignora el centrado y la pista se desplaza con normalidad,
-            que es justo el comportamiento deseado. */}
-        <ol
-          ref={pista}
-          onScroll={revisarFlechas}
-          className="flex justify-center gap-2 overflow-x-auto pb-1"
-        >
-          {loading
-            ? [0, 1].map((i) => (
-                <li key={i} className="flex-shrink-0">
-                  <Skeleton className="h-[7.5rem] w-[9.5rem] rounded-lg" />
-                </li>
-              ))
-            : versions.map((version, i) => {
+          {/* Mientras cargan NO se dibujan casillas de mentira. Antes se
+              pintaban dos placeholders con forma de miniatura y, durante el par
+              de segundos que tarda la consulta, se leían como si la zona
+              tuviera dos capturas que después cambiaban solas. Se reserva el
+              mismo alto con una línea de estado, que no se puede confundir con
+              contenido real. */}
+          {loading ? (
+            <div className="flex h-[7.5rem] items-center justify-center text-xs text-muted-foreground">
+              Cargando capturas...
+            </div>
+          ) : (
+            // justify-center centra las casillas cuando caben; cuando no, el
+            // navegador ignora el centrado y la pista se desplaza con
+            // normalidad, que es justo el comportamiento deseado.
+            <ol
+              ref={pista}
+              onScroll={revisarFlechas}
+              className="flex justify-center gap-2 overflow-x-auto pb-1"
+            >
+              {versions.map((version, i) => {
                 const ultimo = version.analyses[version.analyses.length - 1];
                 const total = zoneTotals(ultimo);
                 const activa = version.sourceTaskId === activeTaskId;
@@ -109,10 +144,10 @@ export function VersionBar({
                       type="button"
                       onClick={() => onSelect(version)}
                       aria-current={activa ? "true" : undefined}
-                      className={`flex w-[9.5rem] flex-col gap-1.5 rounded-lg border p-2 text-left transition-colors ${
+                      className={`flex w-[9.5rem] flex-col gap-1.5 rounded-lg border p-2 text-left transition-all duration-200 hover:-translate-y-0.5 ${
                         activa
-                          ? "border-primary bg-primary/5"
-                          : "border-border/60 hover:bg-muted/50"
+                          ? "border-primary bg-primary/5 shadow-sm"
+                          : "border-border/60 hover:border-border hover:bg-muted/50"
                       }`}
                     >
                       <div className="detect-frame detect-frame-sm h-[3.75rem] w-full overflow-hidden rounded bg-muted">
@@ -130,21 +165,21 @@ export function VersionBar({
                           {formatDate(version.captureDate)}
                         </span>
                         {vigente ? (
-                          <span className="mono text-[0.53rem] text-success">vigente</span>
+                          <span className="text-[0.63rem] text-success">vigente</span>
                         ) : (
-                          <span className="mono text-[0.53rem] text-muted-foreground">consulta</span>
+                          <span className="text-[0.63rem] text-muted-foreground">consulta</span>
                         )}
                       </div>
 
                       <div className="flex items-center justify-between gap-1">
-                        <span className="mono text-[0.58rem] text-muted-foreground">
+                        <span className="mono text-[0.63rem] tabular-nums text-muted-foreground">
                           {total.volumeM3.toLocaleString("es-CL")} m³
                         </span>
                         {/* Ninguna foto traía fecha y se usó la de carga. Sin
                             decirlo, una fecha inventada se lee como real. */}
                         {version.captureDateEstimated && (
                           <span
-                            className="mono text-[0.53rem] text-warning"
+                            className="text-[0.63rem] text-warning"
                             title="Ninguna foto traía fecha de captura; se usó la de carga"
                           >
                             estimada
@@ -155,7 +190,9 @@ export function VersionBar({
                   </li>
                 );
               })}
-        </ol>
+            </ol>
+          )}
+        </div>
       </div>
     </div>
   );

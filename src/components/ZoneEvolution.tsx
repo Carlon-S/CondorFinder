@@ -1,5 +1,5 @@
 // =============================================================================
-// CONDORFINDER — EVOLUCIÓN DE UNA ZONA (HDU10)
+// CONDORFINDER, EVOLUCIÓN DE UNA ZONA (HDU10)
 // Archivo: src/components/ZoneEvolution.tsx
 //
 // Muestra cómo cambió el volumen de una zona a lo largo de sus versiones
@@ -50,7 +50,7 @@ export function ZoneEvolution({
   const points = useMemo(() => evolutionSeries(versions), [versions]);
   const mixedAlgorithms = useMemo(() => hasMixedAlgorithms(points), [points]);
 
-  // AC3 — una zona de una sola versión no tiene con qué compararse. Se dice
+  // AC3, una zona de una sola versión no tiene con qué compararse. Se dice
   // explícitamente en vez de dibujar un gráfico de un punto, que parece un
   // error de datos.
   if (versions.length <= 1) {
@@ -80,7 +80,7 @@ export function ZoneEvolution({
         </p>
       )}
 
-      {/* AC2 — volumen estimado de cada versión por fecha */}
+      {/* AC2, volumen estimado de cada versión por fecha */}
       <ChartContainer config={chartConfig} className="h-[13rem] w-full">
         <LineChart data={chartData} margin={{ left: 4, right: 12, top: 8, bottom: 4 }}>
           <CartesianGrid vertical={false} strokeDasharray="3 3" />
@@ -97,8 +97,8 @@ export function ZoneEvolution({
         </LineChart>
       </ChartContainer>
 
-      {/* AC1 — la cadena completa de versiones, ordenada cronológicamente.
-          AC4 — click en una versión abre su análisis en el visor. */}
+      {/* AC1, la cadena completa de versiones, ordenada cronológicamente.
+          AC4, click en una versión abre su análisis en el visor. */}
       <ol className="space-y-2">
         {versions.map((version, i) => {
           const ultimo = version.analyses[version.analyses.length - 1];
@@ -127,17 +127,24 @@ export function ZoneEvolution({
                   <p className="text-sm font-semibold text-foreground">
                     {formatDate(version.captureDate)}
                   </p>
+                  {/* Misma regla tipográfica que el resto de la vista de
+                      Análisis: .mono queda para las cifras, las palabras van en
+                      la letra del cuerpo. */}
                   {version.captureDateEstimated && (
-                    <span className="mono text-[0.58rem] text-muted-foreground" title="Ninguna foto traía fecha de captura; se usó la de carga">
+                    <span className="text-[0.63rem] text-muted-foreground" title="Ninguna foto traía fecha de captura; se usó la de carga">
                       fecha estimada
                     </span>
                   )}
                   {esVigente && (
-                    <span className="mono text-[0.58rem] text-success">vigente</span>
+                    <span className="text-[0.63rem] text-success">vigente</span>
                   )}
                 </div>
-                <p className="mono text-[0.63rem] text-muted-foreground">
-                  {total.volumeM3.toLocaleString("es-CL")} m³ · {version.analyses.length} análisis
+                <p className="text-[0.63rem] text-muted-foreground">
+                  <span className="mono tabular-nums">
+                    {total.volumeM3.toLocaleString("es-CL")} m³
+                  </span>
+                  {" · "}
+                  <span className="mono tabular-nums">{version.analyses.length}</span> análisis
                 </p>
               </div>
 

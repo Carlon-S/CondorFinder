@@ -400,6 +400,13 @@ function AnalysisPage() {
   const [versionsLoading, setVersionsLoading] = useState(false);
   const [evolutionOpen, setEvolutionOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
+  /** Sube cada vez que se aplica un análisis. Se usa como `key` del mapa y de
+   *  la lista de zonas para que React los reemplace y su animación de entrada
+   *  vuelva a correr: sin eso, cambiar de captura reemplazaba el contenido de
+   *  golpe y no se alcanzaba a ver que algo había cambiado. Un contador y no el
+   *  id del análisis, porque volver a elegir la MISMA captura también tiene que
+   *  dar una señal visible. */
+  const [animKey, setAnimKey] = useState(0);
   /** Nombre de la zona, para el título del informe y de la evolución. Sale de
    *  la colección de zonas: el nombre del análisis identifica una captura, no
    *  el terreno. */
@@ -627,6 +634,7 @@ function AnalysisPage() {
   // la vista, y cada vez que se cambia de captura con la barra inferior. Es el
   // único lugar que sabe traducir un registro guardado a estado de pantalla.
   const aplicarAnalisis = (record: SavedAnalysisRecord) => {
+    setAnimKey((n) => n + 1);
     setMapUrl(record.mapUrl);
     saveMapUrl(record.mapUrl);
     setThumbnailUrl(record.thumbnailUrl ?? null);
@@ -666,6 +674,14 @@ function AnalysisPage() {
 
     // HDU7/AC2, cubre tanto el guardado recién hecho como reabrirlo después.
     checkDuplicateWarning(record);
+
+    // Otra captura es otra imagen: el zoom y el encuadre de la anterior no
+    // significan nada sobre esta. Y el tamaño natural se descarta hasta que la
+    // nueva imagen cargue, porque los rectángulos de detección se posicionan
+    // con esa medida y con la vieja caerían corridos por un instante.
+    setScale(1);
+    setOffset({ x: 0, y: 0 });
+    setImgNaturalSize(null);
 
     // taskId y detectionJsonUrl se resuelven por captura. Sin esto, "Analizar
     // volumen" trabajaría sobre lo que hubiera quedado en sessionStorage de la
@@ -998,14 +1014,15 @@ function AnalysisPage() {
   return (
     // topo-bg: curvas de nivel de feria-page (ver styles.css).
     <div className="topo-bg flex flex-col h-screen overflow-hidden bg-background text-foreground">
-      {/* Tres columnas: controles, mapa y zonas detectadas. La lista de zonas
-          vivía apretada al pie de la columna izquierda, que es la más angosta
-          de la pantalla; con columna propia se lee sin pelear contra los
-          controles.
+      {/* Dos columnas arriba (controles y mapa) y las zonas detectadas a lo
+          ancho, debajo de ambas.
 
-          En ventanas angostas (bajo 80rem) vuelve a dos columnas y la lista se
-          pliega debajo del mapa, para no dejar el visor sin ancho útil. */}
-      <main className="grid flex-1 grid-cols-[clamp(15rem,22vw,22.5rem)_1fr] min-h-0 xl:grid-cols-[clamp(15rem,20vw,20rem)_1fr_clamp(16rem,22vw,24rem)]">
+          Estuvieron en una tercera columna a la derecha y no funcionó: cada
+          zona detectada trae tres cifras, y las fusionadas además su desglose
+          por tipo, así que en una columna angosta cada tarjeta se estiraba a lo
+          alto y solo entraban dos o tres en pantalla. Ocupando el ancho
+          completo caben varias por fila y el mapa recupera ese ancho. */}
+      <main className="grid flex-1 grid-cols-[clamp(15rem,22vw,22.5rem)_1fr] min-h-0">
 
         {/* ── panel lateral ── */}
         <aside
@@ -1040,11 +1057,11 @@ function AnalysisPage() {
                 <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
                   <div className="rounded-md bg-background/40 p-2">
                     <p className="text-muted-foreground">Este análisis</p>
-                    <p className="font-semibold">{activeSummary.totalVolumeM3} m³</p>
+                    <p className="mono font-semibold tabular-nums">{activeSummary.totalVolumeM3} m³</p>
                   </div>
                   <div className="rounded-md bg-background/40 p-2">
                     <p className="text-muted-foreground">Análisis anterior</p>
-                    <p className="font-semibold">
+                    <p className="mono font-semibold tabular-nums">
                       {duplicateWarning.older.summary
                         ? `${duplicateWarning.older.summary.totalVolumeM3} m³`
                         : ", "}
@@ -1150,30 +1167,11 @@ function AnalysisPage() {
                 {currentAnalysisId ? "Guardar cambios" : "Guardar análisis"}
               </Button>
 
-              {/* HDU9 y HDU10 al alcance de la mano. Antes había que salir a
-                  Vista Principal, buscar la zona en una tabla y volver. Los
-                  botones de allá se mantienen: el informe de Vista Principal
-                  permite elegir varias zonas, que es lo que pide el AC1. */}
-              {zoneId && (
-                <div className="flex flex-col gap-2 border-t border-border/40 pt-3">
-                  <Button
-                    variant="secondary"
-                    className="w-full"
-                    onClick={() => setReportOpen(true)}
-                    disabled={zoneAnalyses.length === 0}
-                  >
-                    <FileText className="mr-2 h-4 w-4" /> Informe de esta zona
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    className="w-full"
-                    onClick={() => setEvolutionOpen(true)}
-                    disabled={zoneAnalyses.length === 0}
-                  >
-                    <ChartLineUp className="mr-2 h-4 w-4" /> Ver evolución
-                  </Button>
-                </div>
-              )}
+              {/* "Informe de esta zona" y "Ver evolución" ya no viven acá:
+                  pasaron al encabezado de "Zonas detectadas". Son lecturas
+                  sobre el conjunto de la zona, no acciones sobre el análisis
+                  abierto como analizar y guardar, y ahí quedan junto a lo que
+                  resumen. */}
 
               {/* estado */}
               <div>
@@ -1186,7 +1184,9 @@ function AnalysisPage() {
                   <p className="text-xs font-medium">{statusLabel[status]}</p>
                 </div>
                 <Progress value={progress} className="mt-2.5 h-1" />
-                <p className="mt-1 text-[0.625rem] text-muted-foreground">{progress}% completado</p>
+                <p className="mono mt-1 text-[0.625rem] tabular-nums text-muted-foreground">
+                  {progress}% completado
+                </p>
               </div>
             </div>
 
@@ -1272,7 +1272,12 @@ function AnalysisPage() {
                 <RotateCcw className="mr-1.5 h-3.5 w-3.5" /> Reiniciar vista
               </Button>
 
+              {/* key={animKey}: al cambiar de captura por la barra inferior,
+                  React reemplaza este subárbol y la animación de entrada se
+                  vuelve a ejecutar, así el cambio de mapa se ve como una
+                  transición y no como un parpadeo. */}
               <div
+                key={animKey}
                 ref={containerRef}
                 role="presentation"
                 onWheel={onWheel}
@@ -1280,7 +1285,7 @@ function AnalysisPage() {
                 onPointerMove={onPointerMove}
                 onPointerUp={onPointerUp}
                 onPointerCancel={() => setDragging(false)}
-                className={`h-full w-full touch-none select-none overflow-hidden ${
+                className={`h-full w-full touch-none select-none overflow-hidden animate-in fade-in zoom-in-95 duration-300 ${
                   dragging ? "cursor-grabbing" : "cursor-grab"
                 }`}
               >
@@ -1379,126 +1384,171 @@ function AnalysisPage() {
           )}
         </section>
 
-        {/* ── zonas detectadas ── */}
-        {/* Tercera columna, solo desde 80rem de ancho. Debajo de eso la
-            pantalla no da para tres, y la lista vuelve a la columna izquierda
-            no tendria sentido: se oculta y el mapa se queda con el espacio. */}
-        <aside className="hidden min-w-0 flex-col overflow-y-auto border-l border-border/35 p-4 xl:flex">
-          {/* Un solo encabezado. Al mover este bloque desde la columna
-              izquierda quedaron dos títulos iguales, uno del contenedor nuevo y
-              otro que el bloque ya traía. */}
-          <div>
-            <div className="mb-3 flex items-baseline justify-between gap-2">
-              <p className="text-sm font-semibold text-foreground">Zonas detectadas</p>
-              {displayDetections.length > 0 && (
-                <button
-                  onClick={toggleAll}
-                  className="text-xs text-primary hover:underline"
-                >
-                  {allEnabled ? "Desactivar todas" : "Activar todas"}
-                </button>
-              )}
-            </div>
-
-            {detectionsLoading ? (
-              <div className="space-y-1.5">
-                {[0, 1, 2].map((i) => (
-                  <Skeleton key={i} className="h-14 w-full rounded-md" />
-                ))}
-              </div>
-            ) : displayDetections.length > 0 ? (
-              <ul className="space-y-1.5 max-h-[21.25rem] overflow-y-auto pr-0.5">
-                {displayDetections.map(d => {
-                  const enabled = enabledIds.has(d.id);
-                  const color   = classColor(d.class);
-                  const hasData = d.volume_m3 != null || d.area_m2 != null;
-                  return (
-                    <li
-                      key={d.id}
-                      className={`animate-in fade-in duration-200 fill-mode-both rounded-md border transition-opacity duration-150 ${
-                        enabled
-                          ? "border-border/60 bg-background/60"
-                          : "border-border/20 bg-background/20 opacity-40"
-                      }`}
-                    >
-                      <div className="flex items-start gap-2 p-2">
-                        <button
-                          onClick={() => toggleDetection(d.id)}
-                          className="mt-0.5 flex-shrink-0 rounded p-0.5 hover:bg-muted/40 transition-colors"
-                          title={enabled ? "Desactivar zona" : "Activar zona"}
-                        >
-                          {enabled
-                            ? <Eye    className="h-3.5 w-3.5 text-primary" />
-                            : <EyeOff className="h-3.5 w-3.5 text-muted-foreground" />}
-                        </button>
-                        <span
-                          className="mt-1 h-2.5 w-2.5 rounded-sm flex-shrink-0"
-                          style={{ background: color }}
-                        />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-medium leading-tight">{d.class}</p>
-                          {status === "done" && hasData ? (
-                            d.classes.length > 1 ? (
-                              // Zona fusionada, resumen promedio + desglose por tipo
-                              <div className="mt-1.5 space-y-1.5">
-                                <div className="rounded border border-primary/30 bg-primary/10 px-1.5 py-1">
-                                  <p className="mono text-[0.5rem] font-semibold uppercase tracking-wider text-primary mb-1">
-                                    Promedio
-                                  </p>
-                                  <div className="grid grid-cols-3 gap-1">
-                                    <StatBadge label="Vol"  value={`${(d.volume_m3 ?? 0).toFixed(2)} m³`} />
-                                    <StatBadge label="Área" value={`${(d.area_m2  ?? 0).toFixed(2)} m²`} />
-                                    <StatBadge label="Peso" value={`${Math.round(d.weight_kg ?? 0)} kg`} />
-                                  </div>
-                                </div>
-                                {d.breakdown.map(b => (
-                                  <div key={b.class} className="rounded bg-background/80 px-1.5 py-1">
-                                    <div className="flex items-center gap-1 mb-1">
-                                      <span
-                                        className="h-2 w-2 rounded-sm flex-shrink-0"
-                                        style={{ background: classColor(b.class) }}
-                                      />
-                                      <p className="text-[0.5625rem] font-semibold text-muted-foreground truncate">
-                                        {b.class}
-                                      </p>
-                                    </div>
-                                    <div className="grid grid-cols-3 gap-1">
-                                      <StatBadge label="Vol"  value={b.volume_m3 != null ? `${b.volume_m3.toFixed(2)} m³` : ", "} />
-                                      <StatBadge label="Área" value={b.area_m2  != null ? `${b.area_m2.toFixed(2)} m²`  : ", "} />
-                                      <StatBadge label="Peso" value={b.weight_kg != null ? `${Math.round(b.weight_kg)} kg` : ", "} />
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <div className="mt-1.5 grid grid-cols-3 gap-1">
-                                <StatBadge label="Vol"  value={`${(d.volume_m3 ?? 0).toFixed(2)} m³`} />
-                                <StatBadge label="Área" value={`${(d.area_m2  ?? 0).toFixed(2)} m²`} />
-                                <StatBadge label="Peso" value={`${Math.round(d.weight_kg ?? 0)} kg`} />
-                              </div>
-                            )
-                          ) : (
-                            <p className="mono text-[0.625rem] text-muted-foreground mt-0.5">
-                              {status === "done" ? "Sin datos de volumen" : "Pendiente de análisis"}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            ) : (
-              <div className="py-3 text-center text-xs text-muted-foreground">
-                Sin detecciones cargadas.
-              </div>
-            )}
-          </div>
-        </aside>
       </main>
 
-      {/* Navegación entre capturas, al pie y a lo ancho. Se oculta sola cuando
-          la zona tiene una sola captura. */}
+      {/* ── zonas detectadas, a lo ancho ── */}
+      {/* El alto se acota para que el mapa y el panel de controles sigan siendo
+          lo principal: esta franja crece con su contenido hasta ese tope y ahí
+          empieza a desplazarse por dentro. */}
+      <section className="flex max-h-[28vh] min-h-0 flex-shrink-0 flex-col border-t border-border/40 bg-card/40 px-4 py-3">
+        <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-baseline gap-3">
+            <p className="text-sm font-semibold text-foreground">Zonas detectadas</p>
+            {displayDetections.length > 0 && (
+              <button
+                onClick={toggleAll}
+                className="text-xs text-primary transition-colors hover:underline"
+              >
+                {allEnabled ? "Desactivar todas" : "Activar todas"}
+              </button>
+            )}
+          </div>
+
+          {/* HDU9 y HDU10 al alcance de la mano. Antes había que salir a Vista
+              Principal, buscar la zona en una tabla y volver. Los botones de
+              allá se mantienen: el informe de Vista Principal permite elegir
+              varias zonas, que es lo que pide el AC1. */}
+          {zoneId && (
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => setReportOpen(true)}
+                disabled={zoneAnalyses.length === 0}
+              >
+                <FileText className="mr-2 h-4 w-4" /> Informe de esta zona
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => setEvolutionOpen(true)}
+                disabled={zoneAnalyses.length === 0}
+              >
+                <ChartLineUp className="mr-2 h-4 w-4" /> Ver evolución
+              </Button>
+            </div>
+          )}
+        </div>
+
+        {/* Un solo contenedor con desplazamiento, y solo vertical. Antes había
+            dos anidados (el panel y la lista), así que aparecían dos barras
+            para el mismo contenido. Acá el alto lo fija max-h del <section>: si
+            las tarjetas entran, no hay barra; si no, aparece la vertical y
+            nada más, porque las tarjetas reparten el ancho y nunca lo exceden. */}
+        {detectionsLoading ? (
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] gap-2">
+            {[0, 1, 2, 3].map((i) => (
+              <Skeleton key={i} className="h-24 w-full rounded-md" />
+            ))}
+          </div>
+        ) : displayDetections.length > 0 ? (
+          <ul
+            key={animKey}
+            className="grid min-h-0 grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] items-start gap-2 overflow-y-auto overflow-x-hidden pr-1 animate-in fade-in slide-in-from-bottom-2 duration-300"
+          >
+            {displayDetections.map((d, i) => {
+              const enabled = enabledIds.has(d.id);
+              const color   = classColor(d.class);
+              const hasData = d.volume_m3 != null || d.area_m2 != null;
+              return (
+                <li
+                  key={d.id}
+                  // La entrada se escalona por posición: las tarjetas aparecen
+                  // una tras otra en vez de todas de golpe. El tope de 6 evita
+                  // que en una zona con muchas detecciones la última tarde
+                  // demasiado en llegar.
+                  style={{ animationDelay: `${Math.min(i, 6) * 40}ms` }}
+                  className={`animate-in fade-in slide-in-from-bottom-1 duration-300 fill-mode-both rounded-md border transition-all duration-200 ${
+                    enabled
+                      ? "border-border/60 bg-background/60"
+                      : "scale-[0.98] border-border/20 bg-background/20 opacity-40"
+                  }`}
+                >
+                  <div className="p-2">
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => toggleDetection(d.id)}
+                        className="flex-shrink-0 rounded p-0.5 transition-all duration-150 hover:bg-muted/40 active:scale-90"
+                        title={enabled ? "Desactivar zona" : "Activar zona"}
+                      >
+                        {enabled
+                          ? <Eye    className="h-3.5 w-3.5 text-primary" />
+                          : <EyeOff className="h-3.5 w-3.5 text-muted-foreground" />}
+                      </button>
+                      <span
+                        className="h-2.5 w-2.5 flex-shrink-0 rounded-sm"
+                        style={{ background: color }}
+                      />
+                      <p className="min-w-0 flex-1 truncate text-xs font-medium leading-tight">
+                        {d.class}
+                      </p>
+                      {/* Que la cifra de una zona fusionada es un promedio (o el
+                          máximo) del grupo y no la suma es justamente lo que
+                          impide contar dos veces la misma basura, así que se
+                          dice en la tarjeta y no solo en el código. */}
+                      {d.classes.length > 1 && (
+                        <span className="flex-shrink-0 text-[0.5625rem] text-muted-foreground">
+                          {d.classes.length} tipos · promedio
+                        </span>
+                      )}
+                    </div>
+
+                    {status === "done" && hasData ? (
+                      <>
+                        <div className="mt-1.5 grid grid-cols-3 gap-1">
+                          <StatBadge label="Vol"  value={`${(d.volume_m3 ?? 0).toFixed(2)} m³`} />
+                          <StatBadge label="Área" value={`${(d.area_m2  ?? 0).toFixed(2)} m²`} />
+                          <StatBadge label="Peso" value={`${Math.round(d.weight_kg ?? 0)} kg`} />
+                        </div>
+
+                        {/* Desglose por tipo en una línea por clase, no en un
+                            recuadro de tres celdas por clase como antes. En una
+                            columna vertical aquello daba igual; acá las
+                            tarjetas comparten fila, y una sola tarjeta
+                            fusionada tres veces más alta que el resto dejaba
+                            media fila en blanco. */}
+                        {d.classes.length > 1 && (
+                          <ul className="mt-1.5 space-y-1 border-t border-border/40 pt-1.5">
+                            {d.breakdown.map(b => (
+                              <li key={b.class} className="flex items-center gap-1.5">
+                                <span
+                                  className="h-1.5 w-1.5 flex-shrink-0 rounded-sm"
+                                  style={{ background: classColor(b.class) }}
+                                />
+                                <span className="min-w-0 flex-1 truncate text-[0.5625rem] text-muted-foreground">
+                                  {b.class}
+                                </span>
+                                <span className="mono flex-shrink-0 text-[0.5625rem] tabular-nums text-muted-foreground">
+                                  {b.volume_m3 != null ? `${b.volume_m3.toFixed(2)} m³` : ", "}
+                                  {" · "}
+                                  {b.area_m2 != null ? `${b.area_m2.toFixed(2)} m²` : ", "}
+                                  {" · "}
+                                  {b.weight_kg != null ? `${Math.round(b.weight_kg)} kg` : ", "}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </>
+                    ) : (
+                      <p className="mt-1 text-[0.625rem] text-muted-foreground">
+                        {status === "done" ? "Sin datos de volumen" : "Pendiente de análisis"}
+                      </p>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <div className="py-3 text-center text-xs text-muted-foreground">
+            Sin detecciones cargadas.
+          </div>
+        )}
+      </section>
+
+      {/* Navegación entre capturas, al pie y a lo ancho. Se muestra siempre y
+          se puede plegar desde su propio encabezado. */}
       <VersionBar
         versions={versions}
         activeTaskId={taskId}
@@ -1623,7 +1673,7 @@ function AnalysisPage() {
                   Guardado el {new Date(duplicateExisting.savedAt).toLocaleString("es-CL")}
                 </p>
                 {duplicateExisting.summary && (
-                  <div className="flex gap-2 text-[0.625rem] text-muted-foreground">
+                  <div className="mono flex gap-2 text-[0.625rem] tabular-nums text-muted-foreground">
                     <span>{duplicateExisting.summary.totalVolumeM3} m³</span>
                     <span>·</span>
                     <span>{duplicateExisting.summary.totalWeightKg} kg</span>
@@ -1668,12 +1718,20 @@ const statusLabel: Record<AnalysisStatus, string> = {
   error:   "Error en el analisis",
 };
 
+// Una sola regla tipográfica en toda la vista, para que dos cifras del mismo
+// tipo no se lean con dos letras distintas: Rubik para el título de la página,
+// Sora (la del cuerpo) para TODO lo que sea texto, incluidas las etiquetas, y
+// .mono reservada exclusivamente para las cifras y sus unidades. Antes Metric
+// mostraba su número en Sora y StatBadge el suyo en JetBrains Mono, y sus
+// etiquetas al revés, así que el mismo dato cambiaba de letra según en qué
+// recuadro cayera.
+
 function Metric({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
   return (
     <div className="rounded-lg bg-background/60 px-3 py-3">
       <div className="mb-2.5 text-primary/65 [&_svg]:h-4 [&_svg]:w-4">{icon}</div>
       <p className="text-[0.625rem] text-muted-foreground leading-none mb-1">{label}</p>
-      <p className="text-base font-bold tabular-nums">{value}</p>
+      <p className="mono text-base font-bold tabular-nums">{value}</p>
     </div>
   );
 }
@@ -1681,7 +1739,7 @@ function Metric({ label, value, icon }: { label: string; value: string; icon: Re
 function StatBadge({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded bg-background/80 px-1.5 py-1 text-center">
-      <p className="mono text-[0.5rem] uppercase tracking-wider text-muted-foreground">{label}</p>
+      <p className="text-[0.5rem] uppercase tracking-wider text-muted-foreground">{label}</p>
       <p className="mono text-[0.625rem] font-semibold tabular-nums leading-tight">{value}</p>
     </div>
   );
