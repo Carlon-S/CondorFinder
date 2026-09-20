@@ -16,32 +16,12 @@ import markerIcon from "leaflet/dist/images/marker-icon.png";
 import markerShadow from "leaflet/dist/images/marker-shadow.png";
 import type { GeoMapProps } from "@/components/GeoMap";
 import { ROUTE_OUTBOUND_COLOR, ROUTE_OUTLINE_COLOR, ROUTE_RETURN_COLOR, ROUTE_RETURN_OPACITY } from "@/components/route-colors";
+import { MAIPU_BOUNDARY, MAIPU_VIEW_CENTER } from "@/lib/maipuBoundary";
 
-/** Centro aproximado de la comuna de Maipú, Región Metropolitana. Sin
- *  exportar a propósito, nada afuera de este archivo lo usa, y exportar un
- *  valor no-componente junto al componente de este módulo rompe el
- *  contrato de Fast Refresh de Vite (fuerza un full reload en cada cambio
- *  de este archivo en vez de un hot-patch, eso a su vez generaba el error
- *  "Could not find an active match from /_authed" al recargar en medio de
- *  ese full reload, con el router en un estado intermedio). */
-const MAIPU_CENTER: [number, number] = [-33.5167, -70.75];
-
-/** Recuadro que encierra la comuna de Maipú, con un margen de holgura.
- *
- *  El sistema es para UNA municipalidad, así que el mapa no tiene por qué
- *  permitir navegar el resto del país: con `maxBoundsViscosity` en 1 el borde
- *  es rígido y no se puede arrastrar la vista fuera de la comuna, y `minZoom`
- *  impide alejarse hasta perderla de vista. Antes se podía terminar en
- *  cualquier parte del mundo con un par de gestos, sin forma de volver salvo
- *  recargar.
- *
- *  Es el recuadro envolvente, no el límite comunal real: dibujar un polígono
- *  con la silueta exacta exigiría cargar su GeoJSON, y un rectángulo pintado
- *  como si fuera el límite mentiría sobre dónde termina la comuna. */
-const MAIPU_BOUNDS: [[number, number], [number, number]] = [
-  [-33.60, -70.92],
-  [-33.43, -70.68],
-];
+/** Encuadre inicial: el casco urbano de Maipú. Ver la nota de
+ *  MAIPU_VIEW_CENTER sobre por qué no es el centro geométrico de la comuna.
+ *  El mapa NO está acotado, se puede navegar libremente fuera de ella. */
+const MAIPU_CENTER = MAIPU_VIEW_CENTER;
 
 // Este módulo solo se carga vía import() dinámico desde GeoMap.tsx, después
 // del mount, nunca se evalúa durante SSR. Leaflet toca `window` en el
@@ -380,17 +360,39 @@ export function GeoMapImpl({
       className={className}
       scrollWheelZoom
       renderer={ROUTE_CANVAS_RENDERER}
-      // La vista queda encerrada en Maipú: viscosity 1 hace el borde rígido
-      // (sin ella el arrastre se sale y rebota) y minZoom impide alejarse
-      // hasta perder la comuna de vista.
-      maxBounds={MAIPU_BOUNDS}
-      maxBoundsViscosity={1}
-      minZoom={12}
     >
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
+      {/* Límite comunal de Maipú, siempre visible, debajo de todo lo demás.
+          Da la referencia de qué territorio administra el municipio sin
+          impedir navegar fuera de él.
+
+          interactive={false} es lo importante: recursos.tsx crea un punto
+          haciendo click en el mapa, y un polígono que cubre toda la comuna se
+          quedaría con esos clicks antes de que lleguen al mapa. Sin relleno
+          por el mismo motivo visual: un tinte sobre la comuna entera compite
+          con el mapa base, que es lo que hay que leer.
+
+          El color va en hexadecimal literal y NO como var(--primary): este
+          mapa dibuja los trazos con el renderer de canvas (ver el comentario
+          de ROUTE_CANVAS_RENDERER más abajo), y una variable CSS no se
+          resuelve al asignarla a ctx.strokeStyle, se descarta en silencio y la
+          línea sale del color que hubiera quedado. Es el mismo motivo por el
+          que route-colors.ts guarda literales. */}
+      <Polygon
+        positions={MAIPU_BOUNDARY}
+        interactive={false}
+        pathOptions={{
+          color: "#0F2244", // --primary
+          weight: 2,
+          opacity: 0.65,
+          dashArray: "6 4",
+          fill: false,
+        }}
+      />
+
       <ClickHandler onMapClick={onMapClick} />
       <FlyToPoint target={focusPoint ?? null} />
       <FitBounds points={fitBoundsTo ?? null} />

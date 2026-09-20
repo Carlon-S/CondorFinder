@@ -411,6 +411,12 @@ function AnalysisPage() {
    *  la colección de zonas: el nombre del análisis identifica una captura, no
    *  el terreno. */
   const [zoneName, setZoneName] = useState<string | null>(null);
+  /** El nombre de la zona se resuelve con una consulta aparte, mientras que el
+   *  del análisis ya viene en el registro. Sin saber que la consulta sigue en
+   *  curso, el título mostraba primero el nombre del ANÁLISIS ("Zona A - Vuelo
+   *  2") y un instante después lo reemplazaba por el de la ZONA ("Zona A"): un
+   *  cambio de nombre a la vista que parecía un error de datos. */
+  const [zoneNameLoading, setZoneNameLoading] = useState(false);
 
   // ── HDU4 / AC1, guardar análisis: pide nombre ─────────────────────────────
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
@@ -739,9 +745,11 @@ function AnalysisPage() {
     if (!zona) {
       setVersions([]);
       setVersionsLoading(false);
+      setZoneNameLoading(false);
       return;
     }
     setVersionsLoading(true);
+    setZoneNameLoading(true);
     listAnalyses()
       .then((todos) => {
         const deLaZona = todos.filter((a) => a.zoneId === zona);
@@ -755,7 +763,11 @@ function AnalysisPage() {
 
     listZones()
       .then((zonas) => setZoneName(zonas.find((z) => z.id === zona)?.name ?? null))
-      .catch(() => {});
+      .catch(() => {})
+      // Pase lo que pase se apaga la bandera: si la consulta falla o la zona no
+      // aparece, el título tiene que resolverse a su respaldo en vez de quedar
+      // mostrando un esqueleto para siempre.
+      .finally(() => setZoneNameLoading(false));
   };
 
   /** Cambia la captura que se está viendo, sin salir de la vista. */
@@ -1073,13 +1085,40 @@ function AnalysisPage() {
                 guardarla. */}
             <div>
               <p className="eyebrow">Análisis de volumen</p>
-              <h1 className="font-rubik text-3xl font-semibold tracking-normal text-foreground md:text-4xl">
-                {zoneName ?? currentAnalysisName ?? "Análisis"}
-              </h1>
+              {zoneNameLoading ? (
+                // Un esqueleto, no el nombre del análisis: ese respaldo solo
+                // vale cuando ya se sabe que la zona no tiene nombre, no
+                // mientras la consulta sigue en curso (ver zoneNameLoading).
+                <Skeleton className="h-9 w-3/4 rounded md:h-10" />
+              ) : (
+                <h1
+                  // break-words + line-clamp: un nombre largo antes desbordaba
+                  // la columna o la estiraba. Ahora corta por palabras, se
+                  // limita a dos líneas y el nombre completo queda en el
+                  // title. El cuerpo baja un escalón de tamaño pasados los 22
+                  // caracteres, que es lo que entra cómodo en una línea al
+                  // ancho de este panel.
+                  title={zoneName ?? currentAnalysisName ?? undefined}
+                  className={`font-rubik font-semibold tracking-normal text-foreground line-clamp-2 break-words hyphens-auto ${
+                    (zoneName ?? currentAnalysisName ?? "").length > 22
+                      ? "text-xl md:text-2xl"
+                      : "text-3xl md:text-4xl"
+                  }`}
+                >
+                  {zoneName ?? currentAnalysisName ?? "Análisis"}
+                </h1>
+              )}
               {(currentAnalysisName || captureDate) && (
                 <p className="mt-1.5 flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
                   {currentAnalysisName && (
-                    <span className="truncate font-medium text-foreground">{currentAnalysisName}</span>
+                    // max-w-full: sin un límite, `truncate` dentro de un
+                    // contenedor flex no recorta nada y el nombre desborda.
+                    <span
+                      title={currentAnalysisName}
+                      className="max-w-full truncate font-medium text-foreground"
+                    >
+                      {currentAnalysisName}
+                    </span>
                   )}
                   {currentAnalysisName && captureDate && <span>·</span>}
                   {captureDate && (
