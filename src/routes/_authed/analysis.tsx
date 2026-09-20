@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { notify } from "@/lib/notify";
 import {
   ArrowLeft,
@@ -11,6 +11,8 @@ import {
   Eye,
   EyeOff,
   Loader2,
+  ChartLineUp,
+  FileText,
   Map as MapIcon,
   MousePointerClick,
   RotateCcw,
@@ -37,11 +39,22 @@ import {
   saveAnalysis,
   findAnalysisByName,
   loadAnalysisById,
+  listAnalyses,
+  listZones,
   consumePendingOpenId,
   confirmDuplicate,
   rejectDuplicate,
   type SavedAnalysisRecord,
 } from "@/lib/analysisStore";
+import { buildVersions, type ZoneVersion } from "@/lib/volumeReport";
+import { VersionBar } from "@/components/VersionBar";
+import { ReportPreview } from "@/components/ReportPreview";
+// Carga diferida: ZoneEvolution arrastra recharts, cerca de 850 kB. Importarlo
+// de forma normal lo mete en el bundle inicial de esta ruta; esa regresión ya
+// ocurrió una vez en Vista Principal.
+const ZoneEvolution = lazy(() =>
+  import("@/components/ZoneEvolution").then((m) => ({ default: m.ZoneEvolution })),
+);
 import {
   AlertDialog,
   AlertDialogAction,
@@ -98,7 +111,7 @@ interface DisplayDetection {
   bbox: { minx: number; miny: number; maxx: number; maxy: number };
   polygon: null | number[][];
   // Coordenadas reales (CRS proyectado del ortomosaico) de la detección
-  // dominante del grupo — HDU5 las reproyecta a WGS84 para el mapa.
+  // dominante del grupo, HDU5 las reproyecta a WGS84 para el mapa.
   geo_polygon?: number[][] | null;
   area_m2?: number | null;   // máximo del grupo (para totales sin doble conteo)
   volume_m3?: number | null;
@@ -257,7 +270,7 @@ function mergeOverlapping(
       confidence: Math.max(...dets.map(d => d.confidence)),
       bbox,
       polygon:    dets[0].polygon,
-      // Mismo dets[0] que `polygon` — son dos representaciones de la MISMA
+      // Mismo dets[0] que `polygon`, son dos representaciones de la MISMA
       // geometría (píxel vs. real), tienen que salir de la misma detección.
       geo_polygon: dets[0].geo_polygon,
       area_m2:    aggArea   || null,
@@ -288,20 +301,20 @@ type AnalysisStatus = "idle" | "running" | "done" | "empty" | "error";
 
 function AnalysisPage() {
   const [mapUrl, setMapUrl] = useState<string | null>(() => loadMapUrl());
-  // Miniatura liviana asociada a mapUrl (ver mapState.ts) — puede no existir
+  // Miniatura liviana asociada a mapUrl (ver mapState.ts), puede no existir
   // (análisis reabiertos de antes de este campo), se guarda igual con la
   // misma disciplina "capturado una vez al montar" que mapUrl.
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(() => loadThumbnailUrl());
   const usingGeneratedMap = mapUrl !== null;
 
   // taskId/detectionJsonUrl se capturan UNA VEZ al montar, igual que mapUrl
-  // arriba — sessionStorage es solo el mecanismo de traspaso entre rutas
+  // arriba, sessionStorage es solo el mecanismo de traspaso entre rutas
   // (mismo patrón documentado en mapState.ts/imageState.ts), no una fuente
   // viva para releer en cada click. runAnalysis() volvía a llamar
   // loadTaskId()/loadDetectionJsonUrl() cada vez que se presionaba
   // "Analizar volumen", y esas claves podían quedar limpias por el efecto de
   // cleanup de más abajo (se dispara en cualquier desmontaje, incluido algún
-  // remount temprano que TanStack Start puede hacer en dev) — mapUrl nunca
+  // remount temprano que TanStack Start puede hacer en dev), mapUrl nunca
   // sufría esto porque ya vivía en estado de React, no releído de
   // sessionStorage después del montaje. Mismo tratamiento acá.
   const [taskId, setTaskId] = useState<string | null>(() => loadTaskId());
@@ -309,7 +322,7 @@ function AnalysisPage() {
   // Se llega aquí directo desde el sidebar ahora (antes solo vía Vista
   // Principal, que siempre dejaba un mapUrl seteado). Sin esta bandera, un
   // acceso directo sin contexto mostraría el layout roto en vez de un
-  // estado vacío — se pone en true recién cuando el efecto de montaje ya
+  // estado vacío, se pone en true recién cuando el efecto de montaje ya
   // tuvo chance de resolver un análisis pendiente (HDU4).
   const [initChecked, setInitChecked] = useState(false);
 
@@ -333,16 +346,16 @@ function AnalysisPage() {
   const [detectionsLoading, setDetectionsLoading] = useState(false);
   const [enabledIds, setEnabledIds]               = useState<Set<number>>(new Set());
   const [imgNaturalSize, setImgNaturalSize]        = useState<{ w: number; h: number } | null>(null);
-  // CRS proyectado del ortomosaico (HDU5) — llega junto con las detecciones,
+  // CRS proyectado del ortomosaico (HDU5), llega junto con las detecciones,
   // se guarda para poder reproyectar geo_polygon a WGS84 más adelante (en
   // /rutas). Análisis abiertos por AC4 lo traen de record.crs.
   const [crs, setCrs] = useState<string | undefined>(undefined);
-  // Centro geográfico real del ortomosaico (mismo CRS que `crs`) — a
+  // Centro geográfico real del ortomosaico (mismo CRS que `crs`), a
   // diferencia del centroide de las detecciones, es el mismo sin importar
   // qué encuentre YOLO en cada corrida. rutas.tsx lo prefiere por sobre el
   // centroide de detecciones para ubicar la zona de forma consistente.
   const [orthoCenter, setOrthoCenter] = useState<[number, number] | null>(null);
-  // Huella geográfica COMPLETA del ortomosaico — HDU7 la usa (no las
+  // Huella geográfica COMPLETA del ortomosaico, HDU7 la usa (no las
   // detecciones puntuales) para detectar duplicados entre análisis
   // guardados, más robusto ante corridas de YOLO que detectan la basura en
   // una posición levemente distinta. Ver backendModel/analyses.py.
@@ -377,16 +390,28 @@ function AnalysisPage() {
    */
   const [readOnly, setReadOnly] = useState(false);
 
-  // ── HDU4 / AC1 — guardar análisis: pide nombre ─────────────────────────────
+  // ── capturas de la zona (HDU10 dentro de esta vista) ──────────────────────
+  /** Todos los análisis guardados de la zona actual. */
+  const [zoneAnalyses, setZoneAnalyses] = useState<SavedAnalysisRecord[]>([]);
+  /** Los mismos, agrupados por vuelo y ordenados en el tiempo. */
+  const [versions, setVersions] = useState<ZoneVersion[]>([]);
+  const [evolutionOpen, setEvolutionOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  /** Nombre de la zona, para el título del informe y de la evolución. Sale de
+   *  la colección de zonas: el nombre del análisis identifica una captura, no
+   *  el terreno. */
+  const [zoneName, setZoneName] = useState<string | null>(null);
+
+  // ── HDU4 / AC1, guardar análisis: pide nombre ─────────────────────────────
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [analysisName, setAnalysisName]     = useState("");
 
-  // AC6 — nombre duplicado
+  // AC6, nombre duplicado
   const [duplicateExisting, setDuplicateExisting] = useState<SavedAnalysisRecord | null>(null);
 
   // Análisis ya guardado que se está viendo en esta sesión (llegó por AC4, o
   // ya se guardó una vez en este mismo tab). Mientras esté marcado, volver a
-  // guardar sobrescribe directo, sin pedir nombre ni chequear duplicados —
+  // guardar sobrescribe directo, sin pedir nombre ni chequear duplicados , 
   // no es un análisis nuevo, es el mismo que ya existe.
   // Estado inicial leído de sessionStorage (no null a secas): sin esto, un
   // F5 sobre un análisis YA GUARDADO reconstruía mapUrl/detecciones bien
@@ -397,11 +422,11 @@ function AnalysisPage() {
   const [currentAnalysisId, setCurrentAnalysisId]     = useState<string | null>(loadCurrentAnalysisId);
   const [currentAnalysisName, setCurrentAnalysisName] = useState<string | null>(loadCurrentAnalysisName);
   // Guardar/buscar duplicado ahora son llamadas HTTP (Mongo), no localStorage
-  // instantáneo — sin este indicador, un click en "Guardar" durante una
+  // instantáneo, sin este indicador, un click en "Guardar" durante una
   // conexión lenta no daba ninguna señal de que algo estaba pasando.
   const [savingAnalysis, setSavingAnalysis] = useState(false);
 
-  // HDU7/AC2 — posible duplicado con un análisis anterior (>50% de área
+  // HDU7/AC2, posible duplicado con un análisis anterior (>50% de área
   // superpuesta, calculado por el backend con shapely al guardar). Guarda
   // el análisis ANTERIOR ya resuelto (nombre/volumen) para poder comparar
   // ambos en el banner sin otra vuelta al backend. null = nada pendiente.
@@ -413,7 +438,7 @@ function AnalysisPage() {
   const [resolvingDuplicate, setResolvingDuplicate] = useState<"confirm" | "reject" | null>(null);
 
   // Se llama tanto justo después de guardar (performSave) como al reabrir
-  // un análisis ya guardado (AC4-de-HDU4, en el efecto de montaje) — mismo
+  // un análisis ya guardado (AC4-de-HDU4, en el efecto de montaje), mismo
   // chequeo en los dos casos: "al acceder al mapa del nuevo análisis" (AC2)
   // cubre ambos accesos, no solo el instante del guardado.
   const checkDuplicateWarning = async (record: SavedAnalysisRecord) => {
@@ -456,7 +481,7 @@ function AnalysisPage() {
   };
 
   // Guardado real, compartido entre el camino feliz, la sobrescritura rápida
-  // y la confirmación de duplicado. AC5 — si falla, notifica por toast y no
+  // y la confirmación de duplicado. AC5, si falla, notifica por toast y no
   // cierra el modal para poder reintentar.
   const performSave = async (name: string, overwriteId?: string) => {
     if (!mapUrl) return;
@@ -503,18 +528,18 @@ function AnalysisPage() {
         : "Puedes encontrarlo en el listado de zonas de la Vista Principal.",
     );
 
-    // HDU7/AC1→AC2 — solo un guardado NUEVO (create_analysis en el backend)
+    // HDU7/AC1→AC2, solo un guardado NUEVO (create_analysis en el backend)
     // puede traer un possibleDuplicateOf recién calculado; una sobrescritura
     // nunca lo dispara (ver analyses.py), así que esto es un no-op ahí.
     checkDuplicateWarning(result.record);
   };
 
   // AC6 (sobrescribir): la sobrescritura REEMPLAZA sourceTaskId/mapUrl en el
-  // documento — si el análisis existente venía de una generación DISTINTA
+  // documento, si el análisis existente venía de una generación DISTINTA
   // (otro mapa/tarea) a la que se está guardando ahora, esa tarea anterior
   // y sus archivos quedan sin ninguna referencia una vez sobrescrito. Sin
   // este cleanup quedaban huérfanos para siempre en Mongo (`tasks`) y en
-  // disco (result/finals/task-images) — mismo tipo de fuga que ya se
+  // disco (result/finals/task-images), mismo tipo de fuga que ya se
   // corrigió para "Eliminar zona" en index.tsx, acá aplica al camino de
   // sobrescritura en vez de al de borrado.
   const cleanupOverwrittenTask = (previous: SavedAnalysisRecord) => {
@@ -546,8 +571,8 @@ function AnalysisPage() {
     setSaveDialogOpen(true);
   };
 
-  // AC2 — guarda el análisis con el nombre ingresado en el listado disponible.
-  // AC6 — si el nombre ya existe, pide confirmar sobrescribir en vez de guardar directo.
+  // AC2, guarda el análisis con el nombre ingresado en el listado disponible.
+  // AC6, si el nombre ya existe, pide confirmar sobrescribir en vez de guardar directo.
   const confirmSaveAnalysis = async () => {
     const name = analysisName.trim();
     if (!name || !mapUrl) return;
@@ -593,12 +618,115 @@ function AnalysisPage() {
     };
   }, [displayDetections, enabledIds, status]);
 
+  // ── aplicar un análisis a la vista ────────────────────────────────────────
+  //
+  // Vive aparte del efecto de montaje porque ahora se usa DOS veces: al abrir
+  // la vista, y cada vez que se cambia de captura con la barra inferior. Es el
+  // único lugar que sabe traducir un registro guardado a estado de pantalla.
+  const aplicarAnalisis = (record: SavedAnalysisRecord) => {
+    setMapUrl(record.mapUrl);
+    saveMapUrl(record.mapUrl);
+    setThumbnailUrl(record.thumbnailUrl ?? null);
+    saveThumbnailUrl(record.thumbnailUrl ?? null);
+
+    const detections = (record.detections as (DisplayDetection & { enabled?: boolean })[]) ?? [];
+    setDisplayDetections(detections);
+    // Se restaura la selección tal como se guardó. Una detección sin la marca
+    // cuenta como activa: es como se comportaban los análisis anteriores a que
+    // la selección se persistiera, así que abrirlos sigue dando lo mismo.
+    setEnabledIds(new Set(detections.filter((d) => d.enabled !== false).map((d) => d.id)));
+    setCrs(record.crs);
+    setOrthoCenter(record.orthoCenter ?? null);
+    setOrthoBounds(record.orthoBounds ?? null);
+    setZoneId(record.zoneId ?? null);
+    setCaptureDate(record.captureDate ?? null);
+    setCaptureDateEstimated(record.captureDateEstimated ?? false);
+    setAlgorithmVersion(record.algorithmVersion ?? null);
+
+    // Una versión reemplazada queda en consulta: ni medir de nuevo ni
+    // sobrescribir (AC4 de HDU10). Se resetea en cada aplicación, no solo se
+    // enciende: al volver desde una captura antigua a la vigente, la vista
+    // tiene que recuperar sus controles.
+    setReadOnly(Boolean(record.historical));
+    setCanAnalyze(true);
+    setCannotAnalyzeReason(
+      record.historical
+        ? "Existe una captura más reciente de esta zona, así que este vuelo solo se puede consultar."
+        : null,
+    );
+    setStatus("done");
+
+    setCurrentAnalysisId(record.id);
+    setCurrentAnalysisName(record.name);
+    saveCurrentAnalysisId(record.id);
+    saveCurrentAnalysisName(record.name);
+
+    // HDU7/AC2, cubre tanto el guardado recién hecho como reabrirlo después.
+    checkDuplicateWarning(record);
+
+    // taskId y detectionJsonUrl se resuelven por captura. Sin esto, "Analizar
+    // volumen" trabajaría sobre lo que hubiera quedado en sessionStorage de la
+    // última tarea vista, que puede ser de otra zona por completo.
+    clearDetectionJsonUrl();
+    setDetectionJsonUrl(null);
+    if (record.sourceTaskId) {
+      const sourceTaskId = record.sourceTaskId;
+      saveTaskId(sourceTaskId);
+      setTaskId(sourceTaskId);
+      getTaskStatus(sourceTaskId).then((s) => {
+        if (s?.result_json_url) {
+          saveDetectionJsonUrl(s.result_json_url);
+          setDetectionJsonUrl(s.result_json_url);
+        }
+        // Respaldo: si además faltan los modelos de elevación de este vuelo,
+        // tampoco se puede medir. El motivo principal sigue siendo `historical`.
+        if (s && s.can_analyze === false) {
+          setCanAnalyze(false);
+          setCannotAnalyzeReason(
+            "Existe una captura más reciente de esta zona, así que este vuelo solo se puede consultar.",
+          );
+        }
+      });
+    } else {
+      clearTaskId();
+      setTaskId(null);
+    }
+  };
+
+  /** Trae las demás capturas de la zona para poder navegar entre ellas. */
+  const cargarVersionesDeLaZona = (zona: string | null) => {
+    if (!zona) {
+      setVersions([]);
+      return;
+    }
+    listAnalyses()
+      .then((todos) => {
+        const deLaZona = todos.filter((a) => a.zoneId === zona);
+        setZoneAnalyses(deLaZona);
+        setVersions(buildVersions(deLaZona));
+      })
+      // Degrada en silencio: sin versiones la vista sigue funcionando como
+      // antes, solo sin la barra inferior.
+      .catch(() => {});
+
+    listZones()
+      .then((zonas) => setZoneName(zonas.find((z) => z.id === zona)?.name ?? null))
+      .catch(() => {});
+  };
+
+  /** Cambia la captura que se está viendo, sin salir de la vista. */
+  const seleccionarVersion = (version: ZoneVersion) => {
+    // La medición más reciente de ese vuelo es su lectura vigente.
+    const ultimo = version.analyses[version.analyses.length - 1];
+    if (ultimo) aplicarAnalisis(ultimo);
+  };
+
   // ── carga inicial de detecciones al montar ─────────────────────────────────
   //
   // Un solo efecto para las dos fuentes posibles, en vez de dos separados:
   // antes, el efecto de HDU4/AC4 (abrir un análisis guardado, síncrono) y el
   // de "detectionJsonUrl" (fetch asíncrono a lo que haya quedado en
-  // sessionStorage de CUALQUIER sesión anterior) corrían en paralelo — el
+  // sessionStorage de CUALQUIER sesión anterior) corrían en paralelo, el
   // fetch async terminaba después y pisaba los datos correctos del análisis
   // recién abierto con los de la última generación/tarea, sin importar cuál
   // hubieras clickeado. Al estar en el mismo efecto, si hay un análisis
@@ -607,8 +735,8 @@ function AnalysisPage() {
   // hasLoadedRef evita que el CUERPO del efecto corra más de una vez para el
   // mismo montaje del componente (ej. doble-render por hot-reload en dev, o
   // cualquier remount que React dispare sin que la página realmente haya
-  // cambiado). consumePendingOpenId() es de un solo uso — borra la clave de
-  // sessionStorage al leerla — así que una segunda ejecución del efecto no
+  // cambiado). consumePendingOpenId() es de un solo uso, borra la clave de
+  // sessionStorage al leerla, así que una segunda ejecución del efecto no
   // la encuentra, cae al camino de "fetch en vivo", y pisa los datos
   // correctos recién cargados con lo que haya quedado viejo en
   // detectionJsonUrl. Se vio exactamente esto: un flash correcto de los
@@ -620,111 +748,35 @@ function AnalysisPage() {
     if (hasLoadedRef.current) return;
     hasLoadedRef.current = true;
 
-    // loadAnalysisById ahora es una llamada HTTP (Mongo) — el resto de este
+    // loadAnalysisById ahora es una llamada HTTP (Mongo), el resto de este
     // efecto sigue dependiendo de que se resuelva ANTES de decidir si cae al
     // camino normal (mismo motivo documentado arriba: correr ambos caminos
     // en paralelo pisaba los datos correctos con los de la última tarea
     // vista). El await adentro de este IIFE preserva ese orden.
     (async () => {
-      // HDU4 / AC4 — abrir un análisis guardado desde el listado (index.tsx),
+      // HDU4 / AC4, abrir un análisis guardado desde el listado (index.tsx),
       // O un F5 sobre un análisis ya guardado: consumePendingOpenId() es de
       // un solo uso y ya se consumió en el primer mount, así que en un F5
       // cae acá gracias a loadCurrentAnalysisId() (persistido en
       // sessionStorage, ver mapState.ts). Volver a pedir el registro
-      // completo a Mongo (en vez de intentar persistir cada campo — status,
-      // detecciones, resumen para el banner de duplicado — por separado)
+      // completo a Mongo (en vez de intentar persistir cada campo, status,
+      // detecciones, resumen para el banner de duplicado, por separado)
       // deja TODO consistente con una sola fuente de verdad.
       const pendingId = consumePendingOpenId() ?? loadCurrentAnalysisId();
       if (pendingId) {
         const record = await loadAnalysisById(pendingId);
         if (record) {
-          setMapUrl(record.mapUrl);
-          saveMapUrl(record.mapUrl);
-          setThumbnailUrl(record.thumbnailUrl ?? null);
-          saveThumbnailUrl(record.thumbnailUrl ?? null);
-
-          const detections = (record.detections as (DisplayDetection & { enabled?: boolean })[]) ?? [];
-          setDisplayDetections(detections);
-          // Se restaura la selección tal como se guardó. Una detección sin la
-          // marca cuenta como activa: es como se comportaban los análisis
-          // anteriores a que la selección se persistiera, así que abrirlos
-          // sigue dando lo mismo que antes.
-          setEnabledIds(new Set(detections.filter(d => d.enabled !== false).map(d => d.id)));
-          setCrs(record.crs);
-          setOrthoCenter(record.orthoCenter ?? null);
-          setOrthoBounds(record.orthoBounds ?? null);
-          setZoneId(record.zoneId ?? null);
-          setCaptureDate(record.captureDate ?? null);
-          setCaptureDateEstimated(record.captureDateEstimated ?? false);
-          setAlgorithmVersion(record.algorithmVersion ?? null);
-          // Una versión reemplazada queda en consulta: ni medir de nuevo ni
-          // sobrescribir. Es lo que pide el AC4 de HDU10.
-          if (record.historical) {
-            setReadOnly(true);
-            setCannotAnalyzeReason(
-              "Existe una captura más reciente de esta zona, así que este vuelo solo se puede consultar.",
-            );
-          }
-          setStatus("done");
-
-          setCurrentAnalysisId(record.id);
-          setCurrentAnalysisName(record.name);
-          saveCurrentAnalysisId(record.id);
-          saveCurrentAnalysisName(record.name);
-
-          // HDU7/AC2 — "al acceder al mapa del nuevo análisis" cubre tanto
-          // el guardado recién hecho (performSave) como reabrirlo después
-          // desde Vista Principal, que es justo este camino.
-          checkDuplicateWarning(record);
-
-          // Sin esto, "Analizar volumen" sobre una zona ya guardada fallaba con
-          // "No se encontró la tarea": loadTaskId() seguía apuntando a lo que
-          // hubiera quedado de la última tarea en sessionStorage (o nada), no
-          // a la tarea real de ESTE análisis guardado.
-          //
-          // Eso resolvía taskId, pero "Analizar volumen" TAMBIÉN necesita
-          // detectionJsonUrl — y un SavedAnalysisRecord no guarda esa URL (solo
-          // las detecciones ya resueltas). Sin tocarla, quedaba lo que hubiera
-          // en sessionStorage de la ÚLTIMA zona vista/generada, exactamente el
-          // mismo patrón de dato viejo que ya arreglamos en reviewPending() —
-          // por eso "Analizar volumen" fallaba con "No se encontró la tarea"
-          // (o, peor, reanalizaba la zona equivocada). Se limpia primero y,
-          // si el backend todavía tiene la tarea en memoria (no se reinició
-          // uvicorn desde entonces), se repuebla con su propia URL.
-          clearDetectionJsonUrl();
-          setDetectionJsonUrl(null);
-          if (record.sourceTaskId) {
-            const sourceTaskId = record.sourceTaskId;
-            saveTaskId(sourceTaskId);
-            setTaskId(sourceTaskId);
-            getTaskStatus(sourceTaskId).then((s) => {
-              if (s?.result_json_url) {
-                saveDetectionJsonUrl(s.result_json_url);
-                setDetectionJsonUrl(s.result_json_url);
-              }
-              // Si los modelos de elevación de este vuelo ya se liberaron
-              // porque hay una captura más reciente, el vuelo se puede
-              // consultar pero no volver a medir. Se resuelve acá, al abrir,
-              // para deshabilitar el botón con el motivo en vez de dejar que
-              // el usuario lo presione y reciba un error.
-              if (s && s.can_analyze === false) {
-                setCanAnalyze(false);
-                setCannotAnalyzeReason(
-                  "Existe una captura más reciente de esta zona, así que este vuelo solo se puede consultar.",
-                );
-              }
-            });
-          } else {
-            clearTaskId();
-            setTaskId(null);
-          }
+          aplicarAnalisis(record);
+          // Las demás capturas de la misma zona, para poder navegar entre
+          // ellas sin salir de la vista. buildVersions() ya agrupa por vuelo y
+          // ordena por fecha de captura con desempate por carga.
+          cargarVersionesDeLaZona(record.zoneId ?? null);
           setInitChecked(true);
           return;
         }
       }
-
       // Recién acá se sabe con certeza si había o no un análisis guardado
-      // para mostrar (pendingId ausente, o presente pero sin record) — antes
+      // para mostrar (pendingId ausente, o presente pero sin record), antes
       // esto se marcaba síncrono al principio del efecto, y como el camino
       // de arriba depende de un await real a Mongo, quedaba una vuelta de
       // render con initChecked=true y mapUrl aún null que disparaba el
@@ -756,7 +808,7 @@ function AnalysisPage() {
   }, []);
 
   // Al salir de /analysis por navegación real dentro de la app (sidebar,
-  // Link, etc.) se limpia el hand-off — si no, una vuelta directa a
+  // Link, etc.) se limpia el hand-off, si no, una vuelta directa a
   // /analysis desde el sidebar (sin pasar por openZone/reviewPending, que sí
   // dejan mapUrl fresco a propósito) resucitaba el último análisis visto en
   // vez de mostrar "No hay un análisis para mostrar". Esta cleanup NO corre
@@ -908,7 +960,7 @@ function AnalysisPage() {
   // ── render ─────────────────────────────────────────────────────────────────
 
   // Mientras se resuelve si hay o no un análisis para mostrar (ver el efecto
-  // de arriba) — antes de esto, la navegación a /analysis ya es instantánea,
+  // de arriba), antes de esto, la navegación a /analysis ya es instantánea,
   // pero este tramo se renderizaba con datos todavía vacíos (mapUrl/
   // detecciones/métricas en null) en vez de un estado de carga honesto.
   if (!initChecked) {
@@ -940,7 +992,14 @@ function AnalysisPage() {
   return (
     // topo-bg: curvas de nivel de feria-page (ver styles.css).
     <div className="topo-bg flex flex-col h-screen overflow-hidden bg-background text-foreground">
-      <main className="grid flex-1 grid-cols-[clamp(240px,22vw,360px)_1fr] min-h-0">
+      {/* Tres columnas: controles, mapa y zonas detectadas. La lista de zonas
+          vivía apretada al pie de la columna izquierda, que es la más angosta
+          de la pantalla; con columna propia se lee sin pelear contra los
+          controles.
+
+          En ventanas angostas (bajo 80rem) vuelve a dos columnas y la lista se
+          pliega debajo del mapa, para no dejar el visor sin ancho útil. */}
+      <main className="grid flex-1 grid-cols-[clamp(15rem,22vw,22.5rem)_1fr] min-h-0 xl:grid-cols-[clamp(15rem,20vw,20rem)_1fr_clamp(16rem,22vw,24rem)]">
 
         {/* ── panel lateral ── */}
         <aside
@@ -949,7 +1008,7 @@ function AnalysisPage() {
         >
           <div className="flex flex-col gap-4">
 
-            {/* título — mismo tratamiento que "Zonas monitoreadas" / "Carga
+            {/* título, mismo tratamiento que "Zonas monitoreadas" / "Carga
                 de imágenes": sin botón de volver (la navegación ya vive en
                 el sidebar persistente). */}
             <div>
@@ -963,7 +1022,7 @@ function AnalysisPage() {
               </p>
             </div>
 
-            {/* HDU7/AC2 — posible duplicado con un análisis anterior */}
+            {/* HDU7/AC2, posible duplicado con un análisis anterior */}
             {duplicateWarning && (
               <div className="animate-in fade-in slide-in-from-left-2 duration-300 rounded-lg border border-warning/40 bg-warning/10 p-4">
                 <TriangleAlert className="mb-2 h-5 w-5 text-warning" />
@@ -982,7 +1041,7 @@ function AnalysisPage() {
                     <p className="font-semibold">
                       {duplicateWarning.older.summary
                         ? `${duplicateWarning.older.summary.totalVolumeM3} m³`
-                        : "—"}
+                        : ", "}
                     </p>
                   </div>
                 </div>
@@ -1068,7 +1127,7 @@ function AnalysisPage() {
                 </p>
               )}
 
-              {/* HDU4/AC1 — guardar análisis. Deshabilitado en una versión ya
+              {/* HDU4/AC1, guardar análisis. Deshabilitado en una versión ya
                   reemplazada: consultarla es válido, sobrescribirla no, porque
                   es historia de la zona y no el estado vigente del terreno. */}
               <Button
@@ -1084,6 +1143,31 @@ function AnalysisPage() {
                 )}
                 {currentAnalysisId ? "Guardar cambios" : "Guardar análisis"}
               </Button>
+
+              {/* HDU9 y HDU10 al alcance de la mano. Antes había que salir a
+                  Vista Principal, buscar la zona en una tabla y volver. Los
+                  botones de allá se mantienen: el informe de Vista Principal
+                  permite elegir varias zonas, que es lo que pide el AC1. */}
+              {zoneId && (
+                <div className="flex flex-col gap-2 border-t border-border/40 pt-3">
+                  <Button
+                    variant="secondary"
+                    className="w-full"
+                    onClick={() => setReportOpen(true)}
+                    disabled={zoneAnalyses.length === 0}
+                  >
+                    <FileText className="mr-2 h-4 w-4" /> Informe de esta zona
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    className="w-full"
+                    onClick={() => setEvolutionOpen(true)}
+                    disabled={zoneAnalyses.length === 0}
+                  >
+                    <ChartLineUp className="mr-2 h-4 w-4" /> Ver evolución
+                  </Button>
+                </div>
+              )}
 
               {/* estado */}
               <div>
@@ -1130,17 +1214,17 @@ function AnalysisPage() {
                   <div className="grid grid-cols-2 gap-2">
                     <Metric
                       label="Volumen total"
-                      value={status === "done" ? `${activeSummary.totalVolumeM3} m³` : "—"}
+                      value={status === "done" ? `${activeSummary.totalVolumeM3} m³` : ", "}
                       icon={<Boxes className="h-4 w-4" />}
                     />
                     <Metric
                       label="Peso total"
-                      value={status === "done" ? `${activeSummary.totalWeightKg} kg` : "—"}
+                      value={status === "done" ? `${activeSummary.totalWeightKg} kg` : ", "}
                       icon={<Scale className="h-4 w-4" />}
                     />
                     <Metric
                       label="Área total"
-                      value={status === "done" ? `${activeSummary.totalAreaM2} m²` : "—"}
+                      value={status === "done" ? `${activeSummary.totalAreaM2} m²` : ", "}
                       icon={<Crosshair className="h-4 w-4" />}
                     />
                     <Metric
@@ -1151,116 +1235,6 @@ function AnalysisPage() {
                   </div>
                 </div>
 
-                {/* lista de zonas */}
-                <div>
-                  <div className="flex items-center justify-between mb-2.5">
-                    <p className="text-xs font-semibold text-muted-foreground">
-                      Zonas detectadas
-                    </p>
-                    {displayDetections.length > 0 && (
-                      <button
-                        onClick={toggleAll}
-                        className="text-[0.625rem] text-primary hover:underline"
-                      >
-                        {allEnabled ? "Desactivar todas" : "Activar todas"}
-                      </button>
-                    )}
-                  </div>
-
-                  {detectionsLoading ? (
-                    <div className="space-y-1.5">
-                      {[0, 1, 2].map((i) => (
-                        <Skeleton key={i} className="h-14 w-full rounded-md" />
-                      ))}
-                    </div>
-                  ) : displayDetections.length > 0 ? (
-                    <ul className="space-y-1.5 max-h-[21.25rem] overflow-y-auto pr-0.5">
-                      {displayDetections.map(d => {
-                        const enabled = enabledIds.has(d.id);
-                        const color   = classColor(d.class);
-                        const hasData = d.volume_m3 != null || d.area_m2 != null;
-                        return (
-                          <li
-                            key={d.id}
-                            className={`animate-in fade-in duration-200 fill-mode-both rounded-md border transition-opacity duration-150 ${
-                              enabled
-                                ? "border-border/60 bg-background/60"
-                                : "border-border/20 bg-background/20 opacity-40"
-                            }`}
-                          >
-                            <div className="flex items-start gap-2 p-2">
-                              <button
-                                onClick={() => toggleDetection(d.id)}
-                                className="mt-0.5 flex-shrink-0 rounded p-0.5 hover:bg-muted/40 transition-colors"
-                                title={enabled ? "Desactivar zona" : "Activar zona"}
-                              >
-                                {enabled
-                                  ? <Eye    className="h-3.5 w-3.5 text-primary" />
-                                  : <EyeOff className="h-3.5 w-3.5 text-muted-foreground" />}
-                              </button>
-                              <span
-                                className="mt-1 h-2.5 w-2.5 rounded-sm flex-shrink-0"
-                                style={{ background: color }}
-                              />
-                              <div className="flex-1 min-w-0">
-                                <p className="text-xs font-medium leading-tight">{d.class}</p>
-                                {status === "done" && hasData ? (
-                                  d.classes.length > 1 ? (
-                                    // Zona fusionada — resumen promedio + desglose por tipo
-                                    <div className="mt-1.5 space-y-1.5">
-                                      <div className="rounded border border-primary/30 bg-primary/10 px-1.5 py-1">
-                                        <p className="mono text-[0.5rem] font-semibold uppercase tracking-wider text-primary mb-1">
-                                          Promedio
-                                        </p>
-                                        <div className="grid grid-cols-3 gap-1">
-                                          <StatBadge label="Vol"  value={`${(d.volume_m3 ?? 0).toFixed(2)} m³`} />
-                                          <StatBadge label="Área" value={`${(d.area_m2  ?? 0).toFixed(2)} m²`} />
-                                          <StatBadge label="Peso" value={`${Math.round(d.weight_kg ?? 0)} kg`} />
-                                        </div>
-                                      </div>
-                                      {d.breakdown.map(b => (
-                                        <div key={b.class} className="rounded bg-background/80 px-1.5 py-1">
-                                          <div className="flex items-center gap-1 mb-1">
-                                            <span
-                                              className="h-2 w-2 rounded-sm flex-shrink-0"
-                                              style={{ background: classColor(b.class) }}
-                                            />
-                                            <p className="text-[0.5625rem] font-semibold text-muted-foreground truncate">
-                                              {b.class}
-                                            </p>
-                                          </div>
-                                          <div className="grid grid-cols-3 gap-1">
-                                            <StatBadge label="Vol"  value={b.volume_m3 != null ? `${b.volume_m3.toFixed(2)} m³` : "—"} />
-                                            <StatBadge label="Área" value={b.area_m2  != null ? `${b.area_m2.toFixed(2)} m²`  : "—"} />
-                                            <StatBadge label="Peso" value={b.weight_kg != null ? `${Math.round(b.weight_kg)} kg` : "—"} />
-                                          </div>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  ) : (
-                                    <div className="mt-1.5 grid grid-cols-3 gap-1">
-                                      <StatBadge label="Vol"  value={`${(d.volume_m3 ?? 0).toFixed(2)} m³`} />
-                                      <StatBadge label="Área" value={`${(d.area_m2  ?? 0).toFixed(2)} m²`} />
-                                      <StatBadge label="Peso" value={`${Math.round(d.weight_kg ?? 0)} kg`} />
-                                    </div>
-                                  )
-                                ) : (
-                                  <p className="mono text-[0.625rem] text-muted-foreground mt-0.5">
-                                    {status === "done" ? "Sin datos de volumen" : "Pendiente de análisis"}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  ) : (
-                    <div className="py-3 text-center text-xs text-muted-foreground">
-                      Sin detecciones cargadas.
-                    </div>
-                  )}
-                </div>
               </div>
             )}
           </div>
@@ -1398,9 +1372,191 @@ function AnalysisPage() {
             </div>
           )}
         </section>
+
+        {/* ── zonas detectadas ── */}
+        {/* Tercera columna, solo desde 80rem de ancho. Debajo de eso la
+            pantalla no da para tres, y la lista vuelve a la columna izquierda
+            no tendria sentido: se oculta y el mapa se queda con el espacio. */}
+        <aside className="hidden min-w-0 flex-col overflow-y-auto border-l border-border/35 p-4 xl:flex">
+          <p className="mb-3 text-sm font-semibold text-foreground">Zonas detectadas</p>
+          {/* lista de zonas */}
+          <div>
+            <div className="flex items-center justify-between mb-2.5">
+              <p className="text-xs font-semibold text-muted-foreground">
+                Zonas detectadas
+              </p>
+              {displayDetections.length > 0 && (
+                <button
+                  onClick={toggleAll}
+                  className="text-[0.625rem] text-primary hover:underline"
+                >
+                  {allEnabled ? "Desactivar todas" : "Activar todas"}
+                </button>
+              )}
+            </div>
+
+            {detectionsLoading ? (
+              <div className="space-y-1.5">
+                {[0, 1, 2].map((i) => (
+                  <Skeleton key={i} className="h-14 w-full rounded-md" />
+                ))}
+              </div>
+            ) : displayDetections.length > 0 ? (
+              <ul className="space-y-1.5 max-h-[21.25rem] overflow-y-auto pr-0.5">
+                {displayDetections.map(d => {
+                  const enabled = enabledIds.has(d.id);
+                  const color   = classColor(d.class);
+                  const hasData = d.volume_m3 != null || d.area_m2 != null;
+                  return (
+                    <li
+                      key={d.id}
+                      className={`animate-in fade-in duration-200 fill-mode-both rounded-md border transition-opacity duration-150 ${
+                        enabled
+                          ? "border-border/60 bg-background/60"
+                          : "border-border/20 bg-background/20 opacity-40"
+                      }`}
+                    >
+                      <div className="flex items-start gap-2 p-2">
+                        <button
+                          onClick={() => toggleDetection(d.id)}
+                          className="mt-0.5 flex-shrink-0 rounded p-0.5 hover:bg-muted/40 transition-colors"
+                          title={enabled ? "Desactivar zona" : "Activar zona"}
+                        >
+                          {enabled
+                            ? <Eye    className="h-3.5 w-3.5 text-primary" />
+                            : <EyeOff className="h-3.5 w-3.5 text-muted-foreground" />}
+                        </button>
+                        <span
+                          className="mt-1 h-2.5 w-2.5 rounded-sm flex-shrink-0"
+                          style={{ background: color }}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium leading-tight">{d.class}</p>
+                          {status === "done" && hasData ? (
+                            d.classes.length > 1 ? (
+                              // Zona fusionada, resumen promedio + desglose por tipo
+                              <div className="mt-1.5 space-y-1.5">
+                                <div className="rounded border border-primary/30 bg-primary/10 px-1.5 py-1">
+                                  <p className="mono text-[0.5rem] font-semibold uppercase tracking-wider text-primary mb-1">
+                                    Promedio
+                                  </p>
+                                  <div className="grid grid-cols-3 gap-1">
+                                    <StatBadge label="Vol"  value={`${(d.volume_m3 ?? 0).toFixed(2)} m³`} />
+                                    <StatBadge label="Área" value={`${(d.area_m2  ?? 0).toFixed(2)} m²`} />
+                                    <StatBadge label="Peso" value={`${Math.round(d.weight_kg ?? 0)} kg`} />
+                                  </div>
+                                </div>
+                                {d.breakdown.map(b => (
+                                  <div key={b.class} className="rounded bg-background/80 px-1.5 py-1">
+                                    <div className="flex items-center gap-1 mb-1">
+                                      <span
+                                        className="h-2 w-2 rounded-sm flex-shrink-0"
+                                        style={{ background: classColor(b.class) }}
+                                      />
+                                      <p className="text-[0.5625rem] font-semibold text-muted-foreground truncate">
+                                        {b.class}
+                                      </p>
+                                    </div>
+                                    <div className="grid grid-cols-3 gap-1">
+                                      <StatBadge label="Vol"  value={b.volume_m3 != null ? `${b.volume_m3.toFixed(2)} m³` : ", "} />
+                                      <StatBadge label="Área" value={b.area_m2  != null ? `${b.area_m2.toFixed(2)} m²`  : ", "} />
+                                      <StatBadge label="Peso" value={b.weight_kg != null ? `${Math.round(b.weight_kg)} kg` : ", "} />
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="mt-1.5 grid grid-cols-3 gap-1">
+                                <StatBadge label="Vol"  value={`${(d.volume_m3 ?? 0).toFixed(2)} m³`} />
+                                <StatBadge label="Área" value={`${(d.area_m2  ?? 0).toFixed(2)} m²`} />
+                                <StatBadge label="Peso" value={`${Math.round(d.weight_kg ?? 0)} kg`} />
+                              </div>
+                            )
+                          ) : (
+                            <p className="mono text-[0.625rem] text-muted-foreground mt-0.5">
+                              {status === "done" ? "Sin datos de volumen" : "Pendiente de análisis"}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <div className="py-3 text-center text-xs text-muted-foreground">
+                Sin detecciones cargadas.
+              </div>
+            )}
+          </div>
+        </aside>
       </main>
 
-      {/* HDU4/AC1 — modal que pide el nombre del análisis */}
+      {/* Navegación entre capturas, al pie y a lo ancho. Se oculta sola cuando
+          la zona tiene una sola captura. */}
+      <VersionBar
+        versions={versions}
+        activeTaskId={taskId}
+        onSelect={seleccionarVersion}
+      />
+
+      {/* HDU9, informe acotado a esta zona, con vista previa antes de bajarlo. */}
+      <ReportPreview
+        open={reportOpen}
+        onOpenChange={setReportOpen}
+        selections={
+          zoneId && zoneAnalyses.length > 0
+            ? [{
+                zone: {
+                  id: zoneId,
+                  owner: "",
+                  name: zoneName ?? currentAnalysisName ?? "Zona",
+                  createdAt: new Date().toISOString(),
+                },
+                analyses: zoneAnalyses,
+              }]
+            : null
+        }
+      />
+
+      {/* HDU10, el mismo diálogo de Vista Principal. Su "Ver" ahora cambia de
+          captura acá mismo en vez de navegar, ya que la vista sabe hacerlo. */}
+      <Dialog open={evolutionOpen} onOpenChange={setEvolutionOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Evolución de {zoneName ?? "la zona"}</DialogTitle>
+            <DialogDescription>
+              Cómo cambió el volumen de esta zona entre sus distintas capturas.
+            </DialogDescription>
+          </DialogHeader>
+          {zoneId && (
+            <Suspense
+              fallback={
+                <div className="flex h-[13rem] items-center justify-center">
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                </div>
+              }
+            >
+              <ZoneEvolution
+                zone={{
+                  id: zoneId,
+                  owner: "",
+                  name: zoneName ?? "Zona",
+                  createdAt: new Date().toISOString(),
+                }}
+                analyses={zoneAnalyses}
+                onOpenAnalysis={(id) => {
+                  const record = zoneAnalyses.find((a) => a.id === id);
+                  if (record) aplicarAnalisis(record);
+                  setEvolutionOpen(false);
+                }}
+              />
+            </Suspense>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* HDU4/AC1, modal que pide el nombre del análisis */}
       <Dialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen}>
         <DialogContent>
           <DialogHeader>
@@ -1430,7 +1586,7 @@ function AnalysisPage() {
         </DialogContent>
       </Dialog>
 
-      {/* HDU4/AC6 — confirmación cuando el nombre ya existe */}
+      {/* HDU4/AC6, confirmación cuando el nombre ya existe */}
       <AlertDialog
         open={duplicateExisting !== null}
         onOpenChange={(open) => { if (!open) setDuplicateExisting(null); }}

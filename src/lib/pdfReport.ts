@@ -1,5 +1,5 @@
 // =============================================================================
-// CONDORFINDER — INFORME DE VOLUMEN EN PDF (HDU9)
+// CONDORFINDER, INFORME DE VOLUMEN EN PDF (HDU9)
 // Archivo: src/lib/pdfReport.ts
 //
 // El PDF se arma en el navegador, no en el servidor. El frontend corre en
@@ -35,13 +35,48 @@ function num(n: number): string {
   return n.toLocaleString("es-CL", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+/** Nombre del archivo, fechado el día de emisión. */
+export function reportFilename(): string {
+  return `informe-volumen-${new Date().toISOString().slice(0, 10)}.pdf`;
+}
+
 /**
- * Genera el informe y lo descarga.
+ * Arma el documento y lo devuelve sin guardarlo.
  *
- * Devuelve el nombre del archivo, o lanza si algo falla — quien llama decide
+ * Está separado de la descarga para que la vista previa muestre exactamente el
+ * mismo documento que se va a guardar, sin construirlo dos veces ni arriesgar
+ * que lo previsualizado y lo descargado difieran.
+ *
+ * Devuelve también una función para producir la URL del objeto, porque quien la
+ * crea tiene que liberarla después (ver ReportPreview).
+ */
+export async function buildVolumeReport(selections: ReportSelection[]): Promise<{
+  blobUrl: () => string;
+  save: () => void;
+}> {
+  const doc = await renderReport(selections);
+  return {
+    blobUrl: () => doc.output("bloburl") as unknown as string,
+    save: () => doc.save(reportFilename()),
+  };
+}
+
+/**
+ * Genera el informe y lo descarga directo, sin vista previa.
+ *
+ * Devuelve el nombre del archivo, o lanza si algo falla, quien llama decide
  * cómo avisar (toast), igual que hace el resto de src/lib.
  */
 export async function generateVolumeReport(selections: ReportSelection[]): Promise<string> {
+  const doc = await renderReport(selections);
+  const filename = reportFilename();
+  doc.save(filename);
+  return filename;
+}
+
+/** Todo el dibujo del documento. Lo comparten la descarga directa y la vista
+ *  previa, así que cualquier cambio de formato se hace en un solo lugar. */
+async function renderReport(selections: ReportSelection[]) {
   const { jsPDF } = await import("jspdf");
   const autoTable = (await import("jspdf-autotable")).default;
 
@@ -174,7 +209,7 @@ export async function generateVolumeReport(selections: ReportSelection[]): Promi
 
       const variacion =
         anterior === null
-          ? "—"
+          ? ", "
           : anterior === 0
             ? "sin base"
             : `${(((volumen - anterior) / anterior) * 100).toFixed(1)} %`;
@@ -218,7 +253,5 @@ export async function generateVolumeReport(selections: ReportSelection[]): Promi
     }
   }
 
-  const filename = `informe-volumen-${new Date().toISOString().slice(0, 10)}.pdf`;
-  doc.save(filename);
-  return filename;
+  return doc;
 }

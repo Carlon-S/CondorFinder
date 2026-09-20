@@ -424,7 +424,13 @@ CondorFinder/
 
 Historias comprometidas: HDU5.1 (13), HDU8 (5), HDU9 (5), HDU10 (5) y SP2 (13). Suman 41 puntos sobre un mínimo de 40, porque el ramo comunicó un cambio respecto al plan y bajó el mínimo del Sprint 2 de 50 a 40.
 
-> **Verificación pendiente.** HDU9 y HDU10 están implementadas y compilan (`tsc`, `pnpm build`, `py_compile`), pero **todavía no se recorrieron en vivo**. La tabla de abajo refleja lo que quedó construido, no lo que quedó comprobado.
+> **HDU9 y HDU10 verificadas end to end** (2026-09-20), recorriendo los ocho criterios sobre tres zonas reales: una con dos capturas de la misma zona y otra con una sola. El recorrido destapó cinco defectos, todos corregidos y vueltos a probar:
+>
+> - El archivo de detecciones se borraba del disco al subirse a la nube, así que el análisis ya no lo encontraba. Al calcularse dentro del pipeline se enriquecía antes de subir y el problema no existía.
+> - El modo solo lectura se derivaba de la presencia de los modelos de elevación, pero la poda solo corre al generar y respeta los vuelos sin análisis guardado: una versión reemplazada podía conservarlos y quedaba medible. Ahora se deriva de `historical`.
+> - Rechazar un duplicado no deshacía la zona ya heredada, así que la evolución de una zona mostraba la historia de otra.
+> - El mensaje del AC4 de HDU9 colgaba de un elemento deshabilitado, que no emite eventos de puntero: existía y era inalcanzable.
+> - El botón de evolución se ocultaba con una sola captura, lo que dejaba el AC3 de HDU10 sin forma de alcanzarse.
 
 | Historia | Criterio de aceptación | Estado |
 |---|---|---|
@@ -440,14 +446,14 @@ Historias comprometidas: HDU5.1 (13), HDU8 (5), HDU9 (5), HDU10 (5) y SP2 (13). 
 | HDU8 | "Editar" sobre un recurso registrado permite modificar su registro | 🔲 Pendiente |
 | HDU8 | El botón de disponibilidad alterna el recurso entre disponible y no disponible | 🔲 Pendiente |
 | HDU8 | Un recurso no disponible queda excluido al armar la asignación de una ruta | 🔲 Pendiente |
-| HDU9 | Al seleccionar una o más zonas y presionar "generar informe", se exporta un PDF con el volumen total y por zona | 🟡 Implementado, sin verificar |
-| HDU9 | Con zonas de distintos tipos de residuo, el PDF detalla el volumen por tipo además del total | 🟡 Implementado, sin verificar |
-| HDU9 | Con dos versiones guardadas de la misma zona, el PDF muestra la comparación de volumen entre ambos períodos | 🟡 Implementado, sin verificar |
-| HDU9 | Sin ninguna zona guardada, el botón queda deshabilitado con un mensaje que lo explica | 🟡 Implementado, sin verificar |
-| HDU10 | "Ver evolución" muestra la cadena completa de versiones anteriores, ordenada cronológicamente | 🟡 Implementado, sin verificar |
-| HDU10 | Se grafica el volumen estimado de cada versión por fecha | 🟡 Implementado, sin verificar |
-| HDU10 | Una zona sin versiones anteriores lo indica explícitamente | 🟡 Implementado, sin verificar |
-| HDU10 | Al hacer click en una versión, se abre en modo solo lectura con el visor de HDU4 | 🟡 Implementado, sin verificar |
+| HDU9 | Al seleccionar una o más zonas y presionar "generar informe", se exporta un PDF con el volumen total y por zona | ✅ Cumplido |
+| HDU9 | Con zonas de distintos tipos de residuo, el PDF detalla el volumen por tipo además del total | ✅ Cumplido |
+| HDU9 | Con dos versiones guardadas de la misma zona, el PDF muestra la comparación de volumen entre ambos períodos | ✅ Cumplido |
+| HDU9 | Sin ninguna zona guardada, el botón queda deshabilitado con un mensaje que lo explica | ✅ Cumplido |
+| HDU10 | "Ver evolución" muestra la cadena completa de versiones anteriores, ordenada cronológicamente | ✅ Cumplido |
+| HDU10 | Se grafica el volumen estimado de cada versión por fecha | ✅ Cumplido |
+| HDU10 | Una zona sin versiones anteriores lo indica explícitamente | ✅ Cumplido |
+| HDU10 | Al hacer click en una versión, se abre en modo solo lectura con el visor de HDU4 | ✅ Cumplido |
 | SP2 (Spike, 13 pts) | Primer entregable: tabla comparando el desempeño con una única imagen, para demostrar estabilidad de las estimaciones | 🔲 Pendiente |
 | SP2 (Spike, 13 pts) | Segundo entregable: tabla con una imagen con datos reales validados por la municipalidad | 🔲 Pendiente |
 
