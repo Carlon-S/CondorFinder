@@ -708,6 +708,26 @@ def run_analysis(task_id: str):
         task = task_store.get_task_sync(task_id)
         detections_json = task["detections_json_path"]
         ortho_path = task["ortho_path"]
+        json_name = task.get("result_json_filename", "")
+
+        # El JSON de detecciones puede no estar en disco: storage.upload_result_file
+        # borra la copia local después de subirla a GCS, para no acumular espacio
+        # en la VM. Mientras el volumen se calculaba DENTRO del pipeline esto no
+        # importaba, porque se enriquecía antes de subir; ahora que el cálculo
+        # ocurre después, hay que traerlo de vuelta.
+        #
+        # En modo local (sin bucket) la descarga lee esa misma ruta, así que si
+        # tampoco está ahí es una falta real y el error es correcto.
+        if not os.path.exists(detections_json) and json_name:
+            datos = storage_module.download_result_file(json_name)
+            if datos is None:
+                raise FileNotFoundError(
+                    "No se encontró el archivo de detecciones de este vuelo, "
+                    "ni en el disco del servidor ni en el almacenamiento."
+                )
+            os.makedirs(os.path.dirname(detections_json), exist_ok=True)
+            with open(detections_json, "wb") as f:
+                f.write(datos)
 
         dsm_path, dtm_path, ndsm_path = dem_paths_for(task)
 
@@ -728,8 +748,9 @@ def run_analysis(task_id: str):
         volumeCalc.enrich(detections_json, ortho_path, ndsm_path, detections_json)
 
         # El JSON recién enriquecido reemplaza al que se subió con las
-        # detecciones crudas al terminar el pipeline.
-        json_name = task.get("result_json_filename", "")
+        # detecciones crudas al terminar el pipeline. upload_result_file vuelve
+        # a borrar la copia local, y el bloque de arriba la recupera si hace
+        # falta analizar de nuevo.
         if json_name and os.path.exists(detections_json):
             try:
                 storage_module.upload_result_file(detections_json, json_name, "application/json")
