@@ -74,6 +74,7 @@ const ZoneEvolution = lazy(() =>
 );
 import { ReportPreview } from "@/components/ReportPreview";
 import { zoneTotals } from "@/lib/volumeReport";
+import { borrarArchivosDeVersion } from "@/lib/versionCleanup";
 import type { ReportSelection } from "@/lib/pdfReport";
 import { listResourcePoints, type ResourcePoint } from "@/lib/resources";
 import {
@@ -512,42 +513,6 @@ function MainPage() {
     }
     saveNoWasteDetected((fresh?.detection_count ?? row.detectionCount ?? 0) === 0);
     navigate({ to: "/analysis" });
-  };
-
-  /**
-   * Borra todos los archivos de UNA VERSIÓN (un vuelo) del servidor.
-   *
-   * Se llama solo cuando esa versión se quedó sin ningún análisis guardado.
-   * Mientras le quede alguno, sus archivos siguen haciendo falta: los modelos
-   * de elevación son con lo que se vuelve a medir, y el ortomosaico es lo que
-   * lee ese cálculo.
-   *
-   * Los `dsm_`/`dtm_`/`ndsm_` no se derivaban de acá y sobrevivían a cada
-   * borrado. Solo desaparecían cuando la poda automática pasaba por encima en
-   * la siguiente generación, así que si alguien borraba mucho y generaba poco,
-   * quedaban ocupando disco sin que nada los leyera.
-   */
-  const borrarArchivosDeVersion = (mapUrl?: string | null, taskId?: string) => {
-    const filename = mapUrl?.split("/").pop();
-    if (filename) {
-      deleteResultFile(filename);
-      const thumbName = filename.replace(/\.png$/i, "_thumb.png");
-      if (thumbName !== filename) deleteResultFile(thumbName);
-      const jsonName = filename.replace(/\.png$/i, ".json");
-      if (jsonName !== filename) deleteResultFile(jsonName);
-
-      // El nombre del mapa es "ortho_<uuid>.png"; los cuatro archivos del
-      // vuelo comparten ese <uuid> y solo cambian de prefijo.
-      const base = filename.replace(/\.png$/i, "");
-      for (const prefijo of ["ortho_", "dsm_", "dtm_", "ndsm_"]) {
-        const nombre = `${base.replace(/^ortho_/, prefijo)}.tif`;
-        deleteFinalsFile(nombre);
-      }
-    }
-    if (taskId) {
-      deleteTaskImages(taskId);
-      deleteTask(taskId);
-    }
   };
 
   const confirmDelete = async (alcance: "captura" | "zona" = "captura") => {

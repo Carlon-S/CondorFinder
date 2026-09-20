@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { notify } from "@/lib/notify";
 import {
@@ -41,6 +41,7 @@ import {
   loadAnalysisById,
   listAnalyses,
   listZones,
+  deleteAnalysis,
   consumePendingOpenId,
   confirmDuplicate,
   rejectDuplicate,
@@ -49,6 +50,7 @@ import {
 import { buildVersions, type ZoneVersion } from "@/lib/volumeReport";
 import { VersionBar } from "@/components/VersionBar";
 import { ReportPreview } from "@/components/ReportPreview";
+import { borrarArchivosDeVersion } from "@/lib/versionCleanup";
 // Carga diferida: ZoneEvolution arrastra recharts, cerca de 850 kB. Importarlo
 // de forma normal lo mete en el bundle inicial de esta ruta; esa regresión ya
 // ocurrió una vez en Vista Principal.
@@ -300,6 +302,9 @@ export const Route = createFileRoute("/_authed/analysis")({
 type AnalysisStatus = "idle" | "running" | "done" | "empty" | "error";
 
 function AnalysisPage() {
+  // Para volver a Vista Principal cuando se elimina la última captura de la
+  // zona: sin zona no queda nada que mostrar acá.
+  const navigate = useNavigate();
   const [mapUrl, setMapUrl] = useState<string | null>(() => loadMapUrl());
   // Miniatura liviana asociada a mapUrl (ver mapState.ts), puede no existir
   // (análisis reabiertos de antes de este campo), se guarda igual con la
@@ -466,6 +471,22 @@ function AnalysisPage() {
     if (older) setDuplicateWarning({ older });
   };
 
+  /**
+   * Toma la zona que el BACKEND resolvió para un análisis y recarga sus
+   * capturas.
+   *
+   * La zona no la decide el frontend: la asigna `_resolve_zone()` al guardar
+   * (hereda la que HDU7 reconoció por huella, o crea una nueva), y puede
+   * CAMBIAR después, cuando se resuelve un posible duplicado. Cada vez que el
+   * backend devuelve un registro actualizado hay que adoptar lo que diga, o la
+   * vista se queda mostrando una zona que ya no es la suya.
+   */
+  const adoptarZonaDe = (record: SavedAnalysisRecord) => {
+    const zona = record.zoneId ?? null;
+    setZoneId(zona);
+    cargarVersionesDeLaZona(zona);
+  };
+
   const handleConfirmDuplicate = async () => {
     if (!currentAnalysisId) return;
     const olderName = duplicateWarning?.older.name;
@@ -477,6 +498,9 @@ function AnalysisPage() {
       return;
     }
     setDuplicateWarning(null);
+    // La zona no cambia al confirmar, pero el análisis anterior pasó a
+    // histórico, así que la barra tiene que releerse para marcarlo.
+    adoptarZonaDe(updated);
     notify.success(
       "Análisis vinculado",
       olderName ? `"${olderName}" quedó como historial de esta zona.` : "Quedó vinculado como la misma zona.",
@@ -493,6 +517,13 @@ function AnalysisPage() {
       return;
     }
     setDuplicateWarning(null);
+    // Acá la zona SÍ cambia: al crear el análisis, _resolve_zone le asignó la
+    // zona del posible duplicado sin esperar respuesta (acierta en la mayoría
+    // de los casos), así que hasta este momento esta captura figuraba en la
+    // barra de versiones de la otra zona. Al decir que son distintas, el
+    // backend la mueve a una zona nueva y devuelve el registro corregido;
+    // sin adoptarlo, la barra seguía mostrando las dos juntas hasta un F5.
+    adoptarZonaDe(updated);
     notify.success("Marcado como zona distinta", "Ambos análisis se mantienen por separado.");
   };
 
@@ -549,19 +580,14 @@ function AnalysisPage() {
     // nunca lo dispara (ver analyses.py), así que esto es un no-op ahí.
     checkDuplicateWarning(result.record);
 
-    // La zona la RESUELVE el backend al guardar (_resolve_zone en analyses.py:
-    // hereda la que HDU7 reconoció por huella, o crea una nueva), así que hasta
-    // acá la vista no la conoce. Sin adoptarla, recién guardado el análisis
-    // quedaba sin nombre de zona en el título, sin barra de capturas, y con
-    // "Informe de esta zona" y "Ver evolución" ocultos, porque los tres
-    // dependen de zoneId. Había que salir de la vista y volver a entrar para
-    // que apareciera todo.
+    // Sin adoptar la zona que resolvió el backend, recién guardado el análisis
+    // la vista quedaba sin nombre de zona en el título, sin barra de capturas y
+    // con "Informe de esta zona" y "Ver evolución" ocultos, porque los tres
+    // dependen de zoneId. Había que salir y volver a entrar.
     //
     // También corre en una sobrescritura: la zona no cambia, pero el análisis
     // sí, y la barra de capturas y el informe tienen que reflejarlo.
-    const zonaResuelta = result.record.zoneId ?? null;
-    setZoneId(zonaResuelta);
-    cargarVersionesDeLaZona(zonaResuelta);
+    adoptarZonaDe(result.record);
   };
 
   // AC6 (sobrescribir): la sobrescritura REEMPLAZA sourceTaskId/mapUrl en el
@@ -818,6 +844,62 @@ function AnalysisPage() {
       // aparece, el título tiene que resolverse a su respaldo en vez de quedar
       // mostrando un esqueleto para siempre.
       .finally(() => setZoneNameLoading(false));
+  };
+
+  /** Captura que se está por eliminar desde la barra, o null. */
+  const [versionAEliminar, setVersionAEliminar] = useState<ZoneVersion | null>(null);
+  const [eliminandoVersion, setEliminandoVersion] = useState(false);
+
+  /**
+   * Elimina una captura completa de la zona: todos sus análisis y todos sus
+   * archivos.
+   *
+   * Antes solo se podía borrar desde Vista Principal, y para llegar a una
+   * versión intermedia había que saber que estaba escondida bajo el filtro
+   * "Historial". Desde la barra se ve cuál es cuál y se borra la que
+   * corresponde.
+   *
+   * Se borran TODOS los análisis de esa versión, no uno: todos miden el mismo
+   * vuelo, y dejar algunos sueltos deja la versión a medias. Los archivos se
+   * van con ella porque ya no queda nadie que los use.
+   */
+  const eliminarVersion = async (version: ZoneVersion) => {
+    setEliminandoVersion(true);
+    try {
+      for (const analisis of version.analyses) {
+        await deleteAnalysis(analisis.id);
+      }
+      borrarArchivosDeVersion(version.mapUrl, version.sourceTaskId);
+
+      const restantes = versions.filter((v) => v.sourceTaskId !== version.sourceTaskId);
+      setVersionAEliminar(null);
+
+      if (restantes.length === 0) {
+        // Era la única captura: la zona entera se fue con ella (el backend
+        // borra la zona al quedarse sin análisis). No hay nada que mostrar.
+        notify.success("Captura eliminada", "La zona ya no tiene capturas guardadas.");
+        navigate({ to: "/" });
+        return;
+      }
+
+      // Si se borró la que se estaba viendo, hay que pararse en otra; si no,
+      // basta con releer las capturas para que la barra se actualice.
+      const borroLaActual = version.sourceTaskId === taskId;
+      cargarVersionesDeLaZona(zoneId);
+      if (borroLaActual) {
+        const ultima = restantes[restantes.length - 1];
+        const analisisVigente = ultima.analyses[ultima.analyses.length - 1];
+        if (analisisVigente) aplicarAnalisis(analisisVigente);
+      }
+      notify.success(
+        "Captura eliminada",
+        `La zona conserva ${restantes.length} captura${restantes.length === 1 ? "" : "s"}.`,
+      );
+    } catch {
+      notify.error("No se pudo eliminar la captura", "Intenta nuevamente.");
+    } finally {
+      setEliminandoVersion(false);
+    }
   };
 
   /** Cambia la captura que se está viendo, sin salir de la vista. */
@@ -1751,8 +1833,53 @@ function AnalysisPage() {
         versions={versions}
         activeTaskId={taskId}
         onSelect={seleccionarVersion}
+        // Con una sola captura no se ofrece: eso ya no es borrar una versión,
+        // es borrar la zona, y ese camino vive en Vista Principal con su
+        // propia confirmación.
+        onDelete={versions.length > 1 ? setVersionAEliminar : undefined}
         loading={versionsLoading}
       />
+
+      {/* Confirmación de eliminar una captura desde la barra. */}
+      <AlertDialog
+        open={versionAEliminar !== null}
+        onOpenChange={(open) => { if (!open && !eliminandoVersion) setVersionAEliminar(null); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Eliminar esta captura</AlertDialogTitle>
+            <AlertDialogDescription>
+              {versionAEliminar && (
+                <>
+                  Se elimina la captura del{" "}
+                  <strong>
+                    {versionAEliminar.captureDate
+                      ? new Date(versionAEliminar.captureDate).toLocaleDateString("es-CL")
+                      : "sin fecha"}
+                  </strong>{" "}
+                  con {versionAEliminar.analyses.length} análisis, su mapa y sus modelos de
+                  elevación. La zona conserva sus otras {versions.length - 1} captura(s).
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={eliminandoVersion}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={eliminandoVersion}
+              onClick={(e) => {
+                // Sin esto el diálogo se cierra al instante y el borrado sigue
+                // corriendo sin que nada lo indique.
+                e.preventDefault();
+                if (versionAEliminar) eliminarVersion(versionAEliminar);
+              }}
+            >
+              {eliminandoVersion && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Eliminar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* HDU9, informe acotado a esta zona, con vista previa antes de bajarlo. */}
       <ReportPreview

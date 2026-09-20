@@ -23,7 +23,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
-import { Loader2 } from "@/components/icons/Icons";
+import { Loader2, Trash2 } from "@/components/icons/Icons";
 import type { ZoneVersion } from "@/lib/volumeReport";
 import { zoneTotals } from "@/lib/volumeReport";
 
@@ -37,12 +37,19 @@ export function VersionBar({
   versions,
   activeTaskId,
   onSelect,
+  onDelete,
   loading = false,
 }: {
   versions: ZoneVersion[];
   /** sourceTaskId de la versión que se está viendo. */
   activeTaskId: string | null;
   onSelect: (version: ZoneVersion) => void;
+  /** Eliminar una captura concreta de la zona. Sin esto solo se podía borrar
+   *  desde Vista Principal, y para llegar a una versión intermedia había que
+   *  saber que estaba escondida bajo el filtro "Historial". Se omite cuando la
+   *  zona tiene una sola captura: eso ya no es borrar una versión, es borrar
+   *  la zona, y ese camino vive en Vista Principal con su confirmación. */
+  onDelete?: (version: ZoneVersion) => void;
   /** Las capturas se piden al backend después de montar la vista. Sin este
    *  aviso, la barra aparecía de golpe un momento después y empujaba el
    *  contenido; con él, el espacio queda reservado desde el principio. */
@@ -136,7 +143,12 @@ export function VersionBar({
                 const vigente = i === versions.length - 1;
 
                 return (
-                  <li key={version.sourceTaskId} className="flex-shrink-0">
+                  // relative: la papelera va superpuesta a la casilla, no
+                  // dentro de su <button>. Un botón anidado dentro de otro es
+                  // HTML inválido y el click del interior activa igual al
+                  // exterior, o sea que borrar habría cambiado de versión
+                  // antes de abrir la confirmación.
+                  <li key={version.sourceTaskId} className="group relative flex-shrink-0">
                     <button
                       type="button"
                       onClick={() => onSelect(version)}
@@ -184,6 +196,22 @@ export function VersionBar({
                         )}
                       </div>
                     </button>
+
+                    {/* Aparece al pasar por encima. Siempre visible sería ruido
+                        constante sobre una acción destructiva que casi nunca se
+                        usa; y con foco de teclado también se muestra, para que
+                        no quede inalcanzable sin ratón. */}
+                    {onDelete && (
+                      <button
+                        type="button"
+                        onClick={() => onDelete(version)}
+                        title="Eliminar esta captura"
+                        aria-label={`Eliminar la captura del ${formatDate(version.captureDate)}`}
+                        className="absolute right-1 top-1 flex h-6 w-6 cursor-pointer items-center justify-center rounded-md bg-card/90 text-muted-foreground opacity-0 shadow-sm backdrop-blur transition-all duration-150 hover:bg-destructive/15 hover:text-destructive-strong focus-visible:opacity-100 group-hover:opacity-100"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                   </li>
                 );
               })}
