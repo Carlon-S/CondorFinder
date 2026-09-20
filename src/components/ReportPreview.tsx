@@ -17,7 +17,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Printer } from "lucide-react";
 import { AlertTriangle, Download, FileText, Loader2 } from "@/components/icons/Icons";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { notify } from "@/lib/notify";
 import type { ReportSelection } from "@/lib/pdfReport";
 
@@ -100,7 +105,17 @@ export function ReportPreview({
           DialogContent hereda el color del texto, y sobre este fondo oscuro el
           navy del tema la dejaba invisible. */}
       <DialogContent className="flex h-[92vh] max-h-[92vh] flex-col gap-0 overflow-hidden border-0 bg-neutral-900 p-0 text-neutral-200 sm:max-w-6xl">
+        {/* Radix exige título y descripción para lectores de pantalla.
+            Visualmente sobran (el nombre del archivo ya está en la barra y el
+            documento se explica solo), así que van ocultos en vez de ocupar una
+            franja del diálogo. Sin la descripción, Radix avisa por consola que
+            el diálogo se abre sin `aria-describedby`, y quien lo escucha en vez
+            de verlo no sabe qué contiene. */}
         <DialogTitle className="sr-only">Vista previa del informe</DialogTitle>
+        <DialogDescription className="sr-only">
+          Documento generado con el volumen de las zonas seleccionadas. Se puede
+          descargar o imprimir desde la barra superior.
+        </DialogDescription>
 
         {/* pr-12 deja libre la esquina donde vive la X del diálogo. */}
         <div className="flex flex-shrink-0 items-center gap-3 border-b border-white/10 px-3 py-2 pr-12">
