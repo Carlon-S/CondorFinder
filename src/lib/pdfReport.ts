@@ -186,27 +186,28 @@ function dibujarLinea(
 }
 
 /**
- * Arma el documento y devuelve una URL de objeto para mostrarlo.
+ * Arma el documento y devuelve con qué mostrarlo y con qué guardarlo.
  *
- * Ya no existe un camino de "descargar directo": los dos accesos al informe
- * (Vista Principal y la vista de Análisis) pasan por la vista previa, y la
- * descarga la ofrece el propio visor de PDF del navegador. Así lo que se ve y
- * lo que se guarda son literalmente el mismo documento, sin construirlo dos
- * veces.
+ * Los dos accesos al informe (Vista Principal y la vista de Análisis) pasan por
+ * la vista previa, y de ahí sale la descarga, así que el documento se construye
+ * una sola vez y lo que se ve es literalmente lo que se guarda.
  *
  * La URL la libera quien la crea, no este módulo (ver ReportPreview).
  */
 export async function buildVolumeReport(selections: ReportSelection[]): Promise<{
   blobUrl: () => string;
+  save: () => void;
+  filename: string;
 }> {
   const doc = await renderReport(selections);
+  const filename = reportFilename();
   return {
-    // Se envuelve en un File con nombre para que la descarga del visor no
-    // quede bautizada con el identificador del blob.
+    // Se envuelve en un File con nombre para que una descarga hecha desde el
+    // visor no quede bautizada con el identificador del blob.
     blobUrl: () =>
-      URL.createObjectURL(
-        new File([doc.output("blob")], reportFilename(), { type: "application/pdf" }),
-      ),
+      URL.createObjectURL(new File([doc.output("blob")], filename, { type: "application/pdf" })),
+    save: () => doc.save(filename),
+    filename,
   };
 }
 
