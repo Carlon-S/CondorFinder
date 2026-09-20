@@ -162,7 +162,7 @@ export function VersionBar({
                           {formatDate(version.captureDate)}
                         </span>
                         {vigente ? (
-                          <span className="text-[0.63rem] text-success">vigente</span>
+                          <span className="text-[0.63rem] text-success-strong">vigente</span>
                         ) : (
                           <span className="text-[0.63rem] text-muted-foreground">consulta</span>
                         )}

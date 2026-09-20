@@ -83,6 +83,8 @@
   --color-warning-foreground: var(--warning-foreground);
   --color-success: var(--success);
   --color-success-foreground: var(--success-foreground);
+  --color-success-strong: var(--success-strong);
+  --color-destructive-strong: var(--destructive-strong);
   --color-info: var(--info);
 
   --font-rubik:         "Rubik", sans-serif;
@@ -160,6 +162,22 @@
   --warning-foreground: #151414;
   --success:            #34d399;
   --success-foreground: #151414;
+  /* Verde y rojo OSCURECIDOS, para cuando el color va como TEXTO sobre el
+     cuerpo claro. Mismo criterio que --yellow-dark más arriba: los tonos de
+     estado de arriba están pensados como RELLENO (el círculo completado del
+     stepper, por ejemplo, que lleva --success-foreground oscuro encima), y
+     como texto sobre #EEF0F4 se pierden.
+
+     Las cifras, medidas contra el fondo del cuerpo:
+       #34d399 (success)            1.67:1   ilegible
+       #047857 (success-strong)     4.83:1   pasa AA
+       #ef4444 (destructive)        3.29:1   bajo el mínimo de AA
+       #B91C1C (destructive-strong) 5.68:1   pasa AA
+
+     El relleno NO cambia: --success sigue siendo el menta de siempre donde se
+     usa como fondo, y tocarlo rompería el contraste del texto que va encima. */
+  --success-strong:     #047857;
+  --destructive-strong: #B91C1C;
   --chart-1: #0F2244; --chart-2: #FFC53D; --chart-3: #34d399;
   --chart-4: #5B7FBD; --chart-5: #96A2BC;
   /* Sidebar: navy, sin cambios, sigue siendo donde vive la identidad de
@@ -234,51 +252,23 @@ html {
    estructura; donde hay diferencias están comentadas.
    ============================================================================= */
 
-/* ---------------------------------------------------------------- 1. retícula */
-/* Antes acá vivían las curvas de nivel de feria-page: siete elipses
-   concéntricas repetidas en mosaico. Se reemplazaron por una retícula porque
-   ese dibujo se leía como decoración de folleto y no como una herramienta
-   municipal; la retícula dice lo mismo sobre el dominio (es la graticula de
-   una carta) sin llamar la atención sobre sí misma.
+/* --------------------------------------------------- 1. (sin fondo decorativo)
+   Acá vivió primero `.topo-bg`, las siete elipses concéntricas de feria-page
+   repetidas en mosaico, y después `.grid-bg`, una retícula cartográfica. Las
+   dos se eliminaron: el problema no era el dibujo, era que hubiera dibujo.
 
-   Dos escalas superpuestas, menor y mayor, que es como se dibuja una
-   cuadrícula cartográfica de verdad: cada 2.5rem una línea tenue y cada
-   12.5rem (una de cada cinco) una un poco más marcada. El espaciado va en rem
-   para que la retícula escale junto con el resto de la interfaz; el grosor se
-   queda en 1px, que es la excepción de siempre para las líneas de pelo.
+   En esta aplicación el contenido es un mapa o una tabla de cifras, y
+   cualquier trama de fondo compite con lo único que hay que mirar. Es también
+   lo que hacen las herramientas del rubro (ArcGIS Online, Mapbox Studio,
+   QGIS) y los paneles de datos en general (Stripe, Linear, Datadog): fondo
+   liso, sin excepción.
 
-   El color se expresa directo en rgba en vez de con `opacity` sobre todo el
-   pseudo-elemento, para poder darle distinto peso a cada escala. */
-.grid-bg { position: relative; isolation: isolate; }
-.grid-bg::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  background-image:
-    linear-gradient(to right,  rgba(15, 34, 68, 0.04) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(15, 34, 68, 0.04) 1px, transparent 1px),
-    linear-gradient(to right,  rgba(15, 34, 68, 0.07) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(15, 34, 68, 0.07) 1px, transparent 1px);
-  background-size:
-    2.5rem 2.5rem,
-    2.5rem 2.5rem,
-    12.5rem 12.5rem,
-    12.5rem 12.5rem;
-}
-/* Sobre el fondo oscuro del login el trazo navy se pierde: va en blanco.
-   Van los dos selectores porque en el login las clases .login-dark y .grid-bg
-   viven en el MISMO elemento (.login-dark.grid-bg), no anidadas. */
-.login-dark.grid-bg::before,
-.login-dark .grid-bg::before,
-.grid-bg.grid-bg-dark::before {
-  background-image:
-    linear-gradient(to right,  rgba(255, 255, 255, 0.035) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
-    linear-gradient(to right,  rgba(255, 197, 61, 0.07) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 197, 61, 0.07) 1px, transparent 1px);
-}
+   La profundidad la dan las SUPERFICIES, no el fondo: el cuerpo es un gris
+   neutro, las tarjetas son blancas con un borde de pelo y una sombra mínima,
+   y el contraste entre ambos es el que separa los planos. Ver `.panel` y los
+   tokens --background/--card más arriba.
+
+   No reintroducir un patrón de fondo sin que lo pidan. */
 
 /* ---------------------------------------------------------------- 2. marco de detección */
 /* DECORATIVO. Cuatro esquinas en L (dos por pseudo-elemento) que citan la forma

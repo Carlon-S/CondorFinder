@@ -1,5 +1,5 @@
 // =============================================================================
-// CONDORFINDER — VISTA DE CARGA (HDU1: Unificación de imágenes)
+// CONDORFINDER, VISTA DE CARGA (HDU1: Unificación de imágenes)
 // Archivo: src/routes/carga.tsx
 //
 // Implementa el frontend completo de la Historia de Usuario HDU1: permite al
@@ -7,7 +7,7 @@
 // generar un mapa unificado de la zona.
 //
 // Se llega a esta vista desde la Vista Principal ("/"), al elegir "Nueva zona"
-// en el popup de "Agregar zona" — ya no es la ruta raíz de la aplicación.
+// en el popup de "Agregar zona", ya no es la ruta raíz de la aplicación.
 //
 // Criterios de aceptación cubiertos (frontend):
 //   1. Verificación de formato JPG al cargar archivos
@@ -58,13 +58,13 @@ import { useNavigate } from "@tanstack/react-router";
 export const Route = createFileRoute("/_authed/carga")({
   head: () => ({
     meta: [
-      { title: "CondorFinder — Unificación de imágenes" },
+      { title: "CondorFinder, Unificación de imágenes" },
       {
         name: "description",
         content:
           "Dashboard GIS municipal para unificar imágenes aéreas JPG capturadas con drone y generar un mapa unificado de la zona.",
       },
-      { property: "og:title", content: "CondorFinder — Unificación de imágenes" },
+      { property: "og:title", content: "CondorFinder, Unificación de imágenes" },
       {
         property: "og:description",
         content:
@@ -147,7 +147,7 @@ interface Detection {
   weight_kg: number | null;
 }
 
-// Color fijo por tipo de basura — no se repiten
+// Color fijo por tipo de basura, no se repiten
 const CLASS_COLORS: Record<string, string> = {
   // Nombres en español (nuevas ejecuciones)
   "Residuo de construcción":   "#ef4444",
@@ -240,15 +240,15 @@ function Page() {
   /** Mensaje de error detallado para mostrar al usuario cuando el proceso falla */
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // SP1 — elección de modelo justo al presionar "Generar mapa unificado":
+  // SP1, elección de modelo justo al presionar "Generar mapa unificado":
   // preciso/lento (más detalle, corre más lento) vs óptimo/rápido (el
   // preset que ya se usaba siempre, hardcodeado). Se manda como parámetro
   // directo a generate() (no como estado leído por closure) porque
   // setState no aplica de inmediato dentro del mismo handler de click de
-  // la tarjeta del modal — un setPrecise() seguido de generate() en la
+  // la tarjeta del modal, un setPrecise() seguido de generate() en la
   // misma función vería el valor viejo de precise, no el recién elegido.
   /** Modal que pide elegir el modelo justo al presionar "Generar mapa
-   * unificado" — elegir una tarjeta ahí dispara la generación de inmediato. */
+   * unificado", elegir una tarjeta ahí dispara la generación de inmediato. */
   const [showModelDialog, setShowModelDialog] = useState(false);
 
   /** Progreso de subida al backend (0-100), null si no hay subida en curso */
@@ -258,14 +258,14 @@ function Page() {
   const [uploading, setUploading] = useState(false);
 
   /** Motivo por el que la última subida falló (ej. lock de multiusuario del
-   * backend) — se muestra en el tooltip del botón principal para explicar
+   * backend), se muestra en el tooltip del botón principal para explicar
    * por qué "Generar mapa unificado" sigue deshabilitado. */
   const [uploadBlockedMessage, setUploadBlockedMessage] = useState<string | null>(null);
 
   /**
    * Estado REAL del servidor (¿hay otra tarea corriendo?), consultado
    * directamente en vez de inferido de un intento fallido previo.
-   * uploadBlockedMessage se resetea a null en cada F5 — sin esto, después
+   * uploadBlockedMessage se resetea a null en cada F5, sin esto, después
    * de recargar la página el botón podía verse habilitado aunque el
    * servidor siguiera ocupado, porque el frontend "olvidaba" el bloqueo
    * anterior sin volver a preguntarle al backend.
@@ -321,7 +321,7 @@ function Page() {
   });
 
   /** Qué "slice" de la vista se muestra: navegable a mano (FlowNav, más
-   *  abajo) en vez de depender solo de `phase` — así el botón de cancelar
+   *  abajo) en vez de depender solo de `phase`, así el botón de cancelar
    *  (que vive en la slice "carga") sigue siendo alcanzable aunque la
    *  generación ya haya arrancado. `generate()` la cambia a "mapa" al
    *  arrancar un proceso nuevo (avance automático), pero el usuario puede
@@ -376,10 +376,10 @@ function Page() {
     const isReload = navType === "reload";
 
     // Entrada fresca (no F5) a /carga con una tarea que ya no está en curso
-    // (terminó bien, con error, o ya fue analizada/guardada en otro lado) —
+    // (terminó bien, con error, o ya fue analizada/guardada en otro lado) ,
     // no corresponde resucitar esa sesión vieja solo por haber navegado aquí
     // desde el sidebar. "En progreso" (generating_map) sí debe sobrevivir,
-    // tanto a un F5 como a una navegación de ida y vuelta — eso ya lo cubre
+    // tanto a un F5 como a una navegación de ida y vuelta, eso ya lo cubre
     // el efecto de resume-poll más abajo. Retomar una tarea puntual desde
     // Vista Principal (resumeInCarga) prepara su propio estado ANTES de
     // navegar, así que llega con phase="generating_map" y no entra aquí.
@@ -389,12 +389,12 @@ function Page() {
     }
 
     // Un F5 con phase "done"/"error" sí sobrevive por diseño (no se pierde
-    // el resultado al recargar) — pero el task_id que lo sostiene puede ya
+    // el resultado al recargar), pero el task_id que lo sostiene puede ya
     // no existir en el backend (reinicio de uvicorn, que vacía el dict de
     // tasks en memoria sin borrar los archivos que ya estaban en
     // UPLOAD_DIR). Sin esto, la reconciliación de más abajo seguía viendo
     // los mismos archivos en el servidor y daba por buena una tarea
-    // "fantasma" — la vista quedaba mostrando un resultado de un proceso
+    // "fantasma", la vista quedaba mostrando un resultado de un proceso
     // que ya no existe en vez de verse nueva.
     if (isReload && (phase === "done" || phase === "error")) {
       const savedTaskId = loadTaskId();
@@ -504,7 +504,7 @@ function Page() {
       saveThumbnailUrl(res.thumbnailUrl ?? null);
       // Si detectionJsonUrl no viene por algún motivo, hay que LIMPIAR
       // explícitamente en vez de dejar sessionStorage con lo que haya
-      // quedado de una generación anterior en esta misma pestaña — si no,
+      // quedado de una generación anterior en esta misma pestaña, si no,
       // /analysis termina mostrando el mapa recién generado con las
       // detecciones de OTRA zona (mismo patrón que reviewPending() en
       // index.tsx).
@@ -539,13 +539,13 @@ function Page() {
   // Consulta el estado real del servidor al montar (incluye recargas con
   // F5) y cada 5s mientras siga ocupado, para que el botón "Generar mapa
   // unificado" refleje la realidad del backend en vez de un estado local
-  // que se resetea en cada recarga. Deja de consultar apenas se libera —
+  // que se resetea en cada recarga. Deja de consultar apenas se libera ,
   // no hace falta seguir preguntando una vez que ya se puede generar.
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
     // Solo avisa una vez por transición a "ocupado" (no en cada poll de 5s
-    // mientras sigue ocupado) — evita repetir el mismo toast en loop.
+    // mientras sigue ocupado), evita repetir el mismo toast en loop.
     let notifiedBusy = false;
     const check = async () => {
       const status = await getPipelineStatus();
@@ -555,7 +555,7 @@ function Page() {
         setUploadBlockedMessage((prev) => prev ?? "Hay un proceso de generación en curso en el servidor. Espera a que termine.");
         // Si el "ocupado" es la propia tarea de esta pestaña (retomada tras
         // un F5, o recién iniciada por el propio usuario), no es un bloqueo
-        // externo — no corresponde avisar que "no se puede generar".
+        // externo, no corresponde avisar que "no se puede generar".
         if (!notifiedBusy && phase !== "generating_map") {
           notifiedBusy = true;
           notify.warning(
@@ -681,7 +681,7 @@ function Page() {
    */
   const addFiles = useCallback(async (files: FileList | File[]) => {
     if (uploading) return;
-    // UPLOAD_DIR es compartido por todas las tareas — si se agregan imágenes
+    // UPLOAD_DIR es compartido por todas las tareas, si se agregan imágenes
     // mientras un proceso ya está corriendo (joining/detecting), se
     // contaminaría el set que esa tarea está usando. Se bloquea aquí además
     // de en la UI (botón/input deshabilitados) para cubrir también el path
@@ -739,7 +739,7 @@ function Page() {
       setUploadDone(false);
       const message = err instanceof Error ? err.message : "No se pudieron subir las imágenes.";
       notify.error("No se pudieron subir las imágenes", message);
-      // El toast desaparece solo — sin esto, el botón "Generar mapa
+      // El toast desaparece solo, sin esto, el botón "Generar mapa
       // unificado" queda deshabilitado (uploadDone sigue false) pero el
       // tooltip debajo seguía diciendo "Todas las condiciones cumplidas",
       // sin explicar por qué no se puede generar (típicamente porque el
@@ -917,7 +917,7 @@ function Page() {
       saveThumbnailUrl(res.thumbnailUrl ?? null);
       // Si detectionJsonUrl no viene por algún motivo, hay que LIMPIAR
       // explícitamente en vez de dejar sessionStorage con lo que haya
-      // quedado de una generación anterior en esta misma pestaña — si no,
+      // quedado de una generación anterior en esta misma pestaña, si no,
       // /analysis termina mostrando el mapa recién generado con las
       // detecciones de OTRA zona (mismo patrón que reviewPending() en
       // index.tsx).
@@ -947,15 +947,15 @@ function Page() {
 
   /**
    * Solicita cancelar la generación en curso. Solo puede aplicarse entre
-   * fases del pipeline (ver orquestador.py) — si justo está corriendo ODM o
+   * fases del pipeline (ver orquestador.py), si justo está corriendo ODM o
    * YOLO, la cancelación se aplica apenas esa llamada termine, no al instante
    * (hasta ~10s para que ODM lo note, o hasta que YOLO termine su corrida
-   * actual). "cancelling" queda en true durante TODA esa ventana — no solo
-   * mientras dura el POST /cancel — para que el botón siga mostrando
+   * actual). "cancelling" queda en true durante TODA esa ventana, no solo
+   * mientras dura el POST /cancel, para que el botón siga mostrando
    * "Cancelando..." hasta que el poll detecte el estado final. Se resetea
    * en resetProcess(), que corre cuando el poll confirma la cancelación.
    * Sin toasts: son detalles técnicos del backend que no le aportan nada al
-   * usuario — el cambio de estado visual del botón ya comunica lo mismo.
+   * usuario, el cambio de estado visual del botón ya comunica lo mismo.
    */
   const [cancelling, setCancelling] = useState(() => loadCancelRequested());
   const handleCancel = async () => {
@@ -966,7 +966,7 @@ function Page() {
     await cancelTask(taskId);
   };
 
-  /** Descarga el mapa como blob local — evita bloqueo cross-origin del atributo download */
+  /** Descarga el mapa como blob local, evita bloqueo cross-origin del atributo download */
   const downloadMap = async () => {
     if (!resultUrl) return;
     const url = resultUrl;
@@ -992,7 +992,7 @@ function Page() {
     if (phase === "generating_map") {
       // Mientras se está cancelando, el estado siempre debe leer
       // "Cancelando..." sin importar en qué fase técnica esté el pipeline
-      // (unificando, detectando, etc.) — de lo contrario el usuario ve el
+      // (unificando, detectando, etc.), de lo contrario el usuario ve el
       // mismo texto de "en curso" que antes de haber pedido cancelar.
       if (cancelling) return "Cancelando...";
       if (backendStage === "checking_overlap") return "Verificando solapamiento entre imágenes...";
@@ -1071,7 +1071,7 @@ function Page() {
     // Sin esto, si la subida falla (ej. otro usuario tiene un proceso en
     // curso en el servidor), el botón queda deshabilitado (uploadDone en
     // false) pero el tooltip seguía diciendo "Todas las condiciones
-    // cumplidas" — contradictorio y sin explicar qué hacer.
+    // cumplidas", contradictorio y sin explicar qué hacer.
     if (!uploadDone && uploadBlockedMessage) return { color: "destructive", message: uploadBlockedMessage };
     // Chequeo independiente de uploadDone: si el servidor está ocupado con
     // otra tarea (verificado directo contra el backend, no inferido de un
@@ -1085,11 +1085,10 @@ function Page() {
   // RENDER
   // ---------------------------------------------------------------------------
   return (
-    // grid-bg: reticula cartografica de fondo (ver styles.css).
-    <div className="grid-bg flex min-h-screen flex-col bg-background text-foreground">
+    <div className="flex min-h-screen flex-col bg-background text-foreground">
       <main className="flex w-full min-h-0 flex-1 flex-col gap-5 px-4 py-4 sm:px-6 sm:py-6">
 
-        {/* Título de página — sin botón de volver, la navegación ya vive en
+        {/* Título de página, sin botón de volver, la navegación ya vive en
             el sidebar persistente (mismo criterio que analysis.tsx). El
             tooltip de "?" reemplaza la fila de 4 tarjetas de Instrucciones
             que vivía acá: mismo contenido, condensado, sin ocupar espacio
@@ -1125,18 +1124,18 @@ function Page() {
         </div>
 
         {/* Nav general de la página: 2 slices navegables en cualquier
-            momento (no bloqueadas por `phase`) — arriba de todo, como pide
+            momento (no bloqueadas por `phase`), arriba de todo, como pide
             un flujo tipo "sistema de pedidos". `generate()` avanza acá solo
             de forma automática al arrancar; el usuario puede volver a
             "Carga de imágenes" en cualquier momento (p. ej. para cancelar,
             ver el botón de abajo). El Stepper técnico (progreso real del
-            pipeline) vive aparte, debajo, y se muestra en ambas slices —
+            pipeline) vive aparte, debajo, y se muestra en ambas slices ,
             este nav no representa ese progreso, solo cambia qué se ve. */}
         <FlowNav active={activeSlice} onNavigate={setActiveSlice} />
 
         {/* Contenido de la slice activa: ocupa el espacio restante de la
             página (flex-1 en toda la cadena, con min-h-0 en cada nivel para
-            que los overflow-y-auto internos sigan funcionando) — el
+            que los overflow-y-auto internos sigan funcionando), el
             "cuadrado" al 100%, sin el recorte del 20% (revertido). */}
         <div className="flex min-h-0 flex-1 flex-col gap-5">
 
@@ -1172,7 +1171,7 @@ function Page() {
                 <Upload className="h-7 w-7" />
               </div>
               <p className="mt-4 text-sm font-semibold">
-                {processing ? "Proceso en curso — no se pueden agregar imágenes" : "Arrastra imágenes JPG aquí"}
+                {processing ? "Proceso en curso, no se pueden agregar imágenes" : "Arrastra imágenes JPG aquí"}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
                 {processing ? "Espera a que termine o cancélalo para poder modificar el set." : "o haz clic para seleccionar desde tu equipo"}
@@ -1188,7 +1187,7 @@ function Page() {
           {/* Grid de imágenes */}
           <section className="relative flex min-h-0 flex-col gap-3 overflow-hidden md:pl-6">
 
-            {/* Overlay de carga — cubre todo el bloque independientemente del scroll */}
+            {/* Overlay de carga, cubre todo el bloque independientemente del scroll */}
             {uploading && (
               <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-xl bg-background/85 backdrop-blur-sm">
                 <div className="scan-line relative h-20 w-20 overflow-hidden rounded-md border border-primary/40 bg-primary/10">
@@ -1205,7 +1204,7 @@ function Page() {
               <div className="flex items-center gap-2">
                 {skippedCount > 0 && (
                   <p className="text-[0.625rem] rounded px-2 py-0.5 bg-warning/15 text-warning border border-warning/20">
-                    {skippedCount} omitido(s) — nombre duplicado
+                    {skippedCount} omitido(s), nombre duplicado
                   </p>
                 )}
                 {invalidCount > 0 && (
@@ -1260,13 +1259,13 @@ function Page() {
           </section>
         </div>
 
-        {/* Botón + tooltip — al presionar "Generar mapa unificado" (SP1)
+        {/* Botón + tooltip, al presionar "Generar mapa unificado" (SP1)
             se abre el modal de elección de modelo en vez de arrancar
             directo; elegir una tarjeta ahí dispara la generación de
             inmediato (ver showModelDialog más abajo, junto al Dialog). */}
         <div className="mt-6 flex flex-col items-center gap-4 border-t border-border/25 pt-5">
           {/* Contenedor del mismo ancho que el botón (mx-auto centra ESE
-              ancho exacto en la página) — el badge de validación queda
+              ancho exacto en la página), el badge de validación queda
               posicionado fuera de esta caja (absolute), así no suma ancho
               al grupo ni corre el centro real del botón, a diferencia de
               antes donde ambos eran ítems flex hermanos. */}
@@ -1291,7 +1290,7 @@ function Page() {
 
             <div className="group absolute left-full top-1/2 ml-3 -translate-y-1/2 flex-shrink-0">
               {/* "empty" usa --secondary/--secondary-foreground (mismo tono
-                  cálido que el resto de la paleta) — bg-foreground/text-
+                  cálido que el resto de la paleta), bg-foreground/text-
                   background quedaba como un chip casi negro que no combinaba
                   con el resto del tema. */}
               <div className={`flex h-9 w-9 items-center justify-center rounded-full cursor-help transition-colors ${
@@ -1418,7 +1417,7 @@ function Page() {
               ) : processing ? (
                 // absolute inset-0 en vez de h-full w-full: el padre es
                 // "relative" pero solo tiene min-height (no height fija),
-                // así que h-full no siempre resolvía una altura real —
+                // así que h-full no siempre resolvía una altura real ,
                 // inset-0 sobre el padre relative sí centra de forma
                 // confiable sin depender de esa resolución.
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
@@ -1489,7 +1488,7 @@ function Page() {
         </section>
         )}
 
-        {/* Stepper técnico de "Revisión técnica" — persistente en ambas
+        {/* Stepper técnico de "Revisión técnica", persistente en ambas
             slices (no depende de activeSlice): representa el progreso real
             del pipeline, así que se mantiene visible tanto en "Carga de
             imágenes" como en "Mapa unificado", a diferencia del FlowNav de
@@ -1530,7 +1529,7 @@ function Page() {
         </div>
       </main>
 
-      {/* SP1 — elegir modelo justo al presionar "Generar mapa unificado".
+      {/* SP1, elegir modelo justo al presionar "Generar mapa unificado".
           Mismo patrón visual que el popup de "Agregar zona" en Vista
           Principal (tarjetas grandes con ícono + título + descripción). */}
       <Dialog open={showModelDialog} onOpenChange={setShowModelDialog}>
@@ -1591,7 +1590,7 @@ function PanelHeader({ icon, title, children }: { icon: React.ReactNode; title: 
 
 /** Celda de metadatos en la barra inferior del mapa unificado */
 function MetaCell({ label, value, tone }: { label: string; value: string; tone?: "ok" | "error"; }) {
-  const color = tone === "ok" ? "text-success" : tone === "error" ? "text-destructive" : "text-foreground/80";
+  const color = tone === "ok" ? "text-success-strong" : tone === "error" ? "text-destructive" : "text-foreground/80";
   return (
     <div className="px-3 py-2">
       <p className="text-[0.625rem] text-muted-foreground leading-none mb-1">{label}</p>
@@ -1602,11 +1601,11 @@ function MetaCell({ label, value, tone }: { label: string; value: string; tone?:
 
 /**
  * Nav general de la vista: switcher de 2 pestañas ("Carga de imágenes" /
- * "Mapa unificado") — deliberadamente SIN forma de stepper (sin círculos
+ * "Mapa unificado"), deliberadamente SIN forma de stepper (sin círculos
  * numerados ni línea conectora): ese lenguaje visual queda reservado para
  * el Stepper técnico de abajo, que sí representa progreso real del
  * pipeline. Este nav es solo un selector de slice, siempre navegable en
- * ambos sentidos — la slice "mapa" ya sabe mostrar un placeholder vacío
+ * ambos sentidos, la slice "mapa" ya sabe mostrar un placeholder vacío
  * cuando todavía no hay nada que generar.
  */
 function FlowNav({
@@ -1643,7 +1642,7 @@ function FlowNav({
 
 /**
  * Stepper horizontal de "Revisión técnica" (reemplaza el antiguo CheckRow
- * vertical) — mismos 5 estados/colores (TriState), en formato círculo
+ * vertical), mismos 5 estados/colores (TriState), en formato círculo
  * numerado + línea conectora + label debajo, estilo 1 de la referencia.
  */
 interface StepDef {
@@ -1699,7 +1698,7 @@ function Stepper({
     <ol className="flex items-start">
       {steps.map((step, i) => (
         // Cada <li> es una columna de ancho igual (flex-1 siempre, sin
-        // last:flex-none) — así el círculo queda centrado de verdad en su
+        // last:flex-none), así el círculo queda centrado de verdad en su
         // columna en vez de pegado a un borde. La línea conectora se arma
         // en dos mitades (izquierda/derecha del círculo) en vez de una sola
         // pieza que solo existe en los ítems interiores: los extremos usan
@@ -1773,7 +1772,7 @@ function StepSegment({ fill, hidden, indeterminate }: { fill: number; hidden?: b
 
 function stepLabelColor(state: TriState) {
   switch (state) {
-    case "ok":      return "text-success";
+    case "ok":      return "text-success-strong";
     case "warn":    return "text-warning";
     case "error":   return "text-destructive";
     case "running": return "text-primary";

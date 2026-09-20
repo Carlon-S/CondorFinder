@@ -166,7 +166,7 @@ export function ZoneEvolution({
                     </span>
                   )}
                   {esVigente && (
-                    <span className="text-[0.63rem] text-success">vigente</span>
+                    <span className="text-[0.63rem] text-success-strong">vigente</span>
                   )}
                 </div>
                 <p className="text-[0.63rem] text-muted-foreground">
@@ -208,8 +208,15 @@ function ResumenEvolucion({
   nota?: string;
   tono?: "bueno" | "malo" | "neutro";
 }) {
+  // Las variantes -strong, no --success/--destructive a secas: esos tonos son
+  // de relleno y como texto sobre el cuerpo claro dan 1.67:1 y 3.29:1. Ver el
+  // bloque de tokens en styles.css.
   const color =
-    tono === "malo" ? "text-destructive" : tono === "bueno" ? "text-success" : "text-foreground";
+    tono === "malo"
+      ? "text-destructive-strong"
+      : tono === "bueno"
+        ? "text-success-strong"
+        : "text-foreground";
   return (
     <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
       <p className="text-[0.6875rem] text-muted-foreground">{etiqueta}</p>

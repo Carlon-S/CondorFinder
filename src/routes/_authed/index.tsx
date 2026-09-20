@@ -645,8 +645,7 @@ function MainPage() {
   }, [zones, stateFilter, nameQuery, sortBy, sortDir]);
 
   return (
-    // grid-bg: reticula cartografica de fondo (ver styles.css).
-    <div className="grid-bg flex min-h-screen flex-col bg-background text-foreground">
+    <div className="flex min-h-screen flex-col bg-background text-foreground">
       {/* Encabezado de página, "Recursos disponibles" (antes una columna
           fija de hasta 400px, ver git history) ahora vive en un panel
           deslizante (Sheet): sobre esta vista el contenido real es el

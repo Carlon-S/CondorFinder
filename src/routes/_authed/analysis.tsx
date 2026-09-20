@@ -1034,8 +1034,7 @@ function AnalysisPage() {
   }
 
   return (
-    // grid-bg: reticula cartografica de fondo (ver styles.css).
-    <div className="grid-bg flex flex-col h-screen overflow-hidden bg-background text-foreground">
+    <div className="flex flex-col h-screen overflow-hidden bg-background text-foreground">
       {/* Tres columnas: controles, mapa y zonas detectadas.
 
           Las zonas detectadas estuvieron una vuelta como franja horizontal bajo
@@ -1050,9 +1049,15 @@ function AnalysisPage() {
       <main className="grid flex-1 min-h-0 grid-cols-[clamp(15rem,22vw,22.5rem)_1fr] grid-rows-[minmax(0,1fr)_auto] xl:grid-cols-[clamp(15rem,19vw,19rem)_1fr_clamp(17rem,23vw,25rem)] xl:grid-rows-1">
 
         {/* ── panel lateral ── */}
+        {/* Los dos paneles laterales van sobre superficie de tarjeta y el
+            visor sobre el fondo del cuerpo. Es lo que separa los planos ahora
+            que no hay trama de fondo: sin esta diferencia de tono, panel y
+            mapa quedaban del mismo color y la pantalla se leía como una sola
+            plancha. Mismo criterio que un IDE o un SIG: los paneles son
+            superficie, el lienzo es fondo. */}
         <aside
           id="dashboard"
-          className="border-r border-border/35 p-5 overflow-y-auto"
+          className="border-r border-border/35 bg-card/50 p-5 overflow-y-auto"
         >
           <div className="flex flex-col gap-4">
 
@@ -1234,7 +1239,7 @@ function AnalysisPage() {
                 <p className="text-xs font-semibold text-foreground mb-2.5">Estado del análisis</p>
                 <div className="flex items-center gap-2">
                   {status === "running"  ? <Loader2      className="h-4 w-4 animate-spin text-primary" />
-                  : status === "done"    ? <CheckCircle2 className="h-4 w-4 text-success" />
+                  : status === "done"    ? <CheckCircle2 className="h-4 w-4 text-success-strong" />
                   : status === "empty"   ? <TriangleAlert className="h-4 w-4 text-warning" />
                   :                        <Clock         className="h-4 w-4 text-muted-foreground" />}
                   <p className="text-xs font-medium">{statusLabel[status]}</p>
@@ -1441,7 +1446,7 @@ function AnalysisPage() {
         </section>
 
         {/* ── zonas detectadas ── */}
-        <aside className="col-span-2 flex max-h-[30vh] min-h-0 flex-col border-t border-border/40 bg-card/40 px-4 py-3 xl:col-span-1 xl:max-h-none xl:border-l xl:border-t-0">
+        <aside className="col-span-2 flex max-h-[30vh] min-h-0 flex-col border-t border-border/40 bg-card/50 px-4 py-3 xl:col-span-1 xl:max-h-none xl:border-l xl:border-t-0">
           <div className="mb-2.5 flex items-baseline justify-between gap-2">
             <p className="text-sm font-semibold text-foreground">Zonas detectadas</p>
             {displayDetections.length > 0 && (
