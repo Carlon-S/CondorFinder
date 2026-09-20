@@ -1036,15 +1036,18 @@ function AnalysisPage() {
   return (
     // topo-bg: curvas de nivel de feria-page (ver styles.css).
     <div className="topo-bg flex flex-col h-screen overflow-hidden bg-background text-foreground">
-      {/* Dos columnas arriba (controles y mapa) y las zonas detectadas a lo
-          ancho, debajo de ambas.
+      {/* Tres columnas: controles, mapa y zonas detectadas.
 
-          Estuvieron en una tercera columna a la derecha y no funcionó: cada
-          zona detectada trae tres cifras, y las fusionadas además su desglose
-          por tipo, así que en una columna angosta cada tarjeta se estiraba a lo
-          alto y solo entraban dos o tres en pantalla. Ocupando el ancho
-          completo caben varias por fila y el mapa recupera ese ancho. */}
-      <main className="grid flex-1 grid-cols-[clamp(15rem,22vw,22.5rem)_1fr] min-h-0">
+          Las zonas detectadas estuvieron una vuelta como franja horizontal bajo
+          el mapa y se descartó: una lista se recorre de arriba abajo, y puesta
+          a lo ancho obligaba a leer en zigzag. En columna propia se recorre de
+          un vistazo y el mapa conserva su alto completo.
+
+          Bajo 80rem no hay ancho para tres columnas sin dejar el visor
+          inservible, así que ahí la lista pasa a ocupar una fila propia debajo
+          (col-span-2), que es la única disposición razonable en pantallas
+          angostas. */}
+      <main className="grid flex-1 min-h-0 grid-cols-[clamp(15rem,22vw,22.5rem)_1fr] grid-rows-[minmax(0,1fr)_auto] xl:grid-cols-[clamp(15rem,19vw,19rem)_1fr_clamp(17rem,23vw,25rem)] xl:grid-rows-1">
 
         {/* ── panel lateral ── */}
         <aside
@@ -1197,7 +1200,11 @@ function AnalysisPage() {
 
               {/* estado */}
               <div>
-                <p className="text-xs font-semibold text-muted-foreground mb-2.5">Estado del análisis</p>
+                {/* Los títulos de sección van en el color de texto pleno y las
+                    etiquetas de cada dato en gris. Antes ambos eran gris y la
+                    vista quedaba sin jerarquía: nada destacaba porque todo
+                    pesaba lo mismo. */}
+                <p className="text-xs font-semibold text-foreground mb-2.5">Estado del análisis</p>
                 <div className="flex items-center gap-2">
                   {status === "running"  ? <Loader2      className="h-4 w-4 animate-spin text-primary" />
                   : status === "done"    ? <CheckCircle2 className="h-4 w-4 text-success" />
@@ -1238,7 +1245,7 @@ function AnalysisPage() {
               <div className="rounded-lg bg-background/40 p-3 animate-in fade-in slide-in-from-left-2 duration-500 delay-100 fill-mode-both space-y-4">
                 {/* métricas */}
                 <div>
-                  <p className="text-xs font-semibold text-muted-foreground mb-2.5">Métricas</p>
+                  <p className="text-xs font-semibold text-foreground mb-2.5">Métricas</p>
                   <div className="grid grid-cols-2 gap-2">
                     <Metric
                       label="Volumen total"
@@ -1406,20 +1413,14 @@ function AnalysisPage() {
           )}
         </section>
 
-      </main>
-
-      {/* ── zonas detectadas, a lo ancho ── */}
-      {/* El alto se acota para que el mapa y el panel de controles sigan siendo
-          lo principal: esta franja crece con su contenido hasta ese tope y ahí
-          empieza a desplazarse por dentro. */}
-      <section className="flex max-h-[28vh] min-h-0 flex-shrink-0 flex-col border-t border-border/40 bg-card/40 px-4 py-3">
-        <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-baseline gap-3">
+        {/* ── zonas detectadas ── */}
+        <aside className="col-span-2 flex max-h-[30vh] min-h-0 flex-col border-t border-border/40 bg-card/40 px-4 py-3 xl:col-span-1 xl:max-h-none xl:border-l xl:border-t-0">
+          <div className="mb-2.5 flex items-baseline justify-between gap-2">
             <p className="text-sm font-semibold text-foreground">Zonas detectadas</p>
             {displayDetections.length > 0 && (
               <button
                 onClick={toggleAll}
-                className="text-xs text-primary transition-colors hover:underline"
+                className="cursor-pointer text-xs text-primary transition-colors hover:underline"
               >
                 {allEnabled ? "Desactivar todas" : "Activar todas"}
               </button>
@@ -1431,10 +1432,11 @@ function AnalysisPage() {
               allá se mantienen: el informe de Vista Principal permite elegir
               varias zonas, que es lo que pide el AC1. */}
           {zoneId && (
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="mb-3 grid grid-cols-2 gap-2 xl:grid-cols-1">
               <Button
                 size="sm"
                 variant="secondary"
+                className="w-full"
                 onClick={() => setReportOpen(true)}
                 disabled={zoneAnalyses.length === 0}
               >
@@ -1443,6 +1445,7 @@ function AnalysisPage() {
               <Button
                 size="sm"
                 variant="secondary"
+                className="w-full"
                 onClick={() => setEvolutionOpen(true)}
                 disabled={zoneAnalyses.length === 0}
               >
@@ -1450,235 +1453,176 @@ function AnalysisPage() {
               </Button>
             </div>
           )}
-        </div>
 
-        {/* Tabla de atributos, no fichas. Esto es un listado de features con
-            las mismas tres magnitudes para todas, y el trabajo del panel es
-            COMPARARLAS: cuál pila conviene retirar primero. En tarjetas cada
-            una tenía su propia grilla, así que las cifras no quedaban
-            alineadas entre sí, las etiquetas Vol/Área/Peso se repetían una vez
-            por tarjeta, y convivían cuatro tamaños de letra distintos. Es el
-            mismo patrón de la tabla de atributos de QGIS/ArcGIS: encabezado una
-            sola vez, numéricos a la derecha, y un solo contenedor con
-            desplazamiento vertical. */}
-        {detectionsLoading ? (
-          <div className="space-y-1">
-            {[0, 1, 2, 3].map((i) => (
-              <Skeleton key={i} className="h-7 w-full rounded" />
-            ))}
-          </div>
-        ) : displayDetections.length > 0 ? (
-          <div
-            key={animKey}
-            className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden animate-in fade-in slide-in-from-bottom-2 duration-300"
-          >
-            <table className="w-full border-collapse text-xs">
-              {/* El encabezado queda fijo al desplazar: con muchas detecciones,
-                  perder de vista qué columna es cuál obliga a volver arriba.
-                  El sticky va en cada <th> y no en el <thead>: con
-                  border-collapse (que es lo que da las líneas de la tabla)
-                  Chrome ignora el sticky puesto en la fila o en el grupo. */}
-              <thead>
-                <tr className="text-[0.6875rem] uppercase tracking-wider text-muted-foreground">
-                  <th
-                    scope="col"
-                    className="sticky top-0 z-10 w-9 border-b border-border/60 bg-card px-1 py-1.5 text-left font-semibold"
-                  >
-                    <span className="sr-only">Visible</span>
-                  </th>
-                  <th
-                    scope="col"
-                    className="sticky top-0 z-10 w-[24rem] border-b border-border/60 bg-card px-1 py-1.5 text-left font-semibold"
-                  >
-                    Tipo de residuo
-                  </th>
-                  {/* Columna elástica: se queda con todo el ancho sobrante y lo
-                      usa para la barra de proporción. Sin ella, la columna del
-                      nombre se estiraba a media pantalla y las cifras quedaban
-                      tan lejos del nombre que había que seguir la fila con el
-                      dedo. */}
-                  <th
-                    scope="col"
-                    className="sticky top-0 z-10 border-b border-border/60 bg-card px-2 py-1.5 text-left font-semibold"
-                  >
-                    Distribución
-                  </th>
-                  {[
-                    { label: "Volumen", w: "w-28" },
-                    { label: "Área", w: "w-28" },
-                    { label: "Peso", w: "w-24" },
-                    { label: "% vol", w: "w-16" },
-                  ].map((col) => (
-                    <th
-                      key={col.label}
-                      scope="col"
-                      className={`sticky top-0 z-10 border-b border-border/60 bg-card px-2 py-1.5 text-right font-semibold ${col.w}`}
-                    >
-                      {col.label}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
+          {/* Lista vertical de dos líneas por zona, no una tabla de columnas.
+              En una columna de ~20rem no caben seis columnas, pero lo que hace
+              comparable a una tabla se conserva igual: el volumen, que es la
+              cifra con la que se decide, va alineado a la derecha, así que las
+              cifras quedan una debajo de otra aunque los nombres midan
+              distinto. El resto (área, peso, participación) baja a una segunda
+              línea en gris, que es el orden de importancia real.
 
-              {detectionRows.map((d, i) => {
-                const enabled = enabledIds.has(d.id);
-                const desplegada = expandedIds.has(d.id);
-                const fusionada = d.classes.length > 1;
-                const hasData = d.volume_m3 != null || d.area_m2 != null;
-                const share =
-                  enabled && activeSummary.totalVolumeM3 > 0
-                    ? ((d.volume_m3 ?? 0) / activeSummary.totalVolumeM3) * 100
-                    : null;
+              Dos tamaños de letra en todo el panel: text-xs para lo principal y
+              0.6875rem para la línea secundaria. */}
+          {detectionsLoading ? (
+            <div className="space-y-1">
+              {[0, 1, 2, 3].map((i) => (
+                <Skeleton key={i} className="h-11 w-full rounded-md" />
+              ))}
+            </div>
+          ) : displayDetections.length > 0 ? (
+            <>
+              <ul
+                key={animKey}
+                className="min-h-0 flex-1 space-y-0.5 overflow-y-auto overflow-x-hidden pr-1 animate-in fade-in slide-in-from-bottom-2 duration-300"
+              >
+                {detectionRows.map((d, i) => {
+                  const enabled = enabledIds.has(d.id);
+                  const desplegada = expandedIds.has(d.id);
+                  const fusionada = d.classes.length > 1;
+                  const hasData = d.volume_m3 != null || d.area_m2 != null;
+                  const share =
+                    enabled && activeSummary.totalVolumeM3 > 0
+                      ? ((d.volume_m3 ?? 0) / activeSummary.totalVolumeM3) * 100
+                      : null;
 
-                return (
-                  <tbody
-                    key={d.id}
-                    style={{ animationDelay: `${Math.min(i, 8) * 30}ms` }}
-                    className="animate-in fade-in duration-300 fill-mode-both"
-                  >
-                    <tr
-                      className={`border-b border-border/30 transition-colors duration-200 hover:bg-muted/40 ${
+                  return (
+                    <li
+                      key={d.id}
+                      style={{ animationDelay: `${Math.min(i, 8) * 30}ms` }}
+                      className={`animate-in fade-in duration-300 fill-mode-both rounded-md px-1.5 py-1.5 transition-all duration-200 hover:bg-muted/40 ${
                         enabled ? "" : "opacity-40"
                       }`}
                     >
-                      <td className="px-1 py-1">
+                      <div className="flex items-center gap-1.5">
                         <button
                           onClick={() => toggleDetection(d.id)}
-                          className="rounded p-1 transition-all duration-150 hover:bg-muted/60 active:scale-90"
+                          className="flex-shrink-0 cursor-pointer rounded p-0.5 transition-all duration-150 hover:bg-muted/60 active:scale-90"
                           title={enabled ? "Desactivar zona" : "Activar zona"}
                         >
                           {enabled
                             ? <Eye    className="h-3.5 w-3.5 text-primary" />
                             : <EyeOff className="h-3.5 w-3.5 text-muted-foreground" />}
                         </button>
-                      </td>
 
-                      <td className="px-1 py-1">
-                        <div className="flex min-w-0 items-center gap-2">
-                          {/* El triángulo solo existe donde hay algo que abrir,
-                              y ocupa su ancho igual en las demás para que los
-                              nombres queden alineados en columna. */}
-                          {fusionada ? (
-                            <button
-                              onClick={() => toggleExpanded(d.id)}
-                              aria-expanded={desplegada}
-                              className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
-                              title={desplegada ? "Ocultar desglose" : "Ver desglose por tipo"}
-                            >
-                              <Triangulo abierta={desplegada} />
-                            </button>
-                          ) : (
-                            <span className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
-                          )}
-                          <span
-                            className="h-2.5 w-2.5 flex-shrink-0 rounded-sm"
-                            style={{ background: classColor(d.class) }}
-                          />
-                          <span className="min-w-0 truncate font-medium">{d.class}</span>
-                          {/* Que la cifra de una zona fusionada sea el promedio
-                              (o el máximo) del grupo y no la suma es lo que
-                              impide contar dos veces la misma basura, así que
-                              se dice en la fila y no solo en el código. */}
-                          {fusionada && (
-                            <span className="flex-shrink-0 text-muted-foreground">
-                              ({d.classes.length} tipos, promedio)
+                        {/* El triángulo solo existe donde hay algo que abrir, y
+                            ocupa su ancho igual en las demás para que los
+                            nombres queden alineados en columna. */}
+                        {fusionada ? (
+                          <button
+                            onClick={() => toggleExpanded(d.id)}
+                            aria-expanded={desplegada}
+                            className="flex h-4 w-4 flex-shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+                            title={desplegada ? "Ocultar desglose" : "Ver desglose por tipo"}
+                          >
+                            <Triangulo abierta={desplegada} />
+                          </button>
+                        ) : (
+                          <span className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+                        )}
+
+                        <span
+                          className="h-2.5 w-2.5 flex-shrink-0 rounded-sm"
+                          style={{ background: classColor(d.class) }}
+                        />
+                        <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
+                          {d.class}
+                        </span>
+                        <span className="mono flex-shrink-0 text-xs font-semibold tabular-nums text-foreground">
+                          {status === "done" && hasData
+                            ? `${(d.volume_m3 ?? 0).toFixed(2)} m³`
+                            : "-"}
+                        </span>
+                      </div>
+
+                      {/* pl-[3.4rem] alinea esta línea con el nombre de arriba,
+                          saltando el ojo, el triángulo y el cuadro de color. */}
+                      <div className="mt-0.5 flex items-baseline gap-2 pl-[3.4rem] text-[0.6875rem] text-muted-foreground">
+                        {status === "done" && hasData ? (
+                          <>
+                            <span className="mono min-w-0 flex-1 truncate tabular-nums">
+                              {(d.area_m2 ?? 0).toFixed(2)} m² · {Math.round(d.weight_kg ?? 0)} kg
                             </span>
-                          )}
-                        </div>
-                      </td>
+                            {/* Que la cifra de una zona fusionada sea el
+                                promedio (o el máximo) del grupo y no la suma es
+                                lo que impide contar dos veces la misma basura,
+                                así que se dice en la fila y no solo en el
+                                código. */}
+                            {fusionada && (
+                              <span className="flex-shrink-0">{d.classes.length} tipos, prom.</span>
+                            )}
+                            <span className="mono flex-shrink-0 tabular-nums">
+                              {share != null ? `${share.toFixed(0)} %` : "-"}
+                            </span>
+                          </>
+                        ) : (
+                          <span>
+                            {status === "done" ? "Sin datos de volumen" : "Pendiente de análisis"}
+                          </span>
+                        )}
+                      </div>
 
-                      {status === "done" && hasData ? (
-                        <>
-                          {/* La misma proporción que dice la columna "% vol",
-                              pero legible sin leer: cuál pila conviene retirar
-                              primero se ve de un vistazo. */}
-                          <td className="px-2 py-1">
-                            <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                              <div
-                                className="h-full rounded-full bg-primary/70 transition-all duration-300"
-                                style={{ width: `${share ?? 0}%` }}
-                              />
-                            </div>
-                          </td>
-                          <Cifra>{`${(d.volume_m3 ?? 0).toFixed(2)} m³`}</Cifra>
-                          <Cifra>{`${(d.area_m2 ?? 0).toFixed(2)} m²`}</Cifra>
-                          <Cifra>{`${Math.round(d.weight_kg ?? 0)} kg`}</Cifra>
-                          <Cifra>{share != null ? `${share.toFixed(0)} %` : "-"}</Cifra>
-                        </>
-                      ) : (
-                        <td colSpan={5} className="px-2 py-1 text-right text-muted-foreground">
-                          {status === "done" ? "Sin datos de volumen" : "Pendiente de análisis"}
-                        </td>
+                      {/* Desglose por tipo, colapsado por omisión: en una zona
+                          fusionada sus cifras son casi idénticas entre sí (salen
+                          del mismo grupo), así que desplegadas siempre eran
+                          ruido que tapaba las zonas que sí se comparan entre
+                          sí. Quien necesita auditar el dato lo abre. */}
+                      {desplegada && (
+                        <ul className="mt-1.5 space-y-1 border-l border-border/60 pl-2 ml-[1.9rem]">
+                          {d.breakdown.map((b) => (
+                            <li key={b.class} className="text-[0.6875rem]">
+                              <div className="flex items-center gap-1.5">
+                                <span
+                                  className="h-2 w-2 flex-shrink-0 rounded-sm"
+                                  style={{ background: classColor(b.class) }}
+                                />
+                                <span className="min-w-0 flex-1 truncate text-foreground">
+                                  {b.class}
+                                </span>
+                                <span className="mono flex-shrink-0 tabular-nums text-foreground">
+                                  {b.volume_m3 != null ? `${b.volume_m3.toFixed(2)} m³` : "-"}
+                                </span>
+                              </div>
+                              <p className="mono pl-3.5 tabular-nums text-muted-foreground">
+                                {b.area_m2 != null ? `${b.area_m2.toFixed(2)} m²` : "-"} ·{" "}
+                                {b.weight_kg != null ? `${Math.round(b.weight_kg)} kg` : "-"}
+                              </p>
+                            </li>
+                          ))}
+                        </ul>
                       )}
-                    </tr>
+                    </li>
+                  );
+                })}
+              </ul>
 
-                    {/* Desglose por tipo, colapsado por omisión: en una zona
-                        fusionada sus cifras son casi idénticas entre sí (salen
-                        del mismo grupo), así que desplegadas siempre eran ruido
-                        que tapaba las filas que sí se comparan. Quien necesita
-                        auditar el dato lo abre. */}
-                    {desplegada &&
-                      d.breakdown.map((b) => (
-                        <tr
-                          key={b.class}
-                          className={`border-b border-border/20 bg-muted/20 text-muted-foreground ${
-                            enabled ? "" : "opacity-40"
-                          }`}
-                        >
-                          <td />
-                          <td className="px-1 py-1">
-                            <div className="flex min-w-0 items-center gap-2 pl-6">
-                              <span
-                                className="h-2 w-2 flex-shrink-0 rounded-sm"
-                                style={{ background: classColor(b.class) }}
-                              />
-                              <span className="min-w-0 truncate">{b.class}</span>
-                            </div>
-                          </td>
-                          {/* Sin barra: la proporción de una sub-fila no es
-                              comparable con las demás, porque el volumen del
-                              grupo es su promedio y no la suma de estas. */}
-                          <td />
-                          <Cifra>
-                            {b.volume_m3 != null ? `${b.volume_m3.toFixed(2)} m³` : "-"}
-                          </Cifra>
-                          <Cifra>{b.area_m2 != null ? `${b.area_m2.toFixed(2)} m²` : "-"}</Cifra>
-                          <Cifra>
-                            {b.weight_kg != null ? `${Math.round(b.weight_kg)} kg` : "-"}
-                          </Cifra>
-                          <Cifra>{""}</Cifra>
-                        </tr>
-                      ))}
-                  </tbody>
-                );
-              })}
-
-              {/* Totales al pie, fijos: son los mismos de "Métricas" en el
-                  panel izquierdo, y verlos junto al detalle es lo que permite
-                  reconciliar uno con otro al activar o desactivar zonas. */}
+              {/* Totales al pie de la columna: son los mismos de "Métricas" en
+                  el panel izquierdo, y tenerlos junto al detalle es lo que
+                  permite reconciliar uno con otro al activar o desactivar
+                  zonas. */}
               {status === "done" && (
-                <tfoot>
-                  <tr className="font-semibold">
-                    <td className="sticky bottom-0 border-t border-border/60 bg-card" />
-                    <td className="sticky bottom-0 border-t border-border/60 bg-card px-1 py-1.5">
+                <div className="mt-2 flex-shrink-0 border-t border-border/60 pt-2">
+                  <div className="flex items-center gap-2">
+                    <span className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">
                       Total ({enabledIds.size} de {displayDetections.length} activas)
-                    </td>
-                    <td className="sticky bottom-0 border-t border-border/60 bg-card" />
-                    <CifraTotal>{`${activeSummary.totalVolumeM3} m³`}</CifraTotal>
-                    <CifraTotal>{`${activeSummary.totalAreaM2} m²`}</CifraTotal>
-                    <CifraTotal>{`${activeSummary.totalWeightKg} kg`}</CifraTotal>
-                    <CifraTotal>{activeSummary.totalVolumeM3 > 0 ? "100 %" : "-"}</CifraTotal>
-                  </tr>
-                </tfoot>
+                    </span>
+                    <span className="mono flex-shrink-0 text-xs font-semibold tabular-nums text-foreground">
+                      {activeSummary.totalVolumeM3} m³
+                    </span>
+                  </div>
+                  <p className="mono mt-0.5 text-[0.6875rem] tabular-nums text-muted-foreground">
+                    {activeSummary.totalAreaM2} m² · {activeSummary.totalWeightKg} kg
+                  </p>
+                </div>
               )}
-            </table>
-          </div>
-        ) : (
-          <div className="py-3 text-center text-xs text-muted-foreground">
-            Sin detecciones cargadas.
-          </div>
-        )}
-      </section>
+            </>
+          ) : (
+            <div className="py-3 text-center text-xs text-muted-foreground">
+              Sin detecciones cargadas.
+            </div>
+          )}
+        </aside>
+      </main>
 
       {/* Navegación entre capturas, al pie y a lo ancho. Se muestra siempre y
           se puede plegar desde su propio encabezado. */}
@@ -1863,25 +1807,8 @@ function Metric({ label, value, icon }: { label: string; value: string; icon: Re
     <div className="rounded-lg bg-background/60 px-3 py-3">
       <div className="mb-2.5 text-primary/65 [&_svg]:h-4 [&_svg]:w-4">{icon}</div>
       <p className="text-[0.625rem] text-muted-foreground leading-none mb-1">{label}</p>
-      <p className="mono text-base font-bold tabular-nums">{value}</p>
+      <p className="mono text-base font-bold tabular-nums text-foreground">{value}</p>
     </div>
-  );
-}
-
-/** Celda numérica de la tabla de detecciones. Siempre a la derecha y siempre en
- *  la misma letra: es lo que permite comparar una fila con otra de un vistazo,
- *  que es para lo que existe la tabla. */
-function Cifra({ children }: { children: React.ReactNode }) {
-  return <td className="mono px-2 py-1 text-right tabular-nums">{children}</td>;
-}
-
-/** La misma celda, fijada al pie de la tabla. El sticky va en la celda y no en
- *  el <tfoot> por el mismo motivo que en el encabezado. */
-function CifraTotal({ children }: { children: React.ReactNode }) {
-  return (
-    <td className="mono sticky bottom-0 border-t border-border/60 bg-card px-2 py-1.5 text-right tabular-nums">
-      {children}
-    </td>
   );
 }
 

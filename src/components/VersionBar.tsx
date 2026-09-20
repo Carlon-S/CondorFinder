@@ -78,24 +78,21 @@ export function VersionBar({
   return (
     <div className="flex-shrink-0 border-t border-border/40 bg-card/60 px-4 py-2.5">
       {/* El encabezado es también el control de plegado: es la única parte que
-          queda visible cerrada, así que tiene que ser lo que la vuelve a
-          abrir. */}
+          queda visible cerrada, así que tiene que ser lo que la vuelve a abrir.
+          Va en el color de texto pleno, no en gris apagado: es un
+          título de sección y además el control que abre y cierra la barra, así
+          que tiene que leerse como algo con lo que se puede interactuar. El
+          gris queda para lo accesorio. */}
       <button
         type="button"
         onClick={() => setPlegada((v) => !v)}
         aria-expanded={!plegada}
-        className="mx-auto flex items-center gap-2 rounded px-2 py-0.5 transition-colors hover:bg-muted/50"
+        className="mx-auto flex cursor-pointer items-center gap-2 rounded px-2 py-0.5 transition-colors hover:bg-muted/50"
       >
-        <span className="text-xs font-semibold text-muted-foreground">Capturas de esta zona</span>
-        {loading ? (
-          <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
-        ) : (
-          <span className="text-[0.63rem] text-muted-foreground">
-            {versions.length === 1 ? "1 versión" : `${versions.length} versiones`}
-          </span>
-        )}
+        <span className="text-xs font-semibold text-foreground">Capturas de esta zona</span>
+        {loading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
         <ChevronDown
-          className={`h-3.5 w-3.5 text-muted-foreground transition-transform duration-300 ${
+          className={`h-3.5 w-3.5 text-foreground transition-transform duration-300 ${
             plegada ? "-rotate-90" : ""
           }`}
           aria-hidden="true"
