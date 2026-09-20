@@ -71,6 +71,18 @@ export function ZoneEvolution({
     analysisId: p.analysisId,
   }));
 
+  // Cifras de cabecera. El gráfico muestra la forma de la curva, pero la
+  // pregunta que se hace primero frente a una zona es "cuánto hay hoy y cuánto
+  // cambió", y eso obligaba a leer el eje y restar a ojo.
+  const volumenInicial = zoneTotals(versions[0].analyses[versions[0].analyses.length - 1]).volumeM3;
+  const volumenActual = zoneTotals(
+    versions[versions.length - 1].analyses[versions[versions.length - 1].analyses.length - 1],
+  ).volumeM3;
+  const delta = volumenActual - volumenInicial;
+  // Sin base no hay porcentaje que calcular: una zona que partió en cero y
+  // creció no tiene "aumento de X%", tiene un valor nuevo.
+  const deltaPct = volumenInicial > 0 ? (delta / volumenInicial) * 100 : null;
+
   return (
     <div className="space-y-5">
       {mixedAlgorithms && (
@@ -79,6 +91,24 @@ export function ZoneEvolution({
           variación puede venir de mejoras en la medición y no de un cambio real en el terreno.
         </p>
       )}
+
+      <div className="grid grid-cols-3 gap-2">
+        <ResumenEvolucion etiqueta="Volumen actual" valor={`${volumenActual.toLocaleString("es-CL")} m³`} />
+        <ResumenEvolucion
+          etiqueta="Cambio total"
+          valor={`${delta >= 0 ? "+" : ""}${delta.toFixed(2)} m³`}
+          // Más volumen de basura es peor, no mejor: el rojo va con el
+          // aumento y el verde con la disminución, al revés de lo que haría
+          // una métrica de negocio.
+          tono={delta > 0 ? "malo" : delta < 0 ? "bueno" : "neutro"}
+          nota={deltaPct != null ? `${deltaPct >= 0 ? "+" : ""}${deltaPct.toFixed(0)} %` : undefined}
+        />
+        <ResumenEvolucion
+          etiqueta="Capturas"
+          valor={String(versions.length)}
+          nota={`desde ${formatDate(versions[0].captureDate)}`}
+        />
+      </div>
 
       {/* AC2, volumen estimado de cada versión por fecha */}
       <ChartContainer config={chartConfig} className="h-[13rem] w-full">
@@ -160,6 +190,31 @@ export function ZoneEvolution({
           );
         })}
       </ol>
+    </div>
+  );
+}
+
+/** Una cifra de la cabecera del diálogo. El tono colorea solo el valor, nunca
+ *  el recuadro entero: tres tarjetas de colores compiten entre sí y ninguna
+ *  termina destacando. */
+function ResumenEvolucion({
+  etiqueta,
+  valor,
+  nota,
+  tono = "neutro",
+}: {
+  etiqueta: string;
+  valor: string;
+  nota?: string;
+  tono?: "bueno" | "malo" | "neutro";
+}) {
+  const color =
+    tono === "malo" ? "text-destructive" : tono === "bueno" ? "text-success" : "text-foreground";
+  return (
+    <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
+      <p className="text-[0.6875rem] text-muted-foreground">{etiqueta}</p>
+      <p className={`mono text-sm font-semibold tabular-nums ${color}`}>{valor}</p>
+      {nota && <p className="mono text-[0.6875rem] tabular-nums text-muted-foreground">{nota}</p>}
     </div>
   );
 }

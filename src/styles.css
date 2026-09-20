@@ -234,30 +234,50 @@ html {
    estructura; donde hay diferencias están comentadas.
    ============================================================================= */
 
-/* ---------------------------------------------------------------- 1. curvas de nivel */
-/* El SVG se repite en mosaico: el dibujo vive al centro del tile y los bordes
-   quedan vacíos, así no se ven costuras al repetir.
-   Trazo navy, no amarillo: el sitio usa amarillo porque su fondo es oscuro, y
-   sobre el cuerpo claro de la app esa variante desaparece. */
-.topo-bg { position: relative; isolation: isolate; }
-.topo-bg::before {
+/* ---------------------------------------------------------------- 1. retícula */
+/* Antes acá vivían las curvas de nivel de feria-page: siete elipses
+   concéntricas repetidas en mosaico. Se reemplazaron por una retícula porque
+   ese dibujo se leía como decoración de folleto y no como una herramienta
+   municipal; la retícula dice lo mismo sobre el dominio (es la graticula de
+   una carta) sin llamar la atención sobre sí misma.
+
+   Dos escalas superpuestas, menor y mayor, que es como se dibuja una
+   cuadrícula cartográfica de verdad: cada 2.5rem una línea tenue y cada
+   12.5rem (una de cada cinco) una un poco más marcada. El espaciado va en rem
+   para que la retícula escale junto con el resto de la interfaz; el grosor se
+   queda en 1px, que es la excepción de siempre para las líneas de pelo.
+
+   El color se expresa directo en rgba en vez de con `opacity` sobre todo el
+   pseudo-elemento, para poder darle distinto peso a cada escala. */
+.grid-bg { position: relative; isolation: isolate; }
+.grid-bg::before {
   content: "";
   position: absolute;
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='620' height='620' viewBox='0 0 620 620' fill='none' stroke='%230F2244' stroke-width='1.1'%3E%3Cellipse cx='310' cy='300' rx='38' ry='27'/%3E%3Cellipse cx='308' cy='302' rx='74' ry='55'/%3E%3Cellipse cx='305' cy='305' rx='112' ry='84'/%3E%3Cellipse cx='302' cy='308' rx='152' ry='115'/%3E%3Cellipse cx='299' cy='311' rx='194' ry='148'/%3E%3Cellipse cx='296' cy='314' rx='238' ry='183'/%3E%3Cellipse cx='293' cy='317' rx='284' ry='220'/%3E%3C/svg%3E");
-  background-size: 620px 620px;
-  opacity: 0.055;
+  background-image:
+    linear-gradient(to right,  rgba(15, 34, 68, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(15, 34, 68, 0.04) 1px, transparent 1px),
+    linear-gradient(to right,  rgba(15, 34, 68, 0.07) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(15, 34, 68, 0.07) 1px, transparent 1px);
+  background-size:
+    2.5rem 2.5rem,
+    2.5rem 2.5rem,
+    12.5rem 12.5rem,
+    12.5rem 12.5rem;
 }
-/* Sobre el fondo oscuro del login el trazo navy se pierde: va en amarillo.
-   Van los dos selectores porque en el login las clases .login-dark y .topo-bg
-   viven en el MISMO elemento (.login-dark.topo-bg), no anidadas. */
-.login-dark.topo-bg::before,
-.login-dark .topo-bg::before,
-.topo-bg.topo-bg-dark::before {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='620' height='620' viewBox='0 0 620 620' fill='none' stroke='%23FFC53D' stroke-width='1.1'%3E%3Cellipse cx='310' cy='300' rx='38' ry='27'/%3E%3Cellipse cx='308' cy='302' rx='74' ry='55'/%3E%3Cellipse cx='305' cy='305' rx='112' ry='84'/%3E%3Cellipse cx='302' cy='308' rx='152' ry='115'/%3E%3Cellipse cx='299' cy='311' rx='194' ry='148'/%3E%3Cellipse cx='296' cy='314' rx='238' ry='183'/%3E%3Cellipse cx='293' cy='317' rx='284' ry='220'/%3E%3C/svg%3E");
-  opacity: 0.07;
+/* Sobre el fondo oscuro del login el trazo navy se pierde: va en blanco.
+   Van los dos selectores porque en el login las clases .login-dark y .grid-bg
+   viven en el MISMO elemento (.login-dark.grid-bg), no anidadas. */
+.login-dark.grid-bg::before,
+.login-dark .grid-bg::before,
+.grid-bg.grid-bg-dark::before {
+  background-image:
+    linear-gradient(to right,  rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(to right,  rgba(255, 197, 61, 0.07) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 197, 61, 0.07) 1px, transparent 1px);
 }
 
 /* ---------------------------------------------------------------- 2. marco de detección */

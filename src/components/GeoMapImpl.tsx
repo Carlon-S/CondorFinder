@@ -18,16 +18,33 @@ import type { GeoMapProps } from "@/components/GeoMap";
 import { ROUTE_OUTBOUND_COLOR, ROUTE_OUTLINE_COLOR, ROUTE_RETURN_COLOR, ROUTE_RETURN_OPACITY } from "@/components/route-colors";
 
 /** Centro aproximado de la comuna de Maipú, Región Metropolitana. Sin
- *  exportar a propósito — nada afuera de este archivo lo usa, y exportar un
+ *  exportar a propósito, nada afuera de este archivo lo usa, y exportar un
  *  valor no-componente junto al componente de este módulo rompe el
  *  contrato de Fast Refresh de Vite (fuerza un full reload en cada cambio
- *  de este archivo en vez de un hot-patch — eso a su vez generaba el error
+ *  de este archivo en vez de un hot-patch, eso a su vez generaba el error
  *  "Could not find an active match from /_authed" al recargar en medio de
  *  ese full reload, con el router en un estado intermedio). */
 const MAIPU_CENTER: [number, number] = [-33.5167, -70.75];
 
+/** Recuadro que encierra la comuna de Maipú, con un margen de holgura.
+ *
+ *  El sistema es para UNA municipalidad, así que el mapa no tiene por qué
+ *  permitir navegar el resto del país: con `maxBoundsViscosity` en 1 el borde
+ *  es rígido y no se puede arrastrar la vista fuera de la comuna, y `minZoom`
+ *  impide alejarse hasta perderla de vista. Antes se podía terminar en
+ *  cualquier parte del mundo con un par de gestos, sin forma de volver salvo
+ *  recargar.
+ *
+ *  Es el recuadro envolvente, no el límite comunal real: dibujar un polígono
+ *  con la silueta exacta exigiría cargar su GeoJSON, y un rectángulo pintado
+ *  como si fuera el límite mentiría sobre dónde termina la comuna. */
+const MAIPU_BOUNDS: [[number, number], [number, number]] = [
+  [-33.60, -70.92],
+  [-33.43, -70.68],
+];
+
 // Este módulo solo se carga vía import() dinámico desde GeoMap.tsx, después
-// del mount — nunca se evalúa durante SSR. Leaflet toca `window` en el
+// del mount, nunca se evalúa durante SSR. Leaflet toca `window` en el
 // top-level de su propio módulo (sin guard), así que fixDefaultIcon() puede
 // llamarse directo acá arriba: para cuando este archivo se ejecuta, `window`
 // ya existe siempre.
@@ -36,26 +53,26 @@ L.Icon.Default.mergeOptions({
   iconRetinaUrl: markerIcon2x,
   iconUrl: markerIcon,
   shadowUrl: markerShadow,
-  // El tooltipAnchor por defecto de Leaflet es [16, -28] — el 16 corrige
+  // El tooltipAnchor por defecto de Leaflet es [16, -28], el 16 corrige
   // por la sombra clásica del pin, y sin quererlo descentra cualquier
   // <Tooltip direction="top"> unos px hacia la derecha del ícono.
   tooltipAnchor: [0, -28],
 });
 
 // Pines reales (Phosphor "MapPin"/"MapPinArea", regular + fill) en vez de
-// las formas de CSS que había antes — se arman como <svg> crudo porque
+// las formas de CSS que había antes, se arman como <svg> crudo porque
 // Leaflet arma L.divIcon a partir de un string de HTML, no de JSX.
 //
 // Cada par regular/fill reemplaza el viejo truco de opacidad/borde para
 // distinguir "activo" de "no activo": la silueta hueca (regular) YA se lee
 // como "sin marcar" y la rellena (fill) como "marcado", sin necesitar CSS
-// adicional para esa distinción — son dibujos genuinamente distintos, no
+// adicional para esa distinción, son dibujos genuinamente distintos, no
 // el mismo dibujo con relleno distinto.
 const ZONE_PIN_REGULAR =
   "M128,64a40,40,0,1,0,40,40A40,40,0,0,0,128,64Zm0,64a24,24,0,1,1,24-24A24,24,0,0,1,128,128Zm0-112a88.1,88.1,0,0,0-88,88c0,31.4,14.51,64.68,42,96.25a254.19,254.19,0,0,0,41.45,38.3,8,8,0,0,0,9.18,0A254.19,254.19,0,0,0,174,200.25c27.45-31.57,42-64.85,42-96.25A88.1,88.1,0,0,0,128,16Zm0,206c-16.53-13-72-60.75-72-118a72,72,0,0,1,144,0C200,161.23,144.53,209,128,222Z";
 const ZONE_PIN_FILL =
   "M128,16a88.1,88.1,0,0,0-88,88c0,75.3,80,132.17,83.41,134.55a8,8,0,0,0,9.18,0C136,236.17,216,179.3,216,104A88.1,88.1,0,0,0,128,16Zm0,56a32,32,0,1,1-32,32A32,32,0,0,1,128,72Z";
-// "Puntos de partida y destino" (HDU6) — un punto que el algoritmo de ruta
+// "Puntos de partida y destino" (HDU6), un punto que el algoritmo de ruta
 // puede tratar como origen o como destino (ver el rename de "punto de
 // origen" a simplemente "punto" en toda la app), por eso un pin distinto
 // al de zona en vez de reusar la misma familia "MapPin".
@@ -68,7 +85,7 @@ function pinDivIcon(path: string, color: string, size: number): L.DivIcon {
   return L.divIcon({
     className: "",
     html: `<svg width="${size}" height="${size}" viewBox="0 0 256 256" fill="${color}" style="filter:drop-shadow(0 2px 4px rgba(0,0,0,0.45));"><path d="${path}"/></svg>`,
-    // El pin "apunta" hacia abajo — el ancla va en la punta inferior del
+    // El pin "apunta" hacia abajo, el ancla va en la punta inferior del
     // dibujo (no en el centro geométrico, como sí correspondía con el
     // círculo/cuadrado anteriores), para que quede clavado en la
     // coordenada real del mapa en vez de flotar sobre ella.
@@ -85,13 +102,13 @@ function zoneIcon(color: string, filled: boolean): L.DivIcon {
 }
 
 // Puntos de origen (HDU6): pin "de área" (silueta con base ovalada en la
-// versión fill) — mismo criterio sólido=activo/hueco=inactivo que zoneIcon.
+// versión fill), mismo criterio sólido=activo/hueco=inactivo que zoneIcon.
 function originIcon(active: boolean): L.DivIcon {
   return pinDivIcon(active ? ORIGIN_PIN_FILL : ORIGIN_PIN_REGULAR, active ? "var(--primary)" : "var(--muted-foreground)", 36);
 }
 
 /** Recuadros de detecciones superpuestos sobre la miniatura del tooltip
- *  (HDU5) — "png + json" juntos, no solo la imagen plana. slice (no meet):
+ *  (HDU5), "png + json" juntos, no solo la imagen plana. slice (no meet):
  *  tiene que recortar igual que el object-fit:cover de la imagen de al lado
  *  para que los rects queden alineados con lo que realmente se ve. */
 function PreviewDetectionsOverlay({
@@ -125,7 +142,7 @@ function PreviewDetectionsOverlay({
 }
 
 /** Imagen de la miniatura del tooltip de hover, con su propio manejo de
- *  error — si el PNG no carga (404, ej. la zona se eliminó desde otra
+ *  error, si el PNG no carga (404, ej. la zona se eliminó desde otra
  *  pestaña/sesión mientras seguía en memoria acá) se ve un aviso en vez de
  *  un ícono de imagen rota. Estado local propio (no en el padre) porque
  *  cada marker es independiente: que uno falle no debe afectar a los demás. */
@@ -150,7 +167,7 @@ function ClickHandler({ onMapClick }: { onMapClick?: (lat: number, lng: number) 
   return null;
 }
 
-/** Centra+acerca el mapa a `target` cada vez que cambia — usado tanto al
+/** Centra+acerca el mapa a `target` cada vez que cambia, usado tanto al
  *  hacer click en un punto guardado como al llegar por deep-link
  *  (?point=id) desde Vista Principal. No hace nada mientras es null. */
 function FlyToPoint({ target }: { target: [number, number] | null }) {
@@ -162,7 +179,7 @@ function FlyToPoint({ target }: { target: [number, number] | null }) {
 }
 
 /** Encuadra el mapa para que quepan todos `points` (ej. una ruta recién
- *  generada) — una sola vez cada vez que la referencia del array cambia
+ *  generada), una sola vez cada vez que la referencia del array cambia
  *  (una respuesta nueva del backend siempre trae arrays nuevos, así que
  *  no hace falta clonar nada a mano como sí hace falta en FlyToPoint). */
 function FitBounds({ points }: { points: [number, number][] | null | undefined }) {
@@ -177,12 +194,12 @@ function FitBounds({ points }: { points: [number, number][] | null | undefined }
 
 /** Click en la ruta -> vuelve a encuadrar la ruta COMPLETA (mismo
  *  flyToBounds que FitBounds hace al generarla, no un zoom de acercamiento
- *  a un punto) — pensado para volver rápido a "ver toda la ruta" después
+ *  a un punto), pensado para volver rápido a "ver toda la ruta" después
  *  de haber hecho zoom/pan manual. En vez de un eventHandlers de click
  *  sobre cada Polyline (poco confiable con el renderer Canvas para líneas
  *  muy largas/finas), escucha el click del MAPA (mismo mecanismo que
  *  ClickHandler arriba, ya probado) y mide la distancia en PÍXELES al
- *  vértice más cercano de cualquiera de los trazos — funciona igual con
+ *  vértice más cercano de cualquiera de los trazos, funciona igual con
  *  canvas o SVG, sin depender del hit-testing de la capa. */
 function RouteClickZoom({
   outboundPaths,
@@ -213,7 +230,7 @@ function RouteClickZoom({
 }
 
 /** Texto de la ventana flotante sobre un tramo de ruta (estilo Google
- *  Maps) — velocidad calculada acá mismo (distancia/tiempo), no viaja como
+ *  Maps), velocidad calculada acá mismo (distancia/tiempo), no viaja como
  *  campo aparte del backend. */
 function segmentTooltipText(
   direction: "Ida" | "Vuelta",
@@ -227,7 +244,7 @@ function segmentTooltipText(
   return `${trucksLabel}${direction} · ${minutes} min · ${distanceKm.toFixed(1)} km · ~${speedKmh} km/h`;
 }
 
-/** Distancia aproximada (en grados, NO metros) entre dos puntos — alcanza
+/** Distancia aproximada (en grados, NO metros) entre dos puntos, alcanza
  *  para repartir proporciones a lo largo de un trazo (pointAtFraction de
  *  abajo), no se usa para mostrar ninguna distancia real al usuario. */
 function approxDistance(a: [number, number], b: [number, number]): number {
@@ -237,7 +254,7 @@ function approxDistance(a: [number, number], b: [number, number]): number {
 }
 
 /** Punto ubicado a `fraction` (0-1) de la distancia ACUMULADA de `path`
- *  (no del índice de vértice) — así la ventana flotante queda a un cuarto
+ *  (no del índice de vértice), así la ventana flotante queda a un cuarto
  *  del recorrido real, sin importar que los vértices de OSRM no estén
  *  parejo espaciados (hay muchos más en curvas que en tramos rectos). */
 function pointAtFraction(path: [number, number][], fraction: number): [number, number] | null {
@@ -265,11 +282,11 @@ function pointAtFraction(path: [number, number][], fraction: number): [number, n
   return path[path.length - 1];
 }
 
-/** Key estable PERO distinta entre rutas distintas — primer/último punto +
+/** Key estable PERO distinta entre rutas distintas, primer/último punto +
  *  cantidad de vértices. Forzar el remonte completo del Polyline (y de su
  *  ventana flotante) cuando cambia la ruta es la garantía más simple y
  *  robusta contra el problema de arriba (Leaflet no repositiona un
- *  tooltip ya abierto solo porque cambiaron las coordenadas de su capa) —
+ *  tooltip ya abierto solo porque cambiaron las coordenadas de su capa) ,
  *  React destruye el nodo viejo del mapa y crea uno nuevo desde cero en
  *  vez de intentar "actualizar" uno que Leaflet no sabe recolocar solo. */
 function pathKey(path: [number, number][]): string {
@@ -311,7 +328,7 @@ function RouteSegmentLabel({
   path: [number, number][];
   fraction: number;
   text: string;
-  /** Desplazamiento en píxeles (x, y) — en un tramo de ida y vuelta por la
+  /** Desplazamiento en píxeles (x, y), en un tramo de ida y vuelta por la
    *  MISMA carretera (ej. un solo camino de montaña con curvas), el punto
    *  al 25% del recorrido de cada trazo puede caer geográficamente cerca
    *  del otro aunque se midan desde extremos opuestos (las curvas
@@ -363,6 +380,12 @@ export function GeoMapImpl({
       className={className}
       scrollWheelZoom
       renderer={ROUTE_CANVAS_RENDERER}
+      // La vista queda encerrada en Maipú: viscosity 1 hace el borde rígido
+      // (sin ella el arrastre se sale y rebota) y minZoom impide alejarse
+      // hasta perder la comuna de vista.
+      maxBounds={MAIPU_BOUNDS}
+      maxBoundsViscosity={1}
+      minZoom={12}
     >
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
@@ -375,7 +398,7 @@ export function GeoMapImpl({
       {marker && <Marker position={marker} />}
       {hasRealPaths ? (
         <>
-          {/* Borde oscuro debajo de ambos trazos ("casing") — separa la
+          {/* Borde oscuro debajo de ambos trazos ("casing"), separa la
               línea del fondo del mapa sin importar qué colores tenga
               debajo (antes el celeste/naranjo original se camuflaba
               contra el agua y las calles de los tiles de OSM). */}
@@ -393,9 +416,9 @@ export function GeoMapImpl({
               pathOptions={{ color: ROUTE_OUTLINE_COLOR, weight: 8, opacity: 0.5 }}
             />
           ))}
-          {/* Ida — trazo real (calles, OSRM), azul sólido (estilo Google
+          {/* Ida, trazo real (calles, OSRM), azul sólido (estilo Google
               Maps). Ventana flotante anclada al 25% del recorrido, con
-              camiones/tiempo/distancia/velocidad de ESTE tramo — mismo
+              camiones/tiempo/distancia/velocidad de ESTE tramo, mismo
               índice que routeSegments. Click en la línea -> zoom ahí. */}
           {outboundPaths?.map((path, i) => {
             const key = `outbound-${pathKey(path as [number, number][])}-${i}`;
@@ -421,8 +444,8 @@ export function GeoMapImpl({
               />
             );
           })}
-          {/* Vuelta — mismo tramo tipo de calle, pero más lento (camiones
-              cargados, ver _RETURN_SPEED_FACTOR en routing.py) — mismo azul,
+          {/* Vuelta, mismo tramo tipo de calle, pero más lento (camiones
+              cargados, ver _RETURN_SPEED_FACTOR en routing.py), mismo azul,
               más claro/semitransparente, sin punteado (estilo Google Maps:
               mismo color de ruta, dos sentidos). */}
           {returnPaths?.map((path, i) => {
@@ -474,7 +497,7 @@ export function GeoMapImpl({
             click: (e) => {
               // Sin esto, el click en el marker también dispara el click
               // del mapa (bubblingMouseEvents es true por defecto en
-              // Leaflet) — onMapClick es el mismo handler que "placing"
+              // Leaflet), onMapClick es el mismo handler que "placing"
               // usa para crear un punto nuevo, así que sin cortarlo acá,
               // clickear un punto guardado también intentaría crear uno.
               L.DomEvent.stopPropagation(e);

@@ -1034,8 +1034,8 @@ function AnalysisPage() {
   }
 
   return (
-    // topo-bg: curvas de nivel de feria-page (ver styles.css).
-    <div className="topo-bg flex flex-col h-screen overflow-hidden bg-background text-foreground">
+    // grid-bg: reticula cartografica de fondo (ver styles.css).
+    <div className="grid-bg flex flex-col h-screen overflow-hidden bg-background text-foreground">
       {/* Tres columnas: controles, mapa y zonas detectadas.
 
           Las zonas detectadas estuvieron una vuelta como franja horizontal bajo
@@ -1056,14 +1056,41 @@ function AnalysisPage() {
         >
           <div className="flex flex-col gap-4">
 
-            {/* título, mismo tratamiento que "Zonas monitoreadas" / "Carga
-                de imágenes": sin botón de volver (la navegación ya vive en
-                el sidebar persistente). */}
+            {/* El título es el NOMBRE DE LA ZONA, no la palabra "Análisis".
+                Antes la vista no decía en ningún lado qué zona se estaba
+                mirando: con varias zonas guardadas y capturas de fechas
+                parecidas, era imposible saberlo sin volver a Vista Principal.
+                Qué vista es ya lo dice el sidebar y lo dice el cintillo; lo que
+                falta acá es de qué terreno se está hablando.
+
+                Cae a "Análisis" mientras la zona no se conoce todavía: una
+                generación recién hecha aún no tiene zona asignada, eso pasa al
+                guardarla. */}
             <div>
-              <p className="eyebrow">Paso 2 de 2</p>
+              <p className="eyebrow">Análisis de volumen</p>
               <h1 className="font-rubik text-3xl font-semibold tracking-normal text-foreground md:text-4xl">
-                Análisis
+                {zoneName ?? currentAnalysisName ?? "Análisis"}
               </h1>
+              {(currentAnalysisName || captureDate) && (
+                <p className="mt-1.5 flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
+                  {currentAnalysisName && (
+                    <span className="truncate font-medium text-foreground">{currentAnalysisName}</span>
+                  )}
+                  {currentAnalysisName && captureDate && <span>·</span>}
+                  {captureDate && (
+                    <span className="mono tabular-nums">
+                      captura del {new Date(captureDate).toLocaleDateString("es-CL")}
+                    </span>
+                  )}
+                  {/* Ninguna foto traía fecha y se usó la de carga. Sin
+                      decirlo, una fecha inventada se lee como real. */}
+                  {captureDate && captureDateEstimated && (
+                    <span className="text-warning" title="Ninguna foto traía fecha de captura; se usó la de carga">
+                      (estimada)
+                    </span>
+                  )}
+                </p>
+              )}
               <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
                 Activa o desactiva zonas antes de ejecutar el análisis. Los totales
                 reflejan únicamente las zonas activas.

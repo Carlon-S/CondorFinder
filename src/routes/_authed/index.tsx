@@ -73,6 +73,7 @@ const ZoneEvolution = lazy(() =>
   import("@/components/ZoneEvolution").then((m) => ({ default: m.ZoneEvolution })),
 );
 import { ReportPreview } from "@/components/ReportPreview";
+import { zoneTotals } from "@/lib/volumeReport";
 import type { ReportSelection } from "@/lib/pdfReport";
 import { listResourcePoints, type ResourcePoint } from "@/lib/resources";
 import {
@@ -644,9 +645,8 @@ function MainPage() {
   }, [zones, stateFilter, nameQuery, sortBy, sortDir]);
 
   return (
-    // topo-bg: curvas de nivel de feria-page, el mismo motivo de fondo del
-    // sitio público (ver styles.css).
-    <div className="topo-bg flex min-h-screen flex-col bg-background text-foreground">
+    // grid-bg: reticula cartografica de fondo (ver styles.css).
+    <div className="grid-bg flex min-h-screen flex-col bg-background text-foreground">
       {/* Encabezado de página, "Recursos disponibles" (antes una columna
           fija de hasta 400px, ver git history) ahora vive en un panel
           deslizante (Sheet): sobre esta vista el contenido real es el
@@ -1002,11 +1002,41 @@ function MainPage() {
             </DialogDescription>
           </DialogHeader>
 
+          {/* Barra de selección: cuántas van marcadas y el atajo para marcar o
+              desmarcar todas. Con varias zonas guardadas, armar un informe
+              completo obligaba a hacer click una por una. */}
+          {zoneRecords.length > 0 && (
+            <div className="flex items-center justify-between gap-2 border-y border-border/60 py-2">
+              <span className="text-xs text-muted-foreground">
+                {reportZoneIds.size === 0
+                  ? "Ninguna zona seleccionada"
+                  : `${reportZoneIds.size} de ${zoneRecords.length} seleccionadas`}
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  setReportZoneIds((prev) =>
+                    prev.size === zoneRecords.length
+                      ? new Set()
+                      : new Set(zoneRecords.map((z) => z.id)),
+                  )
+                }
+                className="cursor-pointer text-xs text-primary transition-colors hover:underline"
+              >
+                {reportZoneIds.size === zoneRecords.length ? "Quitar todas" : "Seleccionar todas"}
+              </button>
+            </div>
+          )}
+
           <ul className="max-h-[21.25rem] space-y-1.5 overflow-y-auto pr-1">
             {zoneRecords.map((z) => {
               const deLaZona = savedAnalyses.filter((a) => a.zoneId === z.id);
               const versiones = new Set(deLaZona.map((a) => a.sourceTaskId ?? a.id)).size;
               const marcada = reportZoneIds.has(z.id);
+              // La medición más reciente de la zona: es la que da la miniatura
+              // y la cifra que se muestra en la fila.
+              const ultima = deLaZona[deLaZona.length - 1];
+              const volumen = deLaZona.reduce((s, a) => s + zoneTotals(a).volumeM3, 0);
               return (
                 <li key={z.id}>
                   <button
@@ -1019,33 +1049,97 @@ function MainPage() {
                         return next;
                       })
                     }
-                    className={`flex w-full items-center gap-3 rounded-lg border p-2.5 text-left transition-colors ${
-                      marcada ? "border-primary bg-primary/5" : "border-border/60 hover:bg-muted/40"
+                    className={`flex w-full cursor-pointer items-center gap-3 rounded-lg border p-2.5 text-left transition-all duration-200 ${
+                      marcada
+                        ? "border-primary bg-primary/5"
+                        : "border-border/60 hover:border-border hover:bg-muted/40"
                     }`}
                   >
                     <span
-                      className={`flex h-4 w-4 flex-shrink-0 items-center justify-center rounded border ${
+                      className={`flex h-4 w-4 flex-shrink-0 items-center justify-center rounded border transition-colors ${
                         marcada ? "border-primary bg-primary text-primary-foreground" : "border-border"
                       }`}
                     >
                       {marcada && <span className="text-[0.58rem] leading-none">✓</span>}
                     </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium">{z.name}</span>
-                      <span className="mono block text-[0.63rem] text-muted-foreground">
-                        {versiones} captura(s) · {deLaZona.length} análisis
+
+                    {/* La miniatura del mapa, igual que en la tabla de zonas:
+                        el nombre de una zona no dice mucho por sí solo, y al
+                        elegir qué va en un informe conviene ver cuál es. */}
+                    {ultima && (
+                      <span className="detect-frame detect-frame-sm h-11 w-14 flex-shrink-0 overflow-hidden rounded">
+                        <span className="detect-corners" aria-hidden="true" />
+                        <img
+                          src={ultima.thumbnailUrl ?? ultima.mapUrl}
+                          alt=""
+                          className="h-full w-full object-cover"
+                          loading="lazy"
+                        />
                       </span>
+                    )}
+
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-foreground">
+                        {z.name}
+                      </span>
+                      <span className="block text-[0.6875rem] text-muted-foreground">
+                        <span className="mono tabular-nums">{versiones}</span>{" "}
+                        {versiones === 1 ? "captura" : "capturas"} ·{" "}
+                        <span className="mono tabular-nums">{deLaZona.length}</span>{" "}
+                        {deLaZona.length === 1 ? "análisis" : "análisis"}
+                      </span>
+                    </span>
+
+                    <span className="mono flex-shrink-0 text-xs font-semibold tabular-nums text-foreground">
+                      {volumen.toFixed(2)} m³
                     </span>
                   </button>
                 </li>
               );
             })}
             {zoneRecords.length === 0 && (
-              <li className="py-6 text-center text-xs text-muted-foreground">
-                No hay zonas guardadas todavía.
+              <li className="flex flex-col items-center gap-2 py-8 text-center">
+                <FileText className="h-7 w-7 text-muted-foreground/40" />
+                <p className="text-sm font-medium text-foreground">No hay zonas guardadas</p>
+                <p className="max-w-xs text-xs text-muted-foreground">
+                  Guarda el análisis de una zona y aparecerá acá para incluirla en un informe.
+                </p>
               </li>
             )}
           </ul>
+
+          {/* Qué va a salir en el documento, antes de generarlo. */}
+          {reportZoneIds.size > 0 && (
+            <div className="rounded-lg border border-border/60 bg-muted/30 p-3">
+              <p className="text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                El informe incluirá
+              </p>
+              <div className="mt-1.5 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                <span>
+                  <span className="mono font-semibold tabular-nums text-foreground">
+                    {reportZoneIds.size}
+                  </span>{" "}
+                  {reportZoneIds.size === 1 ? "zona" : "zonas"}
+                </span>
+                <span>
+                  <span className="mono font-semibold tabular-nums text-foreground">
+                    {savedAnalyses.filter((a) => a.zoneId && reportZoneIds.has(a.zoneId)).length}
+                  </span>{" "}
+                  análisis
+                </span>
+                <span>
+                  <span className="mono font-semibold tabular-nums text-foreground">
+                    {savedAnalyses
+                      .filter((a) => a.zoneId && reportZoneIds.has(a.zoneId))
+                      .reduce((s, a) => s + zoneTotals(a).volumeM3, 0)
+                      .toFixed(2)}{" "}
+                    m³
+                  </span>{" "}
+                  en total
+                </span>
+              </div>
+            </div>
+          )}
 
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setReportOpen(false)}>Cancelar</Button>
