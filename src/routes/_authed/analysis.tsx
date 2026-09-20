@@ -364,6 +364,18 @@ function AnalysisPage() {
    *  se puede consultar pero no volver a medir. */
   const [canAnalyze, setCanAnalyze] = useState(true);
   const [cannotAnalyzeReason, setCannotAnalyzeReason] = useState<string | null>(null);
+  /**
+   * Solo lectura: este análisis es de una versión que ya fue reemplazada por
+   * una captura más reciente de la misma zona (HDU7 lo marca `historical` al
+   * confirmarse el duplicado).
+   *
+   * Se deriva del dato, no de la presencia de archivos en el servidor. La poda
+   * de modelos de elevación solo corre al terminar una generación y respeta
+   * los vuelos sin análisis guardado, así que perfectamente puede haber una
+   * versión reemplazada que todavía conserve sus archivos. Preguntar por el
+   * disco respondía "sí se puede medir" para versiones que no correspondía.
+   */
+  const [readOnly, setReadOnly] = useState(false);
 
   // ── HDU4 / AC1 — guardar análisis: pide nombre ─────────────────────────────
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
@@ -645,6 +657,14 @@ function AnalysisPage() {
           setCaptureDate(record.captureDate ?? null);
           setCaptureDateEstimated(record.captureDateEstimated ?? false);
           setAlgorithmVersion(record.algorithmVersion ?? null);
+          // Una versión reemplazada queda en consulta: ni medir de nuevo ni
+          // sobrescribir. Es lo que pide el AC4 de HDU10.
+          if (record.historical) {
+            setReadOnly(true);
+            setCannotAnalyzeReason(
+              "Existe una captura más reciente de esta zona, así que este vuelo solo se puede consultar.",
+            );
+          }
           setStatus("done");
 
           setCurrentAnalysisId(record.id);
@@ -1016,7 +1036,19 @@ function AnalysisPage() {
             <div className="rounded-lg bg-background/40 p-3 animate-in fade-in slide-in-from-left-2 duration-500 fill-mode-both space-y-4">
               <Button
                 onClick={runAnalysis}
-                disabled={status === "running" || !usingGeneratedMap || status === "empty" || !canAnalyze}
+                disabled={
+                  status === "running" ||
+                  !usingGeneratedMap ||
+                  status === "empty" ||
+                  !canAnalyze ||
+                  readOnly ||
+                  // La URL del JSON de detecciones se resuelve con una consulta
+                  // asíncrona al abrir un análisis guardado. Si se presionaba
+                  // antes de que llegara, runAnalysis abortaba con "No se
+                  // encontró la tarea", que sonaba a datos perdidos cuando solo
+                  // era una carrera. Mejor no habilitar el botón hasta tenerla.
+                  !detectionJsonUrl
+                }
                 className="w-full"
               >
                 {status === "running" ? (
@@ -1026,20 +1058,22 @@ function AnalysisPage() {
                 )}
               </Button>
 
-              {/* El vuelo ya no se puede volver a medir porque sus modelos de
-                  elevación se liberaron al aparecer una captura más reciente.
-                  Se explica el motivo en vez de dejar un botón apagado sin
-                  razón aparente. */}
-              {!canAnalyze && cannotAnalyzeReason && (
+              {/* Este vuelo no se puede volver a medir: o es una versión ya
+                  reemplazada, o sus modelos de elevación se liberaron. Se
+                  explica el motivo en vez de dejar un botón apagado sin razón
+                  aparente. */}
+              {(!canAnalyze || readOnly) && cannotAnalyzeReason && (
                 <p className="rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-[0.69rem] leading-relaxed text-muted-foreground">
                   {cannotAnalyzeReason}
                 </p>
               )}
 
-              {/* HDU4/AC1 — guardar análisis */}
+              {/* HDU4/AC1 — guardar análisis. Deshabilitado en una versión ya
+                  reemplazada: consultarla es válido, sobrescribirla no, porque
+                  es historia de la zona y no el estado vigente del terreno. */}
               <Button
                 onClick={handleSaveClick}
-                disabled={status !== "done" || savingAnalysis}
+                disabled={status !== "done" || savingAnalysis || readOnly}
                 variant="secondary"
                 className="w-full"
               >
