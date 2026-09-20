@@ -171,3 +171,25 @@ def update_task_sync(task_id: str, **fields: Any) -> dict | None:
         {"$set": fields},
         return_document=ReturnDocument.AFTER,
     )
+
+
+def list_unreviewed_done_sync() -> list[dict]:
+    """Tareas con el mapa ya generado y todavía SIN análisis guardado.
+
+    La poda de archivos de vuelos antiguos (ver
+    orquestador.liberar_archivos_de_vuelos_previos) las respeta: un vuelo que
+    nunca se midió no tiene ninguna cifra guardada que lo represente, así que
+    borrarle el relieve lo dejaría inservible para siempre, visible como
+    pendiente y sin forma de convertirse en zona.
+
+    Un vuelo ya guardado sí se puede podar: conserva su volumen, su mapa y sus
+    detecciones; lo único que pierde es la posibilidad de volver a medirse, que
+    es la regla de retención acordada.
+
+    Versión síncrona de list_pending_tasks() acotada a "done", porque quien la
+    llama corre en un threading.Thread, no en una corrutina.
+    """
+    cursor = get_sync_db().tasks.find(
+        {"status": "done", "reviewed": {"$ne": True}}
+    )
+    return list(cursor)

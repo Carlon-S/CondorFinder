@@ -888,19 +888,17 @@ function MainPage() {
                       <TableCell className="text-right">
                         {z.state === "done" && (
                           <div className="flex items-center justify-end gap-2">
-                            {/* HDU10 — solo aparece si la zona tiene más de
-                                una captura: con una sola no hay nada que
-                                comparar y el diálogo lo único que diría es
-                                justamente eso. */}
+                            {/* HDU10 — el botón aparece en toda zona guardada,
+                                también con una sola captura. Antes se ocultaba
+                                en ese caso, por parecer que no había nada que
+                                mostrar, pero eso dejaba el AC3 de la historia
+                                ("una zona sin versiones anteriores debe indicar
+                                que no hay con qué comparar") inalcanzable desde
+                                la interfaz: el diálogo sabía dar ese mensaje y
+                                nunca se llegaba a él. */}
                             {(() => {
                               const zona = zoneOf(z.recordId);
                               if (!zona) return null;
-                              const capturas = new Set(
-                                savedAnalyses
-                                  .filter((a) => a.zoneId === zona.id)
-                                  .map((a) => a.sourceTaskId ?? a.id),
-                              ).size;
-                              if (capturas < 2) return null;
                               return (
                                 <Button
                                   size="sm"

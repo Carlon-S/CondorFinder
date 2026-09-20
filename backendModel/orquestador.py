@@ -621,12 +621,13 @@ def dem_paths_for(task: dict) -> tuple[str, str, str]:
 
 
 def liberar_archivos_de_vuelos_previos(conservar_task_id: str) -> None:
-    """Borra de FINALS_DIR los archivos de todos los vuelos menos el indicado.
+    """Borra de FINALS_DIR los archivos de los vuelos que ya no se necesitan.
 
-    Se llama al terminar una generación: desde ese momento, el único vuelo que
-    se puede volver a medir es el recién generado. Se van tres tipos de
-    archivo, todos pesados y todos inútiles para un vuelo que dejó de ser el
-    vigente:
+    Se llama al terminar una generación. Se conservan dos grupos: el vuelo
+    recién generado, y los que tienen el mapa hecho pero todavía sin análisis
+    guardado (ver task_store.list_unreviewed_done_sync para el porqué). Del
+    resto se van tres tipos de archivo, todos pesados y todos inútiles para un
+    vuelo que ya tiene sus cifras guardadas y dejó de ser el vigente:
 
       - dsm/dtm/ndsm: sin ellos no se puede calcular volumen, que es
         justamente la regla de retención acordada.
@@ -643,15 +644,35 @@ def liberar_archivos_de_vuelos_previos(conservar_task_id: str) -> None:
     quede sin borrar cuesta disco, pero un error acá no debe tumbar un
     pipeline que ya terminó bien.
     """
+    def sufijo_de(t: dict) -> str:
+        _, _, ndsm = dem_paths_for(t)
+        return os.path.basename(ndsm)[len("ndsm_"):-len(".tif")]
+
     task = task_store.get_task_sync(conservar_task_id) or {}
-    _, _, ndsm_vigente = dem_paths_for(task)
-    sufijo_vigente = os.path.basename(ndsm_vigente)[len("ndsm_"):-len(".tif")]
+    sufijo_vigente = sufijo_de(task)
 
     if not sufijo_vigente:
         # Sin sufijo no se puede saber cuál conservar, y borrar a ciegas se
         # llevaría también el vuelo vigente. Mejor no tocar nada: el costo es
         # disco, no datos.
         print("No se liberaron archivos: la tarea no tiene ortomosaico asociado", file=sys.stderr)
+        return
+
+    # Además del vuelo recién generado, se respetan los que tienen el mapa
+    # hecho pero todavía ningún análisis guardado. Sin esto, generar un mapa
+    # dejaba inservible para siempre a cualquier pendiente anterior: seguía
+    # apareciendo en la lista sin poder medirse nunca, y como una versión solo
+    # nace al guardarse su primer análisis, tampoco podía llegar a ser una.
+    protegidos = {sufijo_vigente}
+    try:
+        for pendiente in task_store.list_unreviewed_done_sync():
+            s = sufijo_de(pendiente)
+            if s:
+                protegidos.add(s)
+    except Exception as e:
+        # Si no se puede saber cuáles están pendientes, no se poda nada: el
+        # costo de equivocarse acá es perder un vuelo, el de no podar es disco.
+        print(f"No se liberaron archivos, no se pudo listar pendientes: {e}", file=sys.stderr)
         return
 
     prefijos = ("dsm_", "dtm_", "ndsm_", "ortho_")
@@ -661,7 +682,7 @@ def liberar_archivos_de_vuelos_previos(conservar_task_id: str) -> None:
                 continue
             if not nombre.startswith(prefijos):
                 continue
-            if sufijo_vigente in nombre:
+            if any(s in nombre for s in protegidos):
                 continue
             try:
                 os.remove(os.path.join(FINALS_DIR, nombre))
