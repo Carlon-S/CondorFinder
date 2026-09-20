@@ -1072,7 +1072,12 @@ function AnalysisPage() {
                   <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
                     {status === "empty"
                       ? "El análisis finalizó correctamente, pero no encontró polígonos de residuos en el mapa unificado."
-                      : "El servicio de análisis no retornó resultados válidos para mostrar."}
+                      : !canAnalyze
+                        // No es una falla del servicio: es la regla de
+                        // retención. El texto genérico de error hacía parecer
+                        // roto algo que funciona como se diseñó.
+                        ? "No es un error del sistema. Este vuelo conserva su mapa y los análisis que ya se le hicieron, pero no se puede volver a medir."
+                        : "El servicio de análisis no retornó resultados válidos para mostrar."}
                   </p>
                 </div>
               </div>
