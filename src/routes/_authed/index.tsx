@@ -1,5 +1,5 @@
 // =============================================================================
-// CONDORFINDER — VISTA PRINCIPAL
+// CONDORFINDER, VISTA PRINCIPAL
 // Archivo: src/routes/index.tsx
 //
 // Página de entrada de la aplicación. El listado de zonas combina:
@@ -72,6 +72,8 @@ import {
 const ZoneEvolution = lazy(() =>
   import("@/components/ZoneEvolution").then((m) => ({ default: m.ZoneEvolution })),
 );
+import { ReportPreview } from "@/components/ReportPreview";
+import type { ReportSelection } from "@/lib/pdfReport";
 import { listResourcePoints, type ResourcePoint } from "@/lib/resources";
 import {
   listPendingTasks,
@@ -120,7 +122,7 @@ import {
 export const Route = createFileRoute("/_authed/")({
   head: () => ({
     meta: [
-      { title: "CondorFinder — Zonas monitoreadas" },
+      { title: "CondorFinder, Zonas monitoreadas" },
       {
         name: "description",
         content: "Panorama de las zonas con basurales detectados y analizados por CondorFinder.",
@@ -140,7 +142,7 @@ interface ZoneRow {
   name: string;
   savedAt: string;
   mapUrl: string | null;
-  /** Miniatura liviana para la tarjeta — preferida sobre mapUrl (varios MB)
+  /** Miniatura liviana para la tarjeta, preferida sobre mapUrl (varios MB)
    *  cuando existe; ausente en análisis guardados antes de este campo. */
   thumbnailUrl?: string | null;
   summary: AnalysisSummary | null;
@@ -150,12 +152,12 @@ interface ZoneRow {
   resultUrl?: string;
   resultJsonUrl?: string;
   detectionCount?: number;
-  /** HDU7/AC3 — true si este análisis quedó vinculado como versión anterior
+  /** HDU7/AC3, true si este análisis quedó vinculado como versión anterior
    *  de uno más reciente (confirmado como la misma zona). Se oculta de los
    *  filtros normales, solo visible bajo el filtro "Historial". */
   historical?: boolean;
-  /** HDU7/AC3 — nombre del análisis que lo reemplazó, resuelto cruzando
-   *  contra las demás filas ya cargadas (ver loadZoneRows) — no hace falta
+  /** HDU7/AC3, nombre del análisis que lo reemplazó, resuelto cruzando
+   *  contra las demás filas ya cargadas (ver loadZoneRows), no hace falta
    *  pedirle nada extra al backend para esto. */
   supersededByName?: string;
 }
@@ -177,7 +179,7 @@ function fromRecord(r: SavedAnalysisRecord): ZoneRow {
 
 /**
  * Combina los análisis guardados (Mongo) con las tareas pendientes
- * (GET /tasks/pending, también Mongo) — reemplaza el registro local en
+ * (GET /tasks/pending, también Mongo), reemplaza el registro local en
  * taskRegistry.ts. Ya no hay ningún estado del lado del navegador que
  * pueda desincronizarse: cualquier navegador/dispositivo ve exactamente
  * las mismas tareas, y una falla de red al consultar el backend solo
@@ -186,13 +188,13 @@ function fromRecord(r: SavedAnalysisRecord): ZoneRow {
  * uvicorn en el momento equivocado antes de esta migración).
  */
 async function loadZoneRows(): Promise<ZoneRow[]> {
-  // Ambas listas pueden fallar (sesión perdida, red caída) — se degradan en
+  // Ambas listas pueden fallar (sesión perdida, red caída), se degradan en
   // silencio en vez de romper el resto del listado, mismo criterio que ya
   // usa este archivo para listResourcePoints() (.catch(() => {})).
   let doneRows: ZoneRow[] = [];
   try {
     const records = await listAnalyses();
-    // HDU7/AC3 — resuelve supersededByName cruzando contra las demás filas
+    // HDU7/AC3, resuelve supersededByName cruzando contra las demás filas
     // ya traídas en esta misma llamada, sin pedirle nada extra al backend.
     const nameById = new Map(records.map((r) => [r.id, r.name]));
     doneRows = records.map((r) => ({
@@ -212,7 +214,7 @@ async function loadZoneRows(): Promise<ZoneRow[]> {
 
   const trackedRows: ZoneRow[] = [];
   for (const t of pending) {
-    // El backend la incluye para que se pueda descubrir y limpiar acá —
+    // El backend la incluye para que se pueda descubrir y limpiar acá , 
     // nunca se muestra como fila (una tarea cancelada no llega a guardarse
     // ni analizarse), y se borra por completo (archivos + documento) para
     // que no siga apareciendo en el próximo refresh.
@@ -229,7 +231,7 @@ async function loadZoneRows(): Promise<ZoneRow[]> {
         name: "Análisis pendiente de revisión",
         savedAt: t.createdAt ?? new Date().toISOString(),
         // El mapa ya existe en el servidor en este punto (el pipeline
-        // completo terminó, solo falta guardarlo/analizarlo) — antes se
+        // completo terminó, solo falta guardarlo/analizarlo), antes se
         // dejaba en null y la fila mostraba un ícono de placeholder en
         // vez de la miniatura real, aunque el sistema ya la tenía.
         mapUrl: t.resultUrl ?? null,
@@ -269,7 +271,7 @@ function round(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-/** Normaliza para comparar sin distinguir tildes/diacríticos — "a" debe
+/** Normaliza para comparar sin distinguir tildes/diacríticos, "a" debe
  *  encontrar "á" en la búsqueda por nombre de zona. */
 const DIACRITICS_RE = new RegExp("[\\u0300-\\u036f]", "g");
 
@@ -286,7 +288,7 @@ function MainPage() {
   const [loading, setLoading] = useState(true);
   const [addZoneOpen, setAddZoneOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ZoneRow | null>(null);
-  // Retiene el último target no-nulo — deleteTarget se pone en null para
+  // Retiene el último target no-nulo, deleteTarget se pone en null para
   // CERRAR el diálogo (dispara la animación de salida), pero si el texto de
   // la descripción también pasa a depender de null en ese instante, se ve
   // un flash con el mensaje genérico durante los ~200ms de la animación.
@@ -295,19 +297,19 @@ function MainPage() {
   useEffect(() => {
     if (deleteTarget) setDeleteTargetDisplay(deleteTarget);
   }, [deleteTarget]);
-  // key de la fila que se está eliminando ahora mismo (o null) — el diálogo
+  // key de la fila que se está eliminando ahora mismo (o null), el diálogo
   // de confirmación se cierra al instante, y esta fila muestra su propio
   // estado de carga mientras confirmDelete corre en segundo plano. Antes no
   // había ningún indicio de que algo estaba pasando ni confirmación visible
   // hasta que la fila desaparecía de golpe al terminar.
   const [deletingRowKey, setDeletingRowKey] = useState<string | null>(null);
 
-  // Filtro por estado — 4 botones al nivel de "Agregar zona" (Todas incluida).
+  // Filtro por estado, 4 botones al nivel de "Agregar zona" (Todas incluida).
   // "historical" (HDU7/AC3) es un quinto filtro aparte, no un ZoneState más
-  // — ver filteredZones más abajo: los otros 4 SIEMPRE excluyen históricos,
+  //, ver filteredZones más abajo: los otros 4 SIEMPRE excluyen históricos,
   // "historical" muestra SOLO históricos.
   const [stateFilter, setStateFilter] = useState<"all" | ZoneState | "historical">("all");
-  // Búsqueda por nombre de zona — se combina con el filtro de estado.
+  // Búsqueda por nombre de zona, se combina con el filtro de estado.
   const [nameQuery, setNameQuery] = useState("");
 
   // ── HDU9 (informe PDF) y HDU10 (evolución) ────────────────────────────────
@@ -321,7 +323,9 @@ function MainPage() {
   const [zoneRecords, setZoneRecords] = useState<ZoneRecord[]>([]);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportZoneIds, setReportZoneIds] = useState<Set<string>>(new Set());
-  const [generatingReport, setGeneratingReport] = useState(false);
+  /** Zonas elegidas para el informe, ya resueltas, que consume la vista previa. */
+  const [reportSelection, setReportSelection] = useState<ReportSelection[] | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
   /** Zona cuya evolución se está viendo, o null si el diálogo está cerrado. */
   const [evolutionZone, setEvolutionZone] = useState<ZoneRecord | null>(null);
 
@@ -345,7 +349,7 @@ function MainPage() {
   };
 
   // Orden estilo Excel: click en el encabezado de columna.
-  // Solo aplica a las zonas terminadas — en progreso/pendientes siempre van primero.
+  // Solo aplica a las zonas terminadas, en progreso/pendientes siempre van primero.
   const [sortBy, setSortBy] = useState<"fecha" | "volumen" | "peso" | "area">("fecha");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
@@ -375,7 +379,7 @@ function MainPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Panel "Recursos disponibles" (HDU6) — totales reales sobre los puntos
+  // Panel "Recursos disponibles" (HDU6), totales reales sobre los puntos
   // de origen guardados, no los placeholders fijos que había antes.
   const [resourcePoints, setResourcePoints] = useState<ResourcePoint[]>([]);
   const [resourcePointsLoading, setResourcePointsLoading] = useState(true);
@@ -397,18 +401,18 @@ function MainPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zones]);
 
-  // AC4 — abre una zona terminada en /analysis
+  // AC4, abre una zona terminada en /analysis
   const openZone = (recordId: string) => {
     setPendingOpenId(recordId);
     navigate({ to: "/analysis" });
   };
 
-  // Retoma una generación en curso — vuelve a donde se presionó
+  // Retoma una generación en curso, vuelve a donde se presionó
   // "Generar mapa unificado" originalmente.
   //
   // clearImageState() primero es clave: si no se limpia, cualquier resto de
   // OTRA tarea (items, resultUrl, detectionJsonUrl) que haya quedado en
-  // sessionStorage podía mezclarse con la tarea que se está por retomar —
+  // sessionStorage podía mezclarse con la tarea que se está por retomar , 
   // con 2 procesos en progreso, eso hacía que a veces se mostrara el
   // proceso equivocado en /carga.
   const resumeInCarga = async (row: ZoneRow) => {
@@ -445,25 +449,25 @@ function MainPage() {
   // Lleva un mapa ya generado (pero sin analizar/guardar) a /analysis.
   //
   // saveDetectionJsonUrl era condicional (solo se llamaba "if
-  // row.resultJsonUrl") — si por lo que sea esa fila no traía su propio
+  // row.resultJsonUrl"), si por lo que sea esa fila no traía su propio
   // resultJsonUrl, la línea simplemente se saltaba y dejaba en
   // sessionStorage lo que hubiera quedado de la ÚLTIMA zona vista/generada
   // antes. Como saveMapUrl() sí es incondicional, el resultado era: mapUrl
   // se actualiza a la zona correcta, pero detectionJsonUrl queda pegado al
-  // de otra zona — imagen bien, detecciones cruzadas. Ahora ambos casos son
+  // de otra zona, imagen bien, detecciones cruzadas. Ahora ambos casos son
   // explícitos: si hay URL se guarda, si no se limpia, nunca queda un valor
   // viejo sin tocar.
   //
-  // row viene del último refreshZones() cacheado en el estado — puede estar
+  // row viene del último refreshZones() cacheado en el estado, puede estar
   // obsoleto: el auto-refresh automático (más abajo) solo corre mientras
   // haya alguna zona "en progreso", así que si el .json del backend todavía
   // no era visible en disco justo en el poll que hizo pasar esta zona a
   // "pendiente" (pasa con la carpeta del proyecto sincronizada por
-  // OneDrive/WSL — el archivo puede existir un instante antes de que
+  // OneDrive/WSL, el archivo puede existir un instante antes de que
   // os.path.exists() lo vea), esa fila queda pegada sin result_json_url
   // para siempre, sin otro refresh que la corrija. Por eso se re-consulta
   // /status fresco acá mismo antes de navegar, en vez de confiar ciegamente
-  // en row — así "Ir a Análisis" nunca arrastra un dato incompleto viejo.
+  // en row, así "Ir a Análisis" nunca arrastra un dato incompleto viejo.
   const reviewPending = async (row: ZoneRow) => {
     if (!row.taskId) return;
     const fresh = await getTaskStatus(row.taskId);
@@ -490,7 +494,7 @@ function MainPage() {
     if (!deleteTarget) return;
     // Cierra el diálogo de inmediato y deja la carga visible EN LA FILA
     // (deletingRowKey) en vez de mantener el diálogo abierto durante todo
-    // el borrado — antes la fila desaparecía de golpe recién al terminar,
+    // el borrado, antes la fila desaparecía de golpe recién al terminar,
     // sin ningún indicio de que algo estaba pasando mientras tanto.
     const target = deleteTarget;
     setDeleteTarget(null);
@@ -499,7 +503,7 @@ function MainPage() {
     if (target.state === "done" && target.recordId) {
       await deleteAnalysis(target.recordId);
 
-      // Borra también los archivos en el servidor (imagen + json) — si no,
+      // Borra también los archivos en el servidor (imagen + json), si no,
       // quedan huérfanos ocupando espacio aunque la zona ya no aparezca.
       const filename = target.mapUrl?.split("/").pop();
       if (filename) {
@@ -514,13 +518,13 @@ function MainPage() {
         const jsonName = filename.replace(/\.png$/i, ".json");
         if (jsonName !== filename) deleteResultFile(jsonName);
         // El .tif del ortomosaico vive en joining/finals/, no en
-        // detecting/output/ — sin este borrado quedaba huérfano ahí para
+        // detecting/output/, sin este borrado quedaba huérfano ahí para
         // siempre (varios MB por zona) aunque el resto se limpiara bien.
         const tifName = filename.replace(/\.png$/i, ".tif");
         if (tifName !== filename) deleteFinalsFile(tifName);
       }
       // También el snapshot de imágenes originales de la tarea, y el
-      // documento de la tarea en sí (colección `tasks`) — si se guardó con
+      // documento de la tarea en sí (colección `tasks`), si se guardó con
       // una versión que ya trackeaba sourceTaskId. Sin borrar el documento,
       // quedaba huérfano en Mongo para siempre (ya no se pierde solo con
       // reiniciar uvicorn, a diferencia de cuando `tasks` vivía en memoria).
@@ -530,7 +534,7 @@ function MainPage() {
       }
     } else if (target.taskId) {
       // "En progreso" también cancela el proceso en el backend, no solo
-      // deja de trackearlo — si no, seguiría corriendo invisible.
+      // deja de trackearlo, si no, seguiría corriendo invisible.
       if (target.state === "in_progress") {
         await cancelTask(target.taskId);
       }
@@ -539,7 +543,7 @@ function MainPage() {
 
       // "Pendiente de revisión": el mapa y el JSON de detecciones ya se
       // generaron en el servidor (detecting/output/) aunque nunca se hayan
-      // guardado como análisis — sin este cleanup quedaban huérfanos ahí
+      // guardado como análisis, sin este cleanup quedaban huérfanos ahí
       // para siempre, ya que nunca llegaron a tener un registro guardado
       // desde el cual borrarlos. Para "en progreso" estos campos son
       // undefined (el mapa todavía no existe), así que no hace nada.
@@ -564,7 +568,7 @@ function MainPage() {
     notify.success("Zona eliminada", `"${deletedName}" ya no aparece en tu listado.`);
   };
 
-  // "Zona nueva" debe partir en blanco — limpia cualquier resto de una
+  // "Zona nueva" debe partir en blanco, limpia cualquier resto de una
   // sesión de carga anterior (imágenes subidas, mapa generado, progreso)
   // antes de entrar a /carga, para que no se vea la generación previa.
   const goToCarga = () => {
@@ -582,8 +586,8 @@ function MainPage() {
   );
 
   const totals = useMemo(() => {
-    // HDU7/AC3 — un análisis histórico (reemplazado por uno más reciente
-    // confirmado como la misma zona) no debe sumar acá — es justo el doble
+    // HDU7/AC3, un análisis histórico (reemplazado por uno más reciente
+    // confirmado como la misma zona) no debe sumar acá, es justo el doble
     // conteo que el AC pide evitar ("usa el más reciente para el volumen
     // total comunal").
     return zones
@@ -601,7 +605,7 @@ function MainPage() {
   }, [zones]);
 
   const visibleRows = useMemo(() => {
-    // HDU7/AC3 — "historical" es el único filtro que muestra análisis
+    // HDU7/AC3, "historical" es el único filtro que muestra análisis
     // reemplazados; los otros 4 (incluido "all") los excluyen siempre, así
     // el listado principal nunca muestra una zona junto a la versión que
     // ya la reemplazó.
@@ -643,7 +647,7 @@ function MainPage() {
     // topo-bg: curvas de nivel de feria-page, el mismo motivo de fondo del
     // sitio público (ver styles.css).
     <div className="topo-bg flex min-h-screen flex-col bg-background text-foreground">
-      {/* Encabezado de página — "Recursos disponibles" (antes una columna
+      {/* Encabezado de página, "Recursos disponibles" (antes una columna
           fija de hasta 400px, ver git history) ahora vive en un panel
           deslizante (Sheet): sobre esta vista el contenido real es el
           listado de zonas, no un resumen de HDU6 que ya tiene su propia
@@ -659,7 +663,7 @@ function MainPage() {
         <Sheet>
           <SheetTrigger asChild>
             {/* variant="secondary" quedaba casi invisible acá (mismo tono
-                navy que el header) — fondo bg-card + borde para que se lea
+                navy que el header), fondo bg-card + borde para que se lea
                 como botón real, no como parte del fondo. */}
             <Button
               size="sm"
@@ -687,14 +691,14 @@ function MainPage() {
         {/* ── Contenido: KPIs + listado de zonas ── */}
         <section className="flex min-w-0 flex-1 flex-col p-6">
 
-          {/* KPIs generales — el primer dato que la Municipalidad necesita leer al
+          {/* KPIs generales, el primer dato que la Municipalidad necesita leer al
               entrar, por eso usa el mismo tratamiento .panel que el resto del
               sistema en vez de quedar como una tira plana. */}
           <div className="panel mb-6 flex flex-wrap items-center divide-x divide-border/10 px-1 animate-in fade-in slide-in-from-top-2 duration-500">
             <Kpi
               icon={<ChartLineUp className="h-4 w-4" />}
               label="Zonas registradas"
-              // HDU7/AC3 — mismo criterio que "totals" más abajo: un análisis
+              // HDU7/AC3, mismo criterio que "totals" más abajo: un análisis
               // histórico (reemplazado) ya no cuenta como zona vigente.
               value={String(zones.filter((z) => !z.historical).length)}
             />
@@ -711,7 +715,7 @@ function MainPage() {
             )}
           </div>
 
-          {/* Tarjeta que contiene filtros + tabla — mismo tratamiento .bg-card
+          {/* Tarjeta que contiene filtros + tabla, mismo tratamiento .bg-card
               que el resto del sistema, sin duplicar el shadow pesado de
               .panel (ya lo lleva la franja de KPIs arriba). */}
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-card animate-in fade-in slide-in-from-top-2 duration-500 delay-100 fill-mode-both">
@@ -721,7 +725,7 @@ function MainPage() {
               <h3 className="text-sm font-semibold tracking-tight text-foreground">Listado de zonas</h3>
             </div>
 
-            {/* Búsqueda por nombre de zona — centrada entre el título y los filtros */}
+            {/* Búsqueda por nombre de zona, centrada entre el título y los filtros */}
             <div className="flex min-w-[15rem] flex-1 justify-center">
               <div className="relative w-full max-w-md">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -735,7 +739,7 @@ function MainPage() {
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
-              {/* Filtro por estado — 5 botones, uno activo a la vez.
+              {/* Filtro por estado, 5 botones, uno activo a la vez.
                   "Historial" (HDU7/AC3) es el único que muestra análisis
                   reemplazados; los otros 4 los excluyen siempre. */}
               <div className="flex items-center gap-1 rounded-full border border-border p-1">
@@ -745,7 +749,7 @@ function MainPage() {
                 <FilterChip active={stateFilter === "pending_analysis"} onClick={() => setStateFilter("pending_analysis")}>Pendientes</FilterChip>
                 <FilterChip active={stateFilter === "historical"} onClick={() => setStateFilter("historical")}>Historial</FilterChip>
               </div>
-              {/* HDU9/AC4 — sin ninguna zona guardada no hay informe posible:
+              {/* HDU9/AC4, sin ninguna zona guardada no hay informe posible:
                   el botón queda deshabilitado y el motivo aparece al pasar el
                   puntero por encima.
 
@@ -850,7 +854,7 @@ function MainPage() {
                             />
                           </div>
                         ) : z.state === "in_progress" ? (
-                          // Proceso activo en el backend — el barrido de .scan-line
+                          // Proceso activo en el backend, el barrido de .scan-line
                           // conecta la fila con la identidad de detección aérea del
                           // resto de la página, y el ícono deja inequívoco que está
                           // cargando (el barrido solo no era suficientemente claro).
@@ -881,7 +885,7 @@ function MainPage() {
                             Histórico
                           </span>
                         )}
-                        {/* HDU7/AC3 — solo tiene sentido bajo el filtro "Historial", los
+                        {/* HDU7/AC3, solo tiene sentido bajo el filtro "Historial", los
                             demás filtros ya excluyen las filas históricas. */}
                         {z.historical && z.supersededByName && (
                           <p className="mt-0.5 text-[0.625rem] font-normal text-muted-foreground">
@@ -893,18 +897,18 @@ function MainPage() {
                         {new Date(z.savedAt).toLocaleDateString("es-CL")}
                       </TableCell>
                       <TableCell className="text-right mono">
-                        {z.summary ? `${z.summary.totalVolumeM3} m³` : "—"}
+                        {z.summary ? `${z.summary.totalVolumeM3} m³` : ", "}
                       </TableCell>
                       <TableCell className="text-right mono">
-                        {z.summary ? `${z.summary.totalWeightKg} kg` : "—"}
+                        {z.summary ? `${z.summary.totalWeightKg} kg` : ", "}
                       </TableCell>
                       <TableCell className="text-right mono">
-                        {z.summary ? `${z.summary.totalAreaM2} m²` : "—"}
+                        {z.summary ? `${z.summary.totalAreaM2} m²` : ", "}
                       </TableCell>
                       <TableCell className="text-right">
                         {z.state === "done" && (
                           <div className="flex items-center justify-end gap-2">
-                            {/* HDU10 — el botón aparece en toda zona guardada,
+                            {/* HDU10, el botón aparece en toda zona guardada,
                                 también con una sola captura. Antes se ocultaba
                                 en ese caso, por parecer que no había nada que
                                 mostrar, pero eso dejaba el AC3 de la historia
@@ -983,7 +987,7 @@ function MainPage() {
       </main>
 
       {/* Popup de "Agregar zona": nueva zona vs. modificar una existente */}
-      {/* ── HDU9 — selección de zonas para el informe ── */}
+      {/* ── HDU9, selección de zonas para el informe ── */}
       {/* El listado incluye TODAS las versiones de cada zona, incluidas las
           reemplazadas: sin ellas el criterio de comparar una versión con la
           que la sucedió sería inalcanzable, porque los filtros de la tabla
@@ -1045,43 +1049,37 @@ function MainPage() {
 
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setReportOpen(false)}>Cancelar</Button>
+            {/* Ya no descarga directo: abre la misma vista previa que la vista
+                de Análisis, para revisar el documento antes de guardarlo. */}
             <Button
-              disabled={reportZoneIds.size === 0 || generatingReport}
-              onClick={async () => {
-                setGeneratingReport(true);
-                try {
-                  // Carga diferida: jspdf solo se descarga cuando alguien
-                  // realmente genera un informe, y nunca durante el
-                  // renderizado en servidor.
-                  const { generateVolumeReport } = await import("@/lib/pdfReport");
-                  const seleccion = zoneRecords
+              disabled={reportZoneIds.size === 0}
+              onClick={() => {
+                setReportSelection(
+                  zoneRecords
                     .filter((z) => reportZoneIds.has(z.id))
                     .map((zone) => ({
                       zone,
                       analyses: savedAnalyses.filter((a) => a.zoneId === zone.id),
                     }))
-                    .filter((s) => s.analyses.length > 0);
-                  const nombre = await generateVolumeReport(seleccion);
-                  notify.success("Informe generado", nombre);
-                  setReportOpen(false);
-                } catch {
-                  notify.error("No se pudo generar el informe", "Intenta nuevamente.");
-                } finally {
-                  setGeneratingReport(false);
-                }
+                    .filter((s) => s.analyses.length > 0),
+                );
+                setReportOpen(false);
+                setPreviewOpen(true);
               }}
             >
-              {generatingReport ? (
-                <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generando...</>
-              ) : (
-                <><FileText className="mr-2 h-4 w-4" /> Descargar PDF</>
-              )}
+              <FileText className="mr-2 h-4 w-4" /> Ver informe
             </Button>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* ── HDU10 — evolución de una zona ── */}
+      <ReportPreview
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        selections={reportSelection}
+      />
+
+      {/* ── HDU10, evolución de una zona ── */}
       <Dialog open={evolutionZone !== null} onOpenChange={(open) => !open && setEvolutionZone(null)}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>

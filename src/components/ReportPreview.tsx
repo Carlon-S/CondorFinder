@@ -69,7 +69,11 @@ export function ReportPreview({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-4xl">
+      {/* Alto por viewport, no fijo: el visor de PDF del navegador necesita
+          espacio real para mostrar la primera plana completa. Con un alto
+          chico mostraba solo la cabecera y había que desplazar para ver si el
+          documento estaba bien. */}
+      <DialogContent className="flex h-[90vh] max-h-[90vh] flex-col sm:max-w-5xl">
         <DialogHeader>
           <DialogTitle>Vista previa del informe</DialogTitle>
           <DialogDescription>
@@ -77,13 +81,19 @@ export function ReportPreview({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="h-[30rem] overflow-hidden rounded-lg border border-border bg-muted/30">
+        <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-border bg-muted/30">
           {error ? (
             <div className="flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground">
               {error}
             </div>
           ) : url ? (
-            <iframe src={url} title="Vista previa del informe" className="h-full w-full border-0" />
+            // #view=FitH encuadra el ancho de la página, así la primera plana
+            // entra entera en vez de abrirse al zoom que recuerde el visor.
+            <iframe
+              src={`${url}#view=FitH`}
+              title="Vista previa del informe"
+              className="h-full w-full border-0"
+            />
           ) : (
             <div className="flex h-full items-center justify-center">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />

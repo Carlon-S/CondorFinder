@@ -395,6 +395,9 @@ function AnalysisPage() {
   const [zoneAnalyses, setZoneAnalyses] = useState<SavedAnalysisRecord[]>([]);
   /** Los mismos, agrupados por vuelo y ordenados en el tiempo. */
   const [versions, setVersions] = useState<ZoneVersion[]>([]);
+  /** Las capturas se piden después de montar; sin avisarlo, la barra
+   *  aparecía de golpe un momento después y empujaba el contenido. */
+  const [versionsLoading, setVersionsLoading] = useState(false);
   const [evolutionOpen, setEvolutionOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   /** Nombre de la zona, para el título del informe y de la evolución. Sale de
@@ -697,17 +700,20 @@ function AnalysisPage() {
   const cargarVersionesDeLaZona = (zona: string | null) => {
     if (!zona) {
       setVersions([]);
+      setVersionsLoading(false);
       return;
     }
+    setVersionsLoading(true);
     listAnalyses()
       .then((todos) => {
         const deLaZona = todos.filter((a) => a.zoneId === zona);
         setZoneAnalyses(deLaZona);
         setVersions(buildVersions(deLaZona));
       })
-      // Degrada en silencio: sin versiones la vista sigue funcionando como
-      // antes, solo sin la barra inferior.
-      .catch(() => {});
+      // Degrada en silencio: sin versiones la barra queda vacía, pero el resto
+      // de la vista sigue funcionando igual.
+      .catch(() => {})
+      .finally(() => setVersionsLoading(false));
 
     listZones()
       .then((zonas) => setZoneName(zonas.find((z) => z.id === zona)?.name ?? null))
@@ -1378,17 +1384,16 @@ function AnalysisPage() {
             pantalla no da para tres, y la lista vuelve a la columna izquierda
             no tendria sentido: se oculta y el mapa se queda con el espacio. */}
         <aside className="hidden min-w-0 flex-col overflow-y-auto border-l border-border/35 p-4 xl:flex">
-          <p className="mb-3 text-sm font-semibold text-foreground">Zonas detectadas</p>
-          {/* lista de zonas */}
+          {/* Un solo encabezado. Al mover este bloque desde la columna
+              izquierda quedaron dos títulos iguales, uno del contenedor nuevo y
+              otro que el bloque ya traía. */}
           <div>
-            <div className="flex items-center justify-between mb-2.5">
-              <p className="text-xs font-semibold text-muted-foreground">
-                Zonas detectadas
-              </p>
+            <div className="mb-3 flex items-baseline justify-between gap-2">
+              <p className="text-sm font-semibold text-foreground">Zonas detectadas</p>
               {displayDetections.length > 0 && (
                 <button
                   onClick={toggleAll}
-                  className="text-[0.625rem] text-primary hover:underline"
+                  className="text-xs text-primary hover:underline"
                 >
                   {allEnabled ? "Desactivar todas" : "Activar todas"}
                 </button>
@@ -1498,6 +1503,7 @@ function AnalysisPage() {
         versions={versions}
         activeTaskId={taskId}
         onSelect={seleccionarVersion}
+        loading={versionsLoading}
       />
 
       {/* HDU9, informe acotado a esta zona, con vista previa antes de bajarlo. */}
