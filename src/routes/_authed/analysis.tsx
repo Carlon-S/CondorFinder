@@ -1325,7 +1325,12 @@ function AnalysisPage() {
                   Esta captura: {activeSummary.totalVolumeM3} m³
                 </p>
 
-                <ul className="mt-2 space-y-1.5">
+                {/* max-h + scroll: el backend ya acota cuántos candidatos
+                    manda (MAX_CANDIDATOS), pero el aviso vive en el panel
+                    lateral y no puede crecer sin techo aunque lleguen varios.
+                    Con el tope, el botón de "ninguna" siempre queda visible
+                    sin tener que desplazar el panel entero. */}
+                <ul className="mt-2 max-h-[11rem] space-y-1.5 overflow-y-auto pr-1">
                   {duplicateWarning.candidatos.map((c) => (
                     <li key={c.analysisId}>
                       <button

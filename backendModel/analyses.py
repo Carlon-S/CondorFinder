@@ -112,9 +112,11 @@ class ReassignIn(BaseModel):
 class SavedAnalysisIn(BaseModel):
     name: str
     mapUrl: str
-    # Zona a la que pertenece este análisis. Si no viene, el backend la
-    # resuelve: hereda la de la zona que HDU7 haya reconocido por huella del
-    # ortomosaico, o crea una nueva. Ver _resolve_zone().
+    # Zona a la que pertenece este análisis. Si el trabajador la declaró al
+    # cargar ("modificar zona existente"), viene acá y manda sobre cualquier
+    # otra cosa. Si no viene, el backend crea una zona propia: juntarla con
+    # otra es una decisión que se toma después, al resolver el posible
+    # duplicado. Ver _resolve_zone().
     zoneId: str | None = None
     # Fecha en que se CAPTURARON las fotos (EXIF), no en que se guardó el
     # análisis. Es la que ordena las versiones de una zona en el tiempo: dos
@@ -251,6 +253,11 @@ def _to_out(doc: dict) -> SavedAnalysisOut:
 # =============================================================================
 
 OVERLAP_THRESHOLD = 0.5
+
+# Cuantos candidatos a duplicado se le ofrecen al trabajador, como maximo.
+# El aviso vive en el panel lateral, que mide entre 17 y 25rem: mas de un
+# punado de filas no cabe, y ademas empeora la decision en vez de mejorarla.
+MAX_CANDIDATOS = 4
 
 
 def _polygon_iou(coords_a: list[list[float]], coords_b: list[list[float]]) -> float:
@@ -397,8 +404,13 @@ async def _find_possible_duplicates(new_doc: dict, exclude_id: ObjectId | None) 
                 "ratio": round(ratio, 4),
             })
 
+    # Solo los mejores. Con muchas zonas registradas, todas las que rocen el
+    # umbral producirían una lista que no cabe en el panel lateral, y la
+    # decisión se vuelve peor, no mejor: el trabajador tendría que descartar
+    # a ojo una docena de zonas que apenas se tocan. Las que importan son las
+    # que se superponen de verdad, y esas son siempre unas pocas.
     candidatos.sort(key=lambda c: c["ratio"], reverse=True)
-    return candidatos
+    return candidatos[:MAX_CANDIDATOS]
 
 
     new_rect = _bounds_to_rect(new_bounds)
@@ -506,10 +518,17 @@ async def _resolve_zone(doc: dict, owner: str, duplicate_of: str | None) -> str:
         if hermano and hermano.get("zoneId"):
             return hermano["zoneId"]
 
-    if duplicate_of:
-        otro = await get_db().analyses.find_one({"_id": _object_id(duplicate_of)})
-        if otro and otro.get("zoneId"):
-            return otro["zoneId"]
+    # Antes acá se heredaba la zona del mejor candidato a duplicado, en el acto
+    # y sin esperar respuesta. Se quitó: mientras la pregunta está pendiente, la
+    # captura aparecía en la barra de versiones de una zona que el trabajador
+    # todavía no había confirmado, y desplazaba a las demás como si ya fuera la
+    # vigente. Confirmar un candidato es lo que la mueve a esa zona
+    # (confirm_duplicate); hasta entonces vive en la suya.
+    #
+    # La conjetura tenía sentido cuando no había forma de declarar la zona al
+    # cargar. Con "modificar zona existente", quien sabe la respuesta la da
+    # antes, y a quien no la sabe no hay por qué adivinarle.
+    _ = duplicate_of
 
     zona = await get_db().zones.insert_one({
         "owner": owner,
@@ -850,14 +869,26 @@ async def confirm_duplicate(
     if not older_doc:
         raise HTTPException(status_code=404, detail="La zona elegida ya no existe")
 
+    # Confirmar es lo que MUEVE la versión a la zona del elegido. Ya no se
+    # hereda al guardar (ver _resolve_zone), así que hasta este momento la
+    # captura vivía en su propia zona: es acá, y solo acá, donde las dos
+    # historias se juntan.
+    origen = doc.get("zoneId")
+    destino = older_doc.get("zoneId")
+    if destino and destino != origen and doc.get("sourceTaskId"):
+        await get_db().analyses.update_many(
+            {"sourceTaskId": doc["sourceTaskId"]},
+            {"$set": {"zoneId": destino}},
+        )
+        doc["zoneId"] = destino
+        # La zona de origen puede quedar sin ninguna versión. Igual que al
+        # borrar o al reasignar, una zona sin análisis no es nada.
+        if origen:
+            quedan = await get_db().analyses.count_documents({"zoneId": origen})
+            if quedan == 0:
+                await get_db().zones.delete_one({"_id": _object_id(origen)})
+
     if elegido != doc["possibleDuplicateOf"]:
-        destino = older_doc.get("zoneId")
-        if destino and destino != doc.get("zoneId") and doc.get("sourceTaskId"):
-            await get_db().analyses.update_many(
-                {"sourceTaskId": doc["sourceTaskId"]},
-                {"$set": {"zoneId": destino}},
-            )
-            doc["zoneId"] = destino
         # A partir de acá el resto del flujo trabaja sobre el elegido.
         await get_db().analyses.update_one({"_id": oid}, {"$set": {"possibleDuplicateOf": elegido}})
         doc["possibleDuplicateOf"] = elegido
