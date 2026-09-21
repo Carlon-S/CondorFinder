@@ -596,10 +596,30 @@ async def reassign_version(
             detail="Falta la zona de destino: manda zoneId (existente) o name (nueva)",
         )
 
+    # De qué zonas sale, para poder limpiar las que queden vacías.
+    origenes = {
+        d.get("zoneId")
+        for d in await get_db().analyses.find(
+            {"sourceTaskId": source_task_id}, {"zoneId": 1}
+        ).to_list(length=None)
+        if d.get("zoneId") and d.get("zoneId") != destino
+    }
+
     result = await get_db().analyses.update_many(
         {"sourceTaskId": source_task_id},
         {"$set": {"zoneId": destino}},
     )
+
+    # Si la zona de origen se queda sin ninguna versión, se va con ella. Una
+    # zona sin análisis no es nada: no tiene capturas, ni volumen, ni mapa, y
+    # se quedaba apareciendo como fila vacía en el diálogo del informe.
+    # Mismo criterio que al eliminar el último análisis de una zona; sin esto,
+    # mover una versión mal agrupada dejaba un rastro cada vez.
+    for origen in origenes:
+        quedan = await get_db().analyses.count_documents({"zoneId": origen})
+        if quedan == 0:
+            await get_db().zones.delete_one({"_id": _object_id(origen)})
+
     return {"status": "ok", "zoneId": destino, "movidos": result.modified_count}
 
 
