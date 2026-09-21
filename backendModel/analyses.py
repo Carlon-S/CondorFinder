@@ -575,6 +575,23 @@ async def create_analysis(
     doc["_id"] = result.inserted_id
     await _release_source_task(payload.sourceTaskId)
 
+    # Quién queda vigente en la zona, salvo que haya una pregunta pendiente.
+    #
+    # Mientras el aviso de posible duplicado espera respuesta, marcar histórico
+    # al anterior sería responder por el trabajador: esa decisión es
+    # exactamente lo que confirm_duplicate toma cuando él elige. Sin pregunta
+    # pendiente, en cambio, nadie más va a hacerlo, y el caso más común es
+    # justamente ese: declarar la zona al cargar salta toda la detección de
+    # duplicados, así que la captura nueva y la anterior quedaban las dos
+    # vigentes y la zona aparecía dos veces en Vista Principal.
+    if doc.get("duplicateStatus") != "pending" and doc.get("zoneId"):
+        await _reconciliar_vigencia(doc["zoneId"])
+        # El documento en memoria quedó desactualizado si la reconciliación lo
+        # tocó; se relee para devolver el estado real y no uno que ya cambió.
+        actualizado = await get_db().analyses.find_one({"_id": doc["_id"]})
+        if actualizado:
+            return _to_out(actualizado)
+
     return _to_out(doc)
 
 

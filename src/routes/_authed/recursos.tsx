@@ -1,5 +1,5 @@
 // =============================================================================
-// CONDORFINDER — RECURSOS DISPONIBLES (HDU6)
+// CONDORFINDER, RECURSOS DISPONIBLES (HDU6)
 // Archivo: src/routes/_authed/recursos.tsx
 //
 // AC1: botón "Definir punto" habilita el modo de click sobre el
@@ -9,11 +9,11 @@
 // AC3: "Guardar punto" persiste en el perfil (Mongo, vía lib/resources.ts).
 // AC4: botón "Modificar puntos" lista todos los puntos guardados
 // y los muestra en el mapa. AC5: "Editar" reabre el mismo formulario de
-// AC2, pre-llenado, y guarda con PUT en vez de POST — no es un modo nuevo,
+// AC2, pre-llenado, y guarda con PUT en vez de POST, no es un modo nuevo,
 // es "configuring" con editingId seteado. AC6/AC7: confirmar + eliminar,
 // mismo patrón de AlertDialog que ya usa index.tsx para "Eliminar zona".
 //
-// Layout de dos columnas (aside + mapa) igual al de analysis.tsx — mismo
+// Layout de dos columnas (aside + mapa) igual al de analysis.tsx, mismo
 // lenguaje visual que el resto de la app. Máquina de 4 modos con useState
 // simple, no hace falta nada del router para esto.
 // =============================================================================
@@ -53,10 +53,10 @@ interface RecursosSearch {
 }
 
 export const Route = createFileRoute("/_authed/recursos")({
-  // ?point=<id> — deep-link desde el accordion de Vista Principal ("Ver en
+  // ?point=<id>, deep-link desde el accordion de Vista Principal ("Ver en
   // el mapa"): con el id ya en la URL, el efecto de abajo selecciona ese
   // punto apenas se cargan los puntos, sin haber clickeado nada acá.
-  // point?: en vez de point: string | undefined — así queda como key
+  // point?: en vez de point: string | undefined, así queda como key
   // realmente opcional (un <Link to="/recursos"> sin search sigue
   // compilando), no una requerida cuyo valor puede ser undefined.
   validateSearch: (search: Record<string, unknown>): RecursosSearch =>
@@ -72,7 +72,7 @@ interface FormState {
   comuna: string;
   retroCount: string;
   personalCount: string;
-  // HDU5/AC1 — si este punto participa como origen al generar una ruta.
+  // HDU5/AC1, si este punto participa como origen al generar una ruta.
   active: boolean;
 }
 
@@ -94,48 +94,48 @@ function RecursosPage() {
   const [trucks, setTrucks] = useState<Truck[]>([]);
   const [saving, setSaving] = useState(false);
 
-  // Geocodificación (HDU6) — geocodingAddress cubre tanto la inversa
+  // Geocodificación (HDU6), geocodingAddress cubre tanto la inversa
   // (click en el mapa → completa Dirección/Comuna) como la directa
   // (Dirección editada a mano → mueve el marcador), son mutuamente
   // excluyentes en el tiempo así que comparten un solo indicador.
   // geocodeFlyTarget solo se usa para el vuelo del mapa tras un
-  // forwardGeocode exitoso — focusPoint ya cubre el caso de click en un
+  // forwardGeocode exitoso, focusPoint ya cubre el caso de click en un
   // punto guardado, este es el mismo mecanismo para el punto en edición.
   const [geocodingAddress, setGeocodingAddress] = useState(false);
   const [geocodeNotFound, setGeocodeNotFound] = useState(false);
   const [geocodeFlyTarget, setGeocodeFlyTarget] = useState<[number, number] | null>(null);
   // true mientras form.address/comuna tiene texto que todavía no se reflejó
-  // en pendingPoint — evita depender de que el usuario haga blur (clickear
+  // en pendingPoint, evita depender de que el usuario haga blur (clickear
   // afuera) antes de guardar: handleSave revisa esto y geocodifica él mismo
   // si hace falta. Ref (no state) porque no necesita re-render, solo lo lee
   // código, nunca el JSX.
   const addressDirtyRef = useRef(false);
-  // Promesa del forwardGeocode en curso (si lo hay) — si el usuario clickea
+  // Promesa del forwardGeocode en curso (si lo hay), si el usuario clickea
   // "Guardar cambios" justo cuando el blur ya disparó una geocodificación,
   // handleSave espera ESA misma promesa en vez de lanzar una segunda
   // llamada duplicada a Nominatim.
   const geocodeInFlightRef = useRef<Promise<[number, number] | null> | null>(null);
   // Se incrementa en cada acción que fija la ubicación de forma autoritativa
   // (click en el mapa, forwardGeocode exitoso). locatePoint compara este
-  // valor antes de aplicar su resultado — si cambió mientras su
+  // valor antes de aplicar su resultado, si cambió mientras su
   // reverseGeocode estaba en vuelo (el usuario ya escribió/geocodificó algo
   // más nuevo), descarta el resultado en vez de pisar el campo con texto
   // desactualizado.
   const locationGenRef = useRef(0);
 
-  // AC5 — si está seteado, "configuring" es una edición (PUT) sobre este
+  // AC5, si está seteado, "configuring" es una edición (PUT) sobre este
   // punto en vez de una creación nueva (POST). Mismo formulario para ambos.
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  // AC4 — lista de puntos guardados.
+  // AC4, lista de puntos guardados.
   const [points, setPoints] = useState<ResourcePoint[]>([]);
   const [loadingPoints, setLoadingPoints] = useState(false);
 
-  // Punto seleccionado en el mapa (modo "idle" solamente) — su info se
+  // Punto seleccionado en el mapa (modo "idle" solamente), su info se
   // muestra en este mismo panel, reemplazando los botones de siempre.
   const [selectedPoint, setSelectedPoint] = useState<ResourcePoint | null>(null);
 
-  // AC6/AC7 — mismo patrón que index.tsx: deletingPointDisplay retiene el
+  // AC6/AC7, mismo patrón que index.tsx: deletingPointDisplay retiene el
   // último target no-nulo mientras el diálogo se cierra, para que el texto
   // no parpadee a vacío durante la animación de salida.
   const [deletingPoint, setDeletingPoint] = useState<ResourcePoint | null>(null);
@@ -145,7 +145,7 @@ function RecursosPage() {
     if (deletingPoint) setDeletingPointDisplay(deletingPoint);
   }, [deletingPoint]);
 
-  // Deep-link (?point=id) desde el accordion de Vista Principal — una vez
+  // Deep-link (?point=id) desde el accordion de Vista Principal, una vez
   // que los puntos están cargados, selecciona el mismo que un click real en
   // el marker seleccionaría (mismo estado, mismo camino hacia el vuelo del
   // mapa vía el focusPoint derivado más abajo).
@@ -167,7 +167,7 @@ function RecursosPage() {
 
   // Los puntos ahora se ven siempre en el mapa (no solo en modo "listing"),
   // así que este fetch corre al montar la página y se reusa después de
-  // cada creación/edición/eliminación — no solo al entrar a la lista.
+  // cada creación/edición/eliminación, no solo al entrar a la lista.
   const refreshPoints = async () => {
     setLoadingPoints(true);
     try {
@@ -190,7 +190,7 @@ function RecursosPage() {
   const startListing = () => setMode("listing");
 
   // Ubica el punto pendiente en (lat, lng) y refresca Dirección/Comuna por
-  // geocodificación inversa — usado tanto al definir la ubicación inicial
+  // geocodificación inversa, usado tanto al definir la ubicación inicial
   // (mode "placing") como al reposicionarla clickeando de nuevo el mapa
   // mientras el formulario ya está abierto (mode "configuring").
   const locatePoint = (lat: number, lng: number) => {
@@ -198,7 +198,7 @@ function RecursosPage() {
     setPendingPoint([lat, lng]);
     setGeocodeNotFound(false);
     setGeocodingAddress(true);
-    // El click ya fija la ubicación exacta — lo que venga de la
+    // El click ya fija la ubicación exacta, lo que venga de la
     // geocodificación inversa es solo texto descriptivo, no hay nada que
     // resincronizar hacia el mapa.
     addressDirtyRef.current = false;
@@ -206,7 +206,7 @@ function RecursosPage() {
       .then((result) => {
         // Si en el tiempo que tardó esta respuesta el usuario ya escribió y
         // geocodificó una dirección distinta a mano (locationGenRef avanzó),
-        // este resultado quedó obsoleto — aplicarlo pisaría lo que el
+        // este resultado quedó obsoleto, aplicarlo pisaría lo que el
         // usuario ya confirmó con texto más nuevo.
         if (result && locationGenRef.current === gen) {
           setForm((f) => ({ ...f, address: result.address || f.address, comuna: result.comuna || f.comuna }));
@@ -222,7 +222,7 @@ function RecursosPage() {
       setTrucks([]);
       setEditingId(null);
       setMode("configuring");
-      // El formulario se abre al toque — la dirección/comuna se completan
+      // El formulario se abre al toque, la dirección/comuna se completan
       // solas un instante después, sin bloquear la apertura del modo
       // "configuring".
       locatePoint(lat, lng);
@@ -235,7 +235,7 @@ function RecursosPage() {
       return;
     }
     // Click en el mapa fuera de cualquier marker (esos ya cortan su propia
-    // propagación, ver GeoMap.tsx) — en modo idle, deselecciona el punto
+    // propagación, ver GeoMap.tsx), en modo idle, deselecciona el punto
     // que se estuviera mostrando en el panel.
     if (mode === "idle") setSelectedPoint(null);
   };
@@ -264,12 +264,12 @@ function RecursosPage() {
     setMode("configuring");
   };
 
-  // Geocodificación directa (HDU6) — dispara al perder foco (feedback
+  // Geocodificación directa (HDU6), dispara al perder foco (feedback
   // visual inmediato en el mapa mientras se sigue editando), pero
   // handleSave también la llama directo antes de guardar: así el punto
   // queda al día sin depender de que el usuario haya clickeado afuera del
   // campo primero. geocodeInFlightRef evita lanzar una segunda llamada a
-  // Nominatim si las dos rutas (blur y guardar) coinciden en el tiempo —
+  // Nominatim si las dos rutas (blur y guardar) coinciden en el tiempo ,
   // ambas esperan la misma promesa.
   const ensureAddressGeocoded = (): Promise<[number, number] | null> => {
     if (geocodeInFlightRef.current) return geocodeInFlightRef.current;
@@ -283,14 +283,14 @@ function RecursosPage() {
         if (!result) {
           setGeocodeNotFound(true);
           // No hay nada más que reintentar hasta que el usuario vuelva a
-          // tocar el campo (eso la re-marca dirty en el onChange) — sin
+          // tocar el campo (eso la re-marca dirty en el onChange), sin
           // esto, cada click en "Guardar" repetiría la misma búsqueda
           // fallida contra Nominatim.
           addressDirtyRef.current = false;
           return null;
         }
         // Invalida cualquier reverseGeocode de un click anterior que
-        // todavía esté en vuelo — esta dirección escrita a mano es más
+        // todavía esté en vuelo, esta dirección escrita a mano es más
         // nueva y no debe ser pisada por esa respuesta tardía.
         locationGenRef.current++;
         const coords: [number, number] = [result.lat, result.lng];
@@ -323,7 +323,7 @@ function RecursosPage() {
     setSaving(true);
     // Si la dirección se editó y todavía no se reflejó en el mapa (el
     // usuario guardó sin sacar el foco del campo antes), se geocodifica acá
-    // mismo antes de armar el payload — pendingPoint (closure de este
+    // mismo antes de armar el payload, pendingPoint (closure de este
     // render) quedaría desactualizado si solo se esperara el side effect,
     // por eso se usan las coordenadas que devuelve directamente.
     const resolvedPoint = (await ensureAddressGeocoded()) ?? pendingPoint;
@@ -377,7 +377,7 @@ function RecursosPage() {
     }
   };
 
-  // El punto en edición ya se muestra como el marker "pendiente" — sin
+  // El punto en edición ya se muestra como el marker "pendiente", sin
   // excluirlo de acá quedaría duplicado, superpuesto en el mapa.
   const mapPoints = points
     .filter((p) => p.id !== editingId)
@@ -421,7 +421,7 @@ function RecursosPage() {
 
                   {/* Mismo layout que el formulario de AC2 (para que "verlo"
                       se sienta consistente con "editarlo"), pero con todos
-                      los Input deshabilitados — es una vista, no se guarda
+                      los Input deshabilitados, es una vista, no se guarda
                       nada desde acá. */}
                   <div className="space-y-1.5">
                     <label className="text-xs font-medium text-muted-foreground">Nombre del punto</label>
@@ -462,7 +462,7 @@ function RecursosPage() {
 
                   <div className="space-y-1.5">
                     <label className="text-xs font-medium text-muted-foreground">
-                      Retroexcavadoras — cantidad
+                      Retroexcavadoras (cantidad)
                     </label>
                     <Input value={selectedPoint.retroexcavadoras_count} disabled className="disabled:cursor-default" />
                   </div>
@@ -487,7 +487,7 @@ function RecursosPage() {
 
                   <div className="space-y-1.5">
                     <label className="text-xs font-medium text-muted-foreground">
-                      Personal — cantidad de trabajadores
+                      Personal (cantidad de trabajadores)
                     </label>
                     <Input value={selectedPoint.personal_count} disabled className="disabled:cursor-default" />
                   </div>
@@ -628,7 +628,7 @@ function RecursosPage() {
                   />
                   {geocodeNotFound && (
                     <p className="text-[0.625rem] text-muted-foreground">
-                      No se encontró esta dirección en el mapa — el punto no se movió.
+                      No se encontró esta dirección en el mapa, el punto no se movió.
                     </p>
                   )}
                 </div>
@@ -696,7 +696,7 @@ function RecursosPage() {
 
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium text-muted-foreground">
-                    Retroexcavadoras — cantidad
+                    Retroexcavadoras (cantidad)
                   </label>
                   <Input
                     type="number"
@@ -753,7 +753,7 @@ function RecursosPage() {
 
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium text-muted-foreground">
-                    Personal — cantidad de trabajadores
+                    Personal (cantidad de trabajadores)
                   </label>
                   <Input
                     type="number"
@@ -797,7 +797,7 @@ function RecursosPage() {
         </section>
       </main>
 
-      {/* AC6 — confirmación de eliminación, mismo patrón que "Eliminar zona" en index.tsx */}
+      {/* AC6, confirmación de eliminación, mismo patrón que "Eliminar zona" en index.tsx */}
       <AlertDialog
         open={deletingPoint !== null}
         onOpenChange={(open) => {
