@@ -795,14 +795,11 @@ async def delete_analysis(
     if not doc:
         raise HTTPException(status_code=404, detail="Análisis no encontrado")
 
-    # (1) Quien había sido reemplazado POR este vuelve a estar vigente. Es lo
-    # esperable: si se borra la captura más nueva de una zona, la anterior pasa
-    # a ser la vigente otra vez.
-    #
-    # Al borrar un eslabón del MEDIO de una cadena (A→B→C, se borra B), A
-    # vuelve a vigente y convive con C. Las dos son capturas reales de la zona
-    # y la barra de versiones las ordena igual por fecha, así que se prefiere
-    # eso antes que re-enlazar A→C adivinando una intención que nadie expresó.
+    # (1) Se sueltan los punteros que apuntaban a este análisis, para no dejar
+    # capturas marcadas como reemplazadas por un id que ya no existe. Esto por
+    # sí solo deja la zona con varias vigentes a la vez; quién queda vigente de
+    # verdad lo decide (4) más abajo, con el mismo criterio de fecha que usa
+    # todo el resto.
     await get_db().analyses.update_many(
         {"supersededBy": analysis_id},
         {"$set": {"historical": False, "supersededBy": None}},
@@ -823,6 +820,16 @@ async def delete_analysis(
         quedan = await get_db().analyses.count_documents({"zoneId": zone_id})
         if quedan == 0:
             await get_db().zones.delete_one({"_id": _object_id(zone_id)})
+        else:
+            # (4) Volver a dejar UNA sola vigente.
+            #
+            # El paso (1) devolvió a vigente a todo lo que apuntaba al borrado,
+            # que es necesario para no dejar punteros colgando, pero se pasa:
+            # cuando varias capturas compartían sucesor (una zona con varias
+            # versiones, todas reemplazadas por la más nueva), borrar esa más
+            # nueva las promovía a TODAS y la zona aparecía repetida en Vista
+            # Principal, una fila por captura.
+            await _reconciliar_vigencia(zone_id)
 
     return {"message": "Análisis eliminado"}
 
