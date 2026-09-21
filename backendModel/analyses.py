@@ -280,6 +280,78 @@ def _bounds_to_rect(bounds: list[float]) -> list[list[float]]:
     return [[left, bottom], [right, bottom], [right, top], [left, top]]
 
 
+def _momento(valor, respaldo):
+    """Fecha comparable, tolerando nulos y mezcla de naive/aware.
+
+    Comparar un datetime con zona contra uno sin zona lanza TypeError, y en
+    esta colección conviven ambos: captureDate viene del EXIF y savedAt lo
+    pone el backend. Se normaliza a naive antes de ordenar.
+    """
+    d = valor or respaldo
+    if d is None:
+        return datetime.min
+    return d.replace(tzinfo=None) if d.tzinfo else d
+
+
+async def _reconciliar_vigencia(zone_id: str) -> None:
+    """Deja UNA sola versión vigente en la zona: la captura más reciente.
+
+    El resto del sistema asume esa invariante. Vista Principal y el mapa de
+    rutas filtran por `historical` para mostrar el estado actual del terreno,
+    y la vista de análisis usa el mismo campo para poner una captura antigua
+    en solo lectura. Con dos versiones vigentes de la misma zona, la misma
+    zona aparece dos veces como si fueran dos basurales distintos.
+
+    Hace falta acá porque mover una versión a una zona que ya tenía capturas
+    las junta sin que nadie haya confirmado un duplicado: `confirm_duplicate`
+    es el camino que normalmente establece quién reemplaza a quién, y una
+    reasignación manual lo salta por completo.
+
+    La más reciente se decide por fecha de CAPTURA (cuándo se voló), con la de
+    carga como desempate, igual que `buildVersions()` en el frontend: si las
+    dos fuentes no coincidieran, la barra de versiones y este cálculo
+    mostrarían historias distintas de la misma zona.
+    """
+    docs = await get_db().analyses.find({"zoneId": zone_id}).to_list(length=None)
+    if not docs:
+        return
+
+    versiones: dict[str, list[dict]] = {}
+    for d in docs:
+        clave = d.get("sourceTaskId") or f"sin-tarea:{d['_id']}"
+        versiones.setdefault(clave, []).append(d)
+
+    def orden_de(analisis: list[dict]):
+        # El representante es el análisis más antiguo de la versión, igual que
+        # en buildVersions(): todos comparten vuelo, así que cualquiera sirve
+        # para fechar la captura, pero hay que elegir siempre el mismo.
+        ref = min(analisis, key=lambda a: _momento(a.get("savedAt"), None))
+        return (
+            _momento(ref.get("captureDate"), ref.get("savedAt")),
+            _momento(ref.get("uploadedAt"), ref.get("savedAt")),
+        )
+
+    ordenadas = sorted(versiones.values(), key=orden_de)
+    vigente = ordenadas[-1]
+
+    # De la versión vigente, el análisis más reciente es al que apuntan las
+    # anteriores como su reemplazo.
+    sucesor = max(vigente, key=lambda a: _momento(a.get("savedAt"), None))
+    sucesor_id = str(sucesor["_id"])
+
+    await get_db().analyses.update_many(
+        {"_id": {"$in": [a["_id"] for a in vigente]}},
+        {"$set": {"historical": False, "supersededBy": None}},
+    )
+
+    anteriores = [a["_id"] for v in ordenadas[:-1] for a in v]
+    if anteriores:
+        await get_db().analyses.update_many(
+            {"_id": {"$in": anteriores}},
+            {"$set": {"historical": True, "supersededBy": sucesor_id}},
+        )
+
+
 async def _find_possible_duplicates(new_doc: dict, exclude_id: ObjectId | None) -> list[dict]:
     """Todos los candidatos a duplicado, no solo el mejor.
 
@@ -619,6 +691,10 @@ async def reassign_version(
         quedan = await get_db().analyses.count_documents({"zoneId": origen})
         if quedan == 0:
             await get_db().zones.delete_one({"_id": _object_id(origen)})
+
+    # La zona de destino puede haber quedado con dos versiones vigentes: la
+    # que ya tenía y la recién movida. Solo la captura más reciente lo es.
+    await _reconciliar_vigencia(destino)
 
     return {"status": "ok", "zoneId": destino, "movidos": result.modified_count}
 
