@@ -92,6 +92,7 @@ import {
 } from "@/lib/unify";
 import {
   clearImageState,
+  saveZonaDestino,
   saveItems,
   saveUploadDone,
   saveTaskId,
@@ -289,6 +290,8 @@ function MainPage() {
   const [zones, setZones] = useState<ZoneRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [addZoneOpen, setAddZoneOpen] = useState(false);
+  /** Selector de a qué zona existente pertenece la carga que viene. */
+  const [pickZoneOpen, setPickZoneOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ZoneRow | null>(null);
   // Retiene el último target no-nulo, deleteTarget se pone en null para
   // CERRAR el diálogo (dispara la animación de salida), pero si el texto de
@@ -611,11 +614,14 @@ function MainPage() {
   // "Zona nueva" debe partir en blanco, limpia cualquier resto de una
   // sesión de carga anterior (imágenes subidas, mapa generado, progreso)
   // antes de entrar a /carga, para que no se vea la generación previa.
-  const goToCarga = () => {
+  const goToCarga = (zonaDestino?: string) => {
     clearImageState();
     clearMapUrl();
     clearCurrentAnalysisId();
     deleteAllImages().catch(() => {});
+    // Se guarda DESPUÉS de clearImageState, que también la borra: si se
+    // guardara antes, la limpieza se llevaría justo lo que acabamos de elegir.
+    if (zonaDestino) saveZonaDestino(zonaDestino);
     setAddZoneOpen(false);
     navigate({ to: "/carga" });
   };
@@ -1253,7 +1259,7 @@ function MainPage() {
           <div className="grid grid-cols-1 gap-4 pt-2 sm:grid-cols-2">
             <button
               type="button"
-              onClick={goToCarga}
+              onClick={() => goToCarga()}
               className="group flex cursor-pointer flex-col items-center gap-3 rounded-xl border border-border bg-card p-6 text-center transition-[transform,box-shadow,border-color,background-color] duration-200 hover:-translate-y-0.5 hover:border-primary/50 hover:bg-primary/5 hover:shadow-md"
             >
               <span className="flex h-16 w-16 items-center justify-center rounded-xl bg-primary/10 text-primary transition-colors group-hover:bg-primary/15">
@@ -1265,19 +1271,86 @@ function MainPage() {
               </span>
             </button>
 
-            <div
-              title="Próximamente"
-              className="flex cursor-not-allowed flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-muted/30 p-6 text-center opacity-60"
+            {/* Agregar una captura a una zona que YA existe.
+                Era un marcador "Próximamente", y esa ausencia tenía un costo
+                concreto: sin forma de declarar la zona, TODA carga dependía de
+                que el backend la adivinara comparando huellas de ortomosaico,
+                y el trabajador solo podía corregir la conjetura después. */}
+            <button
+              type="button"
+              onClick={() => {
+                setAddZoneOpen(false);
+                setPickZoneOpen(true);
+              }}
+              disabled={zoneRecords.length === 0}
+              title={zoneRecords.length === 0 ? "Todavía no hay zonas guardadas" : undefined}
+              className="group flex cursor-pointer flex-col items-center gap-3 rounded-xl border border-border bg-card p-6 text-center transition-[transform,box-shadow,border-color,background-color] duration-200 hover:-translate-y-0.5 hover:border-primary/50 hover:bg-primary/5 hover:shadow-md disabled:pointer-events-none disabled:opacity-50"
             >
-              <span className="flex h-16 w-16 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-                <ChartLineUp className="h-7 w-7" />
+              <span className="flex h-16 w-16 items-center justify-center rounded-xl bg-primary/10 text-primary transition-colors group-hover:bg-primary/15">
+                <Layers className="h-7 w-7" />
               </span>
               <span className="text-sm font-semibold text-foreground">Modificar zona existente</span>
-              <span className="rounded px-1.5 py-0.5 text-[0.5625rem] font-semibold uppercase tracking-wide bg-warning/15 text-warning">
-                Próximamente
+              <span className="text-xs text-muted-foreground">
+                Agrega una captura nueva a una zona que ya está registrada.
               </span>
-            </div>
+            </button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Elegir a qué zona pertenece la carga que viene. Lo elegido viaja por
+          sessionStorage hasta el guardado del análisis (ver imageState.ts), y
+          el backend lo respeta por sobre cualquier conjetura de superposición. */}
+      <Dialog open={pickZoneOpen} onOpenChange={setPickZoneOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>¿A qué zona pertenece esta captura?</DialogTitle>
+            <DialogDescription>
+              Las fotos que cargues a continuación se guardarán como una captura
+              más de la zona que elijas, sin que el sistema tenga que deducirlo.
+            </DialogDescription>
+          </DialogHeader>
+
+          <ul className="max-h-[21.25rem] space-y-1.5 overflow-y-auto pr-1">
+            {zoneRecords.map((z) => {
+              const deLaZona = savedAnalyses.filter((a) => a.zoneId === z.id);
+              const capturas = new Set(deLaZona.map((a) => a.sourceTaskId ?? a.id)).size;
+              const ultima = deLaZona[deLaZona.length - 1];
+              return (
+                <li key={z.id}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPickZoneOpen(false);
+                      goToCarga(z.id);
+                    }}
+                    className="flex w-full cursor-pointer items-center gap-3 rounded-lg border border-border/60 p-2.5 text-left transition-all duration-200 hover:border-primary hover:bg-primary/5"
+                  >
+                    {ultima && (
+                      <span className="detect-frame detect-frame-sm h-11 w-14 flex-shrink-0 overflow-hidden rounded">
+                        <span className="detect-corners" aria-hidden="true" />
+                        <img
+                          src={ultima.thumbnailUrl ?? ultima.mapUrl}
+                          alt=""
+                          className="h-full w-full object-cover"
+                          loading="lazy"
+                        />
+                      </span>
+                    )}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-foreground">
+                        {z.name}
+                      </span>
+                      <span className="block text-[0.6875rem] text-muted-foreground">
+                        <span className="mono tabular-nums">{capturas}</span>{" "}
+                        {capturas === 1 ? "captura" : "capturas"}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
         </DialogContent>
       </Dialog>
 

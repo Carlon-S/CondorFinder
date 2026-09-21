@@ -46,6 +46,7 @@ import {
   confirmDuplicate,
   rejectDuplicate,
   type SavedAnalysisRecord,
+  type DuplicateCandidate,
 } from "@/lib/analysisStore";
 import { buildVersions, type ZoneVersion } from "@/lib/volumeReport";
 import { VersionBar } from "@/components/VersionBar";
@@ -83,7 +84,7 @@ import {
 } from "@/lib/mapState";
 import {
   loadNoWasteDetected, loadDetectionJsonUrl, saveDetectionJsonUrl, clearDetectionJsonUrl,
-  loadTaskId, saveTaskId, clearTaskId,
+  loadTaskId, saveTaskId, clearTaskId, loadZonaDestino, clearZonaDestino,
 } from "@/lib/imageState";
 import {
   getTaskStatus,
@@ -371,7 +372,11 @@ function AnalysisPage() {
   // agrupa sus análisis. Estos campos viajan con el análisis al guardarlo para
   // que la evolución pueda ordenarlos en el tiempo y distinguir un cambio real
   // del basural de un cambio en cómo se mide.
-  const [zoneId, setZoneId] = useState<string | null>(null);
+  // Arranca con la zona que el trabajador DECLARO en Vista Principal, si eligio
+  // "modificar zona existente". Es lo que hace que el backend no tenga que
+  // adivinar a que zona pertenece esta captura ni levantar el aviso de posible
+  // duplicado: _resolve_zone() da prioridad a la zona declarada.
+  const [zoneId, setZoneId] = useState<string | null>(() => loadZonaDestino());
   /** Fecha en que se voló el terreno, del EXIF de las fotos. */
   const [captureDate, setCaptureDate] = useState<string | null>(null);
   /** true cuando ninguna foto traía fecha y se usó la de carga. */
@@ -451,12 +456,14 @@ function AnalysisPage() {
   // superpuesta, calculado por el backend con shapely al guardar). Guarda
   // el análisis ANTERIOR ya resuelto (nombre/volumen) para poder comparar
   // ambos en el banner sin otra vuelta al backend. null = nada pendiente.
-  const [duplicateWarning, setDuplicateWarning] = useState<{ older: SavedAnalysisRecord } | null>(null);
-  // "confirm"/"reject" (no solo boolean) para saber cuál de los dos botones
-  // mostrar cargando -- antes ambos compartían un solo flag y el ícono de
-  // carga solo se le agregaba al texto de "Es la misma zona", lo que además
-  // le cambiaba el ancho al botón y lo sacaba del borde del banner.
-  const [resolvingDuplicate, setResolvingDuplicate] = useState<"confirm" | "reject" | null>(null);
+  const [duplicateWarning, setDuplicateWarning] = useState<{
+    candidatos: DuplicateCandidate[];
+  } | null>(null);
+  // Qué acción está corriendo: el analysisId del candidato que se está
+  // confirmando, o "reject". Antes era un booleano compartido por dos botones;
+  // ahora hay una fila por candidato y cada una necesita mostrar su propio
+  // indicador, sin bloquear visualmente a las demás.
+  const [resolvingDuplicate, setResolvingDuplicate] = useState<string | null>(null);
 
   // Se llama tanto justo después de guardar (performSave) como al reabrir
   // un análisis ya guardado (AC4-de-HDU4, en el efecto de montaje), mismo
@@ -467,8 +474,23 @@ function AnalysisPage() {
       setDuplicateWarning(null);
       return;
     }
+
+    // Los candidatos vienen con el registro: el backend ya calculó la
+    // superposición de cada uno al guardar, no hace falta pedirlos de nuevo.
+    if (record.possibleDuplicates && record.possibleDuplicates.length > 0) {
+      setDuplicateWarning({ candidatos: record.possibleDuplicates });
+      return;
+    }
+
+    // Respaldo para análisis guardados ANTES de que existiera la lista: solo
+    // traen possibleDuplicateOf. Se arma un candidato único con ese id para
+    // que el aviso siga funcionando sobre registros viejos.
     const older = await loadAnalysisById(record.possibleDuplicateOf);
-    if (older) setDuplicateWarning({ older });
+    if (older) {
+      setDuplicateWarning({
+        candidatos: [{ analysisId: older.id, name: older.name, zoneId: older.zoneId, ratio: 0 }],
+      });
+    }
   };
 
   /**
@@ -487,23 +509,24 @@ function AnalysisPage() {
     cargarVersionesDeLaZona(zona);
   };
 
-  const handleConfirmDuplicate = async () => {
+  const handleConfirmDuplicate = async (candidatoId: string) => {
     if (!currentAnalysisId) return;
-    const olderName = duplicateWarning?.older.name;
-    setResolvingDuplicate("confirm");
-    const updated = await confirmDuplicate(currentAnalysisId);
+    const elegido = duplicateWarning?.candidatos.find((c) => c.analysisId === candidatoId);
+    setResolvingDuplicate(candidatoId);
+    const updated = await confirmDuplicate(currentAnalysisId, candidatoId);
     setResolvingDuplicate(null);
     if (!updated) {
-      notify.error("No se pudo vincular el análisis", "Intenta nuevamente.");
+      notify.error("No se pudo vincular la captura", "Intenta nuevamente.");
       return;
     }
     setDuplicateWarning(null);
-    // La zona no cambia al confirmar, pero el análisis anterior pasó a
-    // histórico, así que la barra tiene que releerse para marcarlo.
+    // Si se eligió un candidato distinto del que el sistema puso primero, el
+    // backend movió esta versión a la zona del elegido, así que la zona sí
+    // puede haber cambiado. Adoptar lo que devuelva cubre los dos casos.
     adoptarZonaDe(updated);
     notify.success(
-      "Análisis vinculado",
-      olderName ? `"${olderName}" quedó como historial de esta zona.` : "Quedó vinculado como la misma zona.",
+      "Capturas vinculadas",
+      elegido ? `Quedó como una captura más de la zona de "${elegido.name}".` : "Quedó vinculada como la misma zona.",
     );
   };
 
@@ -1010,6 +1033,9 @@ function AnalysisPage() {
       clearThumbnailUrl();
       clearDetectionJsonUrl();
       clearCurrentAnalysisId();
+      // La zona declarada vale para ESTA carga. Sin limpiarla, la siguiente
+      // generacion heredaria en silencio la zona de la anterior.
+      clearZonaDestino();
     };
   }, []);
 
@@ -1273,72 +1299,73 @@ function AnalysisPage() {
               </p>
             </div>
 
-            {/* HDU7/AC2, posible duplicado con un análisis anterior */}
+            {/* HDU7/AC2, posible zona duplicada.
+
+                Antes esto preguntaba en binario: "¿es la misma zona que X?",
+                con X = el candidato de mayor superposición. Cuando dos zonas
+                superaban el umbral el trabajador solo veía una, y si la que el
+                sistema eligió no era la correcta, "son zonas distintas"
+                tampoco servía: lo que quería decir era "es esta OTRA", y esa
+                respuesta no existía. Ahora se listan todos los candidatos con
+                su porcentaje de superposición y se elige. */}
             {duplicateWarning && (
               <div className="animate-in fade-in slide-in-from-left-2 duration-300 rounded-lg border border-warning/40 bg-warning/10 p-4">
                 <TriangleAlert className="mb-2 h-5 w-5 text-warning" />
-                <p className="text-sm font-semibold">Posible zona duplicada</p>
+                <p className="text-sm font-semibold">¿Esta captura ya tiene zona?</p>
                 <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                  Este análisis se superpone con "{duplicateWarning.older.name}" (guardado el{" "}
-                  {new Date(duplicateWarning.older.savedAt).toLocaleDateString("es-CL")}). ¿Es la misma zona?
+                  El terreno de esta captura se superpone con{" "}
+                  {duplicateWarning.candidatos.length === 1
+                    ? "una zona ya registrada"
+                    : `${duplicateWarning.candidatos.length} zonas ya registradas`}
+                  . Si es la misma, elígela para que queden como capturas de una
+                  sola zona.
                 </p>
-                <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                  <div className="rounded-md bg-background/40 p-2">
-                    <p className="text-muted-foreground">Este análisis</p>
-                    <p className="mono font-semibold tabular-nums">{activeSummary.totalVolumeM3} m³</p>
-                  </div>
-                  <div className="rounded-md bg-background/40 p-2">
-                    <p className="text-muted-foreground">Análisis anterior</p>
-                    <p className="mono font-semibold tabular-nums">
-                      {duplicateWarning.older.summary
-                        ? `${duplicateWarning.older.summary.totalVolumeM3} m³`
-                        : ", "}
-                    </p>
-                  </div>
-                </div>
-                {/* min-w-0 + ancho de ícono reservado siempre (visible solo
-                    mientras carga la acción de ESE botón puntual): antes el
-                    spinner solo se agregaba al texto de "Es la misma zona",
-                    lo que le cambiaba el ancho al botón en pleno click y lo
-                    sacaba del borde del banner. */}
-                {/* Uno debajo del otro, no lado a lado. Este banner vive en el
-                    panel lateral, que mide entre 240 y 360px; dos botones al
-                    50% no alcanzaban para "Son zonas distintas" ni "Es la misma
-                    zona", y los textos terminaban montados uno sobre otro.
-                    Apilados, entran completos a cualquier ancho. */}
-                <div className="mt-3 flex flex-col gap-2">
-                  {/* La acción principal va arriba: es la respuesta esperada
-                      cuando el sistema acertó en la superposición. */}
-                  {/* El spinner va absolute (fuera del flujo) en vez de un
-                      span reservado en línea con el texto -- ese span le
-                      agregaba margen solo a la izquierda, corriendo el
-                      centro real del texto hacia la derecha. Así el texto
-                      queda perfectamente centrado siempre, y el spinner se
-                      superpone a su izquierda sin mover nada. */}
-                  <Button
-                    size="sm"
-                    className="relative w-full"
-                    disabled={resolvingDuplicate !== null}
-                    onClick={handleConfirmDuplicate}
-                  >
-                    {resolvingDuplicate === "confirm" && (
-                      <Loader2 className="absolute left-3 h-3.5 w-3.5 animate-spin" />
-                    )}
-                    Es la misma zona
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    className="relative w-full"
-                    disabled={resolvingDuplicate !== null}
-                    onClick={handleRejectDuplicate}
-                  >
-                    {resolvingDuplicate === "reject" && (
-                      <Loader2 className="absolute left-3 h-3.5 w-3.5 animate-spin" />
-                    )}
-                    Son zonas distintas
-                  </Button>
-                </div>
+
+                <p className="mono mt-3 text-[0.625rem] text-muted-foreground">
+                  Esta captura: {activeSummary.totalVolumeM3} m³
+                </p>
+
+                <ul className="mt-2 space-y-1.5">
+                  {duplicateWarning.candidatos.map((c) => (
+                    <li key={c.analysisId}>
+                      <button
+                        type="button"
+                        disabled={resolvingDuplicate !== null}
+                        onClick={() => handleConfirmDuplicate(c.analysisId)}
+                        className="flex w-full cursor-pointer items-center gap-2 rounded-md border border-border/60 bg-background/60 p-2 text-left transition-all duration-200 hover:border-primary hover:bg-primary/5 disabled:pointer-events-none disabled:opacity-50"
+                      >
+                        {resolvingDuplicate === c.analysisId && (
+                          <Loader2 className="h-3.5 w-3.5 flex-shrink-0 animate-spin" />
+                        )}
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-xs font-medium text-foreground">
+                            {c.name}
+                          </span>
+                          <span className="mono block text-[0.625rem] tabular-nums text-muted-foreground">
+                            {Math.round(c.ratio * 100)} % de superposición
+                          </span>
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+
+                {/* La salida cuando ninguna corresponde. Va como acción
+                    secundaria y al final: si el sistema levantó el aviso es
+                    porque algo se superpone, así que lo más probable es que
+                    alguna de las de arriba sea la correcta. */}
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="relative mt-3 w-full"
+                  disabled={resolvingDuplicate !== null}
+                  onClick={handleRejectDuplicate}
+                >
+                  {resolvingDuplicate === "reject" && (
+                    <Loader2 className="absolute left-3 h-3.5 w-3.5 animate-spin" />
+                  )}
+                  Ninguna, es una zona nueva
+                </Button>
               </div>
             )}
 

@@ -88,6 +88,27 @@ class ZoneIn(BaseModel):
     name: str
 
 
+class ConfirmDuplicateIn(BaseModel):
+    """Cuál de los candidatos eligió el trabajador.
+
+    Ausente significa "el que el sistema puso primero", que es el
+    comportamiento de siempre.
+    """
+    duplicateOf: str | None = None
+
+
+class ReassignIn(BaseModel):
+    """Destino de una versión que quedó agrupada en la zona equivocada.
+
+    Exactamente uno de los dos: `zoneId` la mueve a una zona que YA existe,
+    `name` crea una zona nueva con ese nombre. Antes solo existía la segunda
+    opción, así que separar una versión mal agrupada siempre generaba una zona
+    más, y no había forma de decir "en realidad pertenece a aquella".
+    """
+    zoneId: str | None = None
+    name: str | None = None
+
+
 class SavedAnalysisIn(BaseModel):
     name: str
     mapUrl: str
@@ -134,8 +155,23 @@ class SavedAnalysisIn(BaseModel):
     # Huella geográfica COMPLETA del ortomosaico: [left, bottom, right, top]
     # (volumeCalc.py::ortho_bounds, mismo CRS que `crs`), HDU7 compara ESTO
     # entre análisis para detectar duplicados, no las detecciones puntuales
-    # (ver _find_possible_duplicate).
+    # (ver _find_possible_duplicates).
     orthoBounds: list[float] | None = None
+
+
+class DuplicateCandidate(BaseModel):
+    """Una zona con la que este análisis podría estar duplicado.
+
+    Se manda la lista completa, no solo la mejor: cuando dos zonas superan el
+    umbral, el trabajador tiene que poder elegir cuál, y no solo aceptar o
+    rechazar la que el sistema eligió por él.
+    """
+    analysisId: str
+    name: str
+    zoneId: str | None = None
+    # Superposición de huellas, 0 a 1. La interfaz la muestra como porcentaje
+    # para que la elección no sea a ciegas.
+    ratio: float
 
 
 class SavedAnalysisOut(SavedAnalysisIn):
@@ -144,6 +180,10 @@ class SavedAnalysisOut(SavedAnalysisIn):
     savedAt: datetime
     # HDU7, gestionados solo por el backend, ver docstring del módulo.
     possibleDuplicateOf: str | None = None
+    # Todos los candidatos, de mayor a menor superposición.
+    # `possibleDuplicateOf` es el primero de esta lista y se conserva porque
+    # es lo que decide la herencia de zona al guardar.
+    possibleDuplicates: list[DuplicateCandidate] = []
     duplicateStatus: str | None = None
     historical: bool = False
     supersededBy: str | None = None
@@ -177,6 +217,7 @@ def _to_out(doc: dict) -> SavedAnalysisOut:
         orthoCenter=doc.get("orthoCenter"),
         orthoBounds=doc.get("orthoBounds"),
         possibleDuplicateOf=doc.get("possibleDuplicateOf"),
+        possibleDuplicates=doc.get("possibleDuplicates", []),
         duplicateStatus=doc.get("duplicateStatus"),
         historical=doc.get("historical", False),
         supersededBy=doc.get("supersededBy"),
@@ -239,19 +280,55 @@ def _bounds_to_rect(bounds: list[float]) -> list[list[float]]:
     return [[left, bottom], [right, bottom], [right, top], [left, top]]
 
 
-async def _find_possible_duplicate(new_doc: dict, exclude_id: ObjectId) -> tuple[str, float] | None:
-    """AC1, compara la huella del ortomosaico (orthoBounds) del análisis
-    recién guardado contra la de todos los análisis guardados anteriormente
-    (mismo crs, no se reproyecta entre zonas UTM distintas, ver "Fuera de
-    alcance" del plan), excluyendo históricos (ya reemplazados) y el propio
-    documento. Devuelve el mejor candidato (mayor IoU) si supera
-    OVERLAP_THRESHOLD, o None. Análisis guardados antes de que existiera
-    orthoBounds no tienen con qué compararse, se excluyen (no hay forma de
-    inferir su huella real retroactivamente)."""
+async def _find_possible_duplicates(new_doc: dict, exclude_id: ObjectId | None) -> list[dict]:
+    """Todos los candidatos a duplicado, no solo el mejor.
+
+    Antes esto devolvía un único id, el de mayor superposición, y el aviso
+    preguntaba "¿es la misma zona que X?" en binario. Cuando dos zonas
+    superaban el umbral, el trabajador solo veía una: si la que el sistema
+    eligió no era la correcta, decir "son zonas distintas" tampoco servía,
+    porque lo que quería decir era "es esta OTRA", y esa respuesta no existía.
+
+    Devuelve la lista ordenada de mayor a menor superposición, cada una con su
+    razón de superposición para que la interfaz pueda mostrarla. Vacía si
+    ninguna supera el umbral.
+    """
     new_crs = new_doc.get("crs")
     new_bounds = new_doc.get("orthoBounds")
     if not new_crs or not new_bounds:
-        return None
+        return []
+    new_rect = _bounds_to_rect(new_bounds)
+
+    query: dict = {
+        "crs": new_crs,
+        "historical": {"$ne": True},
+        "orthoBounds": {"$ne": None},
+    }
+    if exclude_id is not None:
+        query["_id"] = {"$ne": exclude_id}
+
+    propio_vuelo = new_doc.get("sourceTaskId")
+
+    candidatos = []
+    for other in await get_db().analyses.find(query).to_list(length=None):
+        # Otra medición del MISMO vuelo calza consigo misma con superposición
+        # perfecta. No es una zona que elegir, es la misma versión, así que no
+        # se ofrece como candidata.
+        if propio_vuelo and other.get("sourceTaskId") == propio_vuelo:
+            continue
+        ratio = _polygon_iou(new_rect, _bounds_to_rect(other["orthoBounds"]))
+        if ratio >= OVERLAP_THRESHOLD:
+            candidatos.append({
+                "analysisId": str(other["_id"]),
+                "name": other.get("name", ""),
+                "zoneId": other.get("zoneId"),
+                "ratio": round(ratio, 4),
+            })
+
+    candidatos.sort(key=lambda c: c["ratio"], reverse=True)
+    return candidatos
+
+
     new_rect = _bounds_to_rect(new_bounds)
 
     candidates = await get_db().analyses.find({
@@ -340,6 +417,23 @@ async def _resolve_zone(doc: dict, owner: str, duplicate_of: str | None) -> str:
     if doc.get("zoneId"):
         return doc["zoneId"]
 
+    # Otra medición del MISMO vuelo pertenece a la misma zona por definición:
+    # una versión es un vuelo, y un vuelo no puede estar repartido entre dos
+    # zonas. Se resuelve por sourceTaskId y no por superposición de huellas,
+    # porque acá no hay nada que estimar, es un hecho.
+    #
+    # Antes esto salía de rebote del cálculo de duplicados (una medición del
+    # mismo vuelo calza consigo misma con superposición perfecta), pero esos
+    # candidatos ya no se consideran, justamente porque no son una zona que
+    # elegir. Sin esta rama, volver a medir un vuelo lo habría mandado a una
+    # zona nueva.
+    if doc.get("sourceTaskId"):
+        hermano = await get_db().analyses.find_one(
+            {"sourceTaskId": doc["sourceTaskId"], "zoneId": {"$ne": None}}
+        )
+        if hermano and hermano.get("zoneId"):
+            return hermano["zoneId"]
+
     if duplicate_of:
         otro = await get_db().analyses.find_one({"_id": _object_id(duplicate_of)})
         if otro and otro.get("zoneId"):
@@ -375,24 +469,23 @@ async def create_analysis(
     # Se compara ANTES de insertar (y no después, como antes) porque el
     # resultado ahora decide también a qué zona pertenece el análisis, y esa
     # decisión tiene que quedar escrita en el mismo documento que se inserta.
-    match = await _find_possible_duplicate(doc, exclude_id=None)
+    # Si el trabajador YA declaró a qué zona pertenece esta captura (eligió
+    # "modificar zona existente" antes de cargar las fotos), no hay nada que
+    # adivinar ni que preguntar. La detección de duplicados existe para cubrir
+    # el caso en que nadie lo dijo; correrla igual significaría preguntarle
+    # "¿no será esta otra zona?" a alguien que acaba de responder esa pregunta.
+    zona_declarada = bool(payload.zoneId)
+
     duplicate_of = None
-    if match:
-        duplicate_of, _ratio = match
-        # Un análisis nuevo del MISMO vuelo calza consigo mismo con
-        # superposición perfecta, porque comparten ortomosaico. Eso no es un
-        # duplicado de zona, es otra medición de la misma versión: sirve para
-        # heredar la zona, pero no debe levantar el aviso de "¿es la misma
-        # zona?" cada vez que alguien vuelve a medir.
-        otro = await get_db().analyses.find_one({"_id": _object_id(duplicate_of)})
-        mismo_vuelo = bool(
-            doc.get("sourceTaskId")
-            and otro
-            and otro.get("sourceTaskId") == doc["sourceTaskId"]
-        )
-        if not mismo_vuelo:
+    if not zona_declarada:
+        # _find_possible_duplicates ya descarta las mediciones del mismo vuelo:
+        # esas heredan la zona por otro camino y no son una zona que elegir.
+        candidatos = await _find_possible_duplicates(doc, exclude_id=None)
+        if candidatos:
+            duplicate_of = candidatos[0]["analysisId"]
             doc["possibleDuplicateOf"] = duplicate_of
             doc["duplicateStatus"] = "pending"
+            doc["possibleDuplicates"] = candidatos
 
     doc["zoneId"] = await _resolve_zone(doc, current_user.username, duplicate_of)
 
@@ -466,11 +559,11 @@ async def rename_zone(
 @router.post("/versions/{source_task_id}/reassign")
 async def reassign_version(
     source_task_id: str,
-    payload: ZoneIn | None = None,
+    payload: ReassignIn | None = None,
     current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
 ):
     """Mueve una versión completa (todos los análisis de un mismo vuelo) a otra
-    zona, o la separa en una zona propia si se manda un nombre.
+    zona: a una que ya existe (`zoneId`) o a una nueva (`name`).
 
     Existe porque agrupar por HDU7 es una heurística: compara la huella del
     ortomosaico y puede equivocarse, y hasta ahora una confirmación errónea
@@ -482,7 +575,15 @@ async def reassign_version(
     un mismo vuelo miden el mismo terreno, no tiene sentido que queden
     repartidos entre zonas distintas.
     """
-    if payload and payload.name:
+    if payload and payload.zoneId:
+        # A una zona que ya existe. Se valida antes de mover: apuntar una
+        # versión a una zona inexistente la dejaría invisible en todas las
+        # vistas, que filtran por zonas conocidas.
+        existe = await get_db().zones.find_one({"_id": _object_id(payload.zoneId)})
+        if not existe:
+            raise HTTPException(status_code=404, detail="La zona de destino no existe")
+        destino = payload.zoneId
+    elif payload and payload.name:
         zona = await get_db().zones.insert_one({
             "owner": current_user.username,
             "name": payload.name,
@@ -490,7 +591,10 @@ async def reassign_version(
         })
         destino = str(zona.inserted_id)
     else:
-        raise HTTPException(status_code=400, detail="Falta el nombre de la zona de destino")
+        raise HTTPException(
+            status_code=400,
+            detail="Falta la zona de destino: manda zoneId (existente) o name (nueva)",
+        )
 
     result = await get_db().analyses.update_many(
         {"sourceTaskId": source_task_id},
@@ -594,6 +698,7 @@ async def delete_analysis(
 @router.post("/{analysis_id}/confirm-duplicate", response_model=SavedAnalysisOut)
 async def confirm_duplicate(
     analysis_id: str,
+    payload: ConfirmDuplicateIn | None = None,
     current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
 ):
     """AC3, el trabajador confirma que es la misma zona: el análisis
@@ -619,8 +724,30 @@ async def confirm_duplicate(
     if not doc.get("possibleDuplicateOf"):
         raise HTTPException(status_code=400, detail="Este análisis no tiene un posible duplicado pendiente")
 
-    older_id = _object_id(doc["possibleDuplicateOf"])
+    # El trabajador puede elegir un candidato distinto del que el sistema puso
+    # primero. Cuando lo hace, este análisis estaba en la zona equivocada
+    # (la heredó del mejor candidato al guardarse), así que además de marcar
+    # el histórico hay que MOVER la versión a la zona del elegido. Sin eso,
+    # elegir otro candidato marcaba el histórico correcto pero dejaba la
+    # captura colgando de la zona que el sistema había adivinado.
+    elegido = (payload.duplicateOf if payload else None) or doc["possibleDuplicateOf"]
+
+    older_id = _object_id(elegido)
     older_doc = await get_db().analyses.find_one({"_id": older_id})
+    if not older_doc:
+        raise HTTPException(status_code=404, detail="La zona elegida ya no existe")
+
+    if elegido != doc["possibleDuplicateOf"]:
+        destino = older_doc.get("zoneId")
+        if destino and destino != doc.get("zoneId") and doc.get("sourceTaskId"):
+            await get_db().analyses.update_many(
+                {"sourceTaskId": doc["sourceTaskId"]},
+                {"$set": {"zoneId": destino}},
+            )
+            doc["zoneId"] = destino
+        # A partir de acá el resto del flujo trabaja sobre el elegido.
+        await get_db().analyses.update_one({"_id": oid}, {"$set": {"possibleDuplicateOf": elegido}})
+        doc["possibleDuplicateOf"] = elegido
 
     inherited_pending = (
         older_doc is not None

@@ -1,34 +1,45 @@
 // =============================================================================
-// CONDORFINDER — ANÁLISIS GUARDADOS (HDU4)
+// CONDORFINDER, ANÁLISIS GUARDADOS (HDU4)
 // Archivo: src/lib/analysisStore.ts
 //
-// Cliente HTTP para /analyses (backendModel/analyses.py, Mongo) — antes
+// Cliente HTTP para /analyses (backendModel/analyses.py, Mongo), antes
 // vivía en localStorage, documentado desde el principio como un
 // placeholder ("cuando exista backend con persistencia real, este módulo
 // se reemplaza por llamadas a la API sin cambiar los consumidores").
 // Migrado porque localStorage no sincronizaba entre dispositivos/
 // navegadores del mismo trabajador, se perdía al limpiar el navegador, y
-// no se compartía entre usuarios — un bloqueante real para la nube, mismo
+// no se compartía entre usuarios, un bloqueante real para la nube, mismo
 // motivo que ya llevó a migrar `tasks` a Mongo.
 //
 // Mismo patrón que resources.ts: fetch directo con credentials:"include",
 // parseErrorMessage() para traducir errores del backend a texto legible.
 // Los tres consumidores (analysis.tsx, index.tsx, rutas.tsx) pasaron de
-// leer estas funciones de forma síncrona a hacerlo con await — es el único
+// leer estas funciones de forma síncrona a hacerlo con await, es el único
 // cambio real que les tocó, la forma de los datos no cambió.
 // =============================================================================
 
 // CLIENT_BACKEND_URL (no BACKEND_URL): este archivo corre 100% en el
-// navegador — necesita la ruta relativa que proxyea vite.config.ts, para
+// navegador, necesita la ruta relativa que proxyea vite.config.ts, para
 // que la cookie de sesión no se pierda por ser cross-origin. Ver config.ts.
 import { CLIENT_BACKEND_URL as BACKEND_URL } from "./config";
 
-/** Forma real del resumen que guarda analysis.tsx — tipada para poder
+/** Forma real del resumen que guarda analysis.tsx, tipada para poder
  *  mostrarla en Vista Principal y en el diálogo de nombre duplicado. */
 export interface AnalysisSummary {
   totalVolumeM3: number;
   totalWeightKg: number;
   totalAreaM2: number;
+}
+
+/** Una zona con la que un analisis podria estar duplicado, con cuanto se
+ *  superponen sus huellas. La interfaz muestra `ratio` como porcentaje para
+ *  que elegir entre varias no sea a ciegas. */
+export interface DuplicateCandidate {
+  analysisId: string;
+  name: string;
+  zoneId?: string | null;
+  /** Superposicion de huellas, 0 a 1. */
+  ratio: number;
 }
 
 export interface SavedAnalysisRecord {
@@ -37,7 +48,7 @@ export interface SavedAnalysisRecord {
   savedAt: string; // ISO 8601
   mapUrl: string;
   /** Miniatura liviana para tarjetas/listas (Vista Principal, hover de
-   *  rutas.tsx) — usar en vez de `mapUrl` (varios MB) donde solo se
+   *  rutas.tsx), usar en vez de `mapUrl` (varios MB) donde solo se
    *  necesita una vista previa. Ausente en análisis guardados antes de este
    *  cambio; en ese caso el consumidor debe caer de vuelta a `mapUrl`. */
   thumbnailUrl?: string | null;
@@ -45,39 +56,44 @@ export interface SavedAnalysisRecord {
   summary: AnalysisSummary | null;
   /** task_id del backend del que salió este análisis, si vino de una
    *  generación en curso. El backend borra ese documento de `tasks` al
-   *  guardar (ver analyses.py::_release_source_task) — así no aparece
+   *  guardar (ver analyses.py::_release_source_task), así no aparece
    *  duplicado como "pendiente" y "guardado" a la vez en Vista Principal. */
   sourceTaskId?: string;
-  /** CRS proyectado del ortomosaico (ej. "EPSG:32719") — HDU5 lo necesita
+  /** CRS proyectado del ortomosaico (ej. "EPSG:32719"), HDU5 lo necesita
    *  para reproyectar `geo_polygon` de cada detección a WGS84 y ubicarlas
    *  en un mapa real. Ausente en análisis guardados antes de HDU5. */
   crs?: string;
   /** Centro geográfico real del ortomosaico completo (mismo CRS que `crs`)
-   *  — a diferencia del centroide de las detecciones, es el mismo sin
+   * , a diferencia del centroide de las detecciones, es el mismo sin
    *  importar qué encuentre YOLO en cada corrida. rutas.tsx lo usa para
    *  ubicar la zona de forma consistente entre análisis del mismo set de
    *  fotos. Ausente en análisis guardados antes de este cambio. */
   orthoCenter?: [number, number] | null;
-  /** HDU7 — huella geográfica COMPLETA del ortomosaico: [left, bottom,
+  /** HDU7, huella geográfica COMPLETA del ortomosaico: [left, bottom,
    *  right, top], mismo CRS que `crs`. El backend la usa (no las
-   *  detecciones puntuales) para detectar duplicados — comparar la imagen
+   *  detecciones puntuales) para detectar duplicados, comparar la imagen
    *  completa es robusto a que YOLO detecte la basura en una posición
    *  levemente distinta entre corridas del mismo vuelo. Ausente en
    *  análisis guardados antes de este cambio. */
   orthoBounds?: [number, number, number, number] | null;
-  /** HDU7 — id del análisis anterior con el que este se superpone >50% de
+  /** HDU7, id del análisis anterior con el que este se superpone >50% de
    *  área (calculado por el backend con shapely al guardar, nunca por el
    *  frontend). Presente solo si el backend encontró un candidato. */
   possibleDuplicateOf?: string | null;
-  /** HDU7 — estado del aviso de posible duplicado: "pending" = todavía sin
+  /** Todos los candidatos a duplicado, de mayor a menor superposicion.
+   *  `possibleDuplicateOf` es el primero de esta lista; se conserva porque es
+   *  el que decide de que zona hereda el analisis al guardarse. Opcional
+   *  porque los registros guardados antes de este campo no lo traen. */
+  possibleDuplicates?: DuplicateCandidate[];
+  /** HDU7, estado del aviso de posible duplicado: "pending" = todavía sin
    *  resolver (AC2), "confirmed_same"/"confirmed_different" = el trabajador
    *  ya respondió (AC3/AC4). null/ausente = no se detectó superposición. */
   duplicateStatus?: "pending" | "confirmed_same" | "confirmed_different" | null;
-  /** HDU7/AC3 — true si este análisis quedó vinculado como versión anterior
+  /** HDU7/AC3, true si este análisis quedó vinculado como versión anterior
    *  de uno más reciente confirmado como la misma zona. Se oculta del
    *  listado principal de Vista Principal (solo visible bajo "Historial"). */
   historical?: boolean;
-  /** HDU7/AC3 — id del análisis más reciente que reemplazó a este (se setea
+  /** HDU7/AC3, id del análisis más reciente que reemplazó a este (se setea
    *  junto con `historical: true`). */
   supersededBy?: string | null;
   /** Zona a la que pertenece este análisis. La zona es la identidad que
@@ -86,7 +102,7 @@ export interface SavedAnalysisRecord {
    *  del ortomosaico, o crea una nueva). Ausente en análisis anteriores a la
    *  migración. */
   zoneId?: string | null;
-  /** Fecha en que se CAPTURARON las fotos, del EXIF — no la de guardado. Es
+  /** Fecha en que se CAPTURARON las fotos, del EXIF, no la de guardado. Es
    *  la que ordena las versiones de una zona en el tiempo. */
   captureDate?: string | null;
   /** true cuando ninguna foto traía fecha y se cayó a la de carga. La vista
@@ -124,7 +140,7 @@ async function parseErrorMessage(res: Response, fallback: string): Promise<strin
       return typeof parsed.detail === "string" ? parsed.detail : fallback;
     }
   } catch {
-    // respuesta no era JSON — se usa el mensaje genérico
+    // respuesta no era JSON, se usa el mensaje genérico
   }
   return fallback;
 }
@@ -135,7 +151,7 @@ export type SaveAnalysisResult =
 
 /**
  * Lista todos los análisis guardados (AC3 de HDU4). Lanza en caso de error
- * (sesión perdida, red caída) — igual que listResourcePoints() en
+ * (sesión perdida, red caída), igual que listResourcePoints() en
  * resources.ts, para que cada consumidor decida si avisa (rutas.tsx) o
  * degrada en silencio (index.tsx, que ya trata así a listResourcePoints en
  * el mismo archivo).
@@ -150,10 +166,10 @@ export async function listAnalyses(): Promise<SavedAnalysisRecord[]> {
 
 /**
  * Busca un análisis guardado por nombre exacto (AC6 de HDU4). Trae el
- * listado completo y filtra en el cliente — mismo criterio que
+ * listado completo y filtra en el cliente, mismo criterio que
  * resources.py usa para sus puntos, la cantidad de análisis guardados no
  * justifica un endpoint de búsqueda aparte. Si el listado falla, se asume
- * "no hay duplicado" en vez de bloquear el guardado — el intento real de
+ * "no hay duplicado" en vez de bloquear el guardado, el intento real de
  * guardar (POST/PUT) es el que va a mostrar el error de red si persiste.
  */
 export async function findAnalysisByName(name: string): Promise<SavedAnalysisRecord | null> {
@@ -170,10 +186,10 @@ export async function findAnalysisByName(name: string): Promise<SavedAnalysisRec
  * de análisis disponibles (AC2 de HDU4).
  *
  * Si `overwriteId` viene informado, reemplaza ese registro existente (PUT)
- * en vez de crear uno nuevo (POST) — lo usa AC6 cuando el trabajador
+ * en vez de crear uno nuevo (POST), lo usa AC6 cuando el trabajador
  * confirma sobrescribir un análisis con el mismo nombre.
  *
- * Devuelve { ok: false } si el guardado falla (AC5) — hoy eso pasa por un
+ * Devuelve { ok: false } si el guardado falla (AC5), hoy eso pasa por un
  * error de red o de sesión; el try/catch cubre ambos sin que el
  * consumidor (analysis.tsx) tenga que distinguirlos.
  */
@@ -232,7 +248,7 @@ export async function saveAnalysis(
     const record: SavedAnalysisRecord = await res.json();
 
     // El backend ya borró la tarea de origen (analyses.py::_release_source_task)
-    // — deja de aparecer como "en progreso"/"pendiente de análisis" en Vista
+    //, deja de aparecer como "en progreso"/"pendiente de análisis" en Vista
     // Principal sin que el frontend tenga que hacer nada más acá.
 
     return { ok: true, record };
@@ -247,7 +263,7 @@ export async function saveAnalysis(
 /**
  * Elimina un análisis guardado (botón "Eliminar zona" en Vista Principal).
  * Best-effort, igual que la limpieza de archivos huérfanos que ya hace
- * confirmDelete() en index.tsx justo después de llamar a esto — no hay
+ * confirmDelete() en index.tsx justo después de llamar a esto, no hay
  * rollback si falla, solo se intenta.
  */
 export async function deleteAnalysis(id: string): Promise<void> {
@@ -257,13 +273,13 @@ export async function deleteAnalysis(id: string): Promise<void> {
       credentials: "include",
     });
   } catch {
-    // best-effort — ver docstring
+    // best-effort, ver docstring
   }
 }
 
 /**
  * Busca un análisis guardado por id (AC4 de HDU4). Devuelve null ante
- * cualquier error — el caller (analysis.tsx) ya trata "no encontrado" como
+ * cualquier error, el caller (analysis.tsx) ya trata "no encontrado" como
  * "cae al camino normal de carga en vivo", mismo comportamiento correcto
  * para un error de red.
  */
@@ -280,21 +296,30 @@ export async function loadAnalysisById(id: string): Promise<SavedAnalysisRecord 
 }
 
 // ── HDU7: confirmar/rechazar un posible duplicado ───────────────────────────
-// Mismo patrón fetch+credentials:"include" que el resto del archivo — el
+// Mismo patrón fetch+credentials:"include" que el resto del archivo, el
 // backend hace todo el trabajo real (marcar histórico, vincular), acá solo
 // se dispara la acción y se devuelve el análisis actualizado.
 
 /**
- * AC3 — el trabajador confirma que es la misma zona: el análisis anterior
+ * AC3, el trabajador confirma que es la misma zona: el análisis anterior
  * (`possibleDuplicateOf`) pasa a histórico, este queda como la versión
- * vigente. Devuelve null si la llamada falla (red/sesión) — el caller
+ * vigente. Devuelve null si la llamada falla (red/sesión), el caller
  * decide cómo avisar, mismo criterio que el resto de este archivo.
  */
-export async function confirmDuplicate(id: string): Promise<SavedAnalysisRecord | null> {
+export async function confirmDuplicate(
+  id: string,
+  /** Cual de los candidatos eligio el trabajador. Omitido significa "el que el
+   *  sistema puso primero". Cuando se elige otro, el backend ademas MUEVE esta
+   *  version a la zona del elegido: si no, quedaria marcando el historico
+   *  correcto pero colgando de la zona que el sistema habia adivinado. */
+  duplicateOf?: string,
+): Promise<SavedAnalysisRecord | null> {
   try {
     const res = await fetch(`${BACKEND_URL}/analyses/${encodeURIComponent(id)}/confirm-duplicate`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
       credentials: "include",
+      body: JSON.stringify(duplicateOf ? { duplicateOf } : {}),
     });
     if (!res.ok) return null;
     return await res.json();
@@ -304,7 +329,7 @@ export async function confirmDuplicate(id: string): Promise<SavedAnalysisRecord 
 }
 
 /**
- * AC4 — el trabajador indica que son zonas distintas: ambos registros se
+ * AC4, el trabajador indica que son zonas distintas: ambos registros se
  * mantienen por separado, solo se cierra el aviso de posible duplicado.
  */
 export async function rejectDuplicate(id: string): Promise<SavedAnalysisRecord | null> {
@@ -351,7 +376,14 @@ export async function renameZone(zoneId: string, name: string): Promise<ZoneReco
  *  zona nueva. Es la salida cuando HDU7 agrupó mal dos terrenos distintos:
  *  sin esto, una confirmación equivocada de duplicado dejaría fusionadas dos
  *  historias para siempre. */
-export async function reassignVersion(sourceTaskId: string, newZoneName: string): Promise<boolean> {
+export async function reassignVersion(
+  sourceTaskId: string,
+  /** Zona de destino: `{ zoneId }` para una que ya existe, `{ name }` para
+   *  crear una nueva. Antes solo existia la segunda, asi que separar una
+   *  version mal agrupada siempre generaba una zona mas y no habia forma de
+   *  decir "en realidad pertenece a aquella". */
+  destino: { zoneId: string } | { name: string },
+): Promise<boolean> {
   try {
     const res = await fetch(
       `${BACKEND_URL}/analyses/versions/${encodeURIComponent(sourceTaskId)}/reassign`,
@@ -359,7 +391,7 @@ export async function reassignVersion(sourceTaskId: string, newZoneName: string)
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ name: newZoneName }),
+        body: JSON.stringify(destino),
       },
     );
     return res.ok;
@@ -369,7 +401,7 @@ export async function reassignVersion(sourceTaskId: string, newZoneName: string)
 }
 
 // ── handoff entre rutas: qué análisis abrir al llegar a /analysis ──────────
-// Se queda en sessionStorage — es coordinación de navegación entre vistas
+// Se queda en sessionStorage, es coordinación de navegación entre vistas
 // dentro de la MISMA pestaña, no persistencia de datos; no tiene relación
 // con la migración a Mongo de arriba. Mismo patrón que mapState.ts.
 

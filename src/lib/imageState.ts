@@ -1,5 +1,5 @@
 // =============================================================================
-// CONDORFINDER — PERSISTENCIA DE ESTADO DE IMÁGENES
+// CONDORFINDER, PERSISTENCIA DE ESTADO DE IMÁGENES
 // Archivo: src/lib/imageState.ts
 //
 // Guard typeof window !== "undefined" en todas las funciones porque
@@ -126,7 +126,7 @@ const KEY_CANCEL_REQUESTED = "condorfinder_cancel_requested";
  * (hasta ~10s para que ODM lo note, o hasta que YOLO termine su corrida
  * actual si se canceló durante "detecting"). Esta bandera persiste esa
  * intención para que la UI siga mostrando "Cancelando..." durante toda esa
- * ventana — incluso si se recarga la página mientras tanto — en vez de
+ * ventana, incluso si se recarga la página mientras tanto, en vez de
  * volver a mostrar el botón de generar/cancelar como si nada.
  */
 export function saveCancelRequested(v: boolean): void {
@@ -157,6 +157,36 @@ export function clearDetectionJsonUrl(): void {
   sessionStorage.removeItem(KEY_DETECTION_JSON_URL);
 }
 
+/**
+ * Zona a la que el trabajador DECLARO que pertenece esta carga.
+ *
+ * Se elige en Vista Principal ("modificar zona existente") antes de subir las
+ * fotos, y viaja hasta el guardado del analisis. Sin esto, la zona la decidia
+ * siempre una heuristica: el backend comparaba la huella del ortomosaico
+ * contra las zonas guardadas y adivinaba. Adivinar esta bien cuando nadie
+ * dijo nada, pero el trabajador que acaba de elegir "esta es la Zona A" ya
+ * respondio esa pregunta, y el sistema le preguntaba igual.
+ *
+ * `_resolve_zone()` en el backend ya daba prioridad a la zona declarada sobre
+ * la adivinada; lo que faltaba era que alguna pantalla la mandara.
+ */
+const KEY_ZONA_DESTINO = "condorfinder:zona-destino";
+
+export function saveZonaDestino(zoneId: string): void {
+  if (!isBrowser) return;
+  sessionStorage.setItem(KEY_ZONA_DESTINO, zoneId);
+}
+
+export function loadZonaDestino(): string | null {
+  if (!isBrowser) return null;
+  return sessionStorage.getItem(KEY_ZONA_DESTINO);
+}
+
+export function clearZonaDestino(): void {
+  if (!isBrowser) return;
+  sessionStorage.removeItem(KEY_ZONA_DESTINO);
+}
+
 export function clearImageState(): void {
   if (!isBrowser) return;
   sessionStorage.removeItem(KEY_ITEMS);
@@ -168,4 +198,5 @@ export function clearImageState(): void {
   sessionStorage.removeItem(KEY_BACKEND_STAGE);
   sessionStorage.removeItem(KEY_DETECTION_JSON_URL);
   sessionStorage.removeItem(KEY_CANCEL_REQUESTED);
+  sessionStorage.removeItem(KEY_ZONA_DESTINO);
 }
