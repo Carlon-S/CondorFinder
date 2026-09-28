@@ -5,7 +5,6 @@ import {
   PanelLeftOpen,
   LayoutDashboard,
   UploadCloud,
-  BarChart3,
   Truck,
   Route,
   CircleUserRound,
@@ -17,10 +16,14 @@ import {
 import logo from "@/assets/Logo/logo-dark-mode.svg";
 import { logout } from "@/lib/auth";
 
+// /analysis NO está acá a propósito. La vista de análisis siempre habla de una
+// zona concreta, y a esa zona se llega eligiéndola: desde Vista Principal o
+// desde la carga recién terminada. Entrar por el menú abría lo último que
+// quedó en sessionStorage, o nada, sin decir de qué terreno se trataba, así
+// que era una entrada que no se podía usar sin haber pasado antes por otra.
 const NAV_ITEMS = [
   { to: "/", label: "Zonas Monitoreadas", icon: LayoutDashboard },
   { to: "/carga", label: "Carga De Imágenes", icon: UploadCloud },
-  { to: "/analysis", label: "Análisis", icon: BarChart3 },
   { to: "/recursos", label: "Recursos Disponibles", icon: Truck },
   { to: "/rutas", label: "Generar Ruta", icon: Route },
 ] as const;

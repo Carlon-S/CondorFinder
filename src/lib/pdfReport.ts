@@ -364,7 +364,7 @@ async function renderReport(selections: ReportSelection[]) {
 
       const variacion =
         anterior === null
-          ? ", "
+          ? "-"
           : anterior === 0
             ? "sin base"
             : `${(((volumen - anterior) / anterior) * 100).toFixed(1)} %`;

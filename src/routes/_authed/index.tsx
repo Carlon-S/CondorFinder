@@ -21,7 +21,7 @@
 // encajonando cada sección.
 // =============================================================================
 
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { notify } from "@/lib/notify";
 import { ChevronDown, ChevronUp } from "lucide-react";
@@ -35,18 +35,14 @@ import {
   FolderOpen,
   Layers,
   Loader2,
-  MapPin,
   Plus,
   Scale,
   Search,
   Trash2,
-  Truck,
 } from "@/components/icons/Icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ResourcesSummaryPanel } from "@/components/ResourcesSummaryPanel";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Table,
@@ -76,14 +72,12 @@ import { ReportPreview } from "@/components/ReportPreview";
 import { zoneTotals } from "@/lib/volumeReport";
 import { borrarArchivosDeVersion } from "@/lib/versionCleanup";
 import type { ReportSelection } from "@/lib/pdfReport";
-import { listResourcePoints, type ResourcePoint } from "@/lib/resources";
 import {
   listPendingTasks,
   getTaskStatus,
   cancelTask,
   deleteAllImages,
   deleteResultFile,
-  deleteFinalsFile,
   listTaskImages,
   getTaskImageUrl,
   deleteTaskImages,
@@ -192,8 +186,8 @@ function fromRecord(r: SavedAnalysisRecord): ZoneRow {
  */
 async function loadZoneRows(): Promise<ZoneRow[]> {
   // Ambas listas pueden fallar (sesión perdida, red caída), se degradan en
-  // silencio en vez de romper el resto del listado, mismo criterio que ya
-  // usa este archivo para listResourcePoints() (.catch(() => {})).
+  // silencio en vez de romper el resto del listado: una lista incompleta es
+  // mucho mejor que una vista que no carga.
   let doneRows: ZoneRow[] = [];
   try {
     const records = await listAnalyses();
@@ -335,9 +329,9 @@ function MainPage() {
   const [evolutionZone, setEvolutionZone] = useState<ZoneRecord | null>(null);
 
   useEffect(() => {
-    // Degrada en silencio igual que listResourcePoints en este mismo archivo:
-    // si falla, los botones de informe y evolución simplemente no tienen con
-    // qué trabajar, no es motivo para romper la vista principal.
+    // Degrada en silencio: si falla, los botones de informe y evolución
+    // simplemente no tienen con qué trabajar, no es motivo para romper la
+    // vista principal.
     listAnalyses().then(setSavedAnalyses).catch(() => {});
     listZones().then(setZoneRecords).catch(() => {});
   }, []);
@@ -407,16 +401,6 @@ function MainPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Panel "Recursos disponibles" (HDU6), totales reales sobre los puntos
-  // de origen guardados, no los placeholders fijos que había antes.
-  const [resourcePoints, setResourcePoints] = useState<ResourcePoint[]>([]);
-  const [resourcePointsLoading, setResourcePointsLoading] = useState(true);
-  useEffect(() => {
-    listResourcePoints()
-      .then(setResourcePoints)
-      .catch(() => {})
-      .finally(() => setResourcePointsLoading(false));
-  }, []);
   // Auto-refresh: mientras haya alguna zona "en progreso", vuelve a consultar
   // su estado cada 5s (mismo intervalo que usa el polling en vivo de
   // carga.tsx) para que pase sola a "pendiente de análisis" sin necesitar F5.
@@ -691,11 +675,12 @@ function MainPage() {
 
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
-      {/* Encabezado de página, "Recursos disponibles" (antes una columna
-          fija de hasta 400px, ver git history) ahora vive en un panel
-          deslizante (Sheet): sobre esta vista el contenido real es el
-          listado de zonas, no un resumen de HDU6 que ya tiene su propia
-          página completa en /recursos. */}
+      {/* Encabezado de página. Acá vivió el acceso a "Recursos disponibles",
+          primero como columna fija y después como panel deslizante; ya no
+          existe en ninguna de las dos formas. HDU6 tiene su propia página
+          completa en /recursos, alcanzable desde el menú lateral, y este
+          resumen era una tercera copia de la misma información: lo que esta
+          vista tiene que mostrar es el listado de zonas. */}
       <div className="flex items-center justify-between border-b border-border/25 px-6 py-5">
         <div>
           {/* Rótulo sobre el título, equivalente de la .eyebrow del sitio. */}
@@ -704,30 +689,6 @@ function MainPage() {
             Zonas Monitoreadas
           </h2>
         </div>
-        <Sheet>
-          <SheetTrigger asChild>
-            {/* variant="secondary" quedaba casi invisible acá (mismo tono
-                navy que el header), fondo bg-card + borde para que se lea
-                como botón real, no como parte del fondo. */}
-            <Button
-              size="sm"
-              className="border border-border bg-card text-foreground shadow-sm hover:bg-accent hover:text-accent-foreground"
-            >
-              <Truck className="mr-1.5 h-3.5 w-3.5" /> Recursos disponibles
-            </Button>
-          </SheetTrigger>
-          <SheetContent side="left" className="w-[clamp(280px,26vw,380px)] overflow-y-auto">
-            <SheetHeader>
-              <SheetTitle className="sr-only">Recursos disponibles</SheetTitle>
-            </SheetHeader>
-            <ResourcesSummaryPanel points={resourcePoints} loading={resourcePointsLoading} />
-            <Link to="/recursos" className="mt-5 block">
-              <Button size="lg" className="btn-cta w-full">
-                <MapPin className="mr-2 h-4 w-4" /> Definir punto
-              </Button>
-            </Link>
-          </SheetContent>
-        </Sheet>
       </div>
 
       <main className="flex flex-1">
@@ -839,9 +800,12 @@ function MainPage() {
                     <TableHead className="w-[7.5rem]"></TableHead>
                     <TableHead>Zona</TableHead>
                     <TableHead>Fecha</TableHead>
-                    <TableHead className="text-right">Volumen</TableHead>
-                    <TableHead className="text-right">Peso</TableHead>
-                    <TableHead className="text-right">Área</TableHead>
+                    {/* El esqueleto repite los mismos encabezados que la tabla
+                        real, unidad incluida, para que al terminar de cargar
+                        no se muevan de ancho. */}
+                    <TableHead className="text-right">Volumen <span className="mono opacity-70">(m³)</span></TableHead>
+                    <TableHead className="text-right">Peso <span className="mono opacity-70">(kg)</span></TableHead>
+                    <TableHead className="text-right">Área <span className="mono opacity-70">(m²)</span></TableHead>
                     <TableHead className="text-right"></TableHead>
                     <TableHead className="w-[2.75rem]"></TableHead>
                   </TableRow>
@@ -870,9 +834,9 @@ function MainPage() {
                     <TableHead className="w-[7.5rem]"></TableHead>
                     <TableHead>Zona</TableHead>
                     <SortableHead field="fecha" label="Fecha" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} />
-                    <SortableHead field="volumen" label="Volumen" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="right" />
-                    <SortableHead field="peso" label="Peso" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="right" />
-                    <SortableHead field="area" label="Área" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="right" />
+                    <SortableHead field="volumen" label="Volumen" unit="m³" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="right" />
+                    <SortableHead field="peso" label="Peso" unit="kg" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="right" />
+                    <SortableHead field="area" label="Área" unit="m²" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="right" />
                     <TableHead className="text-right"></TableHead>
                     <TableHead className="w-[2.75rem]"></TableHead>
                   </TableRow>
@@ -940,14 +904,17 @@ function MainPage() {
                       <TableCell className="text-muted-foreground">
                         {new Date(z.savedAt).toLocaleDateString("es-CL")}
                       </TableCell>
-                      <TableCell className="text-right mono">
-                        {z.summary ? `${z.summary.totalVolumeM3} m³` : ", "}
+                      {/* Solo la cifra: la unidad la dice el encabezado de la
+                          columna. El respaldo es un guion y no ", ": una zona
+                          sin análisis guardado imprimía una coma suelta. */}
+                      <TableCell className="text-right mono tabular-nums">
+                        {z.summary ? z.summary.totalVolumeM3 : "-"}
                       </TableCell>
-                      <TableCell className="text-right mono">
-                        {z.summary ? `${z.summary.totalWeightKg} kg` : ", "}
+                      <TableCell className="text-right mono tabular-nums">
+                        {z.summary ? z.summary.totalWeightKg : "-"}
                       </TableCell>
-                      <TableCell className="text-right mono">
-                        {z.summary ? `${z.summary.totalAreaM2} m²` : ", "}
+                      <TableCell className="text-right mono tabular-nums">
+                        {z.summary ? z.summary.totalAreaM2 : "-"}
                       </TableCell>
                       <TableCell className="text-right">
                         {z.state === "done" && (
@@ -1472,6 +1439,7 @@ type SortField = "fecha" | "volumen" | "peso" | "area";
 function SortableHead({
   field,
   label,
+  unit,
   sortBy,
   sortDir,
   onSort,
@@ -1479,6 +1447,11 @@ function SortableHead({
 }: {
   field: SortField;
   label: string;
+  /** Unidad de la columna, al lado del nombre y no repetida en cada celda.
+   *  Repetida por fila, "m³" aparecía tantas veces como zonas hubiera y
+   *  separaba las cifras de su propia columna, que es justo lo que hace
+   *  comparable una tabla. Va en .mono, como toda unidad en el sistema. */
+  unit?: string;
   sortBy: SortField;
   sortDir: "asc" | "desc";
   onSort: (field: SortField) => void;
@@ -1490,8 +1463,14 @@ function SortableHead({
       className={`cursor-pointer select-none hover:text-foreground ${align === "right" ? "text-right" : ""}`}
       onClick={() => onSort(field)}
     >
+      {/* Nombre y unidad van dentro de UN solo hijo del flex: con
+          flex-row-reverse (columnas alineadas a la derecha) el orden visual
+          se invierte, y como dos hijos sueltos quedaban como "(m³) Volumen". */}
       <span className={`inline-flex items-center gap-1 ${align === "right" ? "flex-row-reverse" : ""}`}>
-        {label}
+        <span>
+          {label}
+          {unit && <span className="mono ml-1 opacity-70">({unit})</span>}
+        </span>
         {active && (sortDir === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)}
       </span>
     </TableHead>

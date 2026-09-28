@@ -336,6 +336,36 @@ html {
 .detect-frame-sm > .detect-corners::before { top: 4px; right: 4px;    border-width: 1.5px 1.5px 0 0; }
 .detect-frame-sm > .detect-corners::after  { bottom: 4px; left: 4px;  border-width: 0 0 1.5px 1.5px; }
 
+/* ------------------------------------------------- 2b. difuminado del ortomosaico */
+/* El mapa generado es una foto rectangular de corte recto. Sobre el lienzo claro
+   de la vista de análisis ese borde duro se leía como una imagen pegada encima de
+   la página, no como el terreno contenido en un visor. Esta máscara desvanece los
+   cuatro lados hacia el fondo.
+
+   Va en la IMAGEN y no en su contenedor. La capa SVG de las detecciones es
+   hermana de la imagen y tiene que quedar nítida hasta el borde: aplicado al
+   contenedor, el difuminado se comería también los rectángulos del modelo, que
+   son el dato y no la decoración.
+
+   Son dos gradientes cruzados, no uno: un solo linear-gradient difumina un eje
+   nada más, y mask-composite: intersect es lo que hace que los cuatro lados se
+   desvanezcan a la vez. -webkit-mask-composite usa la palabra antigua
+   (source-in) para el mismo efecto en Safari.
+
+   El ancho va en rem, no en px, para que siga la escala proporcional del
+   sistema (ver el clamp de html en la sección de tipografía). */
+.map-feather {
+  --map-feather-size: 2.25rem;
+  -webkit-mask-image:
+    linear-gradient(to right,  transparent 0, #000 var(--map-feather-size), #000 calc(100% - var(--map-feather-size)), transparent 100%),
+    linear-gradient(to bottom, transparent 0, #000 var(--map-feather-size), #000 calc(100% - var(--map-feather-size)), transparent 100%);
+  mask-image:
+    linear-gradient(to right,  transparent 0, #000 var(--map-feather-size), #000 calc(100% - var(--map-feather-size)), transparent 100%),
+    linear-gradient(to bottom, transparent 0, #000 var(--map-feather-size), #000 calc(100% - var(--map-feather-size)), transparent 100%);
+  -webkit-mask-composite: source-in;
+  mask-composite: intersect;
+}
+
 /* ---------------------------------------------------------------- 3. rótulo de sección */
 /* Equivalente de la .eyebrow de feria-page, pero NO en amarillo: sobre el
    cuerpo claro de la app el amarillo de marca da 1.38:1 de contraste y el

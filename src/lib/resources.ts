@@ -42,14 +42,38 @@ export interface ResourcePoint extends ResourcePointInput {
   created_at: string;
 }
 
+/** Campo de un error de validación de FastAPI: loc es la ruta al campo
+ *  ("body", "tolvas", 0, "capacity_m3") y msg el motivo. */
+interface ValidationError {
+  loc?: (string | number)[];
+  msg?: string;
+}
+
 async function parseErrorMessage(res: Response, fallback: string): Promise<string> {
   try {
     const parsed = await res.json();
-    if (parsed?.detail) {
-      return typeof parsed.detail === "string" ? parsed.detail : fallback;
+    const detail = parsed?.detail;
+    if (typeof detail === "string") return detail;
+
+    // Un 422 de FastAPI trae `detail` como LISTA de errores por campo, no como
+    // texto. Antes esa rama caía directo al mensaje genérico, así que un
+    // rechazo de validación (por ejemplo una capacidad en 0, que el backend
+    // exige > 0) se veía en pantalla como "No se pudo guardar el punto" sin
+    // decir qué campo estaba mal, y quedaba indistinguible de una caída de red.
+    if (Array.isArray(detail) && detail.length > 0) {
+      const campos = (detail as ValidationError[])
+        .map((e) => {
+          // Se salta el primer tramo del loc, que siempre es "body".
+          const ruta = (e.loc ?? []).slice(1).join(".");
+          return ruta ? `${ruta}: ${e.msg ?? "valor inválido"}` : e.msg;
+        })
+        .filter(Boolean)
+        .slice(0, 3)
+        .join(" · ");
+      if (campos) return `${fallback} Revisa: ${campos}`;
     }
   } catch {
-    // respuesta no era JSON — se usa el mensaje genérico
+    // respuesta no era JSON, se usa el mensaje genérico
   }
   return fallback;
 }

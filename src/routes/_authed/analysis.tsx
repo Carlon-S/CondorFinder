@@ -1299,81 +1299,6 @@ function AnalysisPage() {
               </p>
             </div>
 
-            {/* HDU7/AC2, posible zona duplicada.
-
-                Antes esto preguntaba en binario: "¿es la misma zona que X?",
-                con X = el candidato de mayor superposición. Cuando dos zonas
-                superaban el umbral el trabajador solo veía una, y si la que el
-                sistema eligió no era la correcta, "son zonas distintas"
-                tampoco servía: lo que quería decir era "es esta OTRA", y esa
-                respuesta no existía. Ahora se listan todos los candidatos con
-                su porcentaje de superposición y se elige. */}
-            {duplicateWarning && (
-              <div className="animate-in fade-in slide-in-from-left-2 duration-300 rounded-lg border border-warning/40 bg-warning/10 p-4">
-                <TriangleAlert className="mb-2 h-5 w-5 text-warning" />
-                <p className="text-sm font-semibold">¿Esta captura ya tiene zona?</p>
-                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                  El terreno de esta captura se superpone con{" "}
-                  {duplicateWarning.candidatos.length === 1
-                    ? "una zona ya registrada"
-                    : `${duplicateWarning.candidatos.length} zonas ya registradas`}
-                  . Si es la misma, elígela para que queden como capturas de una
-                  sola zona.
-                </p>
-
-                <p className="mono mt-3 text-[0.625rem] text-muted-foreground">
-                  Esta captura: {activeSummary.totalVolumeM3} m³
-                </p>
-
-                {/* max-h + scroll: el backend ya acota cuántos candidatos
-                    manda (MAX_CANDIDATOS), pero el aviso vive en el panel
-                    lateral y no puede crecer sin techo aunque lleguen varios.
-                    Con el tope, el botón de "ninguna" siempre queda visible
-                    sin tener que desplazar el panel entero. */}
-                <ul className="mt-2 max-h-[11rem] space-y-1.5 overflow-y-auto pr-1">
-                  {duplicateWarning.candidatos.map((c) => (
-                    <li key={c.analysisId}>
-                      <button
-                        type="button"
-                        disabled={resolvingDuplicate !== null}
-                        onClick={() => handleConfirmDuplicate(c.analysisId)}
-                        className="flex w-full cursor-pointer items-center gap-2 rounded-md border border-border/60 bg-background/60 p-2 text-left transition-all duration-200 hover:border-primary hover:bg-primary/5 disabled:pointer-events-none disabled:opacity-50"
-                      >
-                        {resolvingDuplicate === c.analysisId && (
-                          <Loader2 className="h-3.5 w-3.5 flex-shrink-0 animate-spin" />
-                        )}
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-xs font-medium text-foreground">
-                            {c.name}
-                          </span>
-                          <span className="mono block text-[0.625rem] tabular-nums text-muted-foreground">
-                            {Math.round(c.ratio * 100)} % de superposición
-                          </span>
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-
-                {/* La salida cuando ninguna corresponde. Va como acción
-                    secundaria y al final: si el sistema levantó el aviso es
-                    porque algo se superpone, así que lo más probable es que
-                    alguna de las de arriba sea la correcta. */}
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className="relative mt-3 w-full"
-                  disabled={resolvingDuplicate !== null}
-                  onClick={handleRejectDuplicate}
-                >
-                  {resolvingDuplicate === "reject" && (
-                    <Loader2 className="absolute left-3 h-3.5 w-3.5 animate-spin" />
-                  )}
-                  Ninguna, es una zona nueva
-                </Button>
-              </div>
-            )}
-
             {/* ── Bloque "Control": lo que el usuario opera ── */}
             <div className="rounded-lg bg-background/40 p-3 animate-in fade-in slide-in-from-left-2 duration-500 fill-mode-both space-y-4">
               <Button
@@ -1484,17 +1409,17 @@ function AnalysisPage() {
                   <div className="grid grid-cols-2 gap-2">
                     <Metric
                       label="Volumen total"
-                      value={status === "done" ? `${activeSummary.totalVolumeM3} m³` : ", "}
+                      value={status === "done" ? `${activeSummary.totalVolumeM3} m³` : "-"}
                       icon={<Boxes className="h-4 w-4" />}
                     />
                     <Metric
                       label="Peso total"
-                      value={status === "done" ? `${activeSummary.totalWeightKg} kg` : ", "}
+                      value={status === "done" ? `${activeSummary.totalWeightKg} kg` : "-"}
                       icon={<Scale className="h-4 w-4" />}
                     />
                     <Metric
                       label="Área total"
-                      value={status === "done" ? `${activeSummary.totalAreaM2} m²` : ", "}
+                      value={status === "done" ? `${activeSummary.totalAreaM2} m²` : "-"}
                       icon={<Crosshair className="h-4 w-4" />}
                     />
                     <Metric
@@ -1562,11 +1487,29 @@ function AnalysisPage() {
                   }}
                 >
                   <div className="absolute inset-4 flex items-center justify-center">
-                    <div className="relative w-full h-full">
+                    {/* Imagen y capa de detecciones apiladas en LA MISMA celda
+                        de grid, no una encima de otra con position: absolute.
+
+                        El motivo es el difuminado del borde (.map-feather):
+                        para que la máscara caiga en el borde real del
+                        ortomosaico y no en el aire que object-contain deja al
+                        costado, la caja del <img> tiene que medir exactamente
+                        la foto, y eso se logra con max-h/max-w en vez de
+                        h-full/w-full. Pero entonces la caja de la imagen deja
+                        de ser la del contenedor, y el SVG, que antes se estiraba
+                        sobre el contenedor completo, quedaría más grande que la
+                        foto: los rectángulos del modelo caerían corridos en
+                        cuanto la imagen fuera más chica que el visor.
+
+                        Apiladas en una celda, la celda la dimensiona la imagen
+                        (es el único hijo con tamaño propio) y el SVG hereda esa
+                        misma caja con h-full/w-full. Calzan siempre, se amplíe
+                        la imagen o no. place-items-center las centra a las dos. */}
+                    <div className="grid h-full w-full place-items-center">
                       <img
                         src={mapUrl!}
                         alt="Mapa unificado para analisis de volumen"
-                        className="h-full w-full object-contain pointer-events-none"
+                        className="map-feather col-start-1 row-start-1 max-h-full max-w-full object-contain pointer-events-none"
                         draggable={false}
                         onDragStart={e => e.preventDefault()}
                         onLoad={e => {
@@ -1583,7 +1526,7 @@ function AnalysisPage() {
                         return (
                           <svg
                             viewBox={`0 0 ${imgNaturalSize.w} ${imgNaturalSize.h}`}
-                            className="absolute inset-0 w-full h-full pointer-events-none"
+                            className="col-start-1 row-start-1 h-full w-full pointer-events-none"
                             preserveAspectRatio="xMidYMid meet"
                           >
                             {enabledDets.map(d => {
@@ -1649,7 +1592,17 @@ function AnalysisPage() {
         </section>
 
         {/* ── zonas detectadas ── */}
-        <aside className="col-span-2 flex max-h-[30vh] min-h-0 flex-col border-t border-border/40 bg-card/50 px-4 py-3 xl:col-span-1 xl:max-h-none xl:border-l xl:border-t-0">
+        {/* El tope de alto es solo del layout angosto (abajo de 80rem esta
+            columna baja a su propia fila y no puede comerse el visor). Con el
+            aviso de duplicado presente el tope sube: 30vh alcanza para la lista
+            de zonas, no para la lista más una pregunta con sus candidatos, y
+            recortada dejaba el botón de respuesta fuera de la vista. En el
+            layout de tres columnas no hay tope y esto no aplica. */}
+        <aside
+          className={`col-span-2 flex min-h-0 flex-col border-t border-border/40 bg-card/50 px-4 py-3 xl:col-span-1 xl:max-h-none xl:border-l xl:border-t-0 ${
+            duplicateWarning ? "max-h-[55vh]" : "max-h-[30vh]"
+          }`}
+        >
           <div className="mb-2.5 flex items-baseline justify-between gap-2">
             <p className="text-sm font-semibold text-foreground">Zonas detectadas</p>
             {displayDetections.length > 0 && (
@@ -1854,6 +1807,84 @@ function AnalysisPage() {
           ) : (
             <div className="py-3 text-center text-xs text-muted-foreground">
               Sin detecciones cargadas.
+            </div>
+          )}
+
+          {/* HDU7/AC2, posible zona duplicada. Va al pie de esta columna, no en
+              el panel de controles de la izquierda: la pregunta que hace es si
+              ESTE terreno ya está registrado, y lo que la contesta es lo que
+              está justo arriba, las zonas detectadas y su volumen total. En el
+              panel izquierdo quedaba lejos de esa evidencia y además empujaba
+              hacia abajo los botones de analizar y guardar.
+
+              Antes preguntaba en binario: "¿es la misma zona que X?", con X = el
+              candidato de mayor superposición. Cuando dos zonas superaban el
+              umbral el trabajador solo veía una, y si la que el sistema eligió
+              no era la correcta, "son zonas distintas" tampoco servía: lo que
+              quería decir era "es esta OTRA", y esa respuesta no existía. Ahora
+              se listan todos los candidatos con su porcentaje de superposición
+              y se elige. */}
+          {duplicateWarning && (
+            <div className="mt-3 flex-shrink-0 animate-in fade-in slide-in-from-bottom-2 duration-300 rounded-lg border border-warning/40 bg-warning/10 p-3">
+              <div className="flex items-center gap-2">
+                <TriangleAlert className="h-4 w-4 flex-shrink-0 text-warning" />
+                <p className="text-sm font-semibold">¿Esta captura ya tiene zona?</p>
+              </div>
+              <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+                El terreno de esta captura se superpone con{" "}
+                {duplicateWarning.candidatos.length === 1
+                  ? "una zona ya registrada"
+                  : `${duplicateWarning.candidatos.length} zonas ya registradas`}
+                . Si es la misma, elígela para que queden como capturas de una
+                sola zona.
+              </p>
+
+              {/* max-h + scroll: el backend ya acota cuántos candidatos manda
+                  (MAX_CANDIDATOS), pero acá el aviso comparte columna con la
+                  lista de zonas y no puede crecer sin techo aunque lleguen
+                  varios. Con el tope, el botón de "ninguna" siempre queda
+                  visible sin tener que desplazar la columna entera. */}
+              <ul className="mt-2 max-h-[9rem] space-y-1.5 overflow-y-auto pr-1">
+                {duplicateWarning.candidatos.map((c) => (
+                  <li key={c.analysisId}>
+                    <button
+                      type="button"
+                      disabled={resolvingDuplicate !== null}
+                      onClick={() => handleConfirmDuplicate(c.analysisId)}
+                      className="flex w-full cursor-pointer items-center gap-2 rounded-md border border-border/60 bg-background/60 p-2 text-left transition-all duration-200 hover:border-primary hover:bg-primary/5 disabled:pointer-events-none disabled:opacity-50"
+                    >
+                      {resolvingDuplicate === c.analysisId && (
+                        <Loader2 className="h-3.5 w-3.5 flex-shrink-0 animate-spin" />
+                      )}
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-xs font-medium text-foreground">
+                          {c.name}
+                        </span>
+                        <span className="mono block text-[0.625rem] tabular-nums text-muted-foreground">
+                          {Math.round(c.ratio * 100)} % de superposición
+                        </span>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+
+              {/* La salida cuando ninguna corresponde. Va como acción
+                  secundaria y al final: si el sistema levantó el aviso es
+                  porque algo se superpone, así que lo más probable es que
+                  alguna de las de arriba sea la correcta. */}
+              <Button
+                size="sm"
+                variant="secondary"
+                className="relative mt-2.5 w-full"
+                disabled={resolvingDuplicate !== null}
+                onClick={handleRejectDuplicate}
+              >
+                {resolvingDuplicate === "reject" && (
+                  <Loader2 className="absolute left-3 h-3.5 w-3.5 animate-spin" />
+                )}
+                Ninguna, es una zona nueva
+              </Button>
             </div>
           )}
         </aside>

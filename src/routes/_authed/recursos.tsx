@@ -93,6 +93,12 @@ function RecursosPage() {
   const [tolvas, setTolvas] = useState<Tolva[]>([]);
   const [trucks, setTrucks] = useState<Truck[]>([]);
   const [saving, setSaving] = useState(false);
+  // Se prende cuando un intento de guardar se cortó por capacidades vacías, y
+  // es lo que pinta de rojo los campos que faltan. No se marcan desde el
+  // principio: una tolva recién agregada nace en 0 y tenerla en rojo antes de
+  // que el usuario alcance a escribir es regañarlo por algo que todavía no
+  // hizo mal.
+  const [capacidadesMarcadas, setCapacidadesMarcadas] = useState(false);
 
   // Geocodificación (HDU6), geocodingAddress cubre tanto la inversa
   // (click en el mapa → completa Dirección/Comuna) como la directa
@@ -161,6 +167,9 @@ function RecursosPage() {
     setEditingId(null);
     setGeocodeFlyTarget(null);
     setGeocodeNotFound(false);
+    // Si no se limpia, el próximo punto que se abra arranca con los campos
+    // marcados en rojo por un intento fallido que ya no existe.
+    setCapacidadesMarcadas(false);
   };
 
   const startPlacing = () => setMode("placing");
@@ -261,6 +270,9 @@ function RecursosPage() {
     setGeocodeFlyTarget(null);
     setGeocodeNotFound(false);
     addressDirtyRef.current = false;
+    // Mismo motivo que en backToIdle: un punto que se abre a editar no hereda
+    // los campos en rojo de un intento de guardado anterior.
+    setCapacidadesMarcadas(false);
     setMode("configuring");
   };
 
@@ -318,8 +330,40 @@ function RecursosPage() {
     setTrucks((prev) => prev.map((t, i) => (i === index ? { capacity_m3: capacity } : t)));
   const removeTruck = (index: number) => setTrucks((prev) => prev.filter((_, i) => i !== index));
 
+  // Tolvas y camiones sin capacidad. El backend ya lo valida (gt=0 en TolvaIn
+  // y TruckIn, resources.py), y hasta ahora era el ÚNICO que lo validaba: se
+  // podía agregar una tolva, dejar su capacidad vacía y presionar Guardar. El
+  // POST volvía con un 422 cuyo `detail` es una lista de errores por campo, no
+  // un texto, así que parseErrorMessage caía al mensaje genérico y en pantalla
+  // solo aparecía "No se pudo guardar el punto" sin decir qué corregir. De ahí
+  // venía el error que se "arreglaba" rehaciendo el punto desde cero: al
+  // rehacerlo se llenaban todas las capacidades.
+  const tolvasSinCapacidad = tolvas.filter((t) => !(t.capacity_m3 > 0)).length;
+  const camionesSinCapacidad = trucks.filter((t) => !(t.capacity_m3 > 0)).length;
+
   const handleSave = async () => {
     if (!pendingPoint || !form.name.trim()) return;
+
+    if (tolvasSinCapacidad > 0 || camionesSinCapacidad > 0) {
+      setCapacidadesMarcadas(true);
+      const faltantes = [
+        tolvasSinCapacidad > 0
+          ? `${tolvasSinCapacidad} tolva${tolvasSinCapacidad > 1 ? "s" : ""}`
+          : null,
+        camionesSinCapacidad > 0
+          ? `${camionesSinCapacidad} cami${camionesSinCapacidad > 1 ? "ones" : "ón"}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(" y ");
+      notify.error(
+        "Falta la capacidad de carga",
+        `Hay ${faltantes} sin capacidad. Escribe cuántos m³ carga cada uno, o quítalos de la lista.`,
+      );
+      return;
+    }
+    setCapacidadesMarcadas(false);
+
     setSaving(true);
     // Si la dirección se editó y todavía no se reflejó en el mapa (el
     // usuario guardó sin sacar el foco del campo antes), se geocodifica acá
@@ -678,7 +722,12 @@ function RecursosPage() {
                             placeholder="Capacidad (m³)"
                             value={tolva.capacity_m3 || ""}
                             onChange={(e) => updateTolvaCapacity(i, Number(e.target.value))}
-                            className="h-8"
+                            aria-invalid={capacidadesMarcadas && !(tolva.capacity_m3 > 0)}
+                            className={`h-8 ${
+                              capacidadesMarcadas && !(tolva.capacity_m3 > 0)
+                                ? "border-destructive focus-visible:ring-destructive/40"
+                                : ""
+                            }`}
                           />
                           <button
                             type="button"
@@ -735,7 +784,12 @@ function RecursosPage() {
                             placeholder="Capacidad (m³)"
                             value={truck.capacity_m3 || ""}
                             onChange={(e) => updateTruckCapacity(i, Number(e.target.value))}
-                            className="h-8"
+                            aria-invalid={capacidadesMarcadas && !(truck.capacity_m3 > 0)}
+                            className={`h-8 ${
+                              capacidadesMarcadas && !(truck.capacity_m3 > 0)
+                                ? "border-destructive focus-visible:ring-destructive/40"
+                                : ""
+                            }`}
                           />
                           <button
                             type="button"
