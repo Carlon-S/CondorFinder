@@ -336,41 +336,33 @@ html {
 .detect-frame-sm > .detect-corners::before { top: 4px; right: 4px;    border-width: 1.5px 1.5px 0 0; }
 .detect-frame-sm > .detect-corners::after  { bottom: 4px; left: 4px;  border-width: 0 0 1.5px 1.5px; }
 
-/* ------------------------------------------------- 2b. lámina del ortomosaico */
-/* El mapa generado es una foto rectangular de corte recto, y sobre el lienzo de
-   la vista de análisis ese borde a secas se leía como una imagen pegada encima
-   de la página en vez de terreno dentro de un visor.
+/* ------------------------------------------------- 2b. elevación del ortomosaico */
+/* El ortomosaico se levanta del lienzo con sombra, y la sombra sigue el CONTORNO
+   REAL DE LA ZONA, no la caja de la imagen.
 
-   DIFUMINAR LOS BORDES SE PROBÓ Y SE DESCARTÓ. Era una máscara de dos
-   gradientes cruzados que desvanecía los cuatro lados. El problema no era el
-   ajuste sino la idea: desvanecer un borde no separa la imagen del fondo, la
-   disuelve en él, y además hacía ver el PNG como si estuviera cortado justo en
-   el momento en que se abre entero. No reintroducirlo.
+   Esto se puede hacer porque el PNG es RGBA de verdad: detectingOrtho.py aplica
+   el nodata_mask del ráster como canal alfa antes de guardarlo (preview_rgba.
+   putalpha(mask_pil)), así que todo lo que quedó fuera de la huella del vuelo es
+   transparente. La huella de un vuelo casi nunca es un rectángulo: son las fotos
+   pegadas, con los bordes irregulares que dejó el recorrido del dron.
 
-   Lo que hay es un passepartout: la foto montada sobre un margen claro, con
-   filete y una sombra difusa que la levanta del lienzo. Misma idea que una
-   lámina enmarcada, y mismo recurso que .panel y las tarjetas, ver el bloque de
-   tokens sobre por qué la profundidad viene de las superficies y no del fondo.
-   El margen es lo que hace el trabajo de separar: garantiza el corte contra el
-   fondo sea cual sea el tono de la foto en ese borde, que es precisamente lo
-   que una imagen aérea no garantiza. La sombra da la altura.
+   De ahí que sea filter: drop-shadow y NO box-shadow. box-shadow dibuja siempre
+   el rectángulo de la caja e ignora la transparencia, que es lo que hacía
+   aparecer un marco cuadrado alrededor de una zona que no lo es. drop-shadow
+   respeta el alfa y calca la silueta.
 
-   TODO va como box-shadow, ninguno como border ni como padding. La caja de este
-   elemento mide exactamente la foto, y es lo que mantiene calzada encima la capa
-   SVG de las detecciones (ver analysis.tsx): un border la agrandaría y un
-   padding movería el contenido dentro de ella, y en los dos casos los
-   rectángulos del modelo quedarían corridos. Las sombras de extensión 0 dibujan
-   por fuera de la caja sin tocarla: 6px de margen en --card, 1px de filete y
-   después las dos sombras de elevación.
+   Son dos drop-shadow y no uno porque drop-shadow no tiene parámetro de
+   extensión: una corta para el contacto y una larga y difusa para la altura.
 
-   El radio recorta el ráster de la propia imagen, sin envoltorios. */
-.map-plate {
-  border-radius: 0.5rem;
-  box-shadow:
-    0 0 0 6px var(--card),
-    0 0 0 7px var(--border),
-    0 2px 6px rgba(7, 11, 20, 0.10),
-    0 18px 40px -12px rgba(7, 11, 20, 0.35);
+   Sin borde y sin marco: cualquier canto dibujado vuelve a ser rectangular.
+
+   filter no afecta el layout, así que la caja de la imagen sigue midiendo
+   exactamente la foto y la capa SVG de detecciones sigue calzando (ver
+   analysis.tsx). */
+.map-float {
+  filter:
+    drop-shadow(0 2px 4px rgba(7, 11, 20, 0.22))
+    drop-shadow(0 14px 26px rgba(7, 11, 20, 0.30));
 }
 
 /* ---------------------------------------------------------------- 3. rótulo de sección */

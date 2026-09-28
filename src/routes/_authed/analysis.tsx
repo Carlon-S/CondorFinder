@@ -1486,20 +1486,17 @@ function AnalysisPage() {
                     transition: dragging ? "none" : "transform 120ms ease-out",
                   }}
                 >
-                  {/* inset-8 y no inset-4: el passepartout de .map-plate son 7px
-                      de margen más una sombra que se difunde unos 28px, y el visor
-                      recorta su contenido, así que con 16px de aire la sombra
-                      quedaba cortada contra el borde del panel y la lámina no
-                      llegaba a levantarse. De paso deja las esquinas amarillas de
-                      .detect-frame por fuera de la imagen en vez de encima. */}
+                  {/* inset-8 y no inset-4: la sombra de .map-float se difunde unos
+                      26px hacia abajo y el visor recorta su contenido, así que con
+                      16px de aire quedaba cortada contra el borde del panel y la
+                      imagen no llegaba a levantarse. De paso deja las esquinas
+                      amarillas de .detect-frame por fuera de la imagen en vez de
+                      encima. */}
                   <div className="absolute inset-8 flex items-center justify-center">
                     {/* Imagen y capa de detecciones apiladas en LA MISMA celda
                         de grid, no una encima de otra con position: absolute.
 
-                        El motivo es el canto de la lámina (.map-plate): para
-                        que el filete y la esquina redondeada caigan en el borde
-                        real del ortomosaico y no en el aire que object-contain
-                        deja al costado, la caja del <img> tiene que medir
+                        El motivo es que la caja del <img> tiene que medir
                         exactamente la foto, y eso se logra con max-h/max-w en
                         vez de h-full/w-full. Pero entonces la caja de la imagen deja
                         de ser la del contenedor, y el SVG, que antes se estiraba
@@ -1515,7 +1512,7 @@ function AnalysisPage() {
                       <img
                         src={mapUrl!}
                         alt="Mapa unificado para analisis de volumen"
-                        className="map-plate col-start-1 row-start-1 max-h-full max-w-full object-contain pointer-events-none"
+                        className="map-float col-start-1 row-start-1 max-h-full max-w-full object-contain pointer-events-none"
                         draggable={false}
                         onDragStart={e => e.preventDefault()}
                         onLoad={e => {
