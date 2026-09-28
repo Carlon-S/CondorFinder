@@ -1486,11 +1486,13 @@ function AnalysisPage() {
                     transition: dragging ? "none" : "transform 120ms ease-out",
                   }}
                 >
-                  {/* inset-6 y no inset-4: la lámina proyecta sombra, y con
-                      16px de margen quedaba cortada contra el borde del visor,
-                      que recorta su contenido. Además deja las esquinas amarillas
-                      de .detect-frame por fuera de la imagen en vez de encima. */}
-                  <div className="absolute inset-6 flex items-center justify-center">
+                  {/* inset-8 y no inset-4: el passepartout de .map-plate son 7px
+                      de margen más una sombra que se difunde unos 28px, y el visor
+                      recorta su contenido, así que con 16px de aire la sombra
+                      quedaba cortada contra el borde del panel y la lámina no
+                      llegaba a levantarse. De paso deja las esquinas amarillas de
+                      .detect-frame por fuera de la imagen en vez de encima. */}
+                  <div className="absolute inset-8 flex items-center justify-center">
                     {/* Imagen y capa de detecciones apiladas en LA MISMA celda
                         de grid, no una encima de otra con position: absolute.
 
@@ -1599,9 +1601,10 @@ function AnalysisPage() {
         {/* El tope de alto es solo del layout angosto (abajo de 80rem esta
             columna baja a su propia fila y no puede comerse el visor). Con el
             aviso de duplicado presente el tope sube: 30vh alcanza para la lista
-            de zonas, no para la lista más una pregunta con sus candidatos, y
-            recortada dejaba el botón de respuesta fuera de la vista. En el
-            layout de tres columnas no hay tope y esto no aplica. */}
+            de zonas, no para la lista más una pregunta con sus candidatos, y con
+            el tope chico había que desplazar bastante para llegar a las
+            respuestas. En el layout de tres columnas no hay tope y esto no
+            aplica. */}
         <aside
           className={`col-span-2 flex min-h-0 flex-col border-t border-border/40 bg-card/50 px-4 py-3 xl:col-span-1 xl:max-h-none xl:border-l xl:border-t-0 ${
             duplicateWarning ? "max-h-[55vh]" : "max-h-[30vh]"
@@ -1656,6 +1659,19 @@ function AnalysisPage() {
 
               Dos tamaños de letra en todo el panel: text-xs para lo principal y
               0.6875rem para la línea secundaria. */}
+          {/* UNA sola región desplazable para la lista, los totales y el aviso de
+              duplicado. Antes la lista era la que crecía (flex-1) y los totales
+              quedaban clavados al pie de la columna, así que entre el último
+              polígono y el total aparecía un hueco cuando había pocas zonas, y
+              el total se leía como un pie de página en vez del cierre de la
+              lista. Ahora los tres van en flujo normal: el total sale
+              inmediatamente después del último polígono, el aviso debajo de él,
+              y el espacio que sobra queda abajo, vacío.
+
+              El encabezado y los botones de la zona quedan FUERA de esta región
+              a propósito: son los controles de la columna y no tienen que
+              desplazarse con su contenido. */}
+          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1">
           {detectionsLoading ? (
             <div className="space-y-1">
               {[0, 1, 2, 3].map((i) => (
@@ -1666,7 +1682,7 @@ function AnalysisPage() {
             <>
               <ul
                 key={animKey}
-                className="min-h-0 flex-1 space-y-0.5 overflow-y-auto overflow-x-hidden pr-1 animate-in fade-in slide-in-from-bottom-2 duration-300"
+                className="space-y-0.5 animate-in fade-in slide-in-from-bottom-2 duration-300"
               >
                 {detectionRows.map((d, i) => {
                   const enabled = enabledIds.has(d.id);
@@ -1793,7 +1809,7 @@ function AnalysisPage() {
                   permite reconciliar uno con otro al activar o desactivar
                   zonas. */}
               {status === "done" && (
-                <div className="mt-2 flex-shrink-0 border-t border-border/60 pt-2">
+                <div className="mt-2 border-t border-border/60 pt-2">
                   <div className="flex items-center gap-2">
                     <span className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">
                       Total ({enabledIds.size} de {displayDetections.length} activas)
@@ -1829,7 +1845,7 @@ function AnalysisPage() {
               se listan todos los candidatos con su porcentaje de superposición
               y se elige. */}
           {duplicateWarning && (
-            <div className="mt-3 flex-shrink-0 animate-in fade-in slide-in-from-bottom-2 duration-300 rounded-lg border border-warning/40 bg-warning/10 p-3">
+            <div className="mt-3 animate-in fade-in slide-in-from-bottom-2 duration-300 rounded-lg border border-warning/40 bg-warning/10 p-3">
               <div className="flex items-center gap-2">
                 <TriangleAlert className="h-4 w-4 flex-shrink-0 text-warning" />
                 <p className="text-sm font-semibold">¿Esta captura ya tiene zona?</p>
@@ -1843,12 +1859,12 @@ function AnalysisPage() {
                 sola zona.
               </p>
 
-              {/* max-h + scroll: el backend ya acota cuántos candidatos manda
-                  (MAX_CANDIDATOS), pero acá el aviso comparte columna con la
-                  lista de zonas y no puede crecer sin techo aunque lleguen
-                  varios. Con el tope, el botón de "ninguna" siempre queda
-                  visible sin tener que desplazar la columna entera. */}
-              <ul className="mt-2 max-h-[9rem] space-y-1.5 overflow-y-auto pr-1">
+              {/* Sin tope de alto propio ni scroll anidado: el backend ya acota
+                  cuántos candidatos manda (MAX_CANDIDATOS = 4) y la columna
+                  entera es una sola región desplazable, así que una lista larga
+                  alarga esa región en vez de abrir una segunda barra dentro de
+                  otra. */}
+              <ul className="mt-2 space-y-1.5">
                 {duplicateWarning.candidatos.map((c) => (
                   <li key={c.analysisId}>
                     <button
@@ -1891,6 +1907,7 @@ function AnalysisPage() {
               </Button>
             </div>
           )}
+          </div>
         </aside>
       </main>
 

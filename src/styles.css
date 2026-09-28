@@ -341,30 +341,36 @@ html {
    la vista de análisis ese borde a secas se leía como una imagen pegada encima
    de la página en vez de terreno dentro de un visor.
 
-   El primer intento fue difuminar los cuatro bordes con una máscara de
-   gradientes cruzados. Se descartó: desvanecer el borde no separa la imagen del
-   fondo, la disuelve en él, y encima hacía ver el PNG como si estuviera cortado
-   o incompleto justo en el momento en que se abre entero.
+   DIFUMINAR LOS BORDES SE PROBÓ Y SE DESCARTÓ. Era una máscara de dos
+   gradientes cruzados que desvanecía los cuatro lados. El problema no era el
+   ajuste sino la idea: desvanecer un borde no separa la imagen del fondo, la
+   disuelve en él, y además hacía ver el PNG como si estuviera cortado justo en
+   el momento en que se abre entero. No reintroducirlo.
 
-   Lo que separa acá es lo mismo que separa en todo el resto del sistema: una
-   superficie con canto propio. Esquina redondeada, filete de un pixel y una
-   sombra corta, o sea el ortomosaico como una lámina apoyada sobre el lienzo.
-   Es el mismo recurso de .panel y de las tarjetas, ver el bloque de tokens
-   sobre por qué la profundidad viene de las superficies y no del fondo.
+   Lo que hay es un passepartout: la foto montada sobre un margen claro, con
+   filete y una sombra difusa que la levanta del lienzo. Misma idea que una
+   lámina enmarcada, y mismo recurso que .panel y las tarjetas, ver el bloque de
+   tokens sobre por qué la profundidad viene de las superficies y no del fondo.
+   El margen es lo que hace el trabajo de separar: garantiza el corte contra el
+   fondo sea cual sea el tono de la foto en ese borde, que es precisamente lo
+   que una imagen aérea no garantiza. La sombra da la altura.
 
-   El filete va como box-shadow de extensión 0 y no como border: un borde real
-   entra en la caja del elemento, y esta caja mide exactamente la foto (es lo que
-   mantiene calzada la capa SVG de detecciones), así que no puede cambiar de
-   tamaño. El radio recorta el ráster de la propia imagen, sin envoltorios.
+   TODO va como box-shadow, ninguno como border ni como padding. La caja de este
+   elemento mide exactamente la foto, y es lo que mantiene calzada encima la capa
+   SVG de las detecciones (ver analysis.tsx): un border la agrandaría y un
+   padding movería el contenido dentro de ella, y en los dos casos los
+   rectángulos del modelo quedarían corridos. Las sombras de extensión 0 dibujan
+   por fuera de la caja sin tocarla: 6px de margen en --card, 1px de filete y
+   después las dos sombras de elevación.
 
-   La sombra es corta a propósito: el visor recorta su contenido, y una sombra
-   larga quedaba cortada contra el borde del panel en vez de difundirse. */
+   El radio recorta el ráster de la propia imagen, sin envoltorios. */
 .map-plate {
   border-radius: 0.5rem;
   box-shadow:
-    0 0 0 1px var(--border),
-    0 1px 2px rgba(7, 11, 20, 0.08),
-    0 8px 18px -8px rgba(7, 11, 20, 0.28);
+    0 0 0 6px var(--card),
+    0 0 0 7px var(--border),
+    0 2px 6px rgba(7, 11, 20, 0.10),
+    0 18px 40px -12px rgba(7, 11, 20, 0.35);
 }
 
 /* ---------------------------------------------------------------- 3. rótulo de sección */
