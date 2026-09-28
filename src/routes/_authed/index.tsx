@@ -797,15 +797,19 @@ function MainPage() {
               <Table>
                 <TableHeader>
                   <TableRow className="bg-muted/50 hover:bg-muted/50">
+                    {/* El esqueleto usa LOS MISMOS SortableHead que la tabla
+                        cargada, no una copia escrita a mano. Mantener dos
+                        versiones ya había derivado en encabezados distintos, y
+                        cualquier diferencia de ancho hace que las columnas se
+                        corran justo cuando terminan de cargar los datos.
+                        Presionarlos mientras carga es inofensivo: fija el orden
+                        y se aplica cuando llegan las filas. */}
                     <TableHead className="w-[7.5rem]"></TableHead>
                     <TableHead>Zona</TableHead>
-                    <TableHead>Fecha</TableHead>
-                    {/* El esqueleto repite los mismos encabezados que la tabla
-                        real, unidad incluida, para que al terminar de cargar
-                        no se muevan de ancho. */}
-                    <TableHead className="text-right">Volumen <span className="mono opacity-70">(m³)</span></TableHead>
-                    <TableHead className="text-right">Peso <span className="mono opacity-70">(kg)</span></TableHead>
-                    <TableHead className="text-right">Área <span className="mono opacity-70">(m²)</span></TableHead>
+                    <SortableHead field="fecha" label="Fecha" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableHead field="volumen" label="Volumen" unit="m³" className="w-[7rem]" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="right" />
+                    <SortableHead field="peso" label="Peso" unit="kg" className="w-[7rem]" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="right" />
+                    <SortableHead field="area" label="Área" unit="m²" className="w-[7rem]" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="right" />
                     <TableHead className="text-right"></TableHead>
                     <TableHead className="w-[2.75rem]"></TableHead>
                   </TableRow>
@@ -834,9 +838,9 @@ function MainPage() {
                     <TableHead className="w-[7.5rem]"></TableHead>
                     <TableHead>Zona</TableHead>
                     <SortableHead field="fecha" label="Fecha" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} />
-                    <SortableHead field="volumen" label="Volumen" unit="m³" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="right" />
-                    <SortableHead field="peso" label="Peso" unit="kg" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="right" />
-                    <SortableHead field="area" label="Área" unit="m²" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="right" />
+                    <SortableHead field="volumen" label="Volumen" unit="m³" className="w-[7rem]" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="right" />
+                    <SortableHead field="peso" label="Peso" unit="kg" className="w-[7rem]" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="right" />
+                    <SortableHead field="area" label="Área" unit="m²" className="w-[7rem]" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="right" />
                     <TableHead className="text-right"></TableHead>
                     <TableHead className="w-[2.75rem]"></TableHead>
                   </TableRow>
@@ -1434,8 +1438,20 @@ function FilterChip({
 
 type SortField = "fecha" | "volumen" | "peso" | "area";
 
-/** Encabezado de columna clickeable para ordenar (estilo Excel), con flecha
- *  indicando el campo y dirección de orden activos. */
+/** Encabezado de columna que ordena la tabla, estilo planilla.
+ *
+ *  El indicador se dibuja SIEMPRE, en los tres estados, y lo que cambia es su
+ *  opacidad y su color. Antes aparecía solo en la columna activa, y como la
+ *  tabla usa el ancho automático del navegador, la flecha entrando y saliendo
+ *  cambiaba el ancho del encabezado: ordenar corría las columnas de lugar. Que
+ *  el espacio esté reservado es lo que lo deja quieto, y de paso el indicador
+ *  atenuado al pasar el cursor avisa que la columna se puede ordenar, algo que
+ *  antes no se anunciaba en ninguna parte.
+ *
+ *  Lo clickeable es un <button> dentro del <th>, no el <th> mismo: una celda no
+ *  recibe foco, así que con el onClick puesto ahí ordenar era imposible con
+ *  teclado. Y el <th> lleva aria-sort, que es lo que anuncia el orden vigente a
+ *  un lector de pantalla. */
 function SortableHead({
   field,
   label,
@@ -1444,6 +1460,7 @@ function SortableHead({
   sortDir,
   onSort,
   align,
+  className,
 }: {
   field: SortField;
   label: string;
@@ -1456,23 +1473,51 @@ function SortableHead({
   sortDir: "asc" | "desc";
   onSort: (field: SortField) => void;
   align?: "right";
+  /** Ancho fijo de la columna. Reservar el espacio de la flecha no alcanza por
+   *  sí solo: el contenido de las celdas también cambia de ancho al reordenar
+   *  (una zona con 1250 kg y otra con "-" no miden lo mismo), así que sin un
+   *  ancho declarado las columnas de cifras seguían corriéndose. */
+  className?: string;
 }) {
   const active = sortBy === field;
   return (
     <TableHead
-      className={`cursor-pointer select-none hover:text-foreground ${align === "right" ? "text-right" : ""}`}
-      onClick={() => onSort(field)}
+      aria-sort={active ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
+      className={`select-none p-0 ${align === "right" ? "text-right" : ""} ${className ?? ""}`}
     >
-      {/* Nombre y unidad van dentro de UN solo hijo del flex: con
-          flex-row-reverse (columnas alineadas a la derecha) el orden visual
-          se invierte, y como dos hijos sueltos quedaban como "(m³) Volumen". */}
-      <span className={`inline-flex items-center gap-1 ${align === "right" ? "flex-row-reverse" : ""}`}>
+      <button
+        type="button"
+        onClick={() => onSort(field)}
+        title={`Ordenar por ${label.toLowerCase()}`}
+        className={`group flex h-10 w-full cursor-pointer items-center gap-1 px-2 transition-colors hover:text-foreground ${
+          // flex-row-reverse deja la flecha a la izquierda en las columnas
+          // alineadas a la derecha, del lado por donde se leen las cifras.
+          align === "right" ? "flex-row-reverse" : ""
+        }`}
+      >
+        {/* Nombre y unidad van dentro de UN solo hijo del flex: con
+            flex-row-reverse el orden visual se invierte, y como dos hijos
+            sueltos quedaban como "(m³) Volumen". */}
         <span>
           {label}
           {unit && <span className="mono ml-1 opacity-70">({unit})</span>}
         </span>
-        {active && (sortDir === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)}
-      </span>
+        {/* Los dos íconos ocupan la misma caja. El inactivo no se oculta con
+            un condicional, se atenúa: montarlo y desmontarlo es justamente lo
+            que movía la columna. */}
+        {active ? (
+          sortDir === "asc" ? (
+            <ChevronUp className="h-3 w-3 flex-shrink-0 text-primary" />
+          ) : (
+            <ChevronDown className="h-3 w-3 flex-shrink-0 text-primary" />
+          )
+        ) : (
+          <ChevronDown
+            aria-hidden="true"
+            className="h-3 w-3 flex-shrink-0 opacity-0 transition-opacity duration-150 group-hover:opacity-60"
+          />
+        )}
+      </button>
     </TableHead>
   );
 }
