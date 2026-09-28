@@ -1486,16 +1486,20 @@ function AnalysisPage() {
                     transition: dragging ? "none" : "transform 120ms ease-out",
                   }}
                 >
-                  <div className="absolute inset-4 flex items-center justify-center">
+                  {/* inset-6 y no inset-4: la lámina proyecta sombra, y con
+                      16px de margen quedaba cortada contra el borde del visor,
+                      que recorta su contenido. Además deja las esquinas amarillas
+                      de .detect-frame por fuera de la imagen en vez de encima. */}
+                  <div className="absolute inset-6 flex items-center justify-center">
                     {/* Imagen y capa de detecciones apiladas en LA MISMA celda
                         de grid, no una encima de otra con position: absolute.
 
-                        El motivo es el difuminado del borde (.map-feather):
-                        para que la máscara caiga en el borde real del
-                        ortomosaico y no en el aire que object-contain deja al
-                        costado, la caja del <img> tiene que medir exactamente
-                        la foto, y eso se logra con max-h/max-w en vez de
-                        h-full/w-full. Pero entonces la caja de la imagen deja
+                        El motivo es el canto de la lámina (.map-plate): para
+                        que el filete y la esquina redondeada caigan en el borde
+                        real del ortomosaico y no en el aire que object-contain
+                        deja al costado, la caja del <img> tiene que medir
+                        exactamente la foto, y eso se logra con max-h/max-w en
+                        vez de h-full/w-full. Pero entonces la caja de la imagen deja
                         de ser la del contenedor, y el SVG, que antes se estiraba
                         sobre el contenedor completo, quedaría más grande que la
                         foto: los rectángulos del modelo caerían corridos en
@@ -1509,7 +1513,7 @@ function AnalysisPage() {
                       <img
                         src={mapUrl!}
                         alt="Mapa unificado para analisis de volumen"
-                        className="map-feather col-start-1 row-start-1 max-h-full max-w-full object-contain pointer-events-none"
+                        className="map-plate col-start-1 row-start-1 max-h-full max-w-full object-contain pointer-events-none"
                         draggable={false}
                         onDragStart={e => e.preventDefault()}
                         onLoad={e => {

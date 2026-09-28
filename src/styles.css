@@ -336,34 +336,35 @@ html {
 .detect-frame-sm > .detect-corners::before { top: 4px; right: 4px;    border-width: 1.5px 1.5px 0 0; }
 .detect-frame-sm > .detect-corners::after  { bottom: 4px; left: 4px;  border-width: 0 0 1.5px 1.5px; }
 
-/* ------------------------------------------------- 2b. difuminado del ortomosaico */
-/* El mapa generado es una foto rectangular de corte recto. Sobre el lienzo claro
-   de la vista de análisis ese borde duro se leía como una imagen pegada encima de
-   la página, no como el terreno contenido en un visor. Esta máscara desvanece los
-   cuatro lados hacia el fondo.
+/* ------------------------------------------------- 2b. lámina del ortomosaico */
+/* El mapa generado es una foto rectangular de corte recto, y sobre el lienzo de
+   la vista de análisis ese borde a secas se leía como una imagen pegada encima
+   de la página en vez de terreno dentro de un visor.
 
-   Va en la IMAGEN y no en su contenedor. La capa SVG de las detecciones es
-   hermana de la imagen y tiene que quedar nítida hasta el borde: aplicado al
-   contenedor, el difuminado se comería también los rectángulos del modelo, que
-   son el dato y no la decoración.
+   El primer intento fue difuminar los cuatro bordes con una máscara de
+   gradientes cruzados. Se descartó: desvanecer el borde no separa la imagen del
+   fondo, la disuelve en él, y encima hacía ver el PNG como si estuviera cortado
+   o incompleto justo en el momento en que se abre entero.
 
-   Son dos gradientes cruzados, no uno: un solo linear-gradient difumina un eje
-   nada más, y mask-composite: intersect es lo que hace que los cuatro lados se
-   desvanezcan a la vez. -webkit-mask-composite usa la palabra antigua
-   (source-in) para el mismo efecto en Safari.
+   Lo que separa acá es lo mismo que separa en todo el resto del sistema: una
+   superficie con canto propio. Esquina redondeada, filete de un pixel y una
+   sombra corta, o sea el ortomosaico como una lámina apoyada sobre el lienzo.
+   Es el mismo recurso de .panel y de las tarjetas, ver el bloque de tokens
+   sobre por qué la profundidad viene de las superficies y no del fondo.
 
-   El ancho va en rem, no en px, para que siga la escala proporcional del
-   sistema (ver el clamp de html en la sección de tipografía). */
-.map-feather {
-  --map-feather-size: 2.25rem;
-  -webkit-mask-image:
-    linear-gradient(to right,  transparent 0, #000 var(--map-feather-size), #000 calc(100% - var(--map-feather-size)), transparent 100%),
-    linear-gradient(to bottom, transparent 0, #000 var(--map-feather-size), #000 calc(100% - var(--map-feather-size)), transparent 100%);
-  mask-image:
-    linear-gradient(to right,  transparent 0, #000 var(--map-feather-size), #000 calc(100% - var(--map-feather-size)), transparent 100%),
-    linear-gradient(to bottom, transparent 0, #000 var(--map-feather-size), #000 calc(100% - var(--map-feather-size)), transparent 100%);
-  -webkit-mask-composite: source-in;
-  mask-composite: intersect;
+   El filete va como box-shadow de extensión 0 y no como border: un borde real
+   entra en la caja del elemento, y esta caja mide exactamente la foto (es lo que
+   mantiene calzada la capa SVG de detecciones), así que no puede cambiar de
+   tamaño. El radio recorta el ráster de la propia imagen, sin envoltorios.
+
+   La sombra es corta a propósito: el visor recorta su contenido, y una sombra
+   larga quedaba cortada contra el borde del panel en vez de difundirse. */
+.map-plate {
+  border-radius: 0.5rem;
+  box-shadow:
+    0 0 0 1px var(--border),
+    0 1px 2px rgba(7, 11, 20, 0.08),
+    0 8px 18px -8px rgba(7, 11, 20, 0.28);
 }
 
 /* ---------------------------------------------------------------- 3. rótulo de sección */
