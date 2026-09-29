@@ -1,0 +1,772 @@
+// =============================================================================
+// CONDORFINDER, RECURSOS DE UN PUNTO (HDU8)
+// Archivo: src/routes/_authed/recursos_.$pointId.tsx
+//
+// La flota de un punto, en su propia vista. Antes era una tabla al pie de
+// /recursos, debajo del mapa y de la ficha del punto; acá tiene la pantalla
+// entera, que es lo que necesita una tabla de 21 filas con orden, filtros y
+// páginas.
+//
+// El guion bajo de "recursos_" saca esta ruta de debajo de /recursos: esa es
+// una ruta hoja, no un layout, y anidar bajo ella exigiría un <Outlet> que no
+// tiene. La URL igual queda /recursos/{id}.
+//
+// Los criterios de HDU8 que viven acá:
+//   AC1  "Agregar recurso" abre la modal que pregunta el TIPO, y recién con el
+//        tipo elegido navega al formulario.
+//   AC3  "Editar" lleva al mismo formulario con el recurso cargado.
+//   AC4  El interruptor de cada fila alterna disponible / no disponible.
+// El AC2 vive en el formulario y el AC5 en el backend.
+// =============================================================================
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { ImageOff } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowRightCircle,
+  Boxes,
+  Loader2,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
+  Truck,
+} from "@/components/icons/Icons";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { SortableHead } from "@/components/SortableHead";
+import { notify } from "@/lib/notify";
+import {
+  deleteResource,
+  getResourcePoint,
+  listResourceTypes,
+  listResources,
+  resourcePhotoUrl,
+  setResourceAvailability,
+  type Resource,
+  type ResourceFamily,
+  type ResourcePoint,
+  type ResourceType,
+} from "@/lib/resources";
+
+export const Route = createFileRoute("/_authed/recursos_/$pointId")({
+  component: RecursosDelPuntoPage,
+});
+
+type Campo = "estado" | "equipo" | "tipo" | "capacidad" | "vehiculo";
+
+/** Anchos de columna, en porcentaje y en un solo lugar, para usarlos con
+ *  `table-fixed`. Con el ancho automático del navegador cada columna mide lo
+ *  que mide su contenido más largo, así que "Vehículo" se comía el espacio con
+ *  un "CATERPILLAR 416F2 2018" y el encabezado de capacidad se partía en dos
+ *  líneas. */
+const ANCHOS = {
+  estado: "w-[16%]",
+  foto: "w-[9%]",
+  equipo: "w-[17%]",
+  tipo: "w-[16%]",
+  capacidad: "w-[15%]",
+  vehiculo: "w-[23%]",
+  acciones: "w-[4%]",
+} as const;
+
+/** La cifra de capacidad separada de qué mide. Antes la celda decía "balde 3"
+ *  dentro de una columna cuyo encabezado ya dice "(m³)": una columna de cifras
+ *  tiene que tener cifras, y el número solo no distingue los 10 m³ de carga de
+ *  una tolva de los 3 m³ del balde de una pala. Ahora el número va arriba y qué
+ *  mide va abajo, en gris. */
+function capacidadDe(r: Resource): { valor: number | null; nota: string; falta: boolean } {
+  if (r.familia === "carga") {
+    return r.capacidad_m3 != null
+      ? { valor: r.capacidad_m3, nota: "carga", falta: false }
+      : { valor: null, nota: "sin declarar", falta: true };
+  }
+  if (r.familia === "maquina") {
+    return r.capacidad_balde_m3 != null
+      ? { valor: r.capacidad_balde_m3, nota: "balde", falta: false }
+      : { valor: null, nota: "balde sin declarar", falta: true };
+  }
+  if (r.familia === "arrastre") return { valor: null, nota: "se remolca", falta: false };
+  return { valor: null, nota: "no transporta", falta: false };
+}
+
+function dotacionTexto(r: Resource): string {
+  const partes = [
+    r.conductores_requeridos &&
+      `${r.conductores_requeridos} conductor${r.conductores_requeridos > 1 ? "es" : ""}`,
+    r.peonetas_requeridas &&
+      `${r.peonetas_requeridas} peoneta${r.peonetas_requeridas > 1 ? "s" : ""}`,
+    r.operadores_requeridos &&
+      `${r.operadores_requeridos} operador${r.operadores_requeridos > 1 ? "es" : ""}`,
+  ].filter(Boolean);
+  return partes.length > 0 ? partes.join(" + ") : "sin dotación declarada";
+}
+
+function RecursosDelPuntoPage() {
+  const { pointId } = Route.useParams();
+  const navigate = useNavigate();
+
+  const [punto, setPunto] = useState<ResourcePoint | null>(null);
+  const [recursos, setRecursos] = useState<Resource[]>([]);
+  const [tipos, setTipos] = useState<ResourceType[]>([]);
+  const [cargando, setCargando] = useState(true);
+  const [alternando, setAlternando] = useState<string | null>(null);
+  const [eligiendoTipo, setEligiendoTipo] = useState(false);
+  const [aEliminar, setAEliminar] = useState<Resource | null>(null);
+  const [eliminando, setEliminando] = useState(false);
+  const [fotoAmpliada, setFotoAmpliada] = useState<string | null>(null);
+
+  const [busqueda, setBusqueda] = useState("");
+  const [filtroEstado, setFiltroEstado] = useState<"todos" | "disponibles" | "no">("todos");
+  const [sortBy, setSortBy] = useState<Campo>("tipo");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [pagina, setPagina] = useState(1);
+
+  const recargar = async () => {
+    try {
+      const [p, rs] = await Promise.all([getResourcePoint(pointId), listResources(pointId)]);
+      setPunto(p);
+      setRecursos(rs);
+    } catch (err) {
+      notify.error("No se pudieron cargar los recursos", err instanceof Error ? err.message : "");
+    }
+  };
+
+  useEffect(() => {
+    setCargando(true);
+    Promise.all([recargar(), listResourceTypes().then(setTipos).catch(() => {})]).finally(() =>
+      setCargando(false),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pointId]);
+
+  const alternarOrden = (campo: Campo) => {
+    if (campo === sortBy) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else {
+      setSortBy(campo);
+      setSortDir("asc");
+    }
+  };
+
+  const visibles = useMemo(() => {
+    const q = busqueda.trim().toLowerCase();
+    const filtrados = recursos.filter((r) => {
+      if (filtroEstado === "disponibles" && !r.disponible) return false;
+      if (filtroEstado === "no" && r.disponible) return false;
+      if (!q) return true;
+      // Se busca por todo lo que identifica a una unidad en la conversación
+      // real: "la 2184", "la KZRB-69", "las tolvas", "las Hino".
+      return [r.numero_equipo, r.patente, r.tipo, r.marca, r.modelo]
+        .filter(Boolean)
+        .some((campo) => campo.toLowerCase().includes(q));
+    });
+
+    const signo = sortDir === "asc" ? 1 : -1;
+    return filtrados.sort((a, b) => {
+      // LAS QUE TIENEN FOTO PRIMERO, siempre, sin importar el orden elegido:
+      // son las que se pueden reconocer en patio de un vistazo, y dispersas
+      // entre las que no la tienen obligan a recorrer la tabla entera para
+      // encontrarlas. El orden de la columna decide dentro de cada grupo.
+      const fotoA = a.foto ? 0 : 1;
+      const fotoB = b.foto ? 0 : 1;
+      if (fotoA !== fotoB) return fotoA - fotoB;
+
+      switch (sortBy) {
+        case "estado":
+          return (Number(b.disponible) - Number(a.disponible)) * signo;
+        case "equipo":
+          return (
+            a.numero_equipo.localeCompare(b.numero_equipo, undefined, { numeric: true }) * signo
+          );
+        case "capacidad": {
+          const ca = capacidadDe(a).valor ?? -1;
+          const cb = capacidadDe(b).valor ?? -1;
+          return (ca - cb) * signo;
+        }
+        case "vehiculo":
+          return `${a.marca} ${a.modelo}`.localeCompare(`${b.marca} ${b.modelo}`) * signo;
+        case "tipo":
+        default:
+          return (
+            (a.tipo.localeCompare(b.tipo) ||
+              a.numero_equipo.localeCompare(b.numero_equipo, undefined, { numeric: true })) * signo
+          );
+      }
+    });
+  }, [recursos, busqueda, filtroEstado, sortBy, sortDir]);
+
+  // ── Paginación según el alto disponible ───────────────────────────────────
+  // No un número fijo: en una pantalla de 1440p entran bastantes más filas que
+  // en un portátil, y un 10 fijo dejaría media tarjeta vacía arriba y páginas de
+  // más abajo. Se mide la caja y se divide por el alto de una fila.
+  const cajaTabla = useRef<HTMLDivElement>(null);
+  const [porPagina, setPorPagina] = useState(10);
+  useEffect(() => {
+    const caja = cajaTabla.current;
+    if (!caja) return;
+    const medir = () => {
+      const ALTO_FILA = 60; // fila de dos líneas más el padding de la celda
+      const ALTO_ENCABEZADO = 40;
+      const disponible = caja.clientHeight - ALTO_ENCABEZADO;
+      // Mínimo 5: por debajo de eso paginar cuesta más de lo que ahorra.
+      setPorPagina(Math.max(5, Math.floor(disponible / ALTO_FILA)));
+    };
+    medir();
+    const observador = new ResizeObserver(medir);
+    observador.observe(caja);
+    return () => observador.disconnect();
+  }, []);
+
+  const totalPaginas = Math.max(1, Math.ceil(visibles.length / porPagina));
+  // Filtrar deja la página actual fuera de rango (estabas en la 3 y ahora hay
+  // una): sin esto la tabla se ve vacía aunque haya resultados.
+  useEffect(() => setPagina((p) => Math.min(p, totalPaginas)), [totalPaginas]);
+  const paginaActual = Math.min(pagina, totalPaginas);
+  const desde = (paginaActual - 1) * porPagina;
+  const enPagina = visibles.slice(desde, desde + porPagina);
+  const noDisponibles = recursos.filter((r) => !r.disponible).length;
+
+  const alternarDisponible = async (r: Resource) => {
+    setAlternando(r.id);
+    try {
+      const actualizado = await setResourceAvailability(r.id, !r.disponible);
+      setRecursos((prev) => prev.map((x) => (x.id === r.id ? actualizado : x)));
+      // El punto trae su capacidad calculada por el backend: hay que volver a
+      // pedirla, no recalcularla acá, o las dos cifras pueden discrepar.
+      getResourcePoint(pointId).then(setPunto).catch(() => {});
+    } catch (err) {
+      notify.error(
+        "No se pudo cambiar la disponibilidad",
+        err instanceof Error ? err.message : "Intenta nuevamente.",
+      );
+    } finally {
+      setAlternando(null);
+    }
+  };
+
+  const confirmarEliminar = async () => {
+    if (!aEliminar) return;
+    setEliminando(true);
+    try {
+      await deleteResource(aEliminar.id);
+      notify.success("Recurso eliminado");
+      setAEliminar(null);
+      await recargar();
+    } catch (err) {
+      notify.error("No se pudo eliminar", err instanceof Error ? err.message : "");
+    } finally {
+      setEliminando(false);
+    }
+  };
+
+  return (
+    <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border/25 px-6 py-5">
+        <div>
+          <Link
+            to="/recursos"
+            className="mb-2 inline-flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <ArrowRightCircle className="h-3.5 w-3.5 rotate-180" />
+            Volver a los puntos
+          </Link>
+          <p className="eyebrow">Recursos del punto</p>
+          <h1 className="font-rubik text-3xl font-semibold tracking-normal text-foreground md:text-4xl">
+            {punto?.name ?? "Punto"}
+          </h1>
+          {punto && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              {[punto.address, punto.comuna].filter(Boolean).join(", ")}
+            </p>
+          )}
+        </div>
+
+        <div className="flex items-center gap-4">
+          <div className="text-right">
+            <p className="text-[0.6875rem] uppercase tracking-wide text-muted-foreground">
+              Capacidad
+            </p>
+            <p className="mono text-xl font-semibold tabular-nums text-foreground">
+              {punto?.capacity_m3 ?? 0} m³
+            </p>
+          </div>
+          <div className="text-right">
+            <p className="text-[0.6875rem] uppercase tracking-wide text-muted-foreground">
+              Disponibles
+            </p>
+            <p className="mono text-xl font-semibold tabular-nums text-foreground">
+              {punto?.available_count ?? 0} de {punto?.resource_count ?? 0}
+            </p>
+          </div>
+          <Button onClick={() => setEligiendoTipo(true)}>
+            <Plus className="mr-1.5 h-3.5 w-3.5" /> Agregar recurso
+          </Button>
+        </div>
+      </div>
+
+      <main className="flex min-h-0 flex-1 flex-col p-6">
+        {/* El punto inactivo es el caso que más desconcierta: se pueden activar
+            recursos uno por uno y la ruta sigue sin considerarlos, porque el
+            ruteo descarta el punto entero antes de mirar sus unidades. */}
+        {punto && !punto.active && punto.resource_count > 0 && (
+          <p className="mb-4 rounded-lg border border-warning/40 bg-warning/10 px-4 py-2.5 text-xs leading-relaxed">
+            El punto está inactivo, así que sus recursos no participan de ninguna ruta
+            aunque estén disponibles.
+          </p>
+        )}
+
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-card">
+          <div className="flex flex-wrap items-center gap-2 border-b border-border px-5 py-3">
+            <div className="relative min-w-[14rem] flex-1">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={busqueda}
+                onChange={(e) => setBusqueda(e.target.value)}
+                placeholder="Buscar por número, patente, tipo o marca"
+                className="h-8 pl-8 text-xs"
+              />
+            </div>
+
+            {/* Tres estados y no un interruptor: "ver solo las no disponibles"
+                es una pregunta tan frecuente como "ver las que puedo usar", y
+                con un interruptor una de las dos queda sin atajo. */}
+            <div className="flex items-center gap-1 rounded-md bg-background/60 p-0.5">
+              {(
+                [
+                  ["todos", `Todos (${recursos.length})`],
+                  ["disponibles", `Disponibles (${recursos.length - noDisponibles})`],
+                  ["no", `No disponibles (${noDisponibles})`],
+                ] as const
+              ).map(([valor, etiqueta]) => (
+                <button
+                  key={valor}
+                  type="button"
+                  onClick={() => setFiltroEstado(valor)}
+                  className={`cursor-pointer rounded px-2.5 py-1 text-xs font-medium transition-colors ${
+                    filtroEstado === valor
+                      ? "bg-card text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {etiqueta}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* min-h-0 + flex-1: la caja mide siempre lo mismo, tenga 3 filas o
+              10. Sin alto fijo, una página con menos filas encogía la tarjeta y
+              los controles de paginación saltaban de lugar al cambiar de
+              página. Es también lo que mide el ResizeObserver de arriba. */}
+          <div ref={cajaTabla} className="min-h-0 flex-1 overflow-hidden px-5">
+            {cargando ? (
+              <div className="space-y-2 py-4">
+                {[0, 1, 2, 3, 4].map((i) => (
+                  <Skeleton key={i} className="h-12 w-full rounded-md" />
+                ))}
+              </div>
+            ) : recursos.length === 0 ? (
+              <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
+                <Truck className="h-10 w-10 text-muted-foreground/30" />
+                <div>
+                  <p className="text-sm font-semibold text-foreground">
+                    Este punto no tiene recursos
+                  </p>
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    Sin al menos un vehículo con capacidad de transporte no puede participar
+                    de una ruta.
+                  </p>
+                </div>
+                <Button size="sm" variant="secondary" onClick={() => setEligiendoTipo(true)}>
+                  <Plus className="mr-1.5 h-3.5 w-3.5" /> Agregar el primero
+                </Button>
+              </div>
+            ) : visibles.length === 0 ? (
+              // Un filtro puede vaciar la tabla sin que el punto esté vacío.
+              // Decir "este punto no tiene recursos" acá sería falso.
+              <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
+                <p className="text-sm text-muted-foreground">
+                  Ninguna unidad coincide con la búsqueda.
+                </p>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setBusqueda("");
+                    setFiltroEstado("todos");
+                  }}
+                >
+                  Limpiar filtros
+                </Button>
+              </div>
+            ) : (
+              <Table className="table-fixed">
+                <TableHeader>
+                  <TableRow className="bg-muted/50 hover:bg-muted/50">
+                    <SortableHead
+                      field="estado"
+                      label="Estado"
+                      className={ANCHOS.estado}
+                      sortBy={sortBy}
+                      sortDir={sortDir}
+                      onSort={alternarOrden}
+                    />
+                    <TableHead className={ANCHOS.foto}></TableHead>
+                    {/* El encabezado nombra los DOS datos de la celda: antes
+                        decía solo "Equipo" y la patente aparecía abajo sin que
+                        nada la anunciara. */}
+                    <SortableHead
+                      field="equipo"
+                      label="Equipo / Patente"
+                      className={ANCHOS.equipo}
+                      sortBy={sortBy}
+                      sortDir={sortDir}
+                      onSort={alternarOrden}
+                      align="center"
+                    />
+                    <SortableHead
+                      field="tipo"
+                      label="Tipo"
+                      className={ANCHOS.tipo}
+                      sortBy={sortBy}
+                      sortDir={sortDir}
+                      onSort={alternarOrden}
+                    />
+                    <SortableHead
+                      field="capacidad"
+                      label="Capacidad"
+                      unit="m³"
+                      className={ANCHOS.capacidad}
+                      sortBy={sortBy}
+                      sortDir={sortDir}
+                      onSort={alternarOrden}
+                      align="center"
+                    />
+                    <SortableHead
+                      field="vehiculo"
+                      label="Vehículo"
+                      className={ANCHOS.vehiculo}
+                      sortBy={sortBy}
+                      sortDir={sortDir}
+                      onSort={alternarOrden}
+                    />
+                    <TableHead className={ANCHOS.acciones}></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {enPagina.map((r) => {
+                    const cap = capacidadDe(r);
+                    return (
+                      <TableRow
+                        key={r.id}
+                        className="group animate-in fade-in duration-300 fill-mode-both hover:bg-card/60"
+                      >
+                        {/* ESTADO PRIMERO, antes de la identidad: es lo que
+                            decide si esta unidad entra en una ruta. */}
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <Switch
+                              checked={r.disponible}
+                              disabled={alternando === r.id}
+                              onCheckedChange={() => alternarDisponible(r)}
+                              aria-label={
+                                r.disponible
+                                  ? `Marcar ${r.tipo} ${r.numero_equipo} como no disponible`
+                                  : `Marcar ${r.tipo} ${r.numero_equipo} como disponible`
+                              }
+                            />
+                            {alternando === r.id ? (
+                              <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+                            ) : (
+                              <span
+                                className={`text-xs font-medium ${
+                                  r.disponible ? "text-success-strong" : "text-muted-foreground"
+                                }`}
+                              >
+                                {r.disponible ? "Disponible" : "No disponible"}
+                              </span>
+                            )}
+                          </div>
+                        </TableCell>
+
+                        <TableCell>
+                          <button
+                            type="button"
+                            onClick={() => r.foto && setFotoAmpliada(r.foto)}
+                            disabled={!r.foto}
+                            title={r.foto ? "Ver la foto en grande" : "Sin imagen todavía"}
+                            className={`detect-frame detect-frame-sm block h-11 w-16 overflow-hidden rounded-md bg-muted ${
+                              r.disponible ? "" : "opacity-50 grayscale"
+                            } ${r.foto ? "cursor-zoom-in transition-transform hover:scale-105" : "cursor-default"}`}
+                          >
+                            <span className="detect-corners" aria-hidden="true" />
+                            {r.foto ? (
+                              <img
+                                src={resourcePhotoUrl(r.foto)}
+                                alt={`${r.tipo} ${r.numero_equipo}`}
+                                className="h-full w-full object-cover"
+                                loading="lazy"
+                              />
+                            ) : (
+                              <span className="flex h-full w-full items-center justify-center">
+                                <ImageOff className="h-4 w-4 text-muted-foreground/40" />
+                              </span>
+                            )}
+                          </button>
+                        </TableCell>
+
+                        {/* Centrado: son dos identificadores cortos, y alineados
+                            a la izquierda quedaban pegados a la foto con el
+                            resto de la celda vacía. */}
+                        <TableCell className="text-center">
+                          <p className="mono text-xs font-semibold tabular-nums text-foreground">
+                            {r.numero_equipo || "sin N°"}
+                          </p>
+                          <p className="mono text-xs text-muted-foreground">
+                            {r.patente || "sin patente"}
+                          </p>
+                        </TableCell>
+
+                        <TableCell className="text-xs font-medium">{r.tipo}</TableCell>
+
+                        <TableCell className="text-center">
+                          {cap.valor !== null ? (
+                            <>
+                              <p className="mono text-xs font-semibold tabular-nums text-foreground">
+                                {cap.valor}
+                              </p>
+                              <p className="text-xs text-muted-foreground">{cap.nota}</p>
+                            </>
+                          ) : (
+                            <p
+                              className={`text-xs ${
+                                cap.falta ? "text-warning-strong" : "text-muted-foreground"
+                              }`}
+                            >
+                              {cap.nota}
+                            </p>
+                          )}
+                        </TableCell>
+
+                        <TableCell>
+                          <p className="text-xs text-muted-foreground">
+                            {[r.marca, r.modelo, r.anio].filter(Boolean).join(" ") || "-"}
+                          </p>
+                          <p className="text-xs text-muted-foreground/80">{dotacionTexto(r)}</p>
+                        </TableCell>
+
+                        <TableCell>
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                navigate({
+                                  to: "/recursos/$pointId/recurso",
+                                  params: { pointId },
+                                  search: { id: r.id },
+                                })
+                              }
+                              title="Editar recurso"
+                              aria-label={`Editar ${r.tipo} ${r.numero_equipo}`}
+                              className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition-all hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setAEliminar(r)}
+                              title="Eliminar recurso"
+                              aria-label={`Eliminar ${r.tipo} ${r.numero_equipo}`}
+                              className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition-all hover:bg-destructive/15 hover:text-destructive-strong focus-visible:opacity-100 group-hover:opacity-100"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            )}
+          </div>
+
+          {/* Los controles solo aparecen cuando hay más de una página. */}
+          {visibles.length > porPagina && (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-5 py-3">
+              <p className="text-xs text-muted-foreground">
+                Mostrando{" "}
+                <span className="mono tabular-nums text-foreground">
+                  {desde + 1}-{Math.min(desde + porPagina, visibles.length)}
+                </span>{" "}
+                de <span className="mono tabular-nums text-foreground">{visibles.length}</span>
+              </p>
+              <div className="flex items-center gap-1">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={paginaActual === 1}
+                  onClick={() => setPagina(paginaActual - 1)}
+                >
+                  Anterior
+                </Button>
+                {Array.from({ length: totalPaginas }, (_, i) => i + 1).map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => setPagina(n)}
+                    aria-current={n === paginaActual ? "page" : undefined}
+                    className={`mono h-8 w-8 cursor-pointer rounded-md text-xs tabular-nums transition-colors ${
+                      n === paginaActual
+                        ? "bg-primary text-primary-foreground"
+                        : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                    }`}
+                  >
+                    {n}
+                  </button>
+                ))}
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={paginaActual === totalPaginas}
+                  onClick={() => setPagina(paginaActual + 1)}
+                >
+                  Siguiente
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      </main>
+
+      {/* ── AC1: el tipo, antes de cualquier campo ──
+          Sigue siendo una modal porque el criterio pide que "Agregar recurso"
+          PREGUNTE el tipo; lo que cambió es que ya no abre otro diálogo detrás,
+          sino que lleva al formulario con el tipo elegido. */}
+      <Dialog open={eligiendoTipo} onOpenChange={setEligiendoTipo}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>¿Qué tipo de recurso vas a agregar?</DialogTitle>
+          </DialogHeader>
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            El tipo define qué datos pide el sistema después, así que se elige primero.
+          </p>
+          <div className="space-y-4">
+            {(["carga", "maquina", "arrastre", "apoyo"] as ResourceFamily[]).map((familia) => {
+              const deEsta = tipos.filter((t) => t.familia === familia);
+              if (deEsta.length === 0) return null;
+              return (
+                <div key={familia}>
+                  <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    {familia === "carga" && "Transportan carga"}
+                    {familia === "maquina" && "Máquinas, cargan pero no transportan"}
+                    {familia === "arrastre" && "Se remolcan"}
+                    {familia === "apoyo" && "Apoyo y supervisión"}
+                  </p>
+                  {/* Rejilla de tres y tarjetas del mismo alto: con los tipos en
+                      una lista de anchos distintos, los cuatro grupos se veían
+                      como cuatro bloques desalineados. */}
+                  <div className="grid grid-cols-3 gap-2">
+                    {deEsta.map((t) => (
+                      <button
+                        key={t.tipo}
+                        type="button"
+                        onClick={() => {
+                          setEligiendoTipo(false);
+                          navigate({
+                            to: "/recursos/$pointId/recurso",
+                            params: { pointId },
+                            search: { tipo: t.tipo },
+                          });
+                        }}
+                        className="flex h-16 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-border/60 bg-background/60 px-2 text-center transition-all hover:border-primary hover:bg-primary/5"
+                      >
+                        <Boxes className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-xs font-medium leading-tight">{t.tipo}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={fotoAmpliada !== null}
+        onOpenChange={(a) => {
+          if (!a) setFotoAmpliada(null);
+        }}
+      >
+        <DialogContent className="max-w-3xl overflow-hidden p-0">
+          <DialogHeader className="sr-only">
+            <DialogTitle>Foto del recurso</DialogTitle>
+          </DialogHeader>
+          {fotoAmpliada && (
+            <img
+              src={resourcePhotoUrl(fotoAmpliada)}
+              alt="Foto del recurso"
+              className="h-auto w-full"
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog
+        open={aEliminar !== null}
+        onOpenChange={(abierto) => {
+          if (!abierto && !eliminando) setAEliminar(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-destructive" />
+              Eliminar recurso
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {aEliminar && (
+                <>
+                  Se va a eliminar {aEliminar.tipo} {aEliminar.numero_equipo || "sin número"}
+                  {aEliminar.patente && ` (${aEliminar.patente})`}. No se puede deshacer. Si
+                  el vehículo está fuera de servicio de forma temporal, conviene marcarlo
+                  como no disponible en vez de borrarlo.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={eliminando}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmarEliminar} disabled={eliminando}>
+              {eliminando && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Eliminar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}

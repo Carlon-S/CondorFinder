@@ -163,6 +163,18 @@ export async function listResourcePoints(): Promise<ResourcePoint[]> {
   return res.json();
 }
 
+/** Un punto por su id, con su resumen calculado. Lo usa la vista del listado de
+ *  recursos, que llega por URL y no siempre tiene el punto ya cargado. */
+export async function getResourcePoint(id: string): Promise<ResourcePoint> {
+  const res = await fetch(`${BACKEND_URL}/resources/points/${encodeURIComponent(id)}`, {
+    credentials: "include",
+  });
+  if (!res.ok) {
+    throw new Error(await parseErrorMessage(res, "No se pudo cargar el punto."));
+  }
+  return res.json();
+}
+
 export async function updateResourcePoint(id: string, point: ResourcePointInput): Promise<ResourcePoint> {
   const res = await fetch(`${BACKEND_URL}/resources/points/${encodeURIComponent(id)}`, {
     method: "PUT",

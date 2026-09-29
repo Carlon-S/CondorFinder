@@ -85,6 +85,7 @@
   --color-success-foreground: var(--success-foreground);
   --color-success-strong: var(--success-strong);
   --color-destructive-strong: var(--destructive-strong);
+  --color-warning-strong: var(--warning-strong);
   --color-info: var(--info);
 
   --font-rubik:         "Rubik", sans-serif;
@@ -173,11 +174,18 @@
        #047857 (success-strong)     4.83:1   pasa AA
        #ef4444 (destructive)        3.29:1   bajo el mínimo de AA
        #B91C1C (destructive-strong) 5.68:1   pasa AA
+       #fbbf24 (warning)            1.70:1   ilegible
+       #B45309 (warning-strong)     4.90:1   pasa AA
+
+     El ámbar es el que faltaba, y se notó: la tabla de recursos marcaba
+     "sin declarar" con --warning sobre una tarjeta blanca y prácticamente no
+     se leía. Los tres colores de estado tienen ahora su variante de texto.
 
      El relleno NO cambia: --success sigue siendo el menta de siempre donde se
      usa como fondo, y tocarlo rompería el contraste del texto que va encima. */
   --success-strong:     #047857;
   --destructive-strong: #B91C1C;
+  --warning-strong:     #B45309;
   --chart-1: #0F2244; --chart-2: #FFC53D; --chart-3: #34d399;
   --chart-4: #5B7FBD; --chart-5: #96A2BC;
   /* Sidebar: navy, sin cambios, sigue siendo donde vive la identidad de

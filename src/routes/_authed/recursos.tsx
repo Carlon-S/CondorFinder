@@ -5,7 +5,7 @@
 // AC1: botón "Definir punto" habilita el modo de click sobre el mapa. AC2: al
 // elegir la ubicación se abre la pantalla de configuración del LUGAR (nombre,
 // dirección, comuna, personal). La maquinaria ya no se declara acá: son los
-// recursos individuales de HDU8, y viven en PointResources. AC3: "Guardar
+// recursos individuales de HDU8, y viven en /recursos/{id}. AC3: "Guardar
 // punto" persiste en el perfil (Mongo, vía lib/resources.ts). AC4: botón
 // "Modificar puntos" lista todos los puntos guardados y los muestra en el
 // mapa. AC5: "Editar" reabre el mismo formulario de AC2, pre-llenado, y guarda
@@ -14,10 +14,12 @@
 // usa index.tsx para "Eliminar zona".
 //
 // LAYOUT. Encabezado y franja de cifras a lo ancho, después una fila con el
-// aside (el punto) y el mapa de alto acotado, y al pie la tabla de recursos,
-// también a lo ancho. Antes era aside + mapa a pantalla completa, como
-// analysis.tsx, y con 21 vehículos en una columna de 280px no se leía ni una
-// patente entera: el contenido real de esta vista es la flota, no el mapa.
+// aside (el punto) y el mapa de alto acotado, y al pie la tabla de PUNTOS.
+//
+// La flota de cada punto NO está acá: vive en /recursos/{id}, su propia vista.
+// Estuvo un tiempo embebida al pie de esta pantalla y no daba abasto, porque
+// una tabla de 21 filas con orden, filtros y páginas necesita el ancho y el
+// alto completos, no lo que sobra debajo de un mapa.
 //
 // El mapa va con lockToMaipu: encuadra la comuna completa al abrir y no deja
 // salir de ella. Es la única vista con esa restricción; el mapa de rutas sigue
@@ -26,9 +28,18 @@
 // Máquina de 4 modos con useState simple, no hace falta nada del router.
 // =============================================================================
 
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
-import { Boxes, Loader2, MapPin, Pencil, Trash2, Truck as TruckIcon, X } from "@/components/icons/Icons";
+import {
+  ArrowRightCircle,
+  Boxes,
+  Loader2,
+  MapPin,
+  Pencil,
+  Trash2,
+  Truck as TruckIcon,
+  X,
+} from "@/components/icons/Icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -42,7 +53,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { GeoMap, type GeoMapPoint } from "@/components/GeoMap";
-import { PointResources } from "@/components/PointResources";
 import { forwardGeocode, reverseGeocode } from "@/lib/geocoding";
 import {
   AlertDialog,
@@ -100,6 +110,7 @@ const EMPTY_FORM: FormState = {
 
 function RecursosPage() {
   const { point: deepLinkPointId } = Route.useSearch();
+  const navigate = useNavigate();
   const [mode, setMode] = useState<Mode>("idle");
   const [pendingPoint, setPendingPoint] = useState<[number, number] | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
@@ -713,18 +724,15 @@ function RecursosPage() {
         </section>
         </div>
 
-        {/* El contenido real de la vista: la flota. A lo ancho y como tabla, no
-            apretada en el aside. Con 21 vehículos en una columna de 280px no se
-            leía ni la patente completa. */}
-        {selectedPoint ? (
-          <PointResources point={selectedPoint} onChanged={refreshPoints} />
-        ) : (
+        {/* La flota de cada punto vive en /recursos/{id}, su propia vista. Acá
+            queda el listado de puntos, que es de lo que trata esta pantalla. */}
+        {(
           <div className="overflow-hidden rounded-xl border border-border bg-card">
             <div className="flex items-center gap-2.5 border-b border-border px-5 py-4">
               <span className="flex items-center gap-2.5 border-l-2 border-primary/50 pl-3">
                 <MapPin className="h-3.5 w-3.5 text-foreground/70" />
                 <h3 className="text-sm font-semibold tracking-tight text-foreground">
-                  Puntos de salida
+                  Puntos
                 </h3>
               </span>
             </div>
@@ -740,11 +748,11 @@ function RecursosPage() {
                   <MapPin className="h-10 w-10 text-muted-foreground/30" />
                   <div>
                     <p className="text-sm font-semibold text-foreground">
-                      Todavía no hay puntos de salida
+                      Todavía no hay puntos
                     </p>
                     <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                      Un punto es el lugar desde donde sale la flota. Sin al menos uno no
-                      se puede planificar ninguna ruta.
+                      Un punto es el lugar donde está la flota. Sin al menos uno no se puede
+                      planificar ninguna ruta.
                     </p>
                   </div>
                   <Button size="sm" className="btn-cta" onClick={startPlacing}>
@@ -762,14 +770,15 @@ function RecursosPage() {
                         Capacidad <span className="mono opacity-70">(m³)</span>
                       </TableHead>
                       <TableHead className="w-[6rem]">Estado</TableHead>
+                      <TableHead className="w-[10rem] text-right"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {points.map((p) => (
                       <TableRow
                         key={p.id}
-                        onClick={() => setSelectedPoint(p)}
-                        className="cursor-pointer hover:bg-card/60"
+                        onClick={() => navigate({ to: "/recursos/$pointId", params: { pointId: p.id } })}
+                        className="group cursor-pointer hover:bg-card/60"
                       >
                         <TableCell className="font-medium">{p.name}</TableCell>
                         <TableCell className="text-muted-foreground">
@@ -790,6 +799,15 @@ function RecursosPage() {
                             }`}
                           >
                             {p.active ? "Activo" : "Inactivo"}
+                          </span>
+                        </TableCell>
+                        {/* La fila entera es clickeable, pero eso no se ve. Este
+                            texto es lo que anuncia adónde lleva; sin él, que la
+                            flota viva en otra pantalla es un secreto. */}
+                        <TableCell className="text-right">
+                          <span className="inline-flex items-center gap-1.5 text-xs text-primary opacity-0 transition-opacity group-hover:opacity-100">
+                            Ver sus recursos
+                            <ArrowRightCircle className="h-3.5 w-3.5" />
                           </span>
                         </TableCell>
                       </TableRow>
