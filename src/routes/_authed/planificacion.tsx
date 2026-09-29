@@ -32,6 +32,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowRightCircle,
   Boxes,
   Crosshair,
   FolderOpen,
@@ -68,6 +69,14 @@ import {
 import { listAnalyses, setPendingOpenId, type AnalysisSummary, type SavedAnalysisRecord } from "@/lib/analysisStore";
 import { listResourcePoints, type ResourcePoint } from "@/lib/resources";
 import { PanelPuntos, type PanelPuntosMapProps } from "@/components/PanelPuntos";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { projectPolygonToWgs84 } from "@/lib/projection";
 import { generateRoute, type RoutePlanSegment } from "@/lib/routePlan";
 import { notify } from "@/lib/notify";
@@ -291,6 +300,10 @@ function RutasPage() {
   // en pantallas separadas obligaba a cambiar de vista para saber si un punto
   // tenía capacidad y volver para generar.
   const [panel, setPanel] = useState<"ruta" | "puntos">("ruta");
+  // Pestaña de la tabla al pie. Es el detalle de lo que el mapa muestra
+  // como marcadores: las zonas que se van a retirar y los puntos desde
+  // donde sale la flota. En el mapa son círculos; acá son cifras.
+  const [tabla, setTabla] = useState<"zonas" | "puntos">("zonas");
   // Lo que el panel de puntos necesita del mapa mientras se ubica un punto.
   // Vive acá porque el mapa es de esta vista, no del panel.
   const [puntosMapProps, setPuntosMapProps] = useState<PanelPuntosMapProps>({
@@ -657,21 +670,65 @@ function RutasPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeOutboundPaths, routeReturnPaths]);
 
+  // Cifras de cabecera. Las cuatro responden la pregunta con la que se entra a
+  // esta vista: con qué cuento y cuánto hay que retirar.
+  const totalesCabecera = {
+    puntos: activePoints.length,
+    capacidad: originPoints.reduce((sum, p) => sum + p.capacity_m3, 0),
+    zonas: loadedAnalyses.length,
+    volumen: loadedAnalyses.reduce((sum, a) => sum + a.summary.totalVolumeM3, 0),
+  };
+
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
-      <main className="grid min-h-0 flex-1 grid-cols-[clamp(240px,22vw,360px)_1fr]">
-        <aside className="overflow-y-auto border-r border-border/35 p-5">
-          <div className="flex flex-col gap-4">
-            <div className="animate-in fade-in slide-in-from-left-2 duration-300">
-              <p className="eyebrow">Planificación</p>
-              <h1 className="font-rubik text-3xl font-semibold tracking-normal text-foreground md:text-4xl">
-                Planificar Retiro
-              </h1>
-              <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                Los puntos desde donde sale la flota y las zonas a retirar, sobre el mismo mapa.
-              </p>
-            </div>
+      {/* Cabecera y franja de cifras a lo ancho, arriba de todo. Es la
+          estructura de un tablero de operaciones: primero el estado general,
+          después el mapa con su panel, y al pie el detalle en tabla. */}
+      <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border/25 px-6 py-4">
+        <div>
+          <p className="eyebrow">Planificación</p>
+          <h1 className="font-rubik text-2xl font-semibold tracking-normal text-foreground md:text-3xl">
+            Planificar Retiro
+          </h1>
+        </div>
+        <div className="flex flex-wrap items-center divide-x divide-border/10">
+          <CifraCabecera etiqueta="Puntos activos" valor={String(totalesCabecera.puntos)} />
+          <CifraCabecera etiqueta="Capacidad" valor={`${totalesCabecera.capacidad} m³`} />
+          <CifraCabecera etiqueta="Zonas cargadas" valor={String(totalesCabecera.zonas)} />
+          <CifraCabecera
+            etiqueta="Volumen a retirar"
+            valor={`${totalesCabecera.volumen.toFixed(1)} m³`}
+          />
+        </div>
+      </div>
 
+      {/* El mapa a la IZQUIERDA y grande, el panel a la derecha. Era al revés,
+          con el panel ocupando la columna de lectura y el mapa relegado: acá el
+          mapa es el contenido y el panel son los controles. */}
+      <main className="grid min-h-0 flex-1 grid-cols-[1fr_clamp(19rem,26vw,25rem)]">
+        <section className="relative min-w-0 overflow-hidden border-r border-border/35 bg-background animate-in fade-in duration-500">
+          <GeoMap
+            className="h-full w-full"
+            points={mapPoints}
+            onPointClick={handlePointClick}
+            routePositions={routePositions}
+            outboundPaths={routeOutboundPaths}
+            returnPaths={routeReturnPaths}
+            routeSegments={routeSegments}
+            fitBoundsTo={routeFitPoints}
+            focusPoint={puntosMapProps.focusPoint ?? focusPoint}
+            marker={panel === "puntos" ? puntosMapProps.marker : null}
+            onMapClick={panel === "puntos" ? puntosMapProps.onMapClick ?? undefined : undefined}
+          />
+          {mapDataLoading && (
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/60">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          )}
+        </section>
+
+        <aside className="overflow-y-auto p-5">
+          <div className="flex flex-col gap-4">
             {/* Dos pestañas sobre UN mapa. No son dos vistas disfrazadas: el
                 mapa de abajo sigue mostrando los puntos y las zonas a la vez
                 siempre, y lo que cambia es con cuál de las dos se está
@@ -828,73 +885,150 @@ function RutasPage() {
             )}
           </div>
         </aside>
-
-        <section className="relative min-w-0 overflow-hidden bg-background animate-in fade-in duration-500">
-          <GeoMap
-            className="h-full w-full"
-            points={mapPoints}
-            onPointClick={handlePointClick}
-            routePositions={routePositions}
-            outboundPaths={routeOutboundPaths}
-            returnPaths={routeReturnPaths}
-            routeSegments={routeSegments}
-            fitBoundsTo={routeFitPoints}
-            // El panel de puntos manda su propio destino de vuelo mientras está
-            // ubicando o geocodificando; si no, vale el de esta vista.
-            focusPoint={puntosMapProps.focusPoint ?? focusPoint}
-            marker={panel === "puntos" ? puntosMapProps.marker : null}
-            onMapClick={panel === "puntos" ? puntosMapProps.onMapClick ?? undefined : undefined}
-          />
-          {/* Sin esto, mientras las zonas y los puntos de origen todavía no
-              resuelven el mapa se ve vacío -- indistinguible de "no hay
-              nada cargado todavía" para quien lo mira. */}
-          {mapDataLoading && (
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/60">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            </div>
-          )}
-          {/* Leyenda de la ruta generada (AC2) -- qué es cada trazo + tiempo/
-              distancia de ida y vuelta POR SEPARADO (la vuelta se cuenta
-              desde la última zona hasta el punto de origen). Arriba a la
-              derecha -- el control de zoom de Leaflet vive arriba a la
-              izquierda, así no compiten por el mismo espacio. */}
-          {routeSegments && routeSegments.length > 0 && (
-            <div className="pointer-events-none absolute right-3 top-3 z-[1000] max-w-[15rem] rounded-lg border border-border/60 bg-background/90 p-3 text-xs shadow-lg backdrop-blur">
-              <p className="mb-2 font-semibold text-foreground">Ruta generada</p>
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-2">
-                  <span className="h-0.5 w-5 flex-shrink-0 rounded-full" style={{ backgroundColor: ROUTE_OUTBOUND_COLOR }} />
-                  <span className="text-muted-foreground">Ida</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span
-                    className="h-0.5 w-5 flex-shrink-0 rounded-full"
-                    style={{ backgroundColor: ROUTE_RETURN_COLOR, opacity: ROUTE_RETURN_OPACITY }}
-                  />
-                  <span className="text-muted-foreground">Vuelta (camiones cargados, más lenta)</span>
-                </div>
-              </div>
-              <div className="mt-2.5 space-y-2 border-t border-border/50 pt-2">
-                {routeSegments.map((seg, i) => (
-                  <div key={i} className="space-y-0.5">
-                    {routeSegments.length > 1 && (
-                      <p className="truncate font-medium text-foreground">{seg.originName}</p>
-                    )}
-                    <p className="text-muted-foreground">
-                      Ida: <span className="font-medium text-foreground">{formatDuration(seg.outboundDurationHours)}</span>{" "}
-                      ({seg.outboundDistanceKm.toFixed(1)} km)
-                    </p>
-                    <p className="text-muted-foreground">
-                      Vuelta: <span className="font-medium text-foreground">{formatDuration(seg.returnDurationHours)}</span>{" "}
-                      ({seg.returnDistanceKm.toFixed(1)} km)
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </section>
       </main>
+
+      {/* Detalle en tabla al pie, con pestañas. El mapa dice DÓNDE y esta tabla
+          dice CUÁNTO: un círculo en el mapa no se puede comparar con otro, y
+          las dos preguntas de la planificación (cuánto hay que retirar, con qué
+          cuento) son comparaciones entre filas. */}
+      <div className="flex h-[clamp(11rem,26vh,18rem)] flex-shrink-0 flex-col border-t border-border/35 bg-card">
+        <div className="flex items-center gap-1 border-b border-border px-5 py-2">
+          {(
+            [
+              ["zonas", `Zonas cargadas (${loadedAnalyses.length})`],
+              ["puntos", `Puntos (${originPoints.length})`],
+            ] as const
+          ).map(([valor, etiqueta]) => (
+            <button
+              key={valor}
+              type="button"
+              onClick={() => setTabla(valor)}
+              className={`cursor-pointer rounded px-3 py-1.5 text-xs font-medium transition-colors ${
+                tabla === valor
+                  ? "bg-muted text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {etiqueta}
+            </button>
+          ))}
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4">
+          {tabla === "zonas" ? (
+            loadedAnalyses.length === 0 ? (
+              <p className="py-8 text-center text-xs text-muted-foreground">
+                Ninguna zona cargada todavía. Se cargan desde el panel de la derecha.
+              </p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/50 hover:bg-muted/50">
+                    <TableHead>Zona</TableHead>
+                    <TableHead className="w-[7rem] text-right">
+                      Volumen <span className="mono opacity-70">(m³)</span>
+                    </TableHead>
+                    <TableHead className="w-[7rem] text-right">
+                      Área <span className="mono opacity-70">(m²)</span>
+                    </TableHead>
+                    <TableHead className="w-[7rem] text-right">
+                      Peso <span className="mono opacity-70">(kg)</span>
+                    </TableHead>
+                    <TableHead className="w-[6rem]">Detecciones</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {loadedAnalyses.map((a) => (
+                    <TableRow
+                      key={a.id}
+                      onClick={() => {
+                        setFocusPoint(a.center);
+                      }}
+                      title="Centrar el mapa en esta zona"
+                      className="cursor-pointer hover:bg-card/60"
+                    >
+                      <TableCell className="text-xs font-medium">{a.name}</TableCell>
+                      <TableCell className="mono text-right text-xs tabular-nums">
+                        {a.summary.totalVolumeM3}
+                      </TableCell>
+                      <TableCell className="mono text-right text-xs tabular-nums">
+                        {a.summary.totalAreaM2}
+                      </TableCell>
+                      <TableCell className="mono text-right text-xs tabular-nums">
+                        {a.summary.totalWeightKg}
+                      </TableCell>
+                      <TableCell className="mono text-xs tabular-nums text-muted-foreground">
+                        {a.detections.length}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )
+          ) : originPoints.length === 0 ? (
+            <p className="py-8 text-center text-xs text-muted-foreground">
+              Ningún punto registrado todavía. Se definen desde la pestaña Puntos del panel.
+            </p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/50 hover:bg-muted/50">
+                  <TableHead>Punto</TableHead>
+                  <TableHead>Dirección</TableHead>
+                  <TableHead className="w-[8rem] text-right">Recursos</TableHead>
+                  <TableHead className="w-[7rem] text-right">
+                    Capacidad <span className="mono opacity-70">(m³)</span>
+                  </TableHead>
+                  <TableHead className="w-[6rem]">Estado</TableHead>
+                  <TableHead className="w-[3rem]"></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {originPoints.map((p) => (
+                  <TableRow
+                    key={p.id}
+                    onClick={() => navigate({ to: "/planificacion/$pointId", params: { pointId: p.id } })}
+                    title="Ver la flota de este punto"
+                    className="group cursor-pointer hover:bg-card/60"
+                  >
+                    <TableCell className="text-xs font-medium text-foreground transition-colors group-hover:text-primary">
+                      {p.name}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {[p.address === p.name ? null : p.address, p.comuna]
+                        .filter(Boolean)
+                        .join(", ") || "-"}
+                    </TableCell>
+                    <TableCell className="mono text-right text-xs tabular-nums">
+                      {p.available_count} de {p.resource_count}
+                    </TableCell>
+                    <TableCell className="mono text-right text-xs tabular-nums">
+                      {p.capacity_m3}
+                    </TableCell>
+                    <TableCell>
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-[0.5625rem] font-semibold uppercase tracking-wide ${
+                          p.active
+                            ? "bg-success/15 text-success-strong"
+                            : "bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        {p.active ? "Activo" : "Inactivo"}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <ArrowRightCircle
+                        aria-hidden="true"
+                        className="ml-auto h-4 w-4 text-muted-foreground transition-colors group-hover:text-primary"
+                      />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </div>
+      </div>
 
       {/* AC4 — elegir uno o varios análisis guardados para cargar */}
       <Dialog open={loadDialogOpen} onOpenChange={setLoadDialogOpen}>
@@ -1440,6 +1574,18 @@ function RutasPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+/** Una cifra de la cabecera. Sin ícono ni pastilla: son cuatro seguidas y a
+ *  este tamaño lo que las separa es el divisor vertical, no un adorno por
+ *  cifra. */
+function CifraCabecera({ etiqueta, valor }: { etiqueta: string; valor: string }) {
+  return (
+    <div className="flex-shrink-0 px-4">
+      <p className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">{etiqueta}</p>
+      <p className="mono text-lg font-semibold tabular-nums text-foreground">{valor}</p>
     </div>
   );
 }
