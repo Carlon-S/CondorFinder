@@ -68,7 +68,12 @@ FAMILIA_POR_TIPO = {
 # sobre generar rutas no es un detalle cosmético. Queda fija acá y no se
 # recalcula: geocodificar esta dirección otra vez la empeoraría.
 PUNTO = {
-    "nombre": "Punto de salida",
+    # El nombre es la DIRECCIÓN, no una etiqueta inventada. La planilla de flota
+    # no trae nombre para el recinto y el programa diario tampoco, así que
+    # cualquier cosa como "Punto de salida" o "Depósito municipal" sería un
+    # nombre que nadie en la municipalidad usa. Si más adelante dan el nombre
+    # real, se cambia desde la interfaz y la reimportación ya no lo pisa.
+    "nombre": "Gral. José San Martín 2730",
     "direccion": "Gral. José San Martín 2730",
     "comuna": "Maipú",
     "lat": -33.502421124221655,

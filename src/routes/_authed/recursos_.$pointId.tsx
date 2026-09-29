@@ -222,22 +222,31 @@ function RecursosDelPuntoPage() {
   // en un portátil, y un 10 fijo dejaría media tarjeta vacía arriba y páginas de
   // más abajo. Se mide la caja y se divide por el alto de una fila.
   const cajaTabla = useRef<HTMLDivElement>(null);
-  const [porPagina, setPorPagina] = useState(10);
+  const [porPagina, setPorPagina] = useState(8);
   useEffect(() => {
     const caja = cajaTabla.current;
     if (!caja) return;
     const medir = () => {
-      const ALTO_FILA = 60; // fila de dos líneas más el padding de la celda
-      const ALTO_ENCABEZADO = 40;
-      const disponible = caja.clientHeight - ALTO_ENCABEZADO;
+      // El alto de una fila se MIDE del DOM en vez de estimarse: depende de la
+      // escala proporcional del sistema (el clamp de html en styles.css), así
+      // que en 1440p una fila mide bastante más que en 1080p y cualquier
+      // constante acierta en una resolución y falla en la otra.
+      const fila = caja.querySelector("tbody tr");
+      const encabezado = caja.querySelector("thead");
+      const altoFila = fila?.getBoundingClientRect().height ?? 60;
+      const altoEncabezado = encabezado?.getBoundingClientRect().height ?? 40;
+      if (altoFila <= 0) return;
+      const disponible = caja.clientHeight - altoEncabezado;
       // Mínimo 5: por debajo de eso paginar cuesta más de lo que ahorra.
-      setPorPagina(Math.max(5, Math.floor(disponible / ALTO_FILA)));
+      setPorPagina(Math.max(5, Math.floor(disponible / altoFila)));
     };
     medir();
     const observador = new ResizeObserver(medir);
     observador.observe(caja);
     return () => observador.disconnect();
-  }, []);
+    // Se vuelve a medir cuando aparecen filas: en el primer render la tabla
+    // todavía no existe y no hay ninguna fila que medir.
+  }, [cargando, recursos.length]);
 
   const totalPaginas = Math.max(1, Math.ceil(visibles.length / porPagina));
   // Filtrar deja la página actual fuera de rango (estabas en la 3 y ahora hay
@@ -283,8 +292,13 @@ function RecursosDelPuntoPage() {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
-      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border/25 px-6 py-5">
-        <div>
+      {/* Encabezado con la misma estructura que Vista Principal y /recursos:
+          rótulo, título y la acción a la derecha. Las cifras NO van acá sueltas
+          al lado del botón, como estaban: quedaban sin caja, desalineadas con
+          él y compitiendo con el título. Van abajo, en la franja .panel, que es
+          donde el sistema pone las cifras de cabecera. */}
+      <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border/25 px-6 py-5">
+        <div className="min-w-0">
           <Link
             to="/recursos"
             className="mb-2 inline-flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
@@ -293,40 +307,59 @@ function RecursosDelPuntoPage() {
             Volver a los puntos
           </Link>
           <p className="eyebrow">Recursos del punto</p>
-          <h1 className="font-rubik text-3xl font-semibold tracking-normal text-foreground md:text-4xl">
-            {punto?.name ?? "Punto"}
-          </h1>
+          {punto ? (
+            <h1 className="font-rubik text-3xl font-semibold tracking-normal text-foreground md:text-4xl">
+              {punto.name}
+            </h1>
+          ) : (
+            <Skeleton className="h-9 w-64 rounded md:h-10" />
+          )}
+          {/* La dirección se omite del subtítulo cuando el nombre YA es la
+              dirección, que es como queda el punto importado de la planilla
+              mientras la municipalidad no dé un nombre propio para el recinto.
+              Repetir la misma línea dos veces se lee como un error. La comuna
+              se muestra igual: no está en el título. */}
           {punto && (
-            <p className="mt-1 text-xs text-muted-foreground">
-              {[punto.address, punto.comuna].filter(Boolean).join(", ")}
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              {[punto.address === punto.name ? null : punto.address, punto.comuna]
+                .filter(Boolean)
+                .join(", ")}
+              {!punto.active && (
+                <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[0.5625rem] font-semibold uppercase tracking-wide">
+                  Inactivo
+                </span>
+              )}
             </p>
           )}
         </div>
 
-        <div className="flex items-center gap-4">
-          <div className="text-right">
-            <p className="text-[0.6875rem] uppercase tracking-wide text-muted-foreground">
-              Capacidad
-            </p>
-            <p className="mono text-xl font-semibold tabular-nums text-foreground">
-              {punto?.capacity_m3 ?? 0} m³
-            </p>
-          </div>
-          <div className="text-right">
-            <p className="text-[0.6875rem] uppercase tracking-wide text-muted-foreground">
-              Disponibles
-            </p>
-            <p className="mono text-xl font-semibold tabular-nums text-foreground">
-              {punto?.available_count ?? 0} de {punto?.resource_count ?? 0}
-            </p>
-          </div>
-          <Button onClick={() => setEligiendoTipo(true)}>
-            <Plus className="mr-1.5 h-3.5 w-3.5" /> Agregar recurso
-          </Button>
-        </div>
+        <Button onClick={() => setEligiendoTipo(true)} className="btn-cta">
+          <Plus className="mr-1.5 h-3.5 w-3.5" /> Agregar recurso
+        </Button>
       </div>
 
-      <main className="flex min-h-0 flex-1 flex-col p-6">
+      <main className="flex min-h-0 flex-1 flex-col gap-5 p-6">
+        {/* Franja de cifras, mismo tratamiento .panel que las otras dos vistas.
+            La capacidad es la destacada: es la que decide si este punto puede
+            participar de una ruta; las otras dos son contexto. */}
+        <div className="panel flex flex-wrap items-center divide-x divide-border/10 px-1">
+          <Cifra
+            icono={<Boxes className="h-4 w-4" />}
+            etiqueta="Capacidad de transporte"
+            valor={`${punto?.capacity_m3 ?? 0} m³`}
+            destacada
+          />
+          <Cifra
+            icono={<Truck className="h-4 w-4" />}
+            etiqueta="Disponibles"
+            valor={`${punto?.available_count ?? 0} de ${punto?.resource_count ?? 0}`}
+          />
+          <Cifra
+            icono={<Truck className="h-4 w-4" />}
+            etiqueta="Tipos distintos"
+            valor={String(new Set(recursos.map((r) => r.tipo)).size)}
+          />
+        </div>
         {/* El punto inactivo es el caso que más desconcierta: se pueden activar
             recursos uno por uno y la ruta sigue sin considerarlos, porque el
             ruteo descarta el punto entero antes de mirar sus unidades. */}
@@ -379,8 +412,15 @@ function RecursosDelPuntoPage() {
           {/* min-h-0 + flex-1: la caja mide siempre lo mismo, tenga 3 filas o
               10. Sin alto fijo, una página con menos filas encogía la tarjeta y
               los controles de paginación saltaban de lugar al cambiar de
-              página. Es también lo que mide el ResizeObserver de arriba. */}
-          <div ref={cajaTabla} className="min-h-0 flex-1 overflow-hidden px-5">
+              página. Es también lo que mide el ResizeObserver de arriba.
+
+              overflow-y-auto y NO overflow-hidden. La paginación calcula cuántas
+              filas entran, pero es una estimación sobre el alto de una fila, y
+              si se queda corta con hidden las últimas quedaban recortadas sin
+              ninguna forma de llegar a ellas. El cálculo evita que haya que
+              desplazarse; el scroll es la red que impide que un error de
+              cálculo esconda datos. */}
+          <div ref={cajaTabla} className="min-h-0 flex-1 overflow-y-auto px-5">
             {cargando ? (
               <div className="space-y-2 py-4">
                 {[0, 1, 2, 3, 4].map((i) => (
@@ -767,6 +807,45 @@ function RecursosDelPuntoPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  );
+}
+
+/** Una cifra de la franja de cabecera. Misma forma que la de /recursos: ícono,
+ *  etiqueta chica y el número en .mono, que es donde el sistema pone las
+ *  magnitudes. Una sola manda, y es la capacidad. */
+function Cifra({
+  icono,
+  etiqueta,
+  valor,
+  destacada,
+}: {
+  icono: React.ReactNode;
+  etiqueta: string;
+  valor: string;
+  destacada?: boolean;
+}) {
+  return (
+    <div className="flex flex-shrink-0 items-center gap-3 px-5 py-3.5">
+      <span
+        className={`flex items-center justify-center rounded-md ${
+          destacada ? "h-10 w-10 bg-primary/10 text-primary" : "h-8 w-8 bg-background/50 text-foreground/60"
+        }`}
+      >
+        {icono}
+      </span>
+      <span>
+        <span className="block text-[0.6875rem] uppercase tracking-wide text-muted-foreground">
+          {etiqueta}
+        </span>
+        <span
+          className={`mono block font-semibold tabular-nums text-foreground ${
+            destacada ? "text-xl" : "text-sm"
+          }`}
+        >
+          {valor}
+        </span>
+      </span>
     </div>
   );
 }

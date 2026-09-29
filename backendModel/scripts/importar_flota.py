@@ -128,9 +128,14 @@ def main():
 
     if existente:
         point_id = str(existente["_id"])
-        print(f"Punto YA EXISTE: {punto['nombre']} ({point_id}), se actualizan sus datos")
+        print(f"Punto YA EXISTE: {existente.get('name')} ({point_id}), se actualizan sus datos")
         if aplicar:
-            db.resource_points.update_one({"_id": existente["_id"]}, {"$set": campos_punto})
+            # El NOMBRE no se pisa: el que viene del JSON es un respaldo (la
+            # dirección), y si alguien le puso el nombre real desde la interfaz,
+            # una reimportación no tiene por qué deshacerlo. Mismo criterio que
+            # con `disponible` en los recursos.
+            sin_nombre = {k: v for k, v in campos_punto.items() if k != "name"}
+            db.resource_points.update_one({"_id": existente["_id"]}, {"$set": sin_nombre})
     else:
         print(f"Punto NUEVO: {punto['nombre']}, {punto['direccion']}, {punto['comuna']}")
         print(f"  coordenadas {punto['lat']}, {punto['lng']}")
