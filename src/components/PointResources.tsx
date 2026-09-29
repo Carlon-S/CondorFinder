@@ -1,5 +1,5 @@
 // =============================================================================
-// CONDORFINDER — RECURSOS DE UN PUNTO (HDU8)
+// CONDORFINDER, RECURSOS DE UN PUNTO (HDU8)
 // Archivo: src/components/PointResources.tsx
 //
 // Los cuatro criterios de HDU8 que se ven en pantalla viven acá:

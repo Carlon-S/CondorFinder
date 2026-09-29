@@ -16,7 +16,7 @@ import markerIcon from "leaflet/dist/images/marker-icon.png";
 import markerShadow from "leaflet/dist/images/marker-shadow.png";
 import type { GeoMapProps } from "@/components/GeoMap";
 import { ROUTE_OUTBOUND_COLOR, ROUTE_OUTLINE_COLOR, ROUTE_RETURN_COLOR, ROUTE_RETURN_OPACITY } from "@/components/route-colors";
-import { MAIPU_BOUNDARY, MAIPU_VIEW_CENTER } from "@/lib/maipuBoundary";
+import { MAIPU_BBOX, MAIPU_BOUNDARY, MAIPU_VIEW_CENTER } from "@/lib/maipuBoundary";
 
 /** Encuadre inicial: el casco urbano de Maipú. Ver la nota de
  *  MAIPU_VIEW_CENTER sobre por qué no es el centro geométrico de la comuna.
@@ -343,6 +343,7 @@ export function GeoMapImpl({
   onMapClick,
   onPointClick,
   focusPoint,
+  lockToMaipu,
   className,
 }: GeoMapProps) {
   const hasRealPaths = (outboundPaths && outboundPaths.length > 0) || (returnPaths && returnPaths.length > 0);
@@ -355,8 +356,23 @@ export function GeoMapImpl({
     // es muchísimo más fluido; los markers (L.divIcon) no se ven
     // afectados, Leaflet los sigue manejando por DOM sin importar esto.
     <MapContainer
-      center={center}
-      zoom={zoom}
+      // Con lockToMaipu se encuadra por BOUNDS y no por centro+zoom: "centrado
+      // en toda la comuna" es que entre entera en pantalla, y eso depende del
+      // tamaño del contenedor, así que un zoom fijo no lo garantiza. Leaflet
+      // calcula el zoom que hace calzar la caja.
+      {...(lockToMaipu
+        ? {
+            bounds: MAIPU_BBOX,
+            maxBounds: MAIPU_BBOX,
+            // Borde rígido, no elástico: con viscosidad menor a 1 el mapa se
+            // deja arrastrar fuera y vuelve solo, lo que se lee como que la
+            // restricción falla en vez de existir.
+            maxBoundsViscosity: 1,
+            // Sin esto se puede alejar hasta ver el continente: maxBounds
+            // limita el paneo, no el zoom.
+            minZoom: 12,
+          }
+        : { center, zoom })}
       className={className}
       scrollWheelZoom
       renderer={ROUTE_CANVAS_RENDERER}
@@ -366,8 +382,10 @@ export function GeoMapImpl({
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
       {/* Límite comunal de Maipú, siempre visible, debajo de todo lo demás.
-          Da la referencia de qué territorio administra el municipio sin
-          impedir navegar fuera de él.
+          Da la referencia de qué territorio administra el municipio. Que se
+          pueda navegar fuera de él o no lo decide lockToMaipu, no este dibujo:
+          el polígono es la referencia visual, la restricción es del
+          contenedor.
 
           interactive={false} es lo importante: recursos.tsx crea un punto
           haciendo click en el mapa, y un polígono que cubre toda la comuna se

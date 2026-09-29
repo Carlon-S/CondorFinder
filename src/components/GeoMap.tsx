@@ -87,6 +87,15 @@ export interface GeoMapProps {
    *  padre, no por GeoMap: así tanto un click real como un deep-link
    *  (?point=id) disparan el mismo vuelo. */
   focusPoint?: [number, number] | null;
+  /** Encuadra la comuna completa al abrir y NO deja salir de ella: ni
+   *  arrastrando ni alejando el zoom.
+   *
+   *  Es opt-in y no el comportamiento por omisión a propósito. Esta
+   *  restricción existió antes para los dos mapas y se quitó por pedido
+   *  expreso; ahora vuelve solo donde se pidió, que es la vista de recursos.
+   *  El mapa de rutas sigue libre, porque ahí se mira el trazo completo de un
+   *  recorrido y recortarlo al límite comunal escondería tramos. */
+  lockToMaipu?: boolean;
   className?: string;
 }
 

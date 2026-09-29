@@ -2,20 +2,28 @@
 // CONDORFINDER, RECURSOS DISPONIBLES (HDU6)
 // Archivo: src/routes/_authed/recursos.tsx
 //
-// AC1: botón "Definir punto" habilita el modo de click sobre el
-// mapa. AC2: al elegir la ubicación se abre la pantalla de configuración
-// (tolvas, retroexcavadoras, camiones, personal). AC8: camiones es una
-// lista, cada uno con su propia capacidad. AC9: personal es solo cantidad.
-// AC3: "Guardar punto" persiste en el perfil (Mongo, vía lib/resources.ts).
-// AC4: botón "Modificar puntos" lista todos los puntos guardados
-// y los muestra en el mapa. AC5: "Editar" reabre el mismo formulario de
-// AC2, pre-llenado, y guarda con PUT en vez de POST, no es un modo nuevo,
-// es "configuring" con editingId seteado. AC6/AC7: confirmar + eliminar,
-// mismo patrón de AlertDialog que ya usa index.tsx para "Eliminar zona".
+// AC1: botón "Definir punto" habilita el modo de click sobre el mapa. AC2: al
+// elegir la ubicación se abre la pantalla de configuración del LUGAR (nombre,
+// dirección, comuna, personal). La maquinaria ya no se declara acá: son los
+// recursos individuales de HDU8, y viven en PointResources. AC3: "Guardar
+// punto" persiste en el perfil (Mongo, vía lib/resources.ts). AC4: botón
+// "Modificar puntos" lista todos los puntos guardados y los muestra en el
+// mapa. AC5: "Editar" reabre el mismo formulario de AC2, pre-llenado, y guarda
+// con PUT en vez de POST, no es un modo nuevo, es "configuring" con editingId
+// seteado. AC6/AC7: confirmar + eliminar, mismo patrón de AlertDialog que ya
+// usa index.tsx para "Eliminar zona".
 //
-// Layout de dos columnas (aside + mapa) igual al de analysis.tsx, mismo
-// lenguaje visual que el resto de la app. Máquina de 4 modos con useState
-// simple, no hace falta nada del router para esto.
+// LAYOUT. Encabezado y franja de cifras a lo ancho, después una fila con el
+// aside (el punto) y el mapa de alto acotado, y al pie la tabla de recursos,
+// también a lo ancho. Antes era aside + mapa a pantalla completa, como
+// analysis.tsx, y con 21 vehículos en una columna de 280px no se leía ni una
+// patente entera: el contenido real de esta vista es la flota, no el mapa.
+//
+// El mapa va con lockToMaipu: encuadra la comuna completa al abrir y no deja
+// salir de ella. Es la única vista con esa restricción; el mapa de rutas sigue
+// libre porque ahí hay que poder ver un recorrido entero.
+//
+// Máquina de 4 modos con useState simple, no hace falta nada del router.
 // =============================================================================
 
 import { createFileRoute } from "@tanstack/react-router";
@@ -34,7 +42,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { GeoMap, type GeoMapPoint } from "@/components/GeoMap";
-import { ResourcesSummaryPanel } from "@/components/ResourcesSummaryPanel";
 import { PointResources } from "@/components/PointResources";
 import { forwardGeocode, reverseGeocode } from "@/lib/geocoding";
 import {
@@ -52,9 +59,7 @@ import {
   deleteResourcePoint,
   listResourcePoints,
   updateResourcePoint,
-  type Resource,
   type ResourcePoint,
-  listResources,
 } from "@/lib/resources";
 import { notify } from "@/lib/notify";
 
@@ -135,10 +140,6 @@ function RecursosPage() {
 
   // AC4, lista de puntos guardados.
   const [points, setPoints] = useState<ResourcePoint[]>([]);
-  // Recursos de TODOS los puntos, solo para el panel de resumen. La ficha de un
-  // punto carga los suyos por su cuenta (ver PointResources): son dos consultas
-  // porque son dos necesidades distintas, el resumen global y el detalle de uno.
-  const [resources, setResources] = useState<Resource[]>([]);
   const [loadingPoints, setLoadingPoints] = useState(false);
 
   // Punto seleccionado en el mapa (modo "idle" solamente), su info se
@@ -181,11 +182,8 @@ function RecursosPage() {
   const refreshPoints = async () => {
     setLoadingPoints(true);
     try {
-      // Las dos en paralelo: el resumen necesita las dos, y en serie sumaría
-      // dos viajes de red para pintar una sola vista.
-      const [puntos, recursos] = await Promise.all([listResourcePoints(), listResources()]);
+      const puntos = await listResourcePoints();
       setPoints(puntos);
-      setResources(recursos);
       // El punto seleccionado es una COPIA de la lista, así que hay que
       // volver a tomarlo de la respuesta nueva. Sin esto, cambiar la
       // disponibilidad de un recurso actualizaba la lista pero la ficha
@@ -497,7 +495,6 @@ function RecursosPage() {
                 </div>
               ) : (
                 <div className="animate-in fade-in slide-in-from-left-2 duration-300 flex flex-col gap-5">
-                  <ResourcesSummaryPanel points={points} resources={resources} loading={loadingPoints} />
                   <div className="flex flex-col gap-2 rounded-lg bg-background/40 p-3">
                     <Button onClick={startPlacing} size="lg" className="btn-cta w-full">
                       <MapPin className="mr-2 h-4 w-4" /> Definir punto
@@ -696,6 +693,7 @@ function RecursosPage() {
             marker={mode === "configuring" ? pendingPoint : null}
             points={mapPoints}
             focusPoint={selectedPoint ? [selectedPoint.lat, selectedPoint.lng] : geocodeFlyTarget}
+            lockToMaipu
             onMapClick={handleMapClick}
             onPointClick={handlePointClick}
           />
