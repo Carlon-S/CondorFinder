@@ -62,6 +62,7 @@ export function ResourceFormDialog({
    *  repetido antes de enviar: el índice único de Mongo devuelve un error que
    *  no dice qué campo lo causó. */
   hermanos,
+  flota,
   onGuardado,
 }: {
   abierto: boolean;
@@ -72,6 +73,8 @@ export function ResourceFormDialog({
   recurso: Resource | null;
   tipos: ResourceType[];
   hermanos: Resource[];
+  /** La flota de TODOS los puntos, para el control de patente repetida. */
+  flota: Resource[];
   onGuardado: () => void;
 }) {
   const [form, setForm] = useState<ResourceInput | null>(null);
@@ -155,17 +158,43 @@ export function ResourceFormDialog({
 
   const guardar = async () => {
     if (!form || loQueFalta()) return;
+    const patenteNormalizada = normalizarPatente(form.patente);
 
-    const repetido = hermanos.find(
+    // Dos controles de repetido, con ALCANCES DISTINTOS y no por descuido.
+    //
+    // El N° de equipo se compara solo contra los hermanos de este punto,
+    // porque así está definido el índice único del backend: es el número con
+    // el que la municipalidad nombra sus vehículos dentro de un patio.
+    //
+    // La patente se compara contra la flota ENTERA: una patente es única en el
+    // país, así que la misma en dos puntos distintos no es una convención que
+    // podamos elegir, es un dato mal cargado. Se normaliza sin guiones ni
+    // espacios y en mayúsculas antes de comparar, porque "JXZS-91", "jxzs91" y
+    // "JXZS 91" son la misma patente escrita de tres maneras.
+    const equipoRepetido = hermanos.find(
       (h) =>
         h.id !== recurso?.id &&
         h.numero_equipo &&
         h.numero_equipo.trim() === form.numero_equipo.trim(),
     );
-    if (form.numero_equipo.trim() && repetido) {
+    if (form.numero_equipo.trim() && equipoRepetido) {
       notify.error(
         "N° de equipo repetido",
-        `Este punto ya tiene el equipo ${repetido.numero_equipo} (${repetido.tipo}). Es el identificador con el que la municipalidad nombra sus vehículos, así que no puede repetirse.`,
+        `Este punto ya tiene el equipo ${equipoRepetido.numero_equipo} (${equipoRepetido.tipo}). Es el identificador con el que la municipalidad nombra sus vehículos, así que no puede repetirse.`,
+      );
+      return;
+    }
+
+    const patenteRepetida = flota.find(
+      (h) =>
+        h.id !== recurso?.id && h.patente && normalizarPatente(h.patente) === patenteNormalizada,
+    );
+    if (patenteNormalizada && patenteRepetida) {
+      notify.error(
+        "Patente repetida",
+        patenteRepetida.point_id === form.point_id
+          ? `Este punto ya tiene la patente ${patenteRepetida.patente} en ${patenteRepetida.tipo} ${patenteRepetida.numero_equipo}.`
+          : `Esa patente ya está registrada en otro punto, en ${patenteRepetida.tipo} ${patenteRepetida.numero_equipo}. Una patente identifica a un solo vehículo.`,
       );
       return;
     }
@@ -532,4 +561,11 @@ function ConUnidad({ unidad, children }: { unidad: string; children: React.React
       <div className="flex-1">{children}</div>
     </div>
   );
+}
+
+/** Patente sin guiones, sin espacios y en mayúsculas. "JXZS-91", "jxzs91" y
+ *  "JXZS 91" son la misma patente escrita de tres maneras, y comparadas tal
+ *  cual las tres pasarían como distintas. */
+function normalizarPatente(patente: string): string {
+  return patente.replace(/[\s-]/g, "").toUpperCase();
 }

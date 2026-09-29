@@ -667,7 +667,14 @@ function RecursosPage() {
                 <>
                   Se va a eliminar {aEliminar.name}
                   {aEliminar.resource_count > 0 && (
-                    <> y sus {aEliminar.resource_count} recursos, con sus fotos y sus capacidades</>
+                    <>
+                      {" "}
+                      y{" "}
+                      {aEliminar.resource_count === 1
+                        ? "su único recurso"
+                        : `sus ${aEliminar.resource_count} recursos`}
+                      , con sus fotos y sus capacidades
+                    </>
                   )}
                   . No se puede deshacer. Si el punto deja de operar solo por un tiempo, conviene
                   desactivarlo con el interruptor: deja de participar en las rutas y no se pierde

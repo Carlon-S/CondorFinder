@@ -183,7 +183,9 @@ function RecursosDelPuntoPage() {
 
   const [busqueda, setBusqueda] = useState("");
   const [filtroEstado, setFiltroEstado] = useState<"todos" | "disponibles" | "no">("todos");
-  const [sortBy, setSortBy] = useState<Campo>("tipo");
+  // Por N° de equipo: es el identificador con el que la municipalidad nombra
+  // sus vehículos ("la 2184"), así que es el orden en el que se los busca.
+  const [sortBy, setSortBy] = useState<Campo>("equipo");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [pagina, setPagina] = useState(1);
 
@@ -216,28 +218,32 @@ function RecursosDelPuntoPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pointId]);
 
-  // Una foto de referencia por tipo, para el selector. Sale de la flota REAL:
-  // se toma la primera unidad de ese tipo que tenga foto, así que la imagen que
-  // acompaña a "TOLVA" es literalmente una tolva de la municipalidad y no una
-  // ilustración genérica que podría no parecerse a lo que hay en el patio.
+  // La flota ENTERA, de todos los puntos. Se carga una vez al entrar y sirve a
+  // dos cosas distintas:
   //
-  // Se piden TODOS los recursos y no solo los de este punto: un punto recién
-  // creado no tiene ninguno, y es justo cuando más ayuda ver de qué se está
-  // hablando. Se carga una sola vez, al abrir el selector por primera vez.
-  const [fotoPorTipo, setFotoPorTipo] = useState<Record<string, string>>({});
+  //   - la foto de referencia por tipo del selector, que sale de la flota real:
+  //     la imagen que acompaña a "TOLVA" es literalmente una tolva de la
+  //     municipalidad y no una ilustración genérica. Se piden todos los puntos
+  //     porque un punto recién creado no tiene ninguna unidad, y es justo
+  //     cuando más ayuda ver de qué se está hablando.
+  //   - el control de patente repetida, que tiene que mirar TODOS los puntos:
+  //     una patente es única en el país, no dentro de un patio. El número de
+  //     equipo, en cambio, se compara solo contra los hermanos de este punto,
+  //     porque así está definido el índice único del backend.
+  const [flotaCompleta, setFlotaCompleta] = useState<Resource[]>([]);
   useEffect(() => {
-    if (!eligiendoTipo || Object.keys(fotoPorTipo).length > 0) return;
     listResources()
-      .then((todos) => {
-        const mapa: Record<string, string> = {};
-        for (const r of todos) {
-          if (r.foto && !mapa[r.tipo]) mapa[r.tipo] = r.foto;
-        }
-        setFotoPorTipo(mapa);
-      })
+      .then(setFlotaCompleta)
       .catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [eligiendoTipo]);
+  }, [recursos]);
+
+  const fotoPorTipo = useMemo(() => {
+    const mapa: Record<string, string> = {};
+    for (const r of flotaCompleta) {
+      if (r.foto && !mapa[r.tipo]) mapa[r.tipo] = r.foto;
+    }
+    return mapa;
+  }, [flotaCompleta]);
 
   // Qué declara al menos una unidad de cada tipo. Es lo que permite distinguir
   // un dato faltante de un dato que no sabemos si corresponde (ver capacidadDe).
@@ -277,14 +283,14 @@ function RecursosDelPuntoPage() {
 
     const signo = sortDir === "asc" ? 1 : -1;
     return filtrados.sort((a, b) => {
-      // LAS QUE TIENEN FOTO PRIMERO, siempre, sin importar el orden elegido:
-      // son las que se pueden reconocer en patio de un vistazo, y dispersas
-      // entre las que no la tienen obligan a recorrer la tabla entera para
-      // encontrarlas. El orden de la columna decide dentro de cada grupo.
-      const fotoA = a.foto ? 0 : 1;
-      const fotoB = b.foto ? 0 : 1;
-      if (fotoA !== fotoB) return fotoA - fotoB;
-
+      // Acá había una regla que ponía las unidades CON foto primero, por
+      // encima del orden elegido. Se fue, y el motivo es concreto: con 21
+      // unidades repartidas en páginas de 8, esa regla agrupaba las 13 con
+      // foto en las primeras páginas y las 8 sin foto al final, así que al
+      // ordenar por capacidad las cifras parecían reiniciarse en cada página y
+      // el orden se leía como si fuera solo de la página visible. No lo era,
+      // el orden siempre fue sobre la lista completa, pero eso es
+      // indistinguible cuando hay una segunda clave mandando por encima.
       switch (sortBy) {
         case "estado":
           return (Number(b.disponible) - Number(a.disponible)) * signo;
@@ -896,6 +902,7 @@ function RecursosDelPuntoPage() {
         recurso={enEdicion}
         tipos={tipos}
         hermanos={recursos}
+        flota={flotaCompleta}
         onGuardado={recargar}
       />
 
