@@ -1,12 +1,10 @@
 // =============================================================================
 // CONDORFINDER, FORMULARIO DE UN RECURSO (HDU8)
-// Archivo: src/routes/_authed/recursos_.$pointId.recurso.tsx
+// Archivo: src/routes/_authed/recursos_.$pointId_.recurso.tsx
 //
-// Vista propia y no un diálogo. El formulario tiene foto grande, datos del
-// vehículo y dotación: dentro de una modal quedaba o apretado o tan alto que
-// había que desplazarlo, y en los dos casos compite con el listado que hay
-// detrás. Con vista propia entra completo, se puede volver, y la URL identifica
-// lo que se está editando.
+// Vista propia y no un diálogo. El formulario tiene foto, datos del vehículo y
+// dotación: dentro de una modal quedaba o apretado o tan alto que había que
+// desplazarlo, y en los dos casos compite con el listado que hay detrás.
 //
 // DOS guiones bajos en el nombre del archivo, y los dos importan:
 //
@@ -17,8 +15,7 @@
 // El segundo faltaba y el síntoma era desconcertante: elegir un tipo o apretar
 // editar navegaba, la URL cambiaba, y en pantalla seguía el listado. El
 // formulario se había generado como HIJO del listado, y como el listado no
-// renderiza un <Outlet>, el hijo no tenía dónde aparecer. Un formulario que
-// reemplaza a la vista anterior no es un hijo de ella.
+// renderiza un <Outlet>, el hijo no tenía dónde aparecer.
 //
 // Dos modos, distinguidos por los parámetros de búsqueda:
 //   ?tipo=TOLVA  -> alta. El tipo ya viene elegido, que es el AC1 de HDU8: la
@@ -28,15 +25,22 @@
 // El campo "observaciones" del Excel NO está en este formulario. Doce de las 21
 // unidades lo traían y nueve de esas doce repetían en texto la capacidad que el
 // parser ya extrajo a su propio campo ("Capacidad 10 M3"), así que como campo
-// editable era ruido: el dato de verdad es la capacidad volumétrica, que sí
-// está. El valor original se conserva en la base para no perder la trazabilidad
-// con la planilla.
+// editable era ruido: el dato de verdad es la capacidad volumétrica. El valor
+// original se conserva en la base para no perder la trazabilidad con la
+// planilla.
+//
+// LAYOUT: migas, título con las acciones a la derecha, y UNA tarjeta centrada
+// con todo adentro, empezando por la zona de carga de la foto. Los campos van
+// apilados a lo ancho de la tarjeta, no en dos columnas: un formulario de alta
+// se recorre de arriba abajo una sola vez, y repartirlo en columnas obliga a
+// zigzaguear sin ganar nada cuando la tarjeta ya es angosta.
 // =============================================================================
 
 import { useEffect, useRef, useState } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { ChevronRight } from "lucide-react";
 import { ImageOff, ImagePlus } from "lucide-react";
-import { ArrowRightCircle, Loader2, Truck, X } from "@/components/icons/Icons";
+import { Loader2 } from "@/components/icons/Icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -83,11 +87,14 @@ function RecursoFormPage() {
   const [cargando, setCargando] = useState(true);
   const [guardando, setGuardando] = useState(false);
   const [subiendoFoto, setSubiendoFoto] = useState(false);
+  const [arrastrando, setArrastrando] = useState(false);
   const [fotoAmpliada, setFotoAmpliada] = useState<string | null>(null);
   // Los demás recursos del punto, solo para avisar de un N° de equipo repetido
   // antes de enviar: el índice único de Mongo devuelve un error que no dice qué
   // campo lo causó.
-  const [hermanos, setHermanos] = useState<{ id: string; numero_equipo: string; tipo: string }[]>([]);
+  const [hermanos, setHermanos] = useState<{ id: string; numero_equipo: string; tipo: string }[]>(
+    [],
+  );
   const inputFoto = useRef<HTMLInputElement>(null);
 
   const volverAlListado = () => navigate({ to: "/recursos/$pointId", params: { pointId } });
@@ -105,7 +112,9 @@ function RecursoFormPage() {
         if (cancelado) return;
         setPunto(p);
         setTipos(ts);
-        setHermanos(recursos.map((r) => ({ id: r.id, numero_equipo: r.numero_equipo, tipo: r.tipo })));
+        setHermanos(
+          recursos.map((r) => ({ id: r.id, numero_equipo: r.numero_equipo, tipo: r.tipo })),
+        );
 
         if (id) {
           const existente = recursos.find((r) => r.id === id);
@@ -164,6 +173,10 @@ function RecursoFormPage() {
 
   const elegirFoto = async (archivo: File | undefined) => {
     if (!archivo || !form) return;
+    if (!archivo.type.startsWith("image/")) {
+      notify.error("Ese archivo no es una imagen");
+      return;
+    }
     setSubiendoFoto(true);
     try {
       const nombre = await uploadResourcePhoto(archivo);
@@ -184,10 +197,7 @@ function RecursoFormPage() {
     if (!form) return;
 
     const repetido = hermanos.find(
-      (h) =>
-        h.id !== id &&
-        h.numero_equipo &&
-        h.numero_equipo.trim() === form.numero_equipo.trim(),
+      (h) => h.id !== id && h.numero_equipo && h.numero_equipo.trim() === form.numero_equipo.trim(),
     );
     if (form.numero_equipo.trim() && repetido) {
       notify.error(
@@ -219,44 +229,73 @@ function RecursoFormPage() {
 
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
-      <div className="border-b border-border/25 px-6 py-5">
-        {/* Camino de vuelta explícito. La vista se abre desde el listado de un
-            punto y tiene que poder devolverse ahí sin usar el botón del
-            navegador. */}
-        {/* Mismo botón que en el listado: es el único camino de vuelta de una
-            vista a la que se llega desde otra, y como enlace gris chico pasaba
-            desapercibido. */}
-        <Link to="/recursos/$pointId" params={{ pointId }} className="mb-3 inline-block">
-          <Button variant="secondary" size="sm">
-            <ArrowRightCircle className="mr-1.5 h-3.5 w-3.5 rotate-180" />
-            Volver a los recursos
-          </Button>
-        </Link>
-        <p className="eyebrow">{id ? "Editar recurso" : "Nuevo recurso"}</p>
-        <h1 className="font-rubik text-3xl font-semibold tracking-normal text-foreground md:text-4xl">
-          {form?.tipo ?? "Recurso"}
-        </h1>
+      <div className="px-6 pt-5">
+        {/* Migas. Es el camino de vuelta y a la vez dice dónde está uno: una
+            vista a la que se llega desde otras dos (el listado y el botón de
+            agregar) necesita decirlo, y un solo enlace "Volver" no lo dice. */}
+        <nav className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+          <Link to="/recursos" className="transition-colors hover:text-foreground">
+            Puntos
+          </Link>
+          <ChevronRight className="h-3 w-3" />
+          <Link
+            to="/recursos/$pointId"
+            params={{ pointId }}
+            className="transition-colors hover:text-foreground"
+          >
+            {punto?.name ?? "Recursos"}
+          </Link>
+          <ChevronRight className="h-3 w-3" />
+          <span className="font-medium text-foreground">
+            {id ? "Editar recurso" : "Nuevo recurso"}
+          </span>
+        </nav>
+
+        {/* Título y acciones en la misma fila, como en la referencia: guardar y
+            cancelar están arriba y siempre visibles, sin tener que llegar al
+            pie del formulario para encontrarlos. */}
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-b border-border/25 pb-5">
+          <div className="min-w-0">
+            <h1 className="font-rubik text-3xl font-semibold tracking-normal text-foreground">
+              {id ? "Editar recurso" : "Nuevo recurso"}
+            </h1>
+            {form && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {form.tipo}
+                {punto && ` · ${punto.name}`}
+              </p>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" disabled={guardando} onClick={volverAlListado}>
+              Cancelar
+            </Button>
+            <Button onClick={guardar} disabled={guardando || cargando}>
+              {guardando && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {id ? "Guardar cambios" : "Agregar recurso"}
+            </Button>
+          </div>
+        </div>
       </div>
 
-      <main className="flex-1 p-6">
+      <main className="flex-1 px-6 py-6">
         {cargando || !form || !campos ? (
-          <div className="mx-auto grid max-w-4xl gap-6 md:grid-cols-[18rem_1fr]">
-            <Skeleton className="aspect-[4/3] w-full rounded-xl" />
-            <div className="space-y-3">
-              {[0, 1, 2, 3, 4].map((i) => (
-                <Skeleton key={i} className="h-10 w-full rounded-md" />
-              ))}
-            </div>
+          <div className="mx-auto max-w-2xl space-y-3 rounded-xl border border-border bg-card p-6">
+            <Skeleton className="h-24 w-full rounded-lg" />
+            {[0, 1, 2, 3, 4].map((i) => (
+              <Skeleton key={i} className="h-10 w-full rounded-md" />
+            ))}
           </div>
         ) : (
-          <div className="mx-auto grid max-w-4xl gap-6 md:grid-cols-[18rem_1fr]">
-            {/* ── Foto ── */}
-            <div className="space-y-2">
+          <div className="mx-auto max-w-2xl space-y-5 rounded-xl border border-border bg-card p-6">
+            {/* ── Foto: miniatura más zona de arrastre, como en la referencia ── */}
+            <div className="flex items-stretch gap-3">
               <button
                 type="button"
                 onClick={() => form.foto && setFotoAmpliada(form.foto)}
                 disabled={!form.foto}
-                className={`detect-frame relative block aspect-[4/3] w-full overflow-hidden rounded-xl border border-border bg-card ${
+                title={form.foto ? "Ver la foto en grande" : "Sin imagen todavía"}
+                className={`detect-frame detect-frame-sm h-20 w-24 flex-shrink-0 overflow-hidden rounded-lg border border-border bg-muted ${
                   form.foto ? "cursor-zoom-in" : "cursor-default"
                 }`}
               >
@@ -268,200 +307,213 @@ function RecursoFormPage() {
                     className="h-full w-full object-cover"
                   />
                 ) : (
-                  // Se DICE que no hay imagen. Un marco vacío se lee como que la
-                  // foto no cargó, no como que no existe.
-                  <span className="flex h-full w-full flex-col items-center justify-center gap-2 text-muted-foreground">
-                    <ImageOff className="h-8 w-8 opacity-50" />
-                    <span className="text-xs">Sin imagen todavía</span>
-                  </span>
-                )}
-                {subiendoFoto && (
-                  <span className="absolute inset-0 flex items-center justify-center bg-background/70">
-                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                  <span className="flex h-full w-full items-center justify-center">
+                    <ImageOff className="h-5 w-5 text-muted-foreground/50" />
                   </span>
                 )}
               </button>
 
-              <input
-                ref={inputFoto}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => elegirFoto(e.target.files?.[0])}
-              />
+              {/* Arrastrar y soltar además del clic: es el gesto natural cuando
+                  la foto viene de una carpeta abierta al lado, que es como
+                  llegan las de la flota. */}
+              <div
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setArrastrando(true);
+                }}
+                onDragLeave={() => setArrastrando(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setArrastrando(false);
+                  elegirFoto(e.dataTransfer.files?.[0]);
+                }}
+                onClick={() => inputFoto.current?.click()}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") inputFoto.current?.click();
+                }}
+                className={`flex flex-1 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed px-4 py-3 text-center transition-colors ${
+                  arrastrando
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:border-primary/60 hover:bg-muted/40"
+                }`}
+              >
+                {subiendoFoto ? (
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                ) : (
+                  <ImagePlus className="h-5 w-5 text-muted-foreground" />
+                )}
+                <p className="text-xs">
+                  <span className="font-semibold text-primary">
+                    {form.foto ? "Cambiar imagen" : "Haz clic para subir"}
+                  </span>{" "}
+                  <span className="text-muted-foreground">o arrastra el archivo</span>
+                </p>
+                <p className="text-[0.6875rem] text-muted-foreground">
+                  {form.foto
+                    ? "La imagen actual se reemplaza"
+                    : "Opcional. JPG o PNG, se reduce automáticamente"}
+                </p>
+              </div>
 
-              <div className="flex gap-1.5">
+              {form.foto && (
                 <Button
                   type="button"
+                  variant="ghost"
                   size="sm"
-                  variant="secondary"
-                  className="flex-1"
                   disabled={subiendoFoto}
-                  onClick={() => inputFoto.current?.click()}
+                  onClick={() => setForm({ ...form, foto: null })}
+                  className="self-center"
                 >
-                  <ImagePlus className="mr-1.5 h-3.5 w-3.5" />
-                  {form.foto ? "Cambiar imagen" : "Subir imagen"}
+                  Quitar
                 </Button>
-                {form.foto && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    disabled={subiendoFoto}
-                    onClick={() => setForm({ ...form, foto: null })}
-                    title="Quitar la imagen"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </Button>
-                )}
-              </div>
-
-              <p className="text-xs leading-relaxed text-muted-foreground">
-                La imagen es opcional. Se reduce automáticamente antes de guardarla.
-              </p>
-
-              <div className="flex items-center justify-between rounded-lg border border-border bg-card p-3">
-                <span className="text-xs font-medium text-foreground">Disponible</span>
-                <Switch
-                  checked={form.disponible}
-                  onCheckedChange={(v) => setForm({ ...form, disponible: v })}
-                />
-              </div>
+              )}
             </div>
 
-            {/* ── Campos ── */}
-            <div className="space-y-5">
-              <Bloque titulo="Identificación">
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Campo etiqueta="N° de equipo">
+            <input
+              ref={inputFoto}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => elegirFoto(e.target.files?.[0])}
+            />
+
+            <Campo etiqueta="N° de equipo">
+              <Input
+                value={form.numero_equipo}
+                onChange={(e) => setForm({ ...form, numero_equipo: e.target.value })}
+                placeholder="1143"
+              />
+            </Campo>
+
+            <Campo etiqueta="Patente">
+              <Input
+                value={form.patente}
+                onChange={(e) => setForm({ ...form, patente: e.target.value })}
+                placeholder="JXZS-91"
+              />
+            </Campo>
+
+            {campos.motorizado && (
+              <>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Campo etiqueta="Marca">
                     <Input
-                      value={form.numero_equipo}
-                      onChange={(e) => setForm({ ...form, numero_equipo: e.target.value })}
-                      placeholder="1143"
+                      value={form.marca}
+                      onChange={(e) => setForm({ ...form, marca: e.target.value })}
+                      placeholder="FORD"
                     />
                   </Campo>
-                  <Campo etiqueta="Patente">
+                  <Campo etiqueta="Modelo">
                     <Input
-                      value={form.patente}
-                      onChange={(e) => setForm({ ...form, patente: e.target.value })}
-                      placeholder="JXZS-91"
+                      value={form.modelo}
+                      onChange={(e) => setForm({ ...form, modelo: e.target.value })}
+                      placeholder="CARGO 1723"
                     />
                   </Campo>
                 </div>
-              </Bloque>
+                <Campo etiqueta="Año">
+                  <Input
+                    type="number"
+                    value={form.anio ?? ""}
+                    onChange={(e) =>
+                      setForm({ ...form, anio: e.target.value ? Number(e.target.value) : null })
+                    }
+                    placeholder="2018"
+                  />
+                </Campo>
+              </>
+            )}
 
-              {campos.motorizado && (
-                <Bloque titulo="Vehículo">
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    <Campo etiqueta="Marca">
-                      <Input
-                        value={form.marca}
-                        onChange={(e) => setForm({ ...form, marca: e.target.value })}
-                        placeholder="FORD"
-                      />
-                    </Campo>
-                    <Campo etiqueta="Modelo">
-                      <Input
-                        value={form.modelo}
-                        onChange={(e) => setForm({ ...form, modelo: e.target.value })}
-                        placeholder="CARGO 1723"
-                      />
-                    </Campo>
-                    <Campo etiqueta="Año">
-                      <Input
-                        type="number"
-                        value={form.anio ?? ""}
-                        onChange={(e) =>
-                          setForm({ ...form, anio: e.target.value ? Number(e.target.value) : null })
-                        }
-                        placeholder="2018"
-                      />
-                    </Campo>
-                  </div>
-                </Bloque>
-              )}
+            {campos.capacidadCarga && (
+              <Campo etiqueta="Capacidad de carga">
+                <ConUnidad unidad="m³">
+                  <Input
+                    type="number"
+                    step="0.1"
+                    value={form.capacidad_m3 ?? ""}
+                    // `|| null` y no un ternario sobre el texto: escribir 0
+                    // manda 0, y el backend exige > 0 porque una capacidad de
+                    // cero no es un dato, es la ausencia de uno.
+                    onChange={(e) =>
+                      setForm({ ...form, capacidad_m3: Number(e.target.value) || null })
+                    }
+                    placeholder="10"
+                    className="border-0 shadow-none focus-visible:ring-0"
+                  />
+                </ConUnidad>
+                {form.capacidad_m3 == null && (
+                  <p className="mt-1.5 text-xs leading-relaxed text-warning-strong">
+                    Sin capacidad declarada el recurso se guardará igual, pero no sumará
+                    para las rutas.
+                  </p>
+                )}
+              </Campo>
+            )}
 
-              {(campos.capacidadCarga || campos.capacidadBalde) && (
-                <Bloque titulo="Capacidad volumétrica">
-                  {campos.capacidadCarga && (
-                    <Campo etiqueta="Capacidad de carga (m³)">
-                      <Input
-                        type="number"
-                        step="0.1"
-                        value={form.capacidad_m3 ?? ""}
-                        // `|| null` y no un ternario sobre el texto: escribir 0
-                        // manda 0, y el backend exige > 0 porque una capacidad
-                        // de cero no es un dato, es la ausencia de uno.
-                        onChange={(e) =>
-                          setForm({ ...form, capacidad_m3: Number(e.target.value) || null })
-                        }
-                        placeholder="10"
-                      />
-                      {form.capacidad_m3 == null && (
-                        <p className="mt-1 text-xs leading-relaxed text-warning-strong">
-                          Sin capacidad declarada el recurso se guarda igual, pero no suma
-                          para las rutas: no se puede asignar volumen a un vehículo que no
-                          declara cuánto lleva.
-                        </p>
-                      )}
-                    </Campo>
-                  )}
-                  {campos.capacidadBalde && (
-                    <Campo etiqueta="Capacidad del balde (m³)">
-                      <Input
-                        type="number"
-                        step="0.1"
-                        value={form.capacidad_balde_m3 ?? ""}
-                        onChange={(e) =>
-                          setForm({ ...form, capacidad_balde_m3: Number(e.target.value) || null })
-                        }
-                        placeholder="1"
-                      />
-                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                        Una máquina carga pero no transporta, así que esta capacidad no
-                        suma a la de las rutas.
-                      </p>
-                    </Campo>
-                  )}
-                </Bloque>
-              )}
+            {campos.capacidadBalde && (
+              <Campo etiqueta="Capacidad del balde">
+                <ConUnidad unidad="m³">
+                  <Input
+                    type="number"
+                    step="0.1"
+                    value={form.capacidad_balde_m3 ?? ""}
+                    onChange={(e) =>
+                      setForm({ ...form, capacidad_balde_m3: Number(e.target.value) || null })
+                    }
+                    placeholder="1"
+                    className="border-0 shadow-none focus-visible:ring-0"
+                  />
+                </ConUnidad>
+                <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+                  Una máquina carga pero no transporta, así que esta capacidad no suma a la
+                  de las rutas.
+                </p>
+              </Campo>
+            )}
 
-              {campos.dotacion && (
-                <Bloque titulo="Dotación requerida">
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    {([
+            {campos.dotacion && (
+              <div>
+                <p className="mb-2 text-xs font-medium text-muted-foreground">
+                  Dotación requerida
+                </p>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  {(
+                    [
                       ["conductores_requeridos", "Conductores"],
                       ["peonetas_requeridas", "Peonetas"],
                       ["operadores_requeridos", "Operadores"],
-                    ] as const).map(([clave, etiqueta]) => (
-                      <Campo key={clave} etiqueta={etiqueta}>
-                        <Input
-                          type="number"
-                          min={0}
-                          value={form[clave] || ""}
-                          onChange={(e) =>
-                            setForm({ ...form, [clave]: Number(e.target.value) || 0 })
-                          }
-                        />
-                      </Campo>
-                    ))}
-                  </div>
-                  <p className="text-xs leading-relaxed text-muted-foreground">
-                    Es lo que este vehículo <strong>requiere</strong> para operar, distinto
-                    del personal que el punto tiene.
-                  </p>
-                </Bloque>
-              )}
-
-              <div className="flex gap-2 border-t border-border/40 pt-4">
-                <Button onClick={guardar} disabled={guardando} className="flex-1">
-                  {guardando && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  {id ? "Guardar cambios" : "Agregar recurso"}
-                </Button>
-                <Button variant="secondary" disabled={guardando} onClick={volverAlListado}>
-                  Cancelar
-                </Button>
+                    ] as const
+                  ).map(([clave, etiqueta]) => (
+                    <Campo key={clave} etiqueta={etiqueta}>
+                      <Input
+                        type="number"
+                        min={0}
+                        value={form[clave] || ""}
+                        onChange={(e) => setForm({ ...form, [clave]: Number(e.target.value) || 0 })}
+                      />
+                    </Campo>
+                  ))}
+                </div>
+                <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+                  Es lo que este vehículo <strong>requiere</strong> para operar, distinto del
+                  personal que el punto tiene.
+                </p>
               </div>
+            )}
+
+            <div className="flex items-center justify-between rounded-lg bg-background/40 p-3">
+              <div>
+                <p className="text-xs font-medium text-foreground">Disponible</p>
+                <p className="text-[0.6875rem] text-muted-foreground">
+                  Un recurso no disponible queda fuera al armar una ruta.
+                </p>
+              </div>
+              <Switch
+                checked={form.disponible}
+                onCheckedChange={(v) => setForm({ ...form, disponible: v })}
+              />
             </div>
           </div>
         )}
@@ -491,26 +543,25 @@ function RecursoFormPage() {
   );
 }
 
-/** Grupo de campos con su título. Es lo que da la simetría del formulario de
- *  referencia: bloques del mismo ancho, separados, en vez de una columna de
- *  campos sueltos de alturas distintas. */
-function Bloque({ titulo, children }: { titulo: string; children: React.ReactNode }) {
-  return (
-    <section className="space-y-3 rounded-xl border border-border bg-card p-4">
-      <div className="flex items-center gap-2.5 border-l-2 border-primary/50 pl-3">
-        <Truck className="h-3.5 w-3.5 text-foreground/70" />
-        <h2 className="text-sm font-semibold tracking-tight text-foreground">{titulo}</h2>
-      </div>
-      {children}
-    </section>
-  );
-}
-
 function Campo({ etiqueta, children }: { etiqueta: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1.5">
       <label className="text-xs font-medium text-muted-foreground">{etiqueta}</label>
       {children}
+    </div>
+  );
+}
+
+/** Campo numérico con la unidad pegada a la izquierda, como en la referencia.
+ *  La unidad deja de ser parte de la etiqueta y pasa a estar donde se escribe
+ *  el número, que es donde importa saber en qué se está midiendo. */
+function ConUnidad({ unidad, children }: { unidad: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center overflow-hidden rounded-md border border-input bg-background focus-within:ring-2 focus-within:ring-ring/30">
+      <span className="mono flex h-9 items-center border-r border-input px-3 text-xs text-muted-foreground">
+        {unidad}
+      </span>
+      <div className="flex-1">{children}</div>
     </div>
   );
 }

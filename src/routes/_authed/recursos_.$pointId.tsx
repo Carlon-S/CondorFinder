@@ -96,20 +96,40 @@ const ANCHOS = {
  *  dentro de una columna cuyo encabezado ya dice "(m³)": una columna de cifras
  *  tiene que tener cifras, y el número solo no distingue los 10 m³ de carga de
  *  una tolva de los 3 m³ del balde de una pala. Ahora el número va arriba y qué
- *  mide va abajo, en gris. */
-function capacidadDe(r: Resource): { valor: number | null; nota: string; falta: boolean } {
+ *  mide va abajo, en gris.
+ *
+ *  `declaradoEnSuTipo` decide si una capacidad ausente es un HUECO o
+ *  simplemente algo que no sabemos, y es la corrección de un error de fondo.
+ *  La familia de cada tipo (que TOLVA transporta, que MINICARGADOR es máquina
+ *  con balde) no sale de la planilla: no hay columna de familia, la inferí. Con
+ *  esa inferencia la interfaz afirmaba cosas como "el minicargador tiene el
+ *  balde sin declarar", que no es un dato de la municipalidad sino una
+ *  conclusión de una clasificación propia presentada como hecho.
+ *
+ *  La regla nueva la da el propio dato: una capacidad ausente es un hueco solo
+ *  si ALGUNA otra unidad del mismo tipo sí la declara. Una TOLVA sin capacidad
+ *  lo es, porque las otras seis la traen; un AMPLIROLL no, porque ninguno de
+ *  los dos la trae y no sabemos si le corresponde. Los huecos van en ámbar y lo
+ *  desconocido en gris. */
+function capacidadDe(
+  r: Resource,
+  declaradoEnSuTipo: { carga: boolean; balde: boolean },
+): { valor: number | null; nota: string; falta: boolean } {
   if (r.familia === "carga") {
-    return r.capacidad_m3 != null
-      ? { valor: r.capacidad_m3, nota: "carga", falta: false }
-      : { valor: null, nota: "sin declarar", falta: true };
+    if (r.capacidad_m3 != null) return { valor: r.capacidad_m3, nota: "carga", falta: false };
+    return declaradoEnSuTipo.carga
+      ? { valor: null, nota: "sin declarar", falta: true }
+      : { valor: null, nota: "sin dato", falta: false };
   }
   if (r.familia === "maquina") {
-    return r.capacidad_balde_m3 != null
-      ? { valor: r.capacidad_balde_m3, nota: "balde", falta: false }
-      : { valor: null, nota: "balde sin declarar", falta: true };
+    if (r.capacidad_balde_m3 != null)
+      return { valor: r.capacidad_balde_m3, nota: "balde", falta: false };
+    return declaradoEnSuTipo.balde
+      ? { valor: null, nota: "balde sin declarar", falta: true }
+      : { valor: null, nota: "sin dato", falta: false };
   }
   if (r.familia === "arrastre") return { valor: null, nota: "se remolca", falta: false };
-  return { valor: null, nota: "no transporta", falta: false };
+  return { valor: null, nota: "sin dato", falta: false };
 }
 
 function dotacionTexto(r: Resource): string {
@@ -162,6 +182,21 @@ function RecursosDelPuntoPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pointId]);
 
+  // Qué declara al menos una unidad de cada tipo. Es lo que permite distinguir
+  // un dato faltante de un dato que no sabemos si corresponde (ver capacidadDe).
+  const declaradoPorTipo = useMemo(() => {
+    const mapa: Record<string, { carga: boolean; balde: boolean }> = {};
+    for (const r of recursos) {
+      const acc = (mapa[r.tipo] ??= { carga: false, balde: false });
+      if (r.capacidad_m3 != null) acc.carga = true;
+      if (r.capacidad_balde_m3 != null) acc.balde = true;
+    }
+    return mapa;
+  }, [recursos]);
+
+  const capacidadDeFila = (r: Resource) =>
+    capacidadDe(r, declaradoPorTipo[r.tipo] ?? { carga: false, balde: false });
+
   const alternarOrden = (campo: Campo) => {
     if (campo === sortBy) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else {
@@ -201,8 +236,8 @@ function RecursosDelPuntoPage() {
             a.numero_equipo.localeCompare(b.numero_equipo, undefined, { numeric: true }) * signo
           );
         case "capacidad": {
-          const ca = capacidadDe(a).valor ?? -1;
-          const cb = capacidadDe(b).valor ?? -1;
+          const ca = capacidadDeFila(a).valor ?? -1;
+          const cb = capacidadDeFila(b).valor ?? -1;
           return (ca - cb) * signo;
         }
         case "vehiculo":
@@ -526,7 +561,7 @@ function RecursosDelPuntoPage() {
                 </TableHeader>
                 <TableBody>
                   {enPagina.map((r) => {
-                    const cap = capacidadDe(r);
+                    const cap = capacidadDeFila(r);
                     return (
                       <TableRow
                         key={r.id}
