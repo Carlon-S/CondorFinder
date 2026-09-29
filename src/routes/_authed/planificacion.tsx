@@ -34,6 +34,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRightCircle,
   Boxes,
+  Pencil,
   Crosshair,
   FolderOpen,
   Loader2,
@@ -69,6 +70,7 @@ import {
 import { listAnalyses, setPendingOpenId, type AnalysisSummary, type SavedAnalysisRecord } from "@/lib/analysisStore";
 import { listResourcePoints, type ResourcePoint } from "@/lib/resources";
 import { PanelPuntos, type PanelPuntosMapProps } from "@/components/PanelPuntos";
+import { MAIPU_BBOX } from "@/lib/maipuBoundary";
 import {
   Table,
   TableBody,
@@ -295,15 +297,14 @@ function RutasPage() {
   // necesita. Un solo fetch cubre ambos usos.
   const [originPoints, setOriginPoints] = useState<ResourcePoint[]>([]);
 
-  // Pestaña del panel lateral. Las dos tareas comparten el MISMO mapa: dónde
-  // está la flota y por dónde pasa la ruta son la misma geografía, y tenerlas
-  // en pantallas separadas obligaba a cambiar de vista para saber si un punto
-  // tenía capacidad y volver para generar.
-  const [panel, setPanel] = useState<"ruta" | "puntos">("ruta");
   // Pestaña de la tabla al pie. Es el detalle de lo que el mapa muestra
   // como marcadores: las zonas que se van a retirar y los puntos desde
   // donde sale la flota. En el mapa son círculos; acá son cifras.
   const [tabla, setTabla] = useState<"zonas" | "puntos">("zonas");
+  // Encuadre manual a la comuna. Es un array nuevo en cada clic a propósito:
+  // FitBounds en GeoMapImpl reacciona al cambio de REFERENCIA, así que mandar
+  // la misma constante no volvería a encuadrar la segunda vez.
+  const [recentrar, setRecentrar] = useState<[number, number][] | null>(null);
   // Lo que el panel de puntos necesita del mapa mientras se ubica un punto.
   // Vive acá porque el mapa es de esta vista, no del panel.
   const [puntosMapProps, setPuntosMapProps] = useState<PanelPuntosMapProps>({
@@ -313,6 +314,7 @@ function RutasPage() {
   });
   // Marcador de punto recién clickeado, para que el panel lo abra.
   const [puntoClickeado, setPuntoClickeado] = useState<string | null>(null);
+  const [puntoAEditar, setPuntoAEditar] = useState<string | null>(null);
   // Solo para el mapa principal (mapPoints, abajo) -- se apaga cuando la
   // carga INICIAL de ambas fuentes (zonas + puntos de origen) resuelve, no
   // en cada refresh posterior (multi-pestaña). Antes el mapa se veía vacío
@@ -545,12 +547,10 @@ function RutasPage() {
       // Con el panel de puntos abierto, el clic lo atiende ese panel (abre su
       // ficha para editarlo). Con el de ruta, sigue abriendo la ficha de solo
       // lectura de siempre, que es lo que sirve mientras se planifica.
-      if (panel === "puntos") {
-        setPuntoClickeado(originPoint.id);
-        setFocusPoint(point.position);
-        return;
-      }
-      setZoomPoint(originPoint);
+      // Con los dos bloques a la vista, un clic en un punto lo abre en el
+      // panel de puntos, que es donde se edita. La ficha de solo lectura
+      // dejó de tener sentido: el panel ya muestra todo lo que ella mostraba.
+      setPuntoClickeado(originPoint.id);
       setFocusPoint(point.position);
     }
   };
@@ -715,11 +715,31 @@ function RutasPage() {
             outboundPaths={routeOutboundPaths}
             returnPaths={routeReturnPaths}
             routeSegments={routeSegments}
-            fitBoundsTo={routeFitPoints}
+            // El recentrado manual gana sobre el encuadre automático de la
+            // ruta: es una acción explícita y reciente del usuario.
+            fitBoundsTo={recentrar ?? routeFitPoints}
             focusPoint={puntosMapProps.focusPoint ?? focusPoint}
-            marker={panel === "puntos" ? puntosMapProps.marker : null}
-            onMapClick={panel === "puntos" ? puntosMapProps.onMapClick ?? undefined : undefined}
+            // Sin pestañas, el panel de puntos siempre está montado: es él
+            // quien decide si espera un clic (solo mientras ubica un punto) y
+            // manda null el resto del tiempo.
+            marker={puntosMapProps.marker}
+            onMapClick={puntosMapProps.onMapClick ?? undefined}
+            lockToMaipu
           />
+          {/* Volver al encuadre de la comuna. El mapa se puede mover dentro de
+              un margen alrededor de Maipú, y después de seguir una ruta hasta
+              un borde no hay forma evidente de recomponer la vista: el zoom del
+              navegador no la devuelve y arrastrar a ojo tampoco. */}
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => setRecentrar([...MAIPU_BBOX])}
+            title="Volver a ver toda la comuna"
+            className="absolute right-4 top-4 z-[500] shadow-md"
+          >
+            <Crosshair className="mr-1.5 h-3.5 w-3.5" /> Centrar en Maipú
+          </Button>
+
           {mapDataLoading && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/60">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -729,42 +749,16 @@ function RutasPage() {
 
         <aside className="overflow-y-auto p-5">
           <div className="flex flex-col gap-4">
-            {/* Dos pestañas sobre UN mapa. No son dos vistas disfrazadas: el
-                mapa de abajo sigue mostrando los puntos y las zonas a la vez
-                siempre, y lo que cambia es con cuál de las dos se está
-                trabajando. */}
-            <div className="flex items-center gap-1 rounded-md bg-background/60 p-0.5">
-              {(
-                [
-                  ["ruta", "Ruta"],
-                  ["puntos", "Puntos"],
-                ] as const
-              ).map(([valor, etiqueta]) => (
-                <button
-                  key={valor}
-                  type="button"
-                  onClick={() => setPanel(valor)}
-                  className={`flex-1 cursor-pointer rounded px-3 py-1.5 text-xs font-medium transition-colors ${
-                    panel === valor
-                      ? "bg-card text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {etiqueta}
-                </button>
-              ))}
-            </div>
-
-            {panel === "puntos" && (
-              <PanelPuntos
-                onMapProps={setPuntosMapProps}
-                onPuntosCambiaron={refreshOriginPoints}
-                puntoSeleccionadoId={puntoClickeado}
-              />
-            )}
-
-            {panel === "ruta" && (
-            <>
+            {/* Los dos bloques conviven, uno debajo del otro, como el panel de
+                la referencia (Fleet arriba, Alerts abajo). Estuvieron detrás de
+                un par de pestañas y era un estorbo: planificar es mirar la ruta
+                Y los puntos a la vez, y alternar obligaba a recordar lo que
+                mostraba la otra. */}
+            <div className="rounded-xl border border-border bg-card p-4">
+              <div className="mb-3 flex items-center gap-2.5 border-l-2 border-primary/50 pl-3">
+                <RouteIcon className="h-3.5 w-3.5 text-foreground/70" />
+                <h2 className="text-sm font-semibold tracking-tight text-foreground">Ruta</h2>
+              </div>
 
             <div className="animate-in fade-in slide-in-from-left-2 duration-300 flex flex-col gap-2">
               <Button onClick={openLoadDialog} variant="secondary" className="w-full">
@@ -780,71 +774,19 @@ function RutasPage() {
               </Button>
             </div>
 
-            {loadedAnalyses.length > 0 && (
-              <div className="animate-in fade-in slide-in-from-left-2 duration-300 space-y-1.5">
-                <p className="text-xs font-medium text-muted-foreground">Análisis cargados</p>
-                <ul className="space-y-1.5">
-                  {loadedAnalyses.map((a) => (
-                    <li key={a.id}>
-                      <div
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => focusOnAnalysis(a.id)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            focusOnAnalysis(a.id);
-                          }
-                        }}
-                        title="Ver en el mapa"
-                        className="flex min-w-0 cursor-pointer items-center gap-2 rounded-md border border-border/60 bg-background/60 p-2 text-sm transition-colors hover:bg-muted"
-                      >
-                        <span
-                          className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
-                          style={{
-                            backgroundColor:
-                              ZONE_COLORS[
-                                allAnalyses.findIndex((x) => x.id === a.id) % ZONE_COLORS.length
-                              ],
-                          }}
-                        />
-                        <span className="min-w-0 flex-1 truncate">
-                          {a.name}
-                          <span className="ml-1 text-[0.625rem] font-normal text-muted-foreground">
-                            ({a.detections.length})
-                          </span>
-                        </span>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleUnload(a.id);
-                          }}
-                          title="Descargar (quitar de la ruta)"
-                          aria-label={`Descargar ${a.name}`}
-                          className="flex h-6 w-6 flex-shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive"
-                        >
-                          <X className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+            {/* La lista de zonas cargadas NO va acá. Vive en la tabla al pie,
+                donde cada zona muestra su volumen, su área y su peso, que es lo
+                que se compara al decidir. En el panel era una lista de nombres
+                sin cifras que además duplicaba lo de abajo. */}
 
             {routeError && (
               <div className="animate-in fade-in slide-in-from-left-2 duration-300 rounded-lg border border-warning/40 bg-warning/10 p-4">
                 <TriangleAlert className="mb-2 h-5 w-5 text-warning" />
                 <p className="text-sm font-semibold">No se pudo generar la ruta</p>
                 <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{routeError}</p>
-                <button
-                  type="button"
-                  onClick={() => setPanel("puntos")}
-                  className="mt-3 inline-flex cursor-pointer items-center text-xs font-medium text-primary hover:underline"
-                >
-                  Revisar los puntos →
-                </button>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Revisa los puntos en el bloque de abajo.
+                </p>
               </div>
             )}
 
@@ -881,8 +823,20 @@ function RutasPage() {
                 </ul>
               </div>
             )}
-            </>
-            )}
+            </div>
+
+            <div className="rounded-xl border border-border bg-card p-4">
+              <div className="mb-3 flex items-center gap-2.5 border-l-2 border-primary/50 pl-3">
+                <MapPin className="h-3.5 w-3.5 text-foreground/70" />
+                <h2 className="text-sm font-semibold tracking-tight text-foreground">Puntos</h2>
+              </div>
+              <PanelPuntos
+                onMapProps={setPuntosMapProps}
+                onPuntosCambiaron={refreshOriginPoints}
+                puntoSeleccionadoId={puntoClickeado}
+                puntoAEditarId={puntoAEditar}
+              />
+            </div>
           </div>
         </aside>
       </main>
@@ -1016,11 +970,30 @@ function RutasPage() {
                         {p.active ? "Activo" : "Inactivo"}
                       </span>
                     </TableCell>
+                    {/* Dos acciones distintas sobre la misma fila, y por eso el
+                        lápiz corta la propagación: el clic en la fila abre la
+                        FLOTA del punto (otra pantalla), el lápiz lo abre para
+                        EDITARLO en el panel de la derecha, sin salir de acá. */}
                     <TableCell className="text-right">
-                      <ArrowRightCircle
-                        aria-hidden="true"
-                        className="ml-auto h-4 w-4 text-muted-foreground transition-colors group-hover:text-primary"
-                      />
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPuntoAEditar(p.id);
+                            setFocusPoint([p.lat, p.lng]);
+                          }}
+                          title="Editar este punto"
+                          aria-label={`Editar ${p.name}`}
+                          className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition-all hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <ArrowRightCircle
+                          aria-hidden="true"
+                          className="h-4 w-4 text-muted-foreground transition-colors group-hover:text-primary"
+                        />
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -1457,14 +1430,10 @@ function RutasPage() {
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setPanel("puntos")}
-                className="flex w-full cursor-pointer items-center gap-2 rounded-md border border-dashed border-border/60 p-2.5 text-left text-xs text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary"
-              >
+              <p className="flex items-center gap-2 rounded-md border border-dashed border-border/60 p-2.5 text-xs text-muted-foreground">
                 <Warehouse className="h-4 w-4 flex-shrink-0" />
-                Editar en la pestaña Puntos
-              </button>
+                Se editan en el bloque Puntos
+              </p>
             </div>
           )}
         </DialogContent>
@@ -1492,15 +1461,7 @@ function RutasPage() {
                 </div>
               ) : activePoints.length === 0 ? (
                 <p className="rounded-md border border-dashed border-border/50 py-3 text-center text-xs text-muted-foreground">
-                  No hay puntos activos.{" "}
-                  <button
-                    type="button"
-                    onClick={() => setPanel("puntos")}
-                    className="cursor-pointer text-primary hover:underline"
-                  >
-                    Revísalos en la pestaña Puntos
-                  </button>
-                  .
+                  No hay puntos activos. Revísalos en el bloque Puntos.
                 </p>
               ) : (
                 <ul className="max-h-32 space-y-1 overflow-y-auto">

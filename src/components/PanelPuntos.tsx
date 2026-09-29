@@ -27,7 +27,6 @@
 // dirección, comuna, personal). La maquinaria ya no se declara acá: son los
 // recursos individuales de HDU8, y viven en /recursos/{id}. AC3: "Guardar
 // punto" persiste en el perfil (Mongo, vía lib/resources.ts). AC4: botón
-// "Modificar puntos" lista todos los puntos guardados y los muestra en el
 // mapa. AC5: "Editar" reabre el mismo formulario de AC2, pre-llenado, y guarda
 // con PUT en vez de POST, no es un modo nuevo, es "configuring" con editingId
 // seteado. AC6/AC7: confirmar + eliminar, mismo patrón de AlertDialog que ya
@@ -91,7 +90,7 @@ import {
   type ResourcePoint,
 } from "@/lib/resources";
 import { notify } from "@/lib/notify";
-type Mode = "idle" | "placing" | "configuring" | "listing";
+type Mode = "idle" | "placing" | "configuring";
 
 interface FormState {
   name: string;
@@ -127,6 +126,7 @@ export function PanelPuntos({
   onMapProps,
   onPuntosCambiaron,
   puntoSeleccionadoId,
+  puntoAEditarId,
 }: {
   /** ?point=id, para abrir directo en un punto concreto. */
   deepLinkPointId?: string;
@@ -135,8 +135,12 @@ export function PanelPuntos({
   /** Tras crear, editar o eliminar: la anfitriona vuelve a cargar SUS puntos,
    *  que son los mismos marcadores del mapa y los orígenes de la ruta. */
   onPuntosCambiaron: () => void;
-  /** Clic en un marcador de punto en el mapa de la anfitriona. */
+  /** Clic en un marcador de punto en el mapa de la anfitriona: lo muestra. */
   puntoSeleccionadoId?: string | null;
+  /** Punto que hay que abrir para EDITAR, desde el lápiz de la tabla de abajo.
+   *  Es una prop aparte de la anterior porque son dos intenciones distintas:
+   *  mirar un punto y modificarlo. */
+  puntoAEditarId?: string | null;
 }) {
   const navigate = useNavigate();
   const [mode, setMode] = useState<Mode>("idle");
@@ -245,7 +249,6 @@ export function PanelPuntos({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const startListing = () => setMode("listing");
 
   // Ubica el punto pendiente en (lat, lng) y refresca Dirección/Comuna por
   // geocodificación inversa, usado tanto al definir la ubicación inicial
@@ -445,10 +448,18 @@ export function PanelPuntos({
     if (encontrado) setSelectedPoint(encontrado);
   }, [puntoSeleccionadoId, points]);
 
+  // El lápiz de la tabla de abajo abre el formulario directo, sin pasar por la
+  // ficha de solo lectura: quien aprieta un lápiz ya decidió que va a editar.
+  useEffect(() => {
+    if (!puntoAEditarId) return;
+    const encontrado = points.find((p) => p.id === puntoAEditarId);
+    if (encontrado) startEditing(encontrado);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [puntoAEditarId, points]);
+
   return (
     <div className="flex flex-col gap-4">
 
-        <aside className="rounded-xl border border-border bg-card p-5">
           <div className="flex flex-col gap-4">
 
             {mode === "idle" && (
@@ -508,9 +519,6 @@ export function PanelPuntos({
                     <Button onClick={startPlacing} size="lg" className="btn-cta w-full">
                       <MapPin className="mr-2 h-4 w-4" /> Definir punto
                     </Button>
-                    <Button onClick={startListing} variant="secondary" className="w-full">
-                      <Pencil className="mr-2 h-4 w-4" /> Modificar puntos
-                    </Button>
                   </div>
                 </div>
               )
@@ -526,58 +534,10 @@ export function PanelPuntos({
               </div>
             )}
 
-            {mode === "listing" && (
-              <div className="animate-in fade-in slide-in-from-left-2 duration-300 space-y-3">
-                <button
-                  type="button"
-                  onClick={backToIdle}
-                  className="cursor-pointer text-xs text-primary hover:underline"
-                >
-                  ← Volver
-                </button>
-
-                {loadingPoints ? (
-                  <div className="flex justify-center py-6">
-                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                  </div>
-                ) : points.length === 0 ? (
-                  <p className="rounded-md border border-dashed border-border/50 py-6 text-center text-xs text-muted-foreground">
-                    Todavía no hay puntos guardados.
-                  </p>
-                ) : (
-                  <ul className="space-y-1.5">
-                    {points.map((p) => (
-                      <li
-                        key={p.id}
-                        className={`flex items-center gap-2 rounded-md border border-border/60 bg-background/60 p-2 animate-in fade-in duration-200 ${p.active ? "" : "opacity-45"}`}
-                      >
-                        <MapPin className="h-3.5 w-3.5 flex-shrink-0 text-primary/70" />
-                        <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                          {p.name}
-                          {!p.active && <span className="ml-1.5 text-[0.625rem] font-normal text-muted-foreground">(inactivo)</span>}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => startEditing(p)}
-                          aria-label="Modificar"
-                          className="flex h-7 w-7 flex-shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDeletingPoint(p)}
-                          aria-label="Eliminar"
-                          className="flex h-7 w-7 flex-shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
+            {/* El modo "listing" ya no existe. Era una segunda lista de los
+                mismos puntos dentro de un panel angosto, y la de abajo los
+                muestra con sus cifras. Para editar uno se hace clic en su
+                marcador del mapa o en el lápiz de esa tabla. */}
 
             {mode === "configuring" && (
               <div className="animate-in fade-in slide-in-from-left-2 duration-300 space-y-5">
@@ -692,107 +652,14 @@ export function PanelPuntos({
               </div>
             )}
           </div>
-        </aside>
+        {/* La LISTA de puntos no va acá. Vive en la tabla al pie de la vista
+            de planificación, con las cifras de cada punto (recursos, capacidad,
+            estado), que es lo que se compara. En el panel era una segunda copia
+            de la misma lista, sin esas cifras y sin sitio para mostrarlas.
 
-        {/* La flota de cada punto vive en /recursos/{id}, su propia vista. Acá
-            queda el listado de puntos, que es de lo que trata esta pantalla. */}
-        {(
-          <div className="overflow-hidden rounded-xl border border-border bg-card">
-            <div className="flex items-center gap-2.5 border-b border-border px-5 py-4">
-              <span className="flex items-center gap-2.5 border-l-2 border-primary/50 pl-3">
-                <MapPin className="h-3.5 w-3.5 text-foreground/70" />
-                <h3 className="text-sm font-semibold tracking-tight text-foreground">
-                  Puntos
-                </h3>
-              </span>
-            </div>
-            <div className="px-5 pb-5">
-              {loadingPoints ? (
-                <div className="space-y-2 pt-4">
-                  {[0, 1].map((i) => (
-                    <Skeleton key={i} className="h-12 w-full rounded-md" />
-                  ))}
-                </div>
-              ) : points.length === 0 ? (
-                <div className="flex flex-col items-center gap-3 py-12 text-center">
-                  <MapPin className="h-10 w-10 text-muted-foreground/30" />
-                  <div>
-                    <p className="text-sm font-semibold text-foreground">
-                      Todavía no hay puntos
-                    </p>
-                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                      Un punto es el lugar donde está la flota. Sin al menos uno no se puede
-                      planificar ninguna ruta.
-                    </p>
-                  </div>
-                  <Button size="sm" className="btn-cta" onClick={startPlacing}>
-                    <MapPin className="mr-1.5 h-3.5 w-3.5" /> Definir punto
-                  </Button>
-                </div>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-muted/50 hover:bg-muted/50">
-                      <TableHead>Punto</TableHead>
-                      <TableHead>Dirección</TableHead>
-                      <TableHead className="w-[7rem] text-right">Recursos</TableHead>
-                      <TableHead className="w-[7rem] text-right">
-                        Capacidad <span className="mono opacity-70">(m³)</span>
-                      </TableHead>
-                      <TableHead className="w-[6rem]">Estado</TableHead>
-                      <TableHead className="w-[3rem]"></TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {points.map((p) => (
-                      <TableRow
-                        key={p.id}
-                        onClick={() => navigate({ to: "/planificacion/$pointId", params: { pointId: p.id } })}
-                        className="group cursor-pointer hover:bg-card/60"
-                      >
-                        <TableCell className="font-medium text-foreground transition-colors group-hover:text-primary">
-                          {p.name}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {[p.address, p.comuna].filter(Boolean).join(", ") || "-"}
-                        </TableCell>
-                        <TableCell className="mono text-right tabular-nums">
-                          {p.available_count} de {p.resource_count}
-                        </TableCell>
-                        <TableCell className="mono text-right tabular-nums">
-                          {p.capacity_m3}
-                        </TableCell>
-                        <TableCell>
-                          <span
-                            className={`rounded px-1.5 py-0.5 text-[0.5625rem] font-semibold uppercase tracking-wide ${
-                              p.active
-                                ? "bg-success/15 text-success-strong"
-                                : "bg-muted text-muted-foreground"
-                            }`}
-                          >
-                            {p.active ? "Activo" : "Inactivo"}
-                          </span>
-                        </TableCell>
-                        {/* Una flecha SIEMPRE visible, no un texto que aparece al
-                            pasar el cursor. Con el texto oculto, quien no moviera
-                            el mouse sobre la fila no tenía forma de saber que
-                            llevaba a alguna parte, y con teclado directamente
-                            nunca aparecía. Una flecha permanente dice "esto se
-                            abre" sin ocupar media columna. */}
-                        <TableCell className="text-right">
-                          <ArrowRightCircle
-                            aria-hidden="true"
-                            className="ml-auto h-4 w-4 text-muted-foreground transition-colors group-hover:text-primary"
-                          />
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </div>
-          </div>
-        )}
+            Este panel se queda con lo que SÍ es del panel: las acciones y la
+            ficha del punto que se está viendo o editando. */}
+
       {/* AC6, confirmación de eliminación, mismo patrón que "Eliminar zona" en index.tsx */}
       <AlertDialog
         open={deletingPoint !== null}

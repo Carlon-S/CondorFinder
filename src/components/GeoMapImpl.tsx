@@ -363,7 +363,13 @@ export function GeoMapImpl({
       {...(lockToMaipu
         ? {
             bounds: MAIPU_BBOX,
-            maxBounds: MAIPU_BBOX,
+            // El límite de paneo lleva MARGEN: la caja de la comuna ensanchada
+            // un 30%. Ceñido exactamente a la comuna, mirar un punto del borde
+            // era imposible porque el pin quedaba pegado al canto de la
+            // pantalla, y acercarse a una calle del límite dejaba media vista
+            // bloqueada. Con el margen se puede asomar a los alrededores, pero
+            // no irse a otra región.
+            maxBounds: L.latLngBounds(MAIPU_BBOX).pad(0.3),
             // Borde rígido, no elástico: con viscosidad menor a 1 el mapa se
             // deja arrastrar fuera y vuelve solo, lo que se lee como que la
             // restricción falla en vez de existir.
