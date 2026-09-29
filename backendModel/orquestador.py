@@ -66,6 +66,19 @@ async def lifespan(app: FastAPI):
     await db.analyses.create_index([("zoneId", 1), ("captureDate", 1)])
     await db.analyses.create_index("sourceTaskId")
     await db.zones.create_index("owner")
+    # HDU8: los recursos se listan siempre por punto, y el ruteo los pide por
+    # punto MÁS disponibilidad en cada generación de ruta.
+    await db.resources.create_index([("pointId", 1), ("disponible", 1)])
+    # El N° de equipo es el identificador con el que la municipalidad nombra sus
+    # vehículos en sus propias planillas, así que dos recursos del mismo punto no
+    # pueden compartirlo: sería imposible saber a cuál se refiere una
+    # programación. El índice es PARCIAL porque un recurso creado a mano puede no
+    # tener número, y sin la condición todos los vacíos chocarían entre sí.
+    await db.resources.create_index(
+        [("pointId", 1), ("numero_equipo", 1)],
+        unique=True,
+        partialFilterExpression={"numero_equipo": {"$gt": ""}},
+    )
     # GCS_BUCKET_NAME sin setear => modo local (ver storage.py), así el
     # backend sigue corriendo 100% en WSL sin depender de ninguna cuenta de
     # GCP; solo la VM en producción lo setea de verdad.

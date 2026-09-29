@@ -33,7 +33,6 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Boxes,
-  Construction,
   Crosshair,
   FolderOpen,
   Loader2,
@@ -596,12 +595,14 @@ function RutasPage() {
     }));
 
   const originMapPoints: GeoMapPoint[] = originPoints.map((p) => {
-    // Capacidad de camiones (Modelo A -- las tolvas quedan fijas en el
-    // punto, ver CLAUDE.md/routing.py) -- es lo que de verdad limita si una
-    // ruta es factible desde acá, así que vale la pena verlo sin tener que
-    // abrir la ficha completa del punto.
-    const truckCapacity = p.trucks.reduce((sum, t) => sum + t.capacity_m3, 0);
-    const capacityLabel = `${truckCapacity} m³ camiones`;
+    // La capacidad viene calculada por el backend (capacity_m3 del punto) y es
+    // exactamente la que usa el ruteo: recursos de familia "carga",
+    // disponibles y con capacidad declarada. Antes se sumaba acá a mano desde
+    // los contadores del punto, y eso era una segunda aritmética sobre el mismo
+    // número: la pantalla podía decir una cifra y la ruta armarse con otra.
+    // Es lo que de verdad limita si una ruta es factible desde acá, así que
+    // vale la pena verlo sin abrir la ficha completa del punto.
+    const capacityLabel = `${p.capacity_m3} m³ disponibles`;
     return {
       id: p.id,
       position: [p.lat, p.lng] as [number, number],
@@ -1205,54 +1206,47 @@ function RutasPage() {
               <div className="space-y-1.5">
                 <p className="text-xs font-semibold text-muted-foreground">Recursos disponibles</p>
 
+                {/* Resumen calculado por el backend, no los contadores que el
+                    punto guardaba: con HDU8 la maquinaria son recursos
+                    individuales, y el detalle unidad por unidad vive en
+                    /recursos, que es donde se administra. Acá lo que importa es
+                    si este punto puede participar de una ruta y con cuánto. */}
                 <div className="grid grid-cols-2 gap-1.5">
                   <div className="rounded-md bg-background/40 p-2.5">
                     <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Boxes className="h-4 w-4 flex-shrink-0 text-primary/70" /> Tolvas
+                      <Boxes className="h-4 w-4 flex-shrink-0 text-primary/70" /> Capacidad
                     </span>
-                    <div className="mt-1.5 flex flex-wrap gap-1">
-                      {zoomPoint.tolvas.length === 0 ? (
-                        <span className="text-sm text-muted-foreground">—</span>
-                      ) : (
-                        zoomPoint.tolvas.map((t, i) => (
-                          <span
-                            key={i}
-                            className="rounded-full bg-primary/10 px-2 py-0.5 text-[0.6875rem] font-semibold text-primary"
-                          >
-                            {t.capacity_m3} m³
-                          </span>
-                        ))
-                      )}
-                    </div>
+                    <p className="mono mt-1.5 text-sm font-semibold tabular-nums">
+                      {zoomPoint.capacity_m3} m³
+                    </p>
                   </div>
                   <div className="rounded-md bg-background/40 p-2.5">
                     <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Truck className="h-4 w-4 flex-shrink-0 text-primary/70" /> Camiones
+                      <Truck className="h-4 w-4 flex-shrink-0 text-primary/70" /> Recursos
                     </span>
-                    <div className="mt-1.5 flex flex-wrap gap-1">
-                      {zoomPoint.trucks.length === 0 ? (
-                        <span className="text-sm text-muted-foreground">—</span>
-                      ) : (
-                        zoomPoint.trucks.map((t, i) => (
-                          <span
-                            key={i}
-                            className="rounded-full bg-primary/10 px-2 py-0.5 text-[0.6875rem] font-semibold text-primary"
-                          >
-                            {t.capacity_m3} m³
-                          </span>
-                        ))
-                      )}
-                    </div>
+                    <p className="mono mt-1.5 text-sm font-semibold tabular-nums">
+                      {zoomPoint.available_count} de {zoomPoint.resource_count}
+                    </p>
                   </div>
                 </div>
 
+                {/* Un punto con recursos pero sin capacidad disponible no puede
+                    recibir volumen, y sin decirlo se vería como un origen
+                    válido que después hace fallar la ruta sin motivo aparente. */}
+                {zoomPoint.resource_count > 0 && zoomPoint.capacity_m3 === 0 && (
+                  <p className="rounded-md border border-warning/40 bg-warning/10 px-2.5 py-2 text-[0.6875rem] leading-relaxed">
+                    Este punto tiene recursos registrados pero ninguno con capacidad de
+                    transporte disponible, así que no puede recibir zonas en una ruta.
+                  </p>
+                )}
+                {zoomPoint.resource_count === 0 && (
+                  <p className="rounded-md border border-border/60 bg-muted/40 px-2.5 py-2 text-[0.6875rem] leading-relaxed text-muted-foreground">
+                    Sin recursos registrados todavía. Se agregan desde Recursos
+                    Disponibles.
+                  </p>
+                )}
+
                 <div className="grid grid-cols-2 gap-1.5">
-                  <div className="flex items-center justify-between rounded-md bg-background/40 p-2.5">
-                    <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Construction className="h-4 w-4 flex-shrink-0 text-primary/70" /> Retroexc.
-                    </span>
-                    <span className="text-sm font-semibold">{zoomPoint.retroexcavadoras_count}</span>
-                  </div>
                   <div className="flex items-center justify-between rounded-md bg-background/40 p-2.5">
                     <span className="flex items-center gap-2 text-xs text-muted-foreground">
                       <Users className="h-4 w-4 flex-shrink-0 text-primary/70" /> Personal

@@ -20,12 +20,13 @@
 
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
-import { Loader2, MapPin, Pencil, Trash2, Truck as TruckIcon, Warehouse, X } from "@/components/icons/Icons";
+import { Loader2, MapPin, Pencil, Trash2, X } from "@/components/icons/Icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { GeoMap, type GeoMapPoint } from "@/components/GeoMap";
 import { ResourcesSummaryPanel } from "@/components/ResourcesSummaryPanel";
+import { PointResources } from "@/components/PointResources";
 import { forwardGeocode, reverseGeocode } from "@/lib/geocoding";
 import {
   AlertDialog,
@@ -42,9 +43,9 @@ import {
   deleteResourcePoint,
   listResourcePoints,
   updateResourcePoint,
+  type Resource,
   type ResourcePoint,
-  type Tolva,
-  type Truck,
+  listResources,
 } from "@/lib/resources";
 import { notify } from "@/lib/notify";
 
@@ -70,7 +71,6 @@ interface FormState {
   name: string;
   address: string;
   comuna: string;
-  retroCount: string;
   personalCount: string;
   // HDU5/AC1, si este punto participa como origen al generar una ruta.
   active: boolean;
@@ -80,7 +80,6 @@ const EMPTY_FORM: FormState = {
   name: "",
   address: "",
   comuna: "",
-  retroCount: "0",
   personalCount: "0",
   active: true,
 };
@@ -90,15 +89,7 @@ function RecursosPage() {
   const [mode, setMode] = useState<Mode>("idle");
   const [pendingPoint, setPendingPoint] = useState<[number, number] | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
-  const [tolvas, setTolvas] = useState<Tolva[]>([]);
-  const [trucks, setTrucks] = useState<Truck[]>([]);
   const [saving, setSaving] = useState(false);
-  // Se prende cuando un intento de guardar se cortó por capacidades vacías, y
-  // es lo que pinta de rojo los campos que faltan. No se marcan desde el
-  // principio: una tolva recién agregada nace en 0 y tenerla en rojo antes de
-  // que el usuario alcance a escribir es regañarlo por algo que todavía no
-  // hizo mal.
-  const [capacidadesMarcadas, setCapacidadesMarcadas] = useState(false);
 
   // Geocodificación (HDU6), geocodingAddress cubre tanto la inversa
   // (click en el mapa → completa Dirección/Comuna) como la directa
@@ -135,6 +126,10 @@ function RecursosPage() {
 
   // AC4, lista de puntos guardados.
   const [points, setPoints] = useState<ResourcePoint[]>([]);
+  // Recursos de TODOS los puntos, solo para el panel de resumen. La ficha de un
+  // punto carga los suyos por su cuenta (ver PointResources): son dos consultas
+  // porque son dos necesidades distintas, el resumen global y el detalle de uno.
+  const [resources, setResources] = useState<Resource[]>([]);
   const [loadingPoints, setLoadingPoints] = useState(false);
 
   // Punto seleccionado en el mapa (modo "idle" solamente), su info se
@@ -167,9 +162,6 @@ function RecursosPage() {
     setEditingId(null);
     setGeocodeFlyTarget(null);
     setGeocodeNotFound(false);
-    // Si no se limpia, el próximo punto que se abra arranca con los campos
-    // marcados en rojo por un intento fallido que ya no existe.
-    setCapacidadesMarcadas(false);
   };
 
   const startPlacing = () => setMode("placing");
@@ -180,7 +172,21 @@ function RecursosPage() {
   const refreshPoints = async () => {
     setLoadingPoints(true);
     try {
-      setPoints(await listResourcePoints());
+      // Las dos en paralelo: el resumen necesita las dos, y en serie sumaría
+      // dos viajes de red para pintar una sola vista.
+      const [puntos, recursos] = await Promise.all([listResourcePoints(), listResources()]);
+      setPoints(puntos);
+      setResources(recursos);
+      // El punto seleccionado es una COPIA de la lista, así que hay que
+      // volver a tomarlo de la respuesta nueva. Sin esto, cambiar la
+      // disponibilidad de un recurso actualizaba la lista pero la ficha
+      // abierta seguía mostrando la capacidad anterior, que es justo la cifra
+      // que el usuario acaba de modificar. Si el punto desapareció (lo borró
+      // alguien más), la ficha se cierra en vez de quedar mostrando algo que
+      // ya no existe.
+      setSelectedPoint((actual) =>
+        actual ? puntos.find((p) => p.id === actual.id) ?? null : null,
+      );
     } catch (err) {
       notify.error(
         "No se pudieron cargar los puntos",
@@ -227,8 +233,6 @@ function RecursosPage() {
   const handleMapClick = (lat: number, lng: number) => {
     if (mode === "placing") {
       setForm(EMPTY_FORM);
-      setTolvas([]);
-      setTrucks([]);
       setEditingId(null);
       setMode("configuring");
       // El formulario se abre al toque, la dirección/comuna se completan
@@ -260,19 +264,13 @@ function RecursosPage() {
       name: point.name,
       address: point.address,
       comuna: point.comuna,
-      retroCount: String(point.retroexcavadoras_count),
       personalCount: String(point.personal_count),
       active: point.active,
     });
-    setTolvas(point.tolvas);
-    setTrucks(point.trucks);
     setEditingId(point.id);
     setGeocodeFlyTarget(null);
     setGeocodeNotFound(false);
     addressDirtyRef.current = false;
-    // Mismo motivo que en backToIdle: un punto que se abre a editar no hereda
-    // los campos en rojo de un intento de guardado anterior.
-    setCapacidadesMarcadas(false);
     setMode("configuring");
   };
 
@@ -320,49 +318,8 @@ function RecursosPage() {
     return promise;
   };
 
-  const addTolva = () => setTolvas((prev) => [...prev, { capacity_m3: 0 }]);
-  const updateTolvaCapacity = (index: number, capacity: number) =>
-    setTolvas((prev) => prev.map((t, i) => (i === index ? { capacity_m3: capacity } : t)));
-  const removeTolva = (index: number) => setTolvas((prev) => prev.filter((_, i) => i !== index));
-
-  const addTruck = () => setTrucks((prev) => [...prev, { capacity_m3: 0 }]);
-  const updateTruckCapacity = (index: number, capacity: number) =>
-    setTrucks((prev) => prev.map((t, i) => (i === index ? { capacity_m3: capacity } : t)));
-  const removeTruck = (index: number) => setTrucks((prev) => prev.filter((_, i) => i !== index));
-
-  // Tolvas y camiones sin capacidad. El backend ya lo valida (gt=0 en TolvaIn
-  // y TruckIn, resources.py), y hasta ahora era el ÚNICO que lo validaba: se
-  // podía agregar una tolva, dejar su capacidad vacía y presionar Guardar. El
-  // POST volvía con un 422 cuyo `detail` es una lista de errores por campo, no
-  // un texto, así que parseErrorMessage caía al mensaje genérico y en pantalla
-  // solo aparecía "No se pudo guardar el punto" sin decir qué corregir. De ahí
-  // venía el error que se "arreglaba" rehaciendo el punto desde cero: al
-  // rehacerlo se llenaban todas las capacidades.
-  const tolvasSinCapacidad = tolvas.filter((t) => !(t.capacity_m3 > 0)).length;
-  const camionesSinCapacidad = trucks.filter((t) => !(t.capacity_m3 > 0)).length;
-
   const handleSave = async () => {
     if (!pendingPoint || !form.name.trim()) return;
-
-    if (tolvasSinCapacidad > 0 || camionesSinCapacidad > 0) {
-      setCapacidadesMarcadas(true);
-      const faltantes = [
-        tolvasSinCapacidad > 0
-          ? `${tolvasSinCapacidad} tolva${tolvasSinCapacidad > 1 ? "s" : ""}`
-          : null,
-        camionesSinCapacidad > 0
-          ? `${camionesSinCapacidad} cami${camionesSinCapacidad > 1 ? "ones" : "ón"}`
-          : null,
-      ]
-        .filter(Boolean)
-        .join(" y ");
-      notify.error(
-        "Falta la capacidad de carga",
-        `Hay ${faltantes} sin capacidad. Escribe cuántos m³ carga cada uno, o quítalos de la lista.`,
-      );
-      return;
-    }
-    setCapacidadesMarcadas(false);
 
     setSaving(true);
     // Si la dirección se editó y todavía no se reflejó en el mapa (el
@@ -377,9 +334,6 @@ function RecursosPage() {
       comuna: form.comuna.trim(),
       lat: resolvedPoint[0],
       lng: resolvedPoint[1],
-      tolvas,
-      retroexcavadoras_count: Number(form.retroCount) || 0,
-      trucks,
       personal_count: Number(form.personalCount) || 0,
       active: form.active,
     };
@@ -486,48 +440,14 @@ function RecursosPage() {
                     <Input value={selectedPoint.comuna} disabled className="disabled:cursor-default" />
                   </div>
 
-                  <div className="space-y-2">
-                    <label className="text-xs font-medium text-muted-foreground">Tolvas</label>
-                    {selectedPoint.tolvas.length === 0 ? (
-                      <p className="rounded-md border border-dashed border-border/50 py-3 text-center text-xs text-muted-foreground">
-                        Sin tolvas agregadas
-                      </p>
-                    ) : (
-                      <ul className="space-y-2">
-                        {selectedPoint.tolvas.map((tolva, i) => (
-                          <li key={i} className="flex items-center gap-2">
-                            <Warehouse className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
-                            <Input value={tolva.capacity_m3} disabled className="h-8 disabled:cursor-default" />
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">
-                      Retroexcavadoras (cantidad)
-                    </label>
-                    <Input value={selectedPoint.retroexcavadoras_count} disabled className="disabled:cursor-default" />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-xs font-medium text-muted-foreground">Camiones</label>
-                    {selectedPoint.trucks.length === 0 ? (
-                      <p className="rounded-md border border-dashed border-border/50 py-3 text-center text-xs text-muted-foreground">
-                        Sin camiones agregados
-                      </p>
-                    ) : (
-                      <ul className="space-y-2">
-                        {selectedPoint.trucks.map((truck, i) => (
-                          <li key={i} className="flex items-center gap-2">
-                            <TruckIcon className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
-                            <Input value={truck.capacity_m3} disabled className="h-8 disabled:cursor-default" />
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
+                  {/* HDU8. La maquinaria ya no son contadores del punto sino
+                      recursos individuales, cada uno con su patente y su propio
+                      interruptor de disponibilidad. Los campos del punto de
+                      arriba son solo lectura (se editan con "Modificar puntos"),
+                      pero esta sección SÍ es interactiva: la disponibilidad es
+                      la acción más frecuente de la vista y tiene que estar a un
+                      clic de ver el punto, no detrás de un formulario. */}
+                  <PointResources point={selectedPoint} onChanged={refreshPoints} />
 
                   <div className="space-y-1.5">
                     <label className="text-xs font-medium text-muted-foreground">
@@ -538,7 +458,7 @@ function RecursosPage() {
                 </div>
               ) : (
                 <div className="animate-in fade-in slide-in-from-left-2 duration-300 flex flex-col gap-5">
-                  <ResourcesSummaryPanel points={points} loading={loadingPoints} />
+                  <ResourcesSummaryPanel points={points} resources={resources} loading={loadingPoints} />
                   <div className="flex flex-col gap-2 rounded-lg bg-background/40 p-3">
                     <Button onClick={startPlacing} size="lg" className="btn-cta w-full">
                       <MapPin className="mr-2 h-4 w-4" /> Definir punto
@@ -693,118 +613,16 @@ function RecursosPage() {
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-medium text-muted-foreground">Tolvas</label>
-                    <button
-                      type="button"
-                      onClick={addTolva}
-                      className="cursor-pointer text-[0.625rem] text-primary hover:underline"
-                    >
-                      + Agregar tolva
-                    </button>
-                  </div>
-                  {tolvas.length === 0 ? (
-                    <p className="rounded-md border border-dashed border-border/50 py-3 text-center text-xs text-muted-foreground">
-                      Sin tolvas agregadas
-                    </p>
-                  ) : (
-                    <ul className="space-y-2">
-                      {tolvas.map((tolva, i) => (
-                        <li
-                          key={i}
-                          className="flex items-center gap-2 animate-in fade-in zoom-in-95 duration-200"
-                        >
-                          <Warehouse className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
-                          <Input
-                            type="number"
-                            min={0}
-                            placeholder="Capacidad (m³)"
-                            value={tolva.capacity_m3 || ""}
-                            onChange={(e) => updateTolvaCapacity(i, Number(e.target.value))}
-                            aria-invalid={capacidadesMarcadas && !(tolva.capacity_m3 > 0)}
-                            className={`h-8 ${
-                              capacidadesMarcadas && !(tolva.capacity_m3 > 0)
-                                ? "border-destructive focus-visible:ring-destructive/40"
-                                : ""
-                            }`}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => removeTolva(i)}
-                            aria-label="Eliminar tolva"
-                            className="flex h-8 w-8 flex-shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
+                {/* Acá estaban los contadores de tolvas, retroexcavadoras y
+                    camiones. Ya no: con HDU8 la maquinaria son recursos
+                    individuales que se agregan desde la ficha del punto, uno por
+                    uno y con su patente. Mantener también los contadores dejaba
+                    dos formas de declarar lo mismo y ninguna manera de saber
+                    cuál manda.
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-muted-foreground">
-                    Retroexcavadoras (cantidad)
-                  </label>
-                  <Input
-                    type="number"
-                    min={0}
-                    value={form.retroCount}
-                    onChange={(e) => setForm((f) => ({ ...f, retroCount: e.target.value }))}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-medium text-muted-foreground">Camiones</label>
-                    <button
-                      type="button"
-                      onClick={addTruck}
-                      className="cursor-pointer text-[0.625rem] text-primary hover:underline"
-                    >
-                      + Agregar camión
-                    </button>
-                  </div>
-                  {trucks.length === 0 ? (
-                    <p className="rounded-md border border-dashed border-border/50 py-3 text-center text-xs text-muted-foreground">
-                      Sin camiones agregados
-                    </p>
-                  ) : (
-                    <ul className="space-y-2">
-                      {trucks.map((truck, i) => (
-                        <li
-                          key={i}
-                          className="flex items-center gap-2 animate-in fade-in zoom-in-95 duration-200"
-                        >
-                          <TruckIcon className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
-                          <Input
-                            type="number"
-                            min={0}
-                            placeholder="Capacidad (m³)"
-                            value={truck.capacity_m3 || ""}
-                            onChange={(e) => updateTruckCapacity(i, Number(e.target.value))}
-                            aria-invalid={capacidadesMarcadas && !(truck.capacity_m3 > 0)}
-                            className={`h-8 ${
-                              capacidadesMarcadas && !(truck.capacity_m3 > 0)
-                                ? "border-destructive focus-visible:ring-destructive/40"
-                                : ""
-                            }`}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => removeTruck(i)}
-                            aria-label="Eliminar camión"
-                            className="flex h-8 w-8 flex-shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-
+                    Personal se queda: es el único dato de HDU6 sin equivalente
+                    en la planilla de flota, que trae la dotación que un vehículo
+                    REQUIERE, no los trabajadores que el punto TIENE. */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium text-muted-foreground">
                     Personal (cantidad de trabajadores)

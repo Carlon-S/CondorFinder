@@ -11,6 +11,7 @@ from pyproj import Transformer
 
 import auth as auth_module
 import osrm_client
+import resources as resources_module
 
 # =============================================================================
 # CONDORFINDER — GENERACIÓN DE RUTA ÓPTIMA (HDU5)
@@ -24,11 +25,22 @@ import osrm_client
 #
 # Decisiones de modelo, ya conversadas y cerradas con el equipo antes de
 # implementar (no re-litigar sin volver a hablarlo):
-#   - Capacidad de la ruta = SOLO camiones (`trucks[].capacity_m3`) de los
-#     puntos activos. Las tolvas quedan fijas en el punto (acopio local, no
-#     son una unidad de transporte) — no participan del cálculo de
-#     capacidad ni de la ruta. `retroexcavadoras_count`/`personal_count`
-#     tampoco son una restricción hoy (sin AC que lo pida explícitamente).
+#   - Capacidad de la ruta = los recursos de familia "carga" DISPONIBLES de
+#     los puntos activos (ver capacidad_de_carga_por_punto en resources.py).
+#     Las máquinas (retro, frontal, minicargador) cargan pero no transportan,
+#     así que no suman capacidad, y los carros de arrastre se remolcan.
+#     `personal_count` tampoco es una restricción hoy (sin AC que lo pida).
+#
+#     CORRECCIÓN respecto de lo que decía esta nota antes. Decía que "las
+#     tolvas quedan fijas en el punto (acopio local, no son una unidad de
+#     transporte)" y por eso no entraban al cálculo. Con la flota real en la
+#     mano eso resultó estar equivocado: en el vocabulario de la municipalidad
+#     una TOLVA es un camión volquete. Las seis de la planilla son Ford Cargo y
+#     Hino con patente, "Capacidad 10 M3" y dotación "1 Conductor + 2
+#     Peonetas", y la programación diaria les asigna viajes de retiro
+#     ("PRIMER VIAJE TODAS LAS TOLVAS LAS INDUSTRIAS", 48 m³, equipos
+#     2184-2183-1138-2224). Si no contaran, el punto de salida real quedaría
+#     con 0 m³ de capacidad, porque TODOS sus vehículos de carga son tolvas.
 #   - Un stop de ruta = un ANÁLISIS cargado (no una detección individual):
 #     la ubicación es `orthoCenter` (huella real del ortomosaico, estable
 #     entre corridas — mismo criterio que ya usa /rutas.tsx para el círculo
@@ -189,9 +201,39 @@ async def _load_active_points(point_ids: list[str]) -> list[dict]:
             continue
     if not valid_ids:
         return []
-    return await get_db().resource_points.find(
+    puntos = await get_db().resource_points.find(
         {"_id": {"$in": valid_ids}, "active": True}
     ).to_list(length=None)
+
+    # HDU8: la capacidad de transporte sale de los RECURSOS individuales
+    # disponibles del punto, no de la lista `trucks` que HDU6 guardaba dentro
+    # del documento. Es lo que hace real el AC5 de HDU8 ("un recurso no
+    # disponible queda excluido al armar la asignación de una ruta"): este es el
+    # único lugar del sistema donde ese interruptor cambia un resultado.
+    #
+    # Se escribe sobre la misma clave `trucks` a propósito. Las cuatro
+    # funciones de abajo que calculan capacidad y cantidad mínima de camiones ya
+    # leen de ahí, están probadas y son de otro integrante del equipo: cambiar
+    # la FUENTE del dato sin cambiar su forma deja ese algoritmo intacto.
+    #
+    # Se escribe SIEMPRE, incluso lista vacía. El documento del punto ya no
+    # guarda contadores de maquinaria (ver ResourcePointIn en resources.py), así
+    # que no hay ningún respaldo al que caer: un punto sin recursos disponibles
+    # tiene capacidad cero, y _select_origin_group lo descarta.
+    #
+    # Hubo una versión intermedia que respetaba los contadores viejos cuando el
+    # punto no tenía capacidad propia. Tenía un agujero justo en el criterio que
+    # esto implementa: marcar TODOS los recursos de un punto como no disponibles
+    # dejaba la lista vacía, el respaldo se activaba, y la capacidad volvía a
+    # salir de los contadores en vez de bajar a cero.
+    capacidades = await resources_module.capacidad_de_carga_por_punto(
+        [str(p["_id"]) for p in puntos]
+    )
+    for punto in puntos:
+        punto["trucks"] = [
+            {"capacity_m3": c} for c in capacidades.get(str(punto["_id"]), [])
+        ]
+    return puntos
 
 
 def _point_truck_capacity(point: dict) -> float:
