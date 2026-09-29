@@ -20,10 +20,19 @@
 
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
-import { Loader2, MapPin, Pencil, Trash2, X } from "@/components/icons/Icons";
+import { Boxes, Loader2, MapPin, Pencil, Trash2, Truck as TruckIcon, X } from "@/components/icons/Icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { GeoMap, type GeoMapPoint } from "@/components/GeoMap";
 import { ResourcesSummaryPanel } from "@/components/ResourcesSummaryPanel";
 import { PointResources } from "@/components/PointResources";
@@ -386,21 +395,54 @@ function RecursosPage() {
       muted: !p.active,
     }));
 
+  // Cifras de toda la flota, para la franja superior. Salen del resumen que
+  // calcula el backend por punto, no de recontar los recursos acá: dos
+  // aritméticas sobre el mismo número terminan discrepando.
+  const totales = {
+    puntos: points.length,
+    recursos: points.reduce((sum, p) => sum + p.resource_count, 0),
+    disponibles: points.reduce((sum, p) => sum + p.available_count, 0),
+    capacidad: points.reduce((sum, p) => sum + p.capacity_m3, 0),
+  };
+
+  // El mapa crece cuando se está usando de verdad (ubicar un punto) y se achica
+  // cuando es solo referencia. Antes ocupaba la pantalla completa a la derecha y
+  // empujaba los 21 vehículos a una columna de 280px donde no se leía ninguno.
+  const mapaAlto = mode === "placing" || mode === "configuring"
+    ? "h-[clamp(22rem,46vh,34rem)]"
+    : "h-[clamp(15rem,30vh,24rem)]";
+
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
-      <main className="grid min-h-0 flex-1 grid-cols-[clamp(240px,22vw,360px)_1fr]">
-        <aside className="overflow-y-auto border-r border-border/35 p-5">
+    <div className="flex min-h-screen flex-col bg-background text-foreground">
+      {/* Encabezado a lo ancho, mismo patrón que Vista Principal. Antes vivía
+          dentro del aside y le comía un tercio del alto a la única columna que
+          tenía contenido. */}
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border/25 px-6 py-5">
+        <div>
+          <p className="eyebrow">Planificación</p>
+          <h1 className="font-rubik text-3xl font-semibold tracking-normal text-foreground md:text-4xl">
+            Recursos Disponibles
+          </h1>
+          <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+            Define puntos y los recursos disponibles en cada uno para planificar rutas
+            de recolección.
+          </p>
+        </div>
+      </div>
+
+      <main className="flex min-h-0 flex-1 flex-col gap-5 p-6">
+        {/* Franja de cifras, mismo tratamiento .panel que Vista Principal: lo
+            primero que hay que poder leer al entrar. */}
+        <div className="panel flex flex-wrap items-center divide-x divide-border/10 px-1">
+          <Cifra icono={<MapPin className="h-4 w-4" />} etiqueta="Puntos" valor={String(totales.puntos)} />
+          <Cifra icono={<TruckIcon className="h-4 w-4" />} etiqueta="Recursos" valor={String(totales.recursos)} />
+          <Cifra icono={<TruckIcon className="h-4 w-4" />} etiqueta="Disponibles" valor={`${totales.disponibles} de ${totales.recursos}`} />
+          <Cifra icono={<Boxes className="h-4 w-4" />} etiqueta="Capacidad de transporte" valor={`${totales.capacidad} m³`} />
+        </div>
+
+        <div className="grid min-h-0 gap-5 lg:grid-cols-[clamp(17rem,24vw,23rem)_1fr]">
+        <aside className="rounded-xl border border-border bg-card p-5">
           <div className="flex flex-col gap-4">
-            <div>
-              <p className="eyebrow">Planificación</p>
-              <h1 className="font-rubik text-3xl font-semibold tracking-normal text-foreground md:text-4xl">
-                Recursos Disponibles
-              </h1>
-              <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                Define puntos y los recursos disponibles en cada uno
-                para planificar rutas de recolección.
-              </p>
-            </div>
 
             {mode === "idle" && (
               selectedPoint ? (
@@ -440,14 +482,11 @@ function RecursosPage() {
                     <Input value={selectedPoint.comuna} disabled className="disabled:cursor-default" />
                   </div>
 
-                  {/* HDU8. La maquinaria ya no son contadores del punto sino
-                      recursos individuales, cada uno con su patente y su propio
-                      interruptor de disponibilidad. Los campos del punto de
-                      arriba son solo lectura (se editan con "Modificar puntos"),
-                      pero esta sección SÍ es interactiva: la disponibilidad es
-                      la acción más frecuente de la vista y tiene que estar a un
-                      clic de ver el punto, no detrás de un formulario. */}
-                  <PointResources point={selectedPoint} onChanged={refreshPoints} />
+                  {/* Los recursos de este punto NO van acá. Estuvieron un rato
+                      y era el problema: 21 vehículos en una columna de 280px
+                      donde no se leía ni la patente completa. Van en la tabla a
+                      lo ancho, al pie de la vista. Lo que queda en el aside son
+                      los datos del lugar, que son cinco campos y sí entran. */}
 
                   <div className="space-y-1.5">
                     <label className="text-xs font-medium text-muted-foreground">
@@ -649,7 +688,9 @@ function RecursosPage() {
           </div>
         </aside>
 
-        <section className="relative min-w-0 overflow-hidden bg-background animate-in fade-in duration-500">
+        <section
+          className={`relative min-w-0 overflow-hidden rounded-xl border border-border bg-background animate-in fade-in duration-500 ${mapaAlto}`}
+        >
           <GeoMap
             className="h-full w-full"
             marker={mode === "configuring" ? pendingPoint : null}
@@ -667,6 +708,95 @@ function RecursosPage() {
             </div>
           )}
         </section>
+        </div>
+
+        {/* El contenido real de la vista: la flota. A lo ancho y como tabla, no
+            apretada en el aside. Con 21 vehículos en una columna de 280px no se
+            leía ni la patente completa. */}
+        {selectedPoint ? (
+          <PointResources point={selectedPoint} onChanged={refreshPoints} />
+        ) : (
+          <div className="overflow-hidden rounded-xl border border-border bg-card">
+            <div className="flex items-center gap-2.5 border-b border-border px-5 py-4">
+              <span className="flex items-center gap-2.5 border-l-2 border-primary/50 pl-3">
+                <MapPin className="h-3.5 w-3.5 text-foreground/70" />
+                <h3 className="text-sm font-semibold tracking-tight text-foreground">
+                  Puntos de salida
+                </h3>
+              </span>
+            </div>
+            <div className="px-5 pb-5">
+              {loadingPoints ? (
+                <div className="space-y-2 pt-4">
+                  {[0, 1].map((i) => (
+                    <Skeleton key={i} className="h-12 w-full rounded-md" />
+                  ))}
+                </div>
+              ) : points.length === 0 ? (
+                <div className="flex flex-col items-center gap-3 py-12 text-center">
+                  <MapPin className="h-10 w-10 text-muted-foreground/30" />
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">
+                      Todavía no hay puntos de salida
+                    </p>
+                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                      Un punto es el lugar desde donde sale la flota. Sin al menos uno no
+                      se puede planificar ninguna ruta.
+                    </p>
+                  </div>
+                  <Button size="sm" className="btn-cta" onClick={startPlacing}>
+                    <MapPin className="mr-1.5 h-3.5 w-3.5" /> Definir punto
+                  </Button>
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/50 hover:bg-muted/50">
+                      <TableHead>Punto</TableHead>
+                      <TableHead>Dirección</TableHead>
+                      <TableHead className="w-[7rem] text-right">Recursos</TableHead>
+                      <TableHead className="w-[7rem] text-right">
+                        Capacidad <span className="mono opacity-70">(m³)</span>
+                      </TableHead>
+                      <TableHead className="w-[6rem]">Estado</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {points.map((p) => (
+                      <TableRow
+                        key={p.id}
+                        onClick={() => setSelectedPoint(p)}
+                        className="cursor-pointer hover:bg-card/60"
+                      >
+                        <TableCell className="font-medium">{p.name}</TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {[p.address, p.comuna].filter(Boolean).join(", ") || "-"}
+                        </TableCell>
+                        <TableCell className="mono text-right tabular-nums">
+                          {p.available_count} de {p.resource_count}
+                        </TableCell>
+                        <TableCell className="mono text-right tabular-nums">
+                          {p.capacity_m3}
+                        </TableCell>
+                        <TableCell>
+                          <span
+                            className={`rounded px-1.5 py-0.5 text-[0.5625rem] font-semibold uppercase tracking-wide ${
+                              p.active
+                                ? "bg-success/15 text-success-strong"
+                                : "bg-muted text-muted-foreground"
+                            }`}
+                          >
+                            {p.active ? "Activo" : "Inactivo"}
+                          </span>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </div>
+          </div>
+        )}
       </main>
 
       {/* AC6, confirmación de eliminación, mismo patrón que "Eliminar zona" en index.tsx */}
@@ -694,6 +824,35 @@ function RecursosPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  );
+}
+
+/** Una cifra de la franja superior. Mismo patrón que los KPI de Vista
+ *  Principal: ícono, etiqueta chica y el número en .mono, que es donde el
+ *  sistema pone las magnitudes. */
+function Cifra({
+  icono,
+  etiqueta,
+  valor,
+}: {
+  icono: React.ReactNode;
+  etiqueta: string;
+  valor: string;
+}) {
+  return (
+    <div className="flex flex-shrink-0 items-center gap-3 px-5 py-3.5">
+      <span className="flex h-8 w-8 items-center justify-center rounded-md bg-background/50 text-foreground/60">
+        {icono}
+      </span>
+      <span>
+        <span className="block text-[0.6875rem] uppercase tracking-wide text-muted-foreground">
+          {etiqueta}
+        </span>
+        <span className="mono block text-sm font-semibold tabular-nums text-foreground">
+          {valor}
+        </span>
+      </span>
     </div>
   );
 }

@@ -36,6 +36,14 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -68,19 +76,52 @@ import {
  *  tiene sentido donde debería haberla: un carro de arrastre no transporta, no
  *  es que le falte un dato, y mostrar lo mismo en los dos casos haría parecer
  *  incompleta una planilla que está completa. */
-function textoCapacidad(r: Resource): { texto: string; falta: boolean } {
+function textoCapacidad(r: Resource): {
+  /** La cifra sola, para que la columna alinee. null cuando no hay. */
+  valor: string | null;
+  /** Qué decir en su lugar cuando no hay cifra. */
+  texto: string;
+  /** true solo cuando el dato DEBERÍA estar y no está, que es lo que se pinta
+   *  en color de advertencia. Una máquina sin capacidad de carga no es un dato
+   *  faltante: es que no transporta. */
+  falta: boolean;
+} {
   if (r.familia === "carga") {
     return r.capacidad_m3 != null
-      ? { texto: `${r.capacidad_m3} m³`, falta: false }
-      : { texto: "sin capacidad declarada", falta: true };
+      ? { valor: `${r.capacidad_m3}`, texto: "", falta: false }
+      : { valor: null, texto: "sin declarar", falta: true };
   }
   if (r.familia === "maquina") {
     return r.capacidad_balde_m3 != null
-      ? { texto: `balde ${r.capacidad_balde_m3} m³`, falta: false }
-      : { texto: "sin balde declarado", falta: true };
+      ? { valor: `balde ${r.capacidad_balde_m3}`, texto: "", falta: false }
+      : { valor: null, texto: "balde sin declarar", falta: true };
   }
-  if (r.familia === "arrastre") return { texto: "se remolca", falta: false };
-  return { texto: "sin capacidad de carga", falta: false };
+  if (r.familia === "arrastre") return { valor: null, texto: "se remolca", falta: false };
+  return { valor: null, texto: "no transporta", falta: false };
+}
+
+/** Encabezado de la tabla. Una sola definición para la tabla real y su
+ *  esqueleto: mantener dos copias ya derivó una vez en anchos distintos, y
+ *  cualquier diferencia mueve las columnas justo cuando llegan los datos.
+ *
+ *  La unidad va acá y no en cada celda, igual que en el listado de zonas de
+ *  Vista Principal. */
+function EncabezadoRecursos() {
+  return (
+    <TableRow className="bg-muted/50 hover:bg-muted/50">
+      <TableHead className="w-[5.5rem]"></TableHead>
+      <TableHead className="w-[6rem]">N° equipo</TableHead>
+      <TableHead>Tipo</TableHead>
+      <TableHead className="w-[7rem]">Patente</TableHead>
+      <TableHead className="w-[8rem] text-right">
+        Capacidad <span className="mono opacity-70">(m³)</span>
+      </TableHead>
+      <TableHead>Dotación requerida</TableHead>
+      <TableHead>Vehículo</TableHead>
+      <TableHead className="w-[6rem]">Disponible</TableHead>
+      <TableHead className="w-[5rem]"></TableHead>
+    </TableRow>
+  );
 }
 
 function dotacionTexto(r: ResourceInput): string {
@@ -139,17 +180,18 @@ export function PointResources({
   const familiaDe = (tipo: string): ResourceFamily =>
     tipos.find((t) => t.tipo === tipo)?.familia ?? "apoyo";
 
-  // Agrupados por tipo: con 21 unidades en un punto, una lista plana obliga a
-  // leer las 21 para saber cuántas tolvas hay.
-  const porTipo = useMemo(() => {
-    const mapa = new Map<string, Resource[]>();
-    for (const r of recursos) {
-      mapa.set(r.tipo, [...(mapa.get(r.tipo) ?? []), r]);
-    }
-    return [...mapa.entries()].sort(
-      (a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]),
-    );
-  }, [recursos]);
+  // Ordenados por tipo y después por N° de equipo. Con la columna "Tipo" a la
+  // vista no hace falta agrupar con encabezados intermedios: sería repetir el
+  // mismo dato dos veces, una en el separador y otra en cada fila.
+  const ordenados = useMemo(
+    () =>
+      [...recursos].sort(
+        (a, b) =>
+          a.tipo.localeCompare(b.tipo) ||
+          a.numero_equipo.localeCompare(b.numero_equipo, undefined, { numeric: true }),
+      ),
+    [recursos],
+  );
 
   const abrirNuevo = (tipo: string) => {
     setEligiendoTipo(false);
@@ -292,77 +334,104 @@ export function PointResources({
   const campos = borrador ? camposDeFamilia(familiaDe(borrador.tipo)) : null;
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-sm font-semibold text-foreground">Recursos de este punto</p>
-        <Button size="sm" variant="secondary" onClick={() => setEligiendoTipo(true)}>
+    <div className="overflow-hidden rounded-xl border border-border bg-card">
+      {/* Encabezado de la tarjeta, mismo tratamiento que el listado de zonas de
+          Vista Principal: título, las dos cifras que deciden, y la acción. */}
+      <div className="flex flex-wrap items-center gap-3 border-b border-border px-5 py-4">
+        <div className="flex items-center gap-2.5 border-l-2 border-primary/50 pl-3">
+          <Truck className="h-3.5 w-3.5 text-foreground/70" />
+          <h3 className="text-sm font-semibold tracking-tight text-foreground">
+            Recursos de {point.name}
+          </h3>
+        </div>
+
+        <div className="flex items-center gap-4 text-xs">
+          <span className="flex items-center gap-1.5 text-muted-foreground">
+            <Boxes className="h-3.5 w-3.5 text-primary/70" />
+            Capacidad
+            <span className="mono font-semibold tabular-nums text-foreground">
+              {point.capacity_m3} m³
+            </span>
+          </span>
+          <span className="flex items-center gap-1.5 text-muted-foreground">
+            Disponibles
+            <span className="mono font-semibold tabular-nums text-foreground">
+              {point.available_count} de {point.resource_count}
+            </span>
+          </span>
+        </div>
+
+        <Button size="sm" className="ml-auto" variant="secondary" onClick={() => setEligiendoTipo(true)}>
           <Plus className="mr-1.5 h-3.5 w-3.5" /> Agregar recurso
         </Button>
       </div>
 
-      {/* Capacidad y unidades disponibles, tal como las calcula el backend. Es
-          la misma cifra que decide si este punto puede participar de una ruta. */}
-      <div className="grid grid-cols-2 gap-2">
-        <div className="rounded-md bg-background/40 p-2.5">
-          <span className="flex items-center gap-1.5 text-[0.6875rem] text-muted-foreground">
-            <Boxes className="h-3.5 w-3.5 text-primary/70" /> Capacidad
-          </span>
-          <p className="mono mt-1 text-sm font-semibold tabular-nums text-foreground">
-            {point.capacity_m3} m³
-          </p>
-        </div>
-        <div className="rounded-md bg-background/40 p-2.5">
-          <span className="flex items-center gap-1.5 text-[0.6875rem] text-muted-foreground">
-            <Truck className="h-3.5 w-3.5 text-primary/70" /> Disponibles
-          </span>
-          <p className="mono mt-1 text-sm font-semibold tabular-nums text-foreground">
-            {point.available_count} de {point.resource_count}
-          </p>
-        </div>
-      </div>
-
-      {/* El punto inactivo es el caso que más desconcierta: se pueden activar
+      {/* El punto inactivo es el caso que mas desconcierta: se pueden activar
           recursos uno por uno y la ruta sigue sin considerarlos, porque el ruteo
           descarta el punto entero antes de mirar sus unidades. */}
       {!point.active && point.resource_count > 0 && (
-        <p className="rounded-md border border-warning/40 bg-warning/10 px-2.5 py-2 text-[0.6875rem] leading-relaxed">
+        <p className="border-b border-warning/40 bg-warning/10 px-5 py-2.5 text-xs leading-relaxed">
           El punto está inactivo, así que sus recursos no participan de ninguna ruta
           aunque estén disponibles.
         </p>
       )}
 
-      {cargando ? (
-        <div className="space-y-1.5">
-          {[0, 1, 2].map((i) => (
-            <Skeleton key={i} className="h-12 w-full rounded-md" />
-          ))}
-        </div>
-      ) : recursos.length === 0 ? (
-        <p className="rounded-md border border-dashed border-border/50 px-3 py-4 text-center text-xs leading-relaxed text-muted-foreground">
-          Este punto todavía no tiene recursos. Sin al menos uno con capacidad de
-          transporte no puede participar de una ruta.
-        </p>
-      ) : (
-        <div className="space-y-3">
-          {porTipo.map(([tipo, unidades]) => (
-            <div key={tipo}>
-              <p className="mb-1 text-[0.6875rem] font-semibold uppercase tracking-wide text-muted-foreground">
-                {tipo} ({unidades.filter((u) => u.disponible).length} de {unidades.length})
+      <div className="px-5 pb-5">
+        {cargando ? (
+          <Table>
+            <TableHeader>
+              <EncabezadoRecursos />
+            </TableHeader>
+            <TableBody>
+              {[0, 1, 2, 3].map((n) => (
+                <TableRow key={n} className="hover:bg-transparent">
+                  <TableCell><Skeleton className="h-11 w-16" /></TableCell>
+                  <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+                  <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+                  <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+                  <TableCell className="text-right"><Skeleton className="ml-auto h-4 w-12" /></TableCell>
+                  <TableCell><Skeleton className="h-4 w-28" /></TableCell>
+                  <TableCell><Skeleton className="h-4 w-32" /></TableCell>
+                  <TableCell><Skeleton className="h-5 w-9" /></TableCell>
+                  <TableCell><Skeleton className="h-8 w-16" /></TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        ) : recursos.length === 0 ? (
+          <div className="flex flex-col items-center gap-3 py-12 text-center">
+            <Truck className="h-10 w-10 text-muted-foreground/30" />
+            <div>
+              <p className="text-sm font-semibold text-foreground">Este punto no tiene recursos</p>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                Sin al menos un vehículo con capacidad de transporte no puede participar
+                de una ruta.
               </p>
-              <ul className="space-y-1">
-                {unidades.map((r) => {
-                  const cap = textoCapacidad(r);
-                  return (
-                    <li
-                      key={r.id}
-                      className={`group flex items-center gap-2 rounded-md px-1.5 py-1.5 transition-colors hover:bg-muted/40 ${
-                        r.disponible ? "" : "opacity-60"
-                      }`}
-                    >
-                      {/* Foto cuando existe; marcador cuando no. 8 de los 21
-                          vehículos de la flota real no tienen foto, así que este
-                          no es un caso raro. */}
-                      <div className="detect-frame detect-frame-sm h-9 w-12 flex-shrink-0 overflow-hidden rounded bg-muted">
+            </div>
+            <Button size="sm" variant="secondary" onClick={() => setEligiendoTipo(true)}>
+              <Plus className="mr-1.5 h-3.5 w-3.5" /> Agregar el primero
+            </Button>
+          </div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <EncabezadoRecursos />
+            </TableHeader>
+            <TableBody>
+              {ordenados.map((r) => {
+                const cap = textoCapacidad(r);
+                return (
+                  <TableRow
+                    key={r.id}
+                    className={`group animate-in fade-in duration-300 fill-mode-both hover:bg-card/60 ${
+                      r.disponible ? "" : "opacity-55"
+                    }`}
+                  >
+                    <TableCell>
+                      {/* Foto cuando existe, marcador cuando no. 8 de los 21
+                          vehículos de la flota real no tienen, así que no es un
+                          caso raro. */}
+                      <div className="detect-frame detect-frame-sm h-11 w-16 overflow-hidden rounded-md bg-muted">
                         <span className="detect-corners" aria-hidden="true" />
                         {r.foto ? (
                           <img
@@ -373,34 +442,47 @@ export function PointResources({
                           />
                         ) : (
                           <span className="flex h-full w-full items-center justify-center">
-                            <Truck className="h-3.5 w-3.5 text-muted-foreground/50" />
+                            <Truck className="h-4 w-4 text-muted-foreground/40" />
                           </span>
                         )}
                       </div>
+                    </TableCell>
 
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-xs font-medium text-foreground">
-                          {r.numero_equipo || "Sin N°"}
-                          {r.patente && (
-                            <span className="mono ml-1.5 font-normal text-muted-foreground">
-                              {r.patente}
-                            </span>
-                          )}
-                        </p>
-                        <p className="truncate text-[0.6875rem] text-muted-foreground">
-                          <span className={cap.falta ? "text-warning" : ""}>{cap.texto}</span>
-                          {r.marca && ` · ${r.marca}`}
-                          {r.anio && ` ${r.anio}`}
-                        </p>
-                      </div>
+                    <TableCell className="mono font-medium tabular-nums">
+                      {r.numero_equipo || "-"}
+                    </TableCell>
 
-                      {/* AC4. El interruptor va en la fila y no dentro de un
-                          formulario: es la acción más frecuente de esta vista,
-                          un camión entra y sale de taller. */}
-                      <div className="flex flex-shrink-0 items-center gap-1">
-                        {alternando === r.id && (
-                          <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
-                        )}
+                    <TableCell className="font-medium">{r.tipo}</TableCell>
+
+                    <TableCell className="mono text-muted-foreground">{r.patente || "-"}</TableCell>
+
+                    {/* La unidad va en el encabezado y no en cada celda, igual
+                        que en el listado de zonas: repetida por fila desalinea
+                        las cifras de su propia columna. */}
+                    <TableCell className="mono text-right tabular-nums">
+                      {cap.valor !== null ? (
+                        cap.valor
+                      ) : (
+                        <span
+                          title={cap.texto}
+                          className={`text-[0.6875rem] ${cap.falta ? "text-warning" : "text-muted-foreground"}`}
+                        >
+                          {cap.texto}
+                        </span>
+                      )}
+                    </TableCell>
+
+                    <TableCell className="text-muted-foreground">{dotacionTexto(r)}</TableCell>
+
+                    <TableCell className="text-muted-foreground">
+                      {[r.marca, r.modelo, r.anio].filter(Boolean).join(" ") || "-"}
+                    </TableCell>
+
+                    {/* AC4. El interruptor va en la fila y no dentro de un
+                        formulario: es la acción más frecuente de esta vista, un
+                        camión entra y sale de taller. */}
+                    <TableCell>
+                      <div className="flex items-center gap-2">
                         <Switch
                           checked={r.disponible}
                           disabled={alternando === r.id}
@@ -411,12 +493,20 @@ export function PointResources({
                               : `Marcar ${r.tipo} ${r.numero_equipo} como disponible`
                           }
                         />
+                        {alternando === r.id && (
+                          <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+                        )}
+                      </div>
+                    </TableCell>
+
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-1">
                         <button
                           type="button"
                           onClick={() => abrirEdicion(r)}
                           title="Editar recurso"
                           aria-label={`Editar ${r.tipo} ${r.numero_equipo}`}
-                          className="flex h-6 w-6 cursor-pointer items-center justify-center rounded text-muted-foreground opacity-0 transition-all hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                          className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition-all hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
                         >
                           <Pencil className="h-3.5 w-3.5" />
                         </button>
@@ -425,19 +515,19 @@ export function PointResources({
                           onClick={() => setAEliminar(r)}
                           title="Eliminar recurso"
                           aria-label={`Eliminar ${r.tipo} ${r.numero_equipo}`}
-                          className="flex h-6 w-6 cursor-pointer items-center justify-center rounded text-muted-foreground opacity-0 transition-all hover:bg-destructive/15 hover:text-destructive-strong focus-visible:opacity-100 group-hover:opacity-100"
+                          className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition-all hover:bg-destructive/15 hover:text-destructive-strong focus-visible:opacity-100 group-hover:opacity-100"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          ))}
-        </div>
-      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        )}
+      </div>
 
       {/* ── AC1: el tipo, antes de cualquier campo ── */}
       <Dialog open={eligiendoTipo} onOpenChange={setEligiendoTipo}>
