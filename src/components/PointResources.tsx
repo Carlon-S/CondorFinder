@@ -27,6 +27,7 @@ import {
   Loader2,
   Pencil,
   Plus,
+  Search,
   Trash2,
   Truck,
   X,
@@ -106,24 +107,8 @@ function textoCapacidad(r: Resource): {
  *
  *  La unidad va acá y no en cada celda, igual que en el listado de zonas de
  *  Vista Principal. */
-function EncabezadoRecursos() {
-  return (
-    <TableRow className="bg-muted/50 hover:bg-muted/50">
-      <TableHead className="w-[5.5rem]"></TableHead>
-      <TableHead className="w-[6rem]">N° equipo</TableHead>
-      <TableHead>Tipo</TableHead>
-      <TableHead className="w-[7rem]">Patente</TableHead>
-      <TableHead className="w-[8rem] text-right">
-        Capacidad <span className="mono opacity-70">(m³)</span>
-      </TableHead>
-      <TableHead>Dotación requerida</TableHead>
-      <TableHead>Vehículo</TableHead>
-      <TableHead className="w-[6rem]">Disponible</TableHead>
-      <TableHead className="w-[5rem]"></TableHead>
-    </TableRow>
-  );
-}
-
+/** Dotación que el vehículo REQUIERE para operar, no el personal que el punto
+ *  tiene. Son magnitudes distintas y cruzarlas es trabajo de HDU5.1. */
 function dotacionTexto(r: ResourceInput): string {
   const partes = [
     r.conductores_requeridos && `${r.conductores_requeridos} conductor${r.conductores_requeridos > 1 ? "es" : ""}`,
@@ -131,6 +116,22 @@ function dotacionTexto(r: ResourceInput): string {
     r.operadores_requeridos && `${r.operadores_requeridos} operador${r.operadores_requeridos > 1 ? "es" : ""}`,
   ].filter(Boolean);
   return partes.length > 0 ? partes.join(" + ") : "sin dotación declarada";
+}
+
+function EncabezadoRecursos() {
+  return (
+    <TableRow className="bg-muted/50 hover:bg-muted/50">
+      <TableHead className="w-[9rem]">Estado</TableHead>
+      <TableHead className="w-[5.5rem]"></TableHead>
+      <TableHead className="w-[9rem]">Equipo</TableHead>
+      <TableHead>Tipo</TableHead>
+      <TableHead className="w-[8rem] text-right">
+        Capacidad <span className="mono opacity-70">(m³)</span>
+      </TableHead>
+      <TableHead>Vehículo</TableHead>
+      <TableHead className="w-[5rem]"></TableHead>
+    </TableRow>
+  );
 }
 
 export function PointResources({
@@ -180,18 +181,37 @@ export function PointResources({
   const familiaDe = (tipo: string): ResourceFamily =>
     tipos.find((t) => t.tipo === tipo)?.familia ?? "apoyo";
 
+  // Buscar y filtrar. Con 21 unidades no es un lujo: encontrar "la 2184" o
+  // "las que están en taller" significaba leer la tabla entera. Vive en el
+  // componente y no en la URL porque es un filtro de trabajo momentáneo, no un
+  // estado que tenga sentido compartir por link.
+  const [busqueda, setBusqueda] = useState("");
+  const [filtroEstado, setFiltroEstado] = useState<"todos" | "disponibles" | "no">("todos");
+
   // Ordenados por tipo y después por N° de equipo. Con la columna "Tipo" a la
   // vista no hace falta agrupar con encabezados intermedios: sería repetir el
   // mismo dato dos veces, una en el separador y otra en cada fila.
-  const ordenados = useMemo(
-    () =>
-      [...recursos].sort(
+  const visibles = useMemo(() => {
+    const q = busqueda.trim().toLowerCase();
+    return recursos
+      .filter((r) => {
+        if (filtroEstado === "disponibles" && !r.disponible) return false;
+        if (filtroEstado === "no" && r.disponible) return false;
+        if (!q) return true;
+        // Se busca por todo lo que identifica a una unidad en la conversación
+        // real: "la 2184", "la KZRB-69", "las tolvas", "las Hino".
+        return [r.numero_equipo, r.patente, r.tipo, r.marca, r.modelo]
+          .filter(Boolean)
+          .some((campo) => campo.toLowerCase().includes(q));
+      })
+      .sort(
         (a, b) =>
           a.tipo.localeCompare(b.tipo) ||
           a.numero_equipo.localeCompare(b.numero_equipo, undefined, { numeric: true }),
-      ),
-    [recursos],
-  );
+      );
+  }, [recursos, busqueda, filtroEstado]);
+
+  const noDisponibles = recursos.filter((r) => !r.disponible).length;
 
   const abrirNuevo = (tipo: string) => {
     setEligiendoTipo(false);
@@ -366,6 +386,50 @@ export function PointResources({
         </Button>
       </div>
 
+      {/* Buscar y filtrar. El artículo de Volpis lo pone como "filters as
+          first-class citizens", y acá se gana de verdad: con 21 unidades,
+          encontrar "la 2184" o ver cuáles están en taller significaba leer la
+          tabla entera. Lo que NO se tomó de ahí es la búsqueda global por tipo
+          de entidad ("Sara" devuelve el conductor): no existen conductores ni
+          viajes como entidades en este sistema todavía. */}
+      {recursos.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-border px-5 py-3">
+          <div className="relative min-w-[12rem] flex-1">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+              placeholder="Buscar por número, patente, tipo o marca"
+              className="h-8 pl-8 text-xs"
+            />
+          </div>
+
+          {/* Tres estados y no un interruptor: "ver solo las que están en
+              taller" es una pregunta tan frecuente como "ver las que puedo
+              usar", y con un interruptor una de las dos queda sin atajo. */}
+          <div className="flex items-center gap-1 rounded-md bg-background/60 p-0.5">
+            {([
+              ["todos", `Todos (${recursos.length})`],
+              ["disponibles", `Disponibles (${recursos.length - noDisponibles})`],
+              ["no", `En taller (${noDisponibles})`],
+            ] as const).map(([valor, etiqueta]) => (
+              <button
+                key={valor}
+                type="button"
+                onClick={() => setFiltroEstado(valor)}
+                className={`cursor-pointer rounded px-2.5 py-1 text-[0.6875rem] font-medium transition-colors ${
+                  filtroEstado === valor
+                    ? "bg-card text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {etiqueta}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* El punto inactivo es el caso que mas desconcierta: se pueden activar
           recursos uno por uno y la ruta sigue sin considerarlos, porque el ruteo
           descarta el punto entero antes de mirar sus unidades. */}
@@ -412,26 +476,82 @@ export function PointResources({
               <Plus className="mr-1.5 h-3.5 w-3.5" /> Agregar el primero
             </Button>
           </div>
+        ) : visibles.length === 0 ? (
+          <div className="py-10 text-center">
+            <p className="text-sm text-muted-foreground">
+              Ninguna unidad coincide con la búsqueda.
+            </p>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="mt-2"
+              onClick={() => {
+                setBusqueda("");
+                setFiltroEstado("todos");
+              }}
+            >
+              Limpiar filtros
+            </Button>
+          </div>
         ) : (
           <Table>
             <TableHeader>
               <EncabezadoRecursos />
             </TableHeader>
             <TableBody>
-              {ordenados.map((r) => {
+              {visibles.map((r) => {
                 const cap = textoCapacidad(r);
                 return (
                   <TableRow
                     key={r.id}
-                    className={`group animate-in fade-in duration-300 fill-mode-both hover:bg-card/60 ${
-                      r.disponible ? "" : "opacity-55"
-                    }`}
+                    className="group animate-in fade-in duration-300 fill-mode-both hover:bg-card/60"
                   >
+                    {/* ESTADO PRIMERO, antes de la identidad. La disponibilidad
+                        es lo que decide si esta unidad entra o no en una ruta, y
+                        estaba en la novena columna: había que recorrer la fila
+                        entera para saber lo único accionable de ella.
+
+                        El interruptor va junto a la etiqueta y no en el extremo
+                        opuesto: leer el estado y cambiarlo son el mismo gesto.
+                        AC4 de HDU8. */}
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          checked={r.disponible}
+                          disabled={alternando === r.id}
+                          onCheckedChange={() => alternarDisponible(r)}
+                          aria-label={
+                            r.disponible
+                              ? `Marcar ${r.tipo} ${r.numero_equipo} como no disponible`
+                              : `Marcar ${r.tipo} ${r.numero_equipo} como disponible`
+                          }
+                        />
+                        {alternando === r.id ? (
+                          <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+                        ) : (
+                          // El color dice el estado, y usa la variante -strong
+                          // porque como TEXTO sobre el cuerpo claro las de
+                          // relleno no llegan al contraste mínimo.
+                          <span
+                            className={`text-[0.6875rem] font-semibold ${
+                              r.disponible ? "text-success-strong" : "text-muted-foreground"
+                            }`}
+                          >
+                            {r.disponible ? "Disponible" : "En taller"}
+                          </span>
+                        )}
+                      </div>
+                    </TableCell>
+
                     <TableCell>
                       {/* Foto cuando existe, marcador cuando no. 8 de los 21
-                          vehículos de la flota real no tienen, así que no es un
+                          vehiculos de la flota real no tienen, asi que no es un
                           caso raro. */}
-                      <div className="detect-frame detect-frame-sm h-11 w-16 overflow-hidden rounded-md bg-muted">
+                      <div
+                        className={`detect-frame detect-frame-sm h-11 w-16 overflow-hidden rounded-md bg-muted ${
+                          r.disponible ? "" : "opacity-50 grayscale"
+                        }`}
+                      >
                         <span className="detect-corners" aria-hidden="true" />
                         {r.foto ? (
                           <img
@@ -448,13 +568,20 @@ export function PointResources({
                       </div>
                     </TableCell>
 
-                    <TableCell className="mono font-medium tabular-nums">
-                      {r.numero_equipo || "-"}
+                    {/* Numero y patente en dos lineas, mismo patron que la lista
+                        de zonas detectadas: identifican a la misma unidad, no
+                        son dos datos que se comparen entre filas. Eso libera una
+                        columna. */}
+                    <TableCell>
+                      <p className="mono text-xs font-semibold tabular-nums text-foreground">
+                        {r.numero_equipo || "sin N°"}
+                      </p>
+                      <p className="mono text-[0.6875rem] text-muted-foreground">
+                        {r.patente || "sin patente"}
+                      </p>
                     </TableCell>
 
                     <TableCell className="font-medium">{r.tipo}</TableCell>
-
-                    <TableCell className="mono text-muted-foreground">{r.patente || "-"}</TableCell>
 
                     {/* La unidad va en el encabezado y no en cada celda, igual
                         que en el listado de zonas: repetida por fila desalinea
@@ -472,31 +599,16 @@ export function PointResources({
                       )}
                     </TableCell>
 
-                    <TableCell className="text-muted-foreground">{dotacionTexto(r)}</TableCell>
-
-                    <TableCell className="text-muted-foreground">
-                      {[r.marca, r.modelo, r.anio].filter(Boolean).join(" ") || "-"}
-                    </TableCell>
-
-                    {/* AC4. El interruptor va en la fila y no dentro de un
-                        formulario: es la acción más frecuente de esta vista, un
-                        camión entra y sale de taller. */}
+                    {/* Marca, modelo, ano y dotacion en dos lineas. Son datos de
+                        referencia, no de decision: ocupaban dos columnas propias
+                        y empujaban fuera de la vista lo que si se decide. */}
                     <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Switch
-                          checked={r.disponible}
-                          disabled={alternando === r.id}
-                          onCheckedChange={() => alternarDisponible(r)}
-                          aria-label={
-                            r.disponible
-                              ? `Marcar ${r.tipo} ${r.numero_equipo} como no disponible`
-                              : `Marcar ${r.tipo} ${r.numero_equipo} como disponible`
-                          }
-                        />
-                        {alternando === r.id && (
-                          <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
-                        )}
-                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {[r.marca, r.modelo, r.anio].filter(Boolean).join(" ") || "-"}
+                      </p>
+                      <p className="text-[0.6875rem] text-muted-foreground/80">
+                        {dotacionTexto(r)}
+                      </p>
                     </TableCell>
 
                     <TableCell className="text-right">

@@ -435,7 +435,12 @@ function RecursosPage() {
           <Cifra icono={<MapPin className="h-4 w-4" />} etiqueta="Puntos" valor={String(totales.puntos)} />
           <Cifra icono={<TruckIcon className="h-4 w-4" />} etiqueta="Recursos" valor={String(totales.recursos)} />
           <Cifra icono={<TruckIcon className="h-4 w-4" />} etiqueta="Disponibles" valor={`${totales.disponibles} de ${totales.recursos}`} />
-          <Cifra icono={<Boxes className="h-4 w-4" />} etiqueta="Capacidad de transporte" valor={`${totales.capacidad} m³`} />
+          <Cifra
+            icono={<Boxes className="h-4 w-4" />}
+            etiqueta="Capacidad de transporte"
+            valor={`${totales.capacidad} m³`}
+            destacada
+          />
         </div>
 
         <div className="grid min-h-0 gap-5 lg:grid-cols-[clamp(17rem,24vw,23rem)_1fr]">
@@ -833,21 +838,36 @@ function Cifra({
   icono,
   etiqueta,
   valor,
+  destacada,
 }: {
   icono: React.ReactNode;
   etiqueta: string;
   valor: string;
+  /** Una sola de las cifras manda, y es la capacidad: es la que decide si una
+   *  ruta es posible. Las otras tres son contexto. Con las cuatro del mismo
+   *  tamaño la franja no dice cuál mirar primero. */
+  destacada?: boolean;
 }) {
   return (
     <div className="flex flex-shrink-0 items-center gap-3 px-5 py-3.5">
-      <span className="flex h-8 w-8 items-center justify-center rounded-md bg-background/50 text-foreground/60">
+      <span
+        className={`flex items-center justify-center rounded-md ${
+          destacada
+            ? "h-10 w-10 bg-primary/10 text-primary"
+            : "h-8 w-8 bg-background/50 text-foreground/60"
+        }`}
+      >
         {icono}
       </span>
       <span>
         <span className="block text-[0.6875rem] uppercase tracking-wide text-muted-foreground">
           {etiqueta}
         </span>
-        <span className="mono block text-sm font-semibold tabular-nums text-foreground">
+        <span
+          className={`mono block font-semibold tabular-nums text-foreground ${
+            destacada ? "text-xl" : "text-sm"
+          }`}
+        >
           {valor}
         </span>
       </span>
