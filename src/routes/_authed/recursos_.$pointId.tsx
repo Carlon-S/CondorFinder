@@ -299,12 +299,14 @@ function RecursosDelPuntoPage() {
           donde el sistema pone las cifras de cabecera. */}
       <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border/25 px-6 py-5">
         <div className="min-w-0">
-          <Link
-            to="/recursos"
-            className="mb-2 inline-flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <ArrowRightCircle className="h-3.5 w-3.5 rotate-180" />
-            Volver a los puntos
+          {/* Un botón, no un enlace gris chico. Esta vista se abre desde otra y
+              el único camino de vuelta es este: en gris apagado y a tamaño de
+              nota al pie, quien no lo estuviera buscando no lo encontraba. */}
+          <Link to="/recursos" className="mb-3 inline-block">
+            <Button variant="secondary" size="sm">
+              <ArrowRightCircle className="mr-1.5 h-3.5 w-3.5 rotate-180" />
+              Volver a los puntos
+            </Button>
           </Link>
           <p className="eyebrow">Recursos del punto</p>
           {punto ? (
@@ -332,22 +334,24 @@ function RecursosDelPuntoPage() {
             </p>
           )}
         </div>
-
-        <Button onClick={() => setEligiendoTipo(true)} className="btn-cta">
-          <Plus className="mr-1.5 h-3.5 w-3.5" /> Agregar recurso
-        </Button>
       </div>
 
       <main className="flex min-h-0 flex-1 flex-col gap-5 p-6">
-        {/* Franja de cifras, mismo tratamiento .panel que las otras dos vistas.
-            La capacidad es la destacada: es la que decide si este punto puede
-            participar de una ruta; las otras dos son contexto. */}
+        {/* Franja de cifras, mismo tratamiento .panel que las otras dos vistas,
+            y con la acción adentro: la franja es la cabecera de la flota y
+            "Agregar recurso" actúa sobre esa flota, no sobre el punto.
+            ml-auto la empuja al extremo, así el ancho de la franja no depende
+            de cuántas cifras haya.
+
+            Las tres cifras van al MISMO tamaño. Estuvieron con la capacidad al
+            doble, y aunque sea la que decide, tres cifras de la misma
+            naturaleza en una misma franja con tipografías distintas se leen
+            como si una estuviera rota. La jerarquía la da el orden. */}
         <div className="panel flex flex-wrap items-center divide-x divide-border/10 px-1">
           <Cifra
             icono={<Boxes className="h-4 w-4" />}
             etiqueta="Capacidad de transporte"
             valor={`${punto?.capacity_m3 ?? 0} m³`}
-            destacada
           />
           <Cifra
             icono={<Truck className="h-4 w-4" />}
@@ -355,10 +359,15 @@ function RecursosDelPuntoPage() {
             valor={`${punto?.available_count ?? 0} de ${punto?.resource_count ?? 0}`}
           />
           <Cifra
-            icono={<Truck className="h-4 w-4" />}
+            icono={<Boxes className="h-4 w-4" />}
             etiqueta="Tipos distintos"
             valor={String(new Set(recursos.map((r) => r.tipo)).size)}
           />
+          <div className="ml-auto border-l-0 px-5 py-3">
+            <Button onClick={() => setEligiendoTipo(true)} className="btn-cta">
+              <Plus className="mr-1.5 h-3.5 w-3.5" /> Agregar recurso
+            </Button>
+          </div>
         </div>
         {/* El punto inactivo es el caso que más desconcierta: se pueden activar
             recursos uno por uno y la ruta sigue sin considerarlos, porque el
@@ -811,38 +820,31 @@ function RecursosDelPuntoPage() {
   );
 }
 
-/** Una cifra de la franja de cabecera. Misma forma que la de /recursos: ícono,
- *  etiqueta chica y el número en .mono, que es donde el sistema pone las
- *  magnitudes. Una sola manda, y es la capacidad. */
+/** Una cifra de la franja de cabecera: ícono, etiqueta chica y el número en
+ *  .mono, que es donde el sistema pone las magnitudes.
+ *
+ *  El ícono va SIN pastilla de fondo. Con ella, tres cuadrados de color al hilo
+ *  pesaban más que las cifras que acompañan, y la franja se leía como una fila
+ *  de botones en vez de como datos. */
 function Cifra({
   icono,
   etiqueta,
   valor,
-  destacada,
 }: {
   icono: React.ReactNode;
   etiqueta: string;
   valor: string;
-  destacada?: boolean;
 }) {
   return (
     <div className="flex flex-shrink-0 items-center gap-3 px-5 py-3.5">
-      <span
-        className={`flex items-center justify-center rounded-md ${
-          destacada ? "h-10 w-10 bg-primary/10 text-primary" : "h-8 w-8 bg-background/50 text-foreground/60"
-        }`}
-      >
+      <span className="flex h-8 w-8 items-center justify-center text-muted-foreground">
         {icono}
       </span>
       <span>
         <span className="block text-[0.6875rem] uppercase tracking-wide text-muted-foreground">
           {etiqueta}
         </span>
-        <span
-          className={`mono block font-semibold tabular-nums text-foreground ${
-            destacada ? "text-xl" : "text-sm"
-          }`}
-        >
+        <span className="mono block text-sm font-semibold tabular-nums text-foreground">
           {valor}
         </span>
       </span>

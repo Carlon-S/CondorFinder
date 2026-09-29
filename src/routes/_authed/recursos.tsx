@@ -450,7 +450,6 @@ function RecursosPage() {
             icono={<Boxes className="h-4 w-4" />}
             etiqueta="Capacidad de transporte"
             valor={`${totales.capacidad} m³`}
-            destacada
           />
         </div>
 
@@ -852,40 +851,33 @@ function RecursosPage() {
 /** Una cifra de la franja superior. Mismo patrón que los KPI de Vista
  *  Principal: ícono, etiqueta chica y el número en .mono, que es donde el
  *  sistema pone las magnitudes. */
+/** Una cifra de la franja superior: ícono, etiqueta chica y el número en .mono,
+ *  que es donde el sistema pone las magnitudes.
+ *
+ *  Todas del mismo tamaño y con el ícono SIN pastilla de fondo. Hubo una
+ *  versión con la capacidad al doble y el ícono en una pastilla de color, y
+ *  pesaba más el adorno que el dato: cifras de la misma naturaleza en una misma
+ *  franja con tipografías distintas se leen como si una estuviera rota. La
+ *  jerarquía la da el orden, no el tamaño. */
 function Cifra({
   icono,
   etiqueta,
   valor,
-  destacada,
 }: {
   icono: React.ReactNode;
   etiqueta: string;
   valor: string;
-  /** Una sola de las cifras manda, y es la capacidad: es la que decide si una
-   *  ruta es posible. Las otras tres son contexto. Con las cuatro del mismo
-   *  tamaño la franja no dice cuál mirar primero. */
-  destacada?: boolean;
 }) {
   return (
     <div className="flex flex-shrink-0 items-center gap-3 px-5 py-3.5">
-      <span
-        className={`flex items-center justify-center rounded-md ${
-          destacada
-            ? "h-10 w-10 bg-primary/10 text-primary"
-            : "h-8 w-8 bg-background/50 text-foreground/60"
-        }`}
-      >
+      <span className="flex h-8 w-8 items-center justify-center text-muted-foreground">
         {icono}
       </span>
       <span>
         <span className="block text-[0.6875rem] uppercase tracking-wide text-muted-foreground">
           {etiqueta}
         </span>
-        <span
-          className={`mono block font-semibold tabular-nums text-foreground ${
-            destacada ? "text-xl" : "text-sm"
-          }`}
-        >
+        <span className="mono block text-sm font-semibold tabular-nums text-foreground">
           {valor}
         </span>
       </span>

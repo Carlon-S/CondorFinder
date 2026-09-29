@@ -8,9 +8,17 @@
 // detrás. Con vista propia entra completo, se puede volver, y la URL identifica
 // lo que se está editando.
 //
-// El guion bajo de "recursos_" saca esta ruta de debajo de /recursos: esa es
-// una ruta hoja, no un layout, así que anidar bajo ella exigiría un <Outlet>
-// que no tiene. Ver la convención de TanStack Router para rutas no anidadas.
+// DOS guiones bajos en el nombre del archivo, y los dos importan:
+//
+//   recursos_   saca la ruta de debajo de /recursos, que es una ruta hoja y no
+//               un layout.
+//   $pointId_   la saca de debajo de /recursos/{id}, el listado.
+//
+// El segundo faltaba y el síntoma era desconcertante: elegir un tipo o apretar
+// editar navegaba, la URL cambiaba, y en pantalla seguía el listado. El
+// formulario se había generado como HIJO del listado, y como el listado no
+// renderiza un <Outlet>, el hijo no tenía dónde aparecer. Un formulario que
+// reemplaza a la vista anterior no es un hijo de ella.
 //
 // Dos modos, distinguidos por los parámetros de búsqueda:
 //   ?tipo=TOLVA  -> alta. El tipo ya viene elegido, que es el AC1 de HDU8: la
@@ -56,7 +64,7 @@ interface Busqueda {
   id?: string;
 }
 
-export const Route = createFileRoute("/_authed/recursos_/$pointId/recurso")({
+export const Route = createFileRoute("/_authed/recursos_/$pointId_/recurso")({
   validateSearch: (search: Record<string, unknown>): Busqueda => ({
     tipo: typeof search.tipo === "string" ? search.tipo : undefined,
     id: typeof search.id === "string" ? search.id : undefined,
@@ -215,13 +223,14 @@ function RecursoFormPage() {
         {/* Camino de vuelta explícito. La vista se abre desde el listado de un
             punto y tiene que poder devolverse ahí sin usar el botón del
             navegador. */}
-        <Link
-          to="/recursos/$pointId"
-          params={{ pointId }}
-          className="mb-2 inline-flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <ArrowRightCircle className="h-3.5 w-3.5 rotate-180" />
-          Volver a los recursos{punto ? ` de ${punto.name}` : ""}
+        {/* Mismo botón que en el listado: es el único camino de vuelta de una
+            vista a la que se llega desde otra, y como enlace gris chico pasaba
+            desapercibido. */}
+        <Link to="/recursos/$pointId" params={{ pointId }} className="mb-3 inline-block">
+          <Button variant="secondary" size="sm">
+            <ArrowRightCircle className="mr-1.5 h-3.5 w-3.5 rotate-180" />
+            Volver a los recursos
+          </Button>
         </Link>
         <p className="eyebrow">{id ? "Editar recurso" : "Nuevo recurso"}</p>
         <h1 className="font-rubik text-3xl font-semibold tracking-normal text-foreground md:text-4xl">
