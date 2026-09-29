@@ -44,7 +44,6 @@ import {
   Scale,
   TriangleAlert,
   Truck,
-  Users,
   Warehouse,
   X,
 } from "@/components/icons/Icons";
@@ -73,7 +72,14 @@ import {
   type AnalysisSummary,
   type SavedAnalysisRecord,
 } from "@/lib/analysisStore";
-import { listResourcePoints, type ResourcePoint } from "@/lib/resources";
+import {
+  listResourcePoints,
+  listResources,
+  resumenParaRuta,
+  TEXTO_FUERA_DE_RUTA,
+  type Resource,
+  type ResourcePoint,
+} from "@/lib/resources";
 import { MAIPU_BBOX } from "@/lib/maipuBoundary";
 import {
   Table,
@@ -304,6 +310,10 @@ function RutasPage() {
   // inactivos), y su subconjunto activo es lo que la confirmación (AC1)
   // necesita. Un solo fetch cubre ambos usos.
   const [originPoints, setOriginPoints] = useState<ResourcePoint[]>([]);
+  // La flota de cada punto, para explicar QUÉ cuenta en una ruta y qué no.
+  // El total en m³ ya lo trae el punto calculado por el backend; esto es el
+  // desglose, que es lo que hace visible el AC5 de HDU8.
+  const [recursosPorPunto, setRecursosPorPunto] = useState<Record<string, Resource[]>>({});
 
   // Pestaña de la tabla al pie. Es el detalle de lo que el mapa muestra
   // como marcadores: las zonas que se van a retirar y los puntos desde
@@ -319,6 +329,8 @@ function RutasPage() {
   // sin ningún indicio de carga hasta que ambos fetches resolvían solos.
   const [mapDataLoading, setMapDataLoading] = useState(true);
   const activePoints = originPoints.filter((p) => p.active);
+  /** Desglose de la flota del punto abierto en la ficha. */
+  const resumenPunto = resumenParaRuta(zoomPoint ? (recursosPorPunto[zoomPoint.id] ?? []) : []);
 
   // AC1 — confirmación.
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -364,13 +376,24 @@ function RutasPage() {
   // useEffect de abajo). Es la única fuente de "activo" para el mapa y AC1.
   const refreshOriginPoints = async (): Promise<void> => {
     try {
-      setOriginPoints(await listResourcePoints());
+      // Los dos en paralelo, y los recursos SIN filtrar por punto: una sola
+      // petición trae la flota completa y se agrupa acá. Pidiendo por punto
+      // serían tantas peticiones como puntos activos para mostrar un desglose.
+      const [puntos, recursos] = await Promise.all([listResourcePoints(), listResources()]);
+      setOriginPoints(puntos);
+      setRecursosPorPunto(
+        recursos.reduce<Record<string, Resource[]>>((mapa, r) => {
+          (mapa[r.point_id] ??= []).push(r);
+          return mapa;
+        }, {}),
+      );
     } catch (err) {
       notify.error(
         "No se pudieron cargar los puntos",
         err instanceof Error ? err.message : "Intenta nuevamente.",
       );
       setOriginPoints([]);
+      setRecursosPorPunto({});
     }
   };
 
@@ -1369,6 +1392,12 @@ function RutasPage() {
                     individuales, y el detalle unidad por unidad vive en
                     /recursos, que es donde se administra. Acá lo que importa es
                     si este punto puede participar de una ruta y con cuánto. */}
+                {/* "50 m³" y "20 de 21" son dos cifras que no se explican
+                    entre sí: no se sabe cuáles de esas 20 unidades producen
+                    esos 50 m³ ni por qué la otra no cuenta. Acá va el
+                    desglose, que es lo que hace VISIBLE el AC5 de HDU8: al
+                    marcar un recurso como no disponible se lo ve salir de la
+                    cuenta y aparecer abajo con su motivo. */}
                 <div className="grid grid-cols-2 gap-1.5">
                   <div className="rounded-md bg-background/40 p-2.5">
                     <span className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -1380,13 +1409,33 @@ function RutasPage() {
                   </div>
                   <div className="rounded-md bg-background/40 p-2.5">
                     <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Truck className="h-4 w-4 flex-shrink-0 text-primary/70" /> Recursos
+                      <Truck className="h-4 w-4 flex-shrink-0 text-primary/70" /> Cuentan
                     </span>
                     <p className="mono mt-1.5 text-sm font-semibold tabular-nums">
-                      {zoomPoint.available_count} de {zoomPoint.resource_count}
+                      {resumenPunto.suman.length} de {zoomPoint.resource_count}
                     </p>
                   </div>
                 </div>
+
+                {(["no_disponible", "sin_capacidad", "no_transporta"] as const).map((motivo) =>
+                  resumenPunto.fuera[motivo].length === 0 ? null : (
+                    <div
+                      key={motivo}
+                      className="flex items-baseline justify-between gap-2 rounded-md bg-background/40 px-2.5 py-1.5"
+                    >
+                      <span className="text-[0.6875rem] text-muted-foreground">
+                        Fuera, {TEXTO_FUERA_DE_RUTA[motivo]}
+                      </span>
+                      <span
+                        className={`mono text-xs font-semibold tabular-nums ${
+                          motivo === "sin_capacidad" ? "text-warning-strong" : "text-foreground"
+                        }`}
+                      >
+                        {resumenPunto.fuera[motivo].length}
+                      </span>
+                    </div>
+                  ),
+                )}
 
                 {/* Un punto con recursos pero sin capacidad disponible no puede
                     recibir volumen, y sin decirlo se vería como un origen
@@ -1403,14 +1452,12 @@ function RutasPage() {
                   </p>
                 )}
 
-                <div className="grid grid-cols-2 gap-1.5">
-                  <div className="flex items-center justify-between rounded-md bg-background/40 p-2.5">
-                    <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Users className="h-4 w-4 flex-shrink-0 text-primary/70" /> Personal
-                    </span>
-                    <span className="text-sm font-semibold">{zoomPoint.personal_count}</span>
-                  </div>
-                </div>
+                {/* Acá iba "Personal", el contador del punto. Se fue junto
+                    con su campo del formulario: la pregunta que importa no es
+                    cuánta gente TIENE el punto sino quién va en cada tramo, y
+                    eso es HDU5.1. Mostrando un 0 que ya nadie puede cambiar,
+                    esta ficha decía que el punto no tiene personal, que es
+                    falso. El dato sigue guardado en la base. */}
               </div>
 
               <p className="flex items-center gap-2 rounded-md border border-dashed border-border/60 p-2.5 text-xs text-muted-foreground">
@@ -1447,15 +1494,26 @@ function RutasPage() {
                   No hay puntos activos. Revísalos en el bloque Puntos.
                 </p>
               ) : (
+                // Cada punto con lo que REALMENTE aporta, no solo su nombre.
+                // Antes esta lista decía cuáles participan pero no con cuánto,
+                // así que la ruta se mandaba a generar sin saber si había
+                // capacidad para ella, y un "infeasible" después no tenía
+                // ninguna explicación a la vista.
                 <ul className="max-h-32 space-y-1 overflow-y-auto">
-                  {activePoints.map((p) => (
-                    <li
-                      key={p.id}
-                      className="rounded-md border border-border/60 bg-background/60 px-2 py-1.5 text-xs"
-                    >
-                      {p.name}
-                    </li>
-                  ))}
+                  {activePoints.map((p) => {
+                    const resumen = resumenParaRuta(recursosPorPunto[p.id] ?? []);
+                    return (
+                      <li
+                        key={p.id}
+                        className="flex items-baseline justify-between gap-2 rounded-md border border-border/60 bg-background/60 px-2 py-1.5 text-xs"
+                      >
+                        <span className="truncate">{p.name}</span>
+                        <span className="mono flex-shrink-0 tabular-nums text-muted-foreground">
+                          {resumen.suman.length} u · {resumen.capacidad} m³
+                        </span>
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </div>

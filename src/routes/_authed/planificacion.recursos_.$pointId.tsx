@@ -67,8 +67,10 @@ import {
   getResourcePoint,
   listResourceTypes,
   listResources,
+  motivoFueraDeRuta,
   resourcePhotoUrl,
   setResourceAvailability,
+  TEXTO_FUERA_DE_RUTA,
   type Resource,
   type ResourcePoint,
   type ResourceType,
@@ -977,6 +979,21 @@ function RecursosDelPuntoPage() {
                   />
                   <Dato etiqueta="Dotación requerida" valor={dotacionTexto(enDetalle)} />
                   <Dato etiqueta="Punto" valor={punto?.name ?? "-"} />
+                  {/* AC5 de HDU8, dicho donde se mira la unidad. Que un recurso
+                      esté "disponible" y que sume a una ruta son dos cosas
+                      distintas: lo primero es un estado operativo que el
+                      trabajador controla, lo segundo se deriva de la familia y
+                      de la capacidad declarada. Sin esta línea había que
+                      deducirlo comparando cifras entre dos pantallas. */}
+                  <Dato
+                    etiqueta="Participa en rutas"
+                    valor={
+                      motivoFueraDeRuta(enDetalle)
+                        ? `No, ${TEXTO_FUERA_DE_RUTA[motivoFueraDeRuta(enDetalle)!]}`
+                        : `Sí, aporta ${enDetalle.capacidad_m3} m³`
+                    }
+                    alerta={motivoFueraDeRuta(enDetalle) === "sin_capacidad"}
+                  />
                 </dl>
 
                 <div className="flex gap-2 border-t border-border/40 pt-4">

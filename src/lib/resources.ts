@@ -94,6 +94,58 @@ export interface ResourcePoint extends ResourcePointInput {
   capacity_m3: number;
 }
 
+/** Por qué un recurso entra o no entra en el cálculo de una ruta.
+ *
+ *  Es el ESPEJO exacto de `capacidad_de_carga_por_punto()` en
+ *  backendModel/resources.py, con sus tres exclusiones y en el mismo orden. Que
+ *  esté duplicado no es un descuido: el backend decide, el frontend explica, y
+ *  la alternativa (pedirle al backend un desglose solo para mostrarlo) sería un
+ *  endpoint nuevo para no decir nada que el cliente no pueda deducir de datos
+ *  que ya tiene. Si cambia una de las dos, tiene que cambiar la otra. */
+export type MotivoFueraDeRuta = "no_disponible" | "no_transporta" | "sin_capacidad";
+
+export function motivoFueraDeRuta(r: Resource): MotivoFueraDeRuta | null {
+  // El orden importa: cada unidad cae en UN motivo, y el primero es el que se
+  // reporta. Una retroexcavadora fuera de servicio se informa como fuera de
+  // servicio, que es lo que el trabajador puede cambiar.
+  if (!r.disponible) return "no_disponible";
+  if (r.familia !== "carga") return "no_transporta";
+  if (r.capacidad_m3 == null) return "sin_capacidad";
+  return null;
+}
+
+export const TEXTO_FUERA_DE_RUTA: Record<MotivoFueraDeRuta, string> = {
+  no_disponible: "marcado como no disponible",
+  no_transporta: "no transporta carga",
+  sin_capacidad: "sin capacidad declarada",
+};
+
+export interface ResumenRuta {
+  /** Los que sí suman: de carga, disponibles y con capacidad declarada. */
+  suman: Resource[];
+  capacidad: number;
+  fuera: Record<MotivoFueraDeRuta, Resource[]>;
+}
+
+/** Reparte los recursos de un punto entre los que cuentan para una ruta y los
+ *  que no, con el motivo de cada exclusión. */
+export function resumenParaRuta(recursos: Resource[]): ResumenRuta {
+  const resumen: ResumenRuta = {
+    suman: [],
+    capacidad: 0,
+    fuera: { no_disponible: [], no_transporta: [], sin_capacidad: [] },
+  };
+  for (const r of recursos) {
+    const motivo = motivoFueraDeRuta(r);
+    if (motivo) resumen.fuera[motivo].push(r);
+    else {
+      resumen.suman.push(r);
+      resumen.capacidad += r.capacidad_m3 ?? 0;
+    }
+  }
+  return resumen;
+}
+
 /** URL de la foto de un recurso. El endpoint exige sesión, igual que el resto
  *  del router; la cookie viaja sola en un `<img src>`. */
 export function resourcePhotoUrl(foto: string): string {
