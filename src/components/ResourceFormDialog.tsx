@@ -182,7 +182,11 @@ export function ResourceFormDialog({
           onOpenChange(a);
         }}
       >
-        <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
+        {/* max-w-3xl son 48rem, la mitad más que las 32rem de antes. Con ese
+            ancho los campos pasan a DOS columnas: una sola columna a 48rem deja
+            campos de texto absurdamente largos para escribir una patente, y el
+            recorrido vertical se hace igual de largo que antes. */}
+        <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{recurso ? "Editar recurso" : "Nuevo recurso"}</DialogTitle>
           </DialogHeader>
@@ -192,6 +196,9 @@ export function ResourceFormDialog({
               <p className="text-xs text-muted-foreground">
                 {form.tipo} · {nombrePunto}
               </p>
+
+              <div className="grid gap-5 md:grid-cols-[17rem_1fr]">
+              <div className="space-y-3">
 
               {/* ── Imagen ──
                   Grande y sola: es lo que permite reconocer la unidad en patio,
@@ -255,6 +262,23 @@ export function ResourceFormDialog({
                 {form.foto ? "Cambiar imagen" : "Adjuntar imagen"}
               </Button>
 
+              <div className="flex items-center justify-between rounded-lg bg-background/40 p-3">
+                <div>
+                  <p className="text-xs font-medium text-foreground">Disponible</p>
+                  <p className="text-[0.6875rem] text-muted-foreground">
+                    Fuera al armar una ruta.
+                  </p>
+                </div>
+                <Switch
+                  checked={form.disponible}
+                  onCheckedChange={(v) => setForm({ ...form, disponible: v })}
+                />
+              </div>
+              </div>
+
+              {/* ── Campos ── */}
+              <div className="space-y-4">
+              <div className="grid gap-4 sm:grid-cols-2">
               <Campo etiqueta="N° de equipo">
                 <Input
                   value={form.numero_equipo}
@@ -270,10 +294,11 @@ export function ResourceFormDialog({
                   placeholder="JXZS-91"
                 />
               </Campo>
+              </div>
 
               {campos.motorizado && (
                 <>
-                  <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="grid gap-4 sm:grid-cols-3">
                     <Campo etiqueta="Marca">
                       <Input
                         value={form.marca}
@@ -288,7 +313,6 @@ export function ResourceFormDialog({
                         placeholder="CARGO 1723"
                       />
                     </Campo>
-                  </div>
                   <Campo etiqueta="Año">
                     <Input
                       type="number"
@@ -299,6 +323,7 @@ export function ResourceFormDialog({
                       placeholder="2018"
                     />
                   </Campo>
+                  </div>
                 </>
               )}
 
@@ -377,17 +402,7 @@ export function ResourceFormDialog({
                 </div>
               )}
 
-              <div className="flex items-center justify-between rounded-lg bg-background/40 p-3">
-                <div>
-                  <p className="text-xs font-medium text-foreground">Disponible</p>
-                  <p className="text-[0.6875rem] text-muted-foreground">
-                    Un recurso no disponible queda fuera al armar una ruta.
-                  </p>
-                </div>
-                <Switch
-                  checked={form.disponible}
-                  onCheckedChange={(v) => setForm({ ...form, disponible: v })}
-                />
+              </div>
               </div>
 
               <div className="flex gap-2 border-t border-border/40 pt-4">

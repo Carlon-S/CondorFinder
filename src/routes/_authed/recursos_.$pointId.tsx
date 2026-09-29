@@ -185,6 +185,29 @@ function RecursosDelPuntoPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pointId]);
 
+  // Una foto de referencia por tipo, para el selector. Sale de la flota REAL:
+  // se toma la primera unidad de ese tipo que tenga foto, así que la imagen que
+  // acompaña a "TOLVA" es literalmente una tolva de la municipalidad y no una
+  // ilustración genérica que podría no parecerse a lo que hay en el patio.
+  //
+  // Se piden TODOS los recursos y no solo los de este punto: un punto recién
+  // creado no tiene ninguno, y es justo cuando más ayuda ver de qué se está
+  // hablando. Se carga una sola vez, al abrir el selector por primera vez.
+  const [fotoPorTipo, setFotoPorTipo] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (!eligiendoTipo || Object.keys(fotoPorTipo).length > 0) return;
+    listResources()
+      .then((todos) => {
+        const mapa: Record<string, string> = {};
+        for (const r of todos) {
+          if (r.foto && !mapa[r.tipo]) mapa[r.tipo] = r.foto;
+        }
+        setFotoPorTipo(mapa);
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eligiendoTipo]);
+
   // Qué declara al menos una unidad de cada tipo. Es lo que permite distinguir
   // un dato faltante de un dato que no sabemos si corresponde (ver capacidadDe).
   const declaradoPorTipo = useMemo(() => {
@@ -758,30 +781,53 @@ function RecursosDelPuntoPage() {
           hace cada vehículo, y no está confirmada. Los tipos sí son dato: están
           escritos en la planilla. */}
       <Dialog open={eligiendoTipo} onOpenChange={setEligiendoTipo}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>¿Qué tipo de recurso vas a agregar?</DialogTitle>
           </DialogHeader>
           <p className="text-xs leading-relaxed text-muted-foreground">
             El tipo define qué datos pide el sistema después, así que se elige primero.
           </p>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
             {[...tipos]
               .sort((a, b) => a.tipo.localeCompare(b.tipo))
-              .map((t) => (
-                <button
-                  key={t.tipo}
-                  type="button"
-                  onClick={() => {
-                    setEligiendoTipo(false);
-                    setEnEdicion(null);
-                    setTipoNuevo(t.tipo);
-                  }}
-                  className="flex h-16 cursor-pointer items-center justify-center rounded-lg border border-border/60 bg-background/60 px-2 text-center text-xs font-medium leading-tight transition-all hover:border-primary hover:bg-primary/5"
-                >
-                  {t.tipo}
-                </button>
-              ))}
+              .map((t) => {
+                const foto = fotoPorTipo[t.tipo];
+                return (
+                  <button
+                    key={t.tipo}
+                    type="button"
+                    onClick={() => {
+                      setEligiendoTipo(false);
+                      setEnEdicion(null);
+                      setTipoNuevo(t.tipo);
+                    }}
+                    className="group cursor-pointer overflow-hidden rounded-lg border border-border/60 bg-background/60 text-left transition-all hover:border-primary hover:bg-primary/5"
+                  >
+                    <span className="block aspect-[4/3] w-full overflow-hidden bg-muted">
+                      {foto ? (
+                        <img
+                          src={resourcePhotoUrl(foto)}
+                          alt={t.tipo}
+                          className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-105"
+                          loading="lazy"
+                        />
+                      ) : (
+                        // Cuatro de los nueve tipos no tienen ninguna unidad con
+                        // foto en toda la flota. Se dice, en vez de dejar un
+                        // hueco gris que parezca una imagen que no cargó.
+                        <span className="flex h-full w-full flex-col items-center justify-center gap-1 text-muted-foreground">
+                          <ImageOff className="h-5 w-5 opacity-50" />
+                          <span className="text-[0.625rem]">Sin foto de referencia</span>
+                        </span>
+                      )}
+                    </span>
+                    <span className="block px-2 py-2 text-center text-xs font-medium leading-tight">
+                      {t.tipo}
+                    </span>
+                  </button>
+                );
+              })}
           </div>
         </DialogContent>
       </Dialog>
