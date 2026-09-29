@@ -358,17 +358,8 @@ function RecursosDelPuntoPage() {
           al lado del botón, como estaban: quedaban sin caja, desalineadas con
           él y compitiendo con el título. Van abajo, en la franja .panel, que es
           donde el sistema pone las cifras de cabecera. */}
-      <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border/25 px-6 py-5">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border/25 px-6 py-5">
         <div className="min-w-0">
-          {/* Un botón, no un enlace gris chico. Esta vista se abre desde otra y
-              el único camino de vuelta es este: en gris apagado y a tamaño de
-              nota al pie, quien no lo estuviera buscando no lo encontraba. */}
-          <Link to="/recursos" className="mb-3 inline-block">
-            <Button variant="secondary" size="sm">
-              <ArrowRightCircle className="mr-1.5 h-3.5 w-3.5 rotate-180" />
-              Volver a los puntos
-            </Button>
-          </Link>
           <p className="eyebrow">Recursos del punto</p>
           {punto ? (
             <h1 className="font-rubik text-3xl font-semibold tracking-normal text-foreground md:text-4xl">
@@ -395,6 +386,18 @@ function RecursosDelPuntoPage() {
             </p>
           )}
         </div>
+
+        {/* Al extremo derecho y con el peso de un botón primario. Estuvo arriba
+            del título como enlace gris chico y pasaba desapercibido: esta vista
+            se abre desde otra y este es el único camino de vuelta, así que no
+            puede ser lo menos visible de la pantalla. No compite con la acción
+            principal, que es el botón amarillo de la franja de abajo. */}
+        <Link to="/recursos" className="flex-shrink-0">
+          <Button>
+            <ArrowRightCircle className="mr-1.5 h-4 w-4 rotate-180" />
+            Volver a los puntos
+          </Button>
+        </Link>
       </div>
 
       <main className="flex min-h-0 flex-1 flex-col gap-5 p-6">
