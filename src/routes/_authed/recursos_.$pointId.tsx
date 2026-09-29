@@ -20,7 +20,7 @@
 // =============================================================================
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { ImageOff } from "lucide-react";
 import {
   AlertTriangle,
@@ -57,6 +57,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { SortableHead } from "@/components/SortableHead";
+import { ResourceFormDialog } from "@/components/ResourceFormDialog";
 import { notify } from "@/lib/notify";
 import {
   deleteResource,
@@ -66,7 +67,6 @@ import {
   resourcePhotoUrl,
   setResourceAvailability,
   type Resource,
-  type ResourceFamily,
   type ResourcePoint,
   type ResourceType,
 } from "@/lib/resources";
@@ -146,7 +146,6 @@ function dotacionTexto(r: Resource): string {
 
 function RecursosDelPuntoPage() {
   const { pointId } = Route.useParams();
-  const navigate = useNavigate();
 
   const [punto, setPunto] = useState<ResourcePoint | null>(null);
   const [recursos, setRecursos] = useState<Resource[]>([]);
@@ -157,6 +156,10 @@ function RecursosDelPuntoPage() {
   const [aEliminar, setAEliminar] = useState<Resource | null>(null);
   const [eliminando, setEliminando] = useState(false);
   const [fotoAmpliada, setFotoAmpliada] = useState<string | null>(null);
+  // Formulario: `tipoNuevo` con valor = alta, `enEdicion` con valor = edición.
+  // Nunca los dos a la vez.
+  const [tipoNuevo, setTipoNuevo] = useState<string | null>(null);
+  const [enEdicion, setEnEdicion] = useState<Resource | null>(null);
 
   const [busqueda, setBusqueda] = useState("");
   const [filtroEstado, setFiltroEstado] = useState<"todos" | "disponibles" | "no">("todos");
@@ -665,13 +668,10 @@ function RecursosDelPuntoPage() {
                           <div className="flex items-center justify-end gap-1">
                             <button
                               type="button"
-                              onClick={() =>
-                                navigate({
-                                  to: "/recursos/$pointId/recurso",
-                                  params: { pointId },
-                                  search: { id: r.id },
-                                })
-                              }
+                              onClick={() => {
+                                setTipoNuevo(null);
+                                setEnEdicion(r);
+                              }}
                               title="Editar recurso"
                               aria-label={`Editar ${r.tipo} ${r.numero_equipo}`}
                               className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition-all hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
@@ -747,57 +747,61 @@ function RecursosDelPuntoPage() {
 
       {/* ── AC1: el tipo, antes de cualquier campo ──
           Sigue siendo una modal porque el criterio pide que "Agregar recurso"
-          PREGUNTE el tipo; lo que cambió es que ya no abre otro diálogo detrás,
-          sino que lleva al formulario con el tipo elegido. */}
+          PREGUNTE el tipo.
+
+          Los nueve tipos van en UNA LISTA PLANA, sin agrupar. Estuvieron
+          repartidos en "Transportan carga", "Máquinas, cargan pero no
+          transportan", "Se remolcan" y "Apoyo y supervisión", y esa
+          clasificación no sale de ningún lado: la planilla de la municipalidad
+          no tiene columna de familia, la deduje yo de los nombres. Presentarla
+          como encabezados de sección la convertiía en una afirmación sobre qué
+          hace cada vehículo, y no está confirmada. Los tipos sí son dato: están
+          escritos en la planilla. */}
       <Dialog open={eligiendoTipo} onOpenChange={setEligiendoTipo}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>¿Qué tipo de recurso vas a agregar?</DialogTitle>
           </DialogHeader>
           <p className="text-xs leading-relaxed text-muted-foreground">
             El tipo define qué datos pide el sistema después, así que se elige primero.
           </p>
-          <div className="space-y-4">
-            {(["carga", "maquina", "arrastre", "apoyo"] as ResourceFamily[]).map((familia) => {
-              const deEsta = tipos.filter((t) => t.familia === familia);
-              if (deEsta.length === 0) return null;
-              return (
-                <div key={familia}>
-                  <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    {familia === "carga" && "Transportan carga"}
-                    {familia === "maquina" && "Máquinas, cargan pero no transportan"}
-                    {familia === "arrastre" && "Se remolcan"}
-                    {familia === "apoyo" && "Apoyo y supervisión"}
-                  </p>
-                  {/* Rejilla de tres y tarjetas del mismo alto: con los tipos en
-                      una lista de anchos distintos, los cuatro grupos se veían
-                      como cuatro bloques desalineados. */}
-                  <div className="grid grid-cols-3 gap-2">
-                    {deEsta.map((t) => (
-                      <button
-                        key={t.tipo}
-                        type="button"
-                        onClick={() => {
-                          setEligiendoTipo(false);
-                          navigate({
-                            to: "/recursos/$pointId/recurso",
-                            params: { pointId },
-                            search: { tipo: t.tipo },
-                          });
-                        }}
-                        className="flex h-16 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-border/60 bg-background/60 px-2 text-center transition-all hover:border-primary hover:bg-primary/5"
-                      >
-                        <Boxes className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-xs font-medium leading-tight">{t.tipo}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {[...tipos]
+              .sort((a, b) => a.tipo.localeCompare(b.tipo))
+              .map((t) => (
+                <button
+                  key={t.tipo}
+                  type="button"
+                  onClick={() => {
+                    setEligiendoTipo(false);
+                    setEnEdicion(null);
+                    setTipoNuevo(t.tipo);
+                  }}
+                  className="flex h-16 cursor-pointer items-center justify-center rounded-lg border border-border/60 bg-background/60 px-2 text-center text-xs font-medium leading-tight transition-all hover:border-primary hover:bg-primary/5"
+                >
+                  {t.tipo}
+                </button>
+              ))}
           </div>
         </DialogContent>
       </Dialog>
+
+      <ResourceFormDialog
+        abierto={tipoNuevo !== null || enEdicion !== null}
+        onOpenChange={(a) => {
+          if (!a) {
+            setTipoNuevo(null);
+            setEnEdicion(null);
+          }
+        }}
+        pointId={pointId}
+        nombrePunto={punto?.name ?? "el punto"}
+        tipoNuevo={tipoNuevo}
+        recurso={enEdicion}
+        tipos={tipos}
+        hermanos={recursos}
+        onGuardado={recargar}
+      />
 
       <Dialog
         open={fotoAmpliada !== null}

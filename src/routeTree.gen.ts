@@ -17,7 +17,6 @@ import { Route as AuthedCargaRouteImport } from './routes/_authed/carga'
 import { Route as AuthedRecursosRouteImport } from './routes/_authed/recursos'
 import { Route as AuthedRutasRouteImport } from './routes/_authed/rutas'
 import { Route as AuthedRecursosPointIdRouteImport } from './routes/_authed/recursos_.$pointId'
-import { Route as AuthedRecursosPointIdRecursoRouteImport } from './routes/_authed/recursos_.$pointId_.recurso'
 
 const AuthedRoute = AuthedRouteImport.update({
   id: '/_authed',
@@ -58,12 +57,6 @@ const AuthedRecursosPointIdRoute = AuthedRecursosPointIdRouteImport.update({
   path: '/recursos/$pointId',
   getParentRoute: () => AuthedRoute,
 } as any)
-const AuthedRecursosPointIdRecursoRoute =
-  AuthedRecursosPointIdRecursoRouteImport.update({
-    id: '/recursos_/$pointId_/recurso',
-    path: '/recursos/$pointId/recurso',
-    getParentRoute: () => AuthedRoute,
-  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthedIndexRoute
@@ -73,7 +66,6 @@ export interface FileRoutesByFullPath {
   '/recursos': typeof AuthedRecursosRoute
   '/rutas': typeof AuthedRutasRoute
   '/recursos/$pointId': typeof AuthedRecursosPointIdRoute
-  '/recursos/$pointId/recurso': typeof AuthedRecursosPointIdRecursoRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
@@ -83,7 +75,6 @@ export interface FileRoutesByTo {
   '/rutas': typeof AuthedRutasRoute
   '/': typeof AuthedIndexRoute
   '/recursos/$pointId': typeof AuthedRecursosPointIdRoute
-  '/recursos/$pointId/recurso': typeof AuthedRecursosPointIdRecursoRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -95,7 +86,6 @@ export interface FileRoutesById {
   '/_authed/rutas': typeof AuthedRutasRoute
   '/_authed/': typeof AuthedIndexRoute
   '/_authed/recursos_/$pointId': typeof AuthedRecursosPointIdRoute
-  '/_authed/recursos_/$pointId_/recurso': typeof AuthedRecursosPointIdRecursoRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -107,7 +97,6 @@ export interface FileRouteTypes {
     | '/recursos'
     | '/rutas'
     | '/recursos/$pointId'
-    | '/recursos/$pointId/recurso'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
@@ -117,7 +106,6 @@ export interface FileRouteTypes {
     | '/rutas'
     | '/'
     | '/recursos/$pointId'
-    | '/recursos/$pointId/recurso'
   id:
     | '__root__'
     | '/_authed'
@@ -128,7 +116,6 @@ export interface FileRouteTypes {
     | '/_authed/rutas'
     | '/_authed/'
     | '/_authed/recursos_/$pointId'
-    | '/_authed/recursos_/$pointId_/recurso'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -194,13 +181,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedRecursosPointIdRouteImport
       parentRoute: typeof AuthedRoute
     }
-    '/_authed/recursos_/$pointId_/recurso': {
-      id: '/_authed/recursos_/$pointId_/recurso'
-      path: '/recursos/$pointId/recurso'
-      fullPath: '/recursos/$pointId/recurso'
-      preLoaderRoute: typeof AuthedRecursosPointIdRecursoRouteImport
-      parentRoute: typeof AuthedRoute
-    }
   }
 }
 
@@ -211,7 +191,6 @@ interface AuthedRouteChildren {
   AuthedRutasRoute: typeof AuthedRutasRoute
   AuthedIndexRoute: typeof AuthedIndexRoute
   AuthedRecursosPointIdRoute: typeof AuthedRecursosPointIdRoute
-  AuthedRecursosPointIdRecursoRoute: typeof AuthedRecursosPointIdRecursoRoute
 }
 
 const AuthedRouteChildren: AuthedRouteChildren = {
@@ -221,7 +200,6 @@ const AuthedRouteChildren: AuthedRouteChildren = {
   AuthedRutasRoute: AuthedRutasRoute,
   AuthedIndexRoute: AuthedIndexRoute,
   AuthedRecursosPointIdRoute: AuthedRecursosPointIdRoute,
-  AuthedRecursosPointIdRecursoRoute: AuthedRecursosPointIdRecursoRoute,
 }
 
 const AuthedRouteWithChildren =
