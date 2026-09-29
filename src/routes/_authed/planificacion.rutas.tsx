@@ -69,7 +69,6 @@ import {
 } from "@/components/ui/select";
 import { listAnalyses, setPendingOpenId, type AnalysisSummary, type SavedAnalysisRecord } from "@/lib/analysisStore";
 import { listResourcePoints, type ResourcePoint } from "@/lib/resources";
-import { PanelPuntos, type PanelPuntosMapProps } from "@/components/PanelPuntos";
 import { MAIPU_BBOX } from "@/lib/maipuBoundary";
 import {
   Table,
@@ -84,7 +83,7 @@ import { generateRoute, type RoutePlanSegment } from "@/lib/routePlan";
 import { notify } from "@/lib/notify";
 import { ROUTE_OUTBOUND_COLOR, ROUTE_RETURN_COLOR, ROUTE_RETURN_OPACITY } from "@/components/route-colors";
 
-export const Route = createFileRoute("/_authed/planificacion")({
+export const Route = createFileRoute("/_authed/planificacion/rutas")({
   component: RutasPage,
 });
 
@@ -300,21 +299,11 @@ function RutasPage() {
   // Pestaña de la tabla al pie. Es el detalle de lo que el mapa muestra
   // como marcadores: las zonas que se van a retirar y los puntos desde
   // donde sale la flota. En el mapa son círculos; acá son cifras.
-  const [tabla, setTabla] = useState<"zonas" | "puntos">("zonas");
+  const [tabla, setTabla] = useState<"zonas" | "tramos">("zonas");
   // Encuadre manual a la comuna. Es un array nuevo en cada clic a propósito:
   // FitBounds en GeoMapImpl reacciona al cambio de REFERENCIA, así que mandar
   // la misma constante no volvería a encuadrar la segunda vez.
   const [recentrar, setRecentrar] = useState<[number, number][] | null>(null);
-  // Lo que el panel de puntos necesita del mapa mientras se ubica un punto.
-  // Vive acá porque el mapa es de esta vista, no del panel.
-  const [puntosMapProps, setPuntosMapProps] = useState<PanelPuntosMapProps>({
-    marker: null,
-    onMapClick: null,
-    focusPoint: null,
-  });
-  // Marcador de punto recién clickeado, para que el panel lo abra.
-  const [puntoClickeado, setPuntoClickeado] = useState<string | null>(null);
-  const [puntoAEditar, setPuntoAEditar] = useState<string | null>(null);
   // Solo para el mapa principal (mapPoints, abajo) -- se apaga cuando la
   // carga INICIAL de ambas fuentes (zonas + puntos de origen) resuelve, no
   // en cada refresh posterior (multi-pestaña). Antes el mapa se veía vacío
@@ -343,6 +332,13 @@ function RutasPage() {
   // sobre cada tramo del mapa. null hasta que hay una ruta exitosa.
   const [routeSegments, setRouteSegments] = useState<RoutePlanSegment[] | null>(null);
   const [routeError, setRouteError] = useState<string | null>(null);
+
+  // ¿El backend está mandando ya los datos de HDU5.1? Las columnas de vehículo
+  // y personal existen solo si SÍ. Preguntarlo por los datos y no por una
+  // bandera de configuración es lo que hace que aparezcan solas el día que el
+  // backend las devuelva, sin tocar esta vista.
+  const hayVehiculo = routeSegments?.some((seg) => seg.vehicle) ?? false;
+  const hayDotacion = routeSegments?.some((seg) => seg.crew && seg.crew.length > 0) ?? false;
 
   // Horas disponibles: 0/negativo/vacío no es una entrada válida — sin esto
   // se podía confirmar una ruta con "0 horas" en silencio (Number("") || 0).
@@ -547,10 +543,7 @@ function RutasPage() {
       // Con el panel de puntos abierto, el clic lo atiende ese panel (abre su
       // ficha para editarlo). Con el de ruta, sigue abriendo la ficha de solo
       // lectura de siempre, que es lo que sirve mientras se planifica.
-      // Con los dos bloques a la vista, un clic en un punto lo abre en el
-      // panel de puntos, que es donde se edita. La ficha de solo lectura
-      // dejó de tener sentido: el panel ya muestra todo lo que ella mostraba.
-      setPuntoClickeado(originPoint.id);
+      setZoomPoint(originPoint);
       setFocusPoint(point.position);
     }
   };
@@ -718,12 +711,7 @@ function RutasPage() {
             // El recentrado manual gana sobre el encuadre automático de la
             // ruta: es una acción explícita y reciente del usuario.
             fitBoundsTo={recentrar ?? routeFitPoints}
-            focusPoint={puntosMapProps.focusPoint ?? focusPoint}
-            // Sin pestañas, el panel de puntos siempre está montado: es él
-            // quien decide si espera un clic (solo mientras ubica un punto) y
-            // manda null el resto del tiempo.
-            marker={puntosMapProps.marker}
-            onMapClick={puntosMapProps.onMapClick ?? undefined}
+            focusPoint={focusPoint}
             lockToMaipu
           />
           {/* Volver al encuadre de la comuna. El mapa se puede mover dentro de
@@ -825,18 +813,6 @@ function RutasPage() {
             )}
             </div>
 
-            <div className="rounded-xl border border-border bg-card p-4">
-              <div className="mb-3 flex items-center gap-2.5 border-l-2 border-primary/50 pl-3">
-                <MapPin className="h-3.5 w-3.5 text-foreground/70" />
-                <h2 className="text-sm font-semibold tracking-tight text-foreground">Puntos</h2>
-              </div>
-              <PanelPuntos
-                onMapProps={setPuntosMapProps}
-                onPuntosCambiaron={refreshOriginPoints}
-                puntoSeleccionadoId={puntoClickeado}
-                puntoAEditarId={puntoAEditar}
-              />
-            </div>
           </div>
         </aside>
       </main>
@@ -850,7 +826,7 @@ function RutasPage() {
           {(
             [
               ["zonas", `Zonas cargadas (${loadedAnalyses.length})`],
-              ["puntos", `Puntos (${originPoints.length})`],
+              ["tramos", `Tramos de la ruta (${routeSegments?.length ?? 0})`],
             ] as const
           ).map(([valor, etiqueta]) => (
             <button
@@ -919,81 +895,77 @@ function RutasPage() {
                 </TableBody>
               </Table>
             )
-          ) : originPoints.length === 0 ? (
+          ) : !routeSegments || routeSegments.length === 0 ? (
             <p className="py-8 text-center text-xs text-muted-foreground">
-              Ningún punto registrado todavía. Se definen desde la pestaña Puntos del panel.
+              Todavía no hay una ruta generada. Los tramos aparecen acá al generarla.
             </p>
           ) : (
+            // Tabla de tramos. Hoy muestra lo que el backend devuelve: origen,
+            // camiones usados y las distancias y duraciones de ida y vuelta.
+            //
+            // Es también donde aterriza HDU5.1, que pide que "cada tramo del
+            // plan muestre qué vehículo lo recorre, por patente y tipo, y su
+            // personal asociado". Esas columnas se renderizan SOLO cuando el
+            // backend las manda (son campos opcionales del contrato en
+            // routePlan.ts): mientras no existan, la tabla muestra lo que hay.
+            // No se dibujan columnas vacías ni guiones a la espera de un dato,
+            // que es lo que convertiría una tabla en una promesa.
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/50 hover:bg-muted/50">
-                  <TableHead>Punto</TableHead>
-                  <TableHead>Dirección</TableHead>
-                  <TableHead className="w-[8rem] text-right">Recursos</TableHead>
-                  <TableHead className="w-[7rem] text-right">
-                    Capacidad <span className="mono opacity-70">(m³)</span>
+                  <TableHead className="w-[3rem]">#</TableHead>
+                  <TableHead>Origen</TableHead>
+                  {hayVehiculo && <TableHead>Vehículo</TableHead>}
+                  {hayDotacion && <TableHead>Personal</TableHead>}
+                  <TableHead className="w-[7rem] text-right">Camiones</TableHead>
+                  <TableHead className="w-[8rem] text-right">
+                    Ida <span className="mono opacity-70">(km)</span>
                   </TableHead>
-                  <TableHead className="w-[6rem]">Estado</TableHead>
-                  <TableHead className="w-[3rem]"></TableHead>
+                  <TableHead className="w-[8rem] text-right">
+                    Vuelta <span className="mono opacity-70">(km)</span>
+                  </TableHead>
+                  <TableHead className="w-[7rem] text-right">
+                    Duración <span className="mono opacity-70">(h)</span>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {originPoints.map((p) => (
-                  <TableRow
-                    key={p.id}
-                    onClick={() => navigate({ to: "/planificacion/$pointId", params: { pointId: p.id } })}
-                    title="Ver la flota de este punto"
-                    className="group cursor-pointer hover:bg-card/60"
-                  >
-                    <TableCell className="text-xs font-medium text-foreground transition-colors group-hover:text-primary">
-                      {p.name}
+                {routeSegments.map((seg, i) => (
+                  <TableRow key={i} className="hover:bg-card/60">
+                    <TableCell className="mono text-xs tabular-nums text-muted-foreground">
+                      {i + 1}
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {[p.address === p.name ? null : p.address, p.comuna]
-                        .filter(Boolean)
-                        .join(", ") || "-"}
+                    <TableCell className="text-xs font-medium">{seg.originName}</TableCell>
+                    {hayVehiculo && (
+                      <TableCell className="text-xs">
+                        {seg.vehicle ? (
+                          <>
+                            <span className="mono font-medium">{seg.vehicle.patente}</span>
+                            <span className="ml-1.5 text-muted-foreground">
+                              {seg.vehicle.tipo}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="text-muted-foreground">sin asignar</span>
+                        )}
+                      </TableCell>
+                    )}
+                    {hayDotacion && (
+                      <TableCell className="text-xs text-muted-foreground">
+                        {seg.crew && seg.crew.length > 0 ? seg.crew.join(", ") : "sin asignar"}
+                      </TableCell>
+                    )}
+                    <TableCell className="mono text-right text-xs tabular-nums">
+                      {seg.trucksUsed}
                     </TableCell>
                     <TableCell className="mono text-right text-xs tabular-nums">
-                      {p.available_count} de {p.resource_count}
+                      {seg.outboundDistanceKm.toFixed(1)}
                     </TableCell>
                     <TableCell className="mono text-right text-xs tabular-nums">
-                      {p.capacity_m3}
+                      {seg.returnDistanceKm.toFixed(1)}
                     </TableCell>
-                    <TableCell>
-                      <span
-                        className={`rounded px-1.5 py-0.5 text-[0.5625rem] font-semibold uppercase tracking-wide ${
-                          p.active
-                            ? "bg-success/15 text-success-strong"
-                            : "bg-muted text-muted-foreground"
-                        }`}
-                      >
-                        {p.active ? "Activo" : "Inactivo"}
-                      </span>
-                    </TableCell>
-                    {/* Dos acciones distintas sobre la misma fila, y por eso el
-                        lápiz corta la propagación: el clic en la fila abre la
-                        FLOTA del punto (otra pantalla), el lápiz lo abre para
-                        EDITARLO en el panel de la derecha, sin salir de acá. */}
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setPuntoAEditar(p.id);
-                            setFocusPoint([p.lat, p.lng]);
-                          }}
-                          title="Editar este punto"
-                          aria-label={`Editar ${p.name}`}
-                          className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition-all hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </button>
-                        <ArrowRightCircle
-                          aria-hidden="true"
-                          className="h-4 w-4 text-muted-foreground transition-colors group-hover:text-primary"
-                        />
-                      </div>
+                    <TableCell className="mono text-right text-xs tabular-nums">
+                      {(seg.outboundDurationHours + seg.returnDurationHours).toFixed(1)}
                     </TableCell>
                   </TableRow>
                 ))}

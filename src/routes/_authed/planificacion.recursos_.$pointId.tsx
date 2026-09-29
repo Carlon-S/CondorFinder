@@ -1,6 +1,6 @@
 // =============================================================================
 // CONDORFINDER, RECURSOS DE UN PUNTO (HDU8)
-// Archivo: src/routes/_authed/planificacion_.$pointId.tsx
+// Archivo: src/routes/_authed/planificacion.recursos_.$pointId.tsx
 //
 // La flota de un punto, en su propia vista. Antes era una tabla al pie de
 // /recursos, debajo del mapa y de la ficha del punto; acá tiene la pantalla
@@ -71,7 +71,7 @@ import {
   type ResourceType,
 } from "@/lib/resources";
 
-export const Route = createFileRoute("/_authed/planificacion_/$pointId")({
+export const Route = createFileRoute("/_authed/planificacion/recursos_/$pointId")({
   component: RecursosDelPuntoPage,
 });
 
@@ -395,10 +395,10 @@ function RecursosDelPuntoPage() {
               tiene que leerse como "navegación", igual que el menú lateral, no
               como una acción sobre los datos. La acción principal sigue siendo
               el botón amarillo de la franja de abajo. */}
-          <Link to="/planificacion" className="mt-3 inline-block">
+          <Link to="/planificacion/recursos" className="mt-3 inline-block">
             <Button className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90">
               <ArrowRightCircle className="mr-1.5 h-4 w-4 rotate-180" />
-              Volver a la planificación
+              Volver a los puntos
             </Button>
           </Link>
         </div>

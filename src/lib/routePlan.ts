@@ -43,6 +43,14 @@ export interface RoutePlanStop {
  *  route.outboundPaths[i]/returnPaths[i], para la ventana flotante sobre
  *  cada tramo (estilo Google Maps). La velocidad no viaja aparte -- se
  *  calcula en el frontend como distancia/tiempo cuando hace falta mostrarla. */
+/** Identidad del vehículo que recorre un tramo. HDU5.1/AC7. */
+export interface RoutePlanVehicle {
+  patente: string;
+  tipo: string;
+  /** Id del recurso en /resources/units, para poder abrirlo desde la ruta. */
+  resourceId?: string;
+}
+
 export interface RoutePlanSegment {
   originName: string;
   trucksUsed: number;
@@ -50,6 +58,39 @@ export interface RoutePlanSegment {
   outboundDurationHours: number;
   returnDistanceKm: number;
   returnDurationHours: number;
+
+  // ── Campos de HDU5.1 ──
+  //
+  // OPCIONALES a propósito, y es una decisión, no un descuido. El backend de
+  // HDU5.1 todavía no existe: hoy estos campos llegan ausentes y la interfaz
+  // muestra lo que hay. Declararlos igual deja el contrato escrito, así que
+  // cuando el backend empiece a devolverlos las columnas aparecen solas sin
+  // tocar la vista.
+  //
+  // Lo que NO se hace es dibujar las columnas vacías o con guiones a la espera
+  // del dato: una tabla que promete algo que no tiene es peor que una tabla
+  // más corta. planificacion.rutas.tsx decide si las renderiza preguntando por
+  // los datos (hayVehiculo, hayDotacion), no por una bandera de configuración.
+
+  /** Qué vehículo recorre este tramo, por patente y tipo. AC7. */
+  vehicle?: RoutePlanVehicle;
+  /** Personal asignado al vehículo de este tramo. AC7, y su disponibilidad es
+   *  la restricción del AC1 y el AC2. */
+  crew?: string[];
+  /** Autonomía del vehículo en km, contra la que se descarta un tramo
+   *  demasiado largo. AC3. */
+  autonomyKm?: number;
+}
+
+/** Una zona que no se pudo asignar a ningún vehículo, con el motivo. HDU5.1/AC6:
+ *  el plan sigue siendo válido para el resto, la zona queda marcada. */
+export interface RoutePlanUnassigned {
+  analysisId: string;
+  name: string;
+  /** Por qué no se pudo: sin vehículo compatible, sin personal completo, fuera
+   *  de autonomía, sin capacidad. En texto, porque es lo que se le muestra al
+   *  trabajador tal cual. */
+  reason: string;
 }
 
 export interface RoutePlanSuccess {
@@ -64,6 +105,8 @@ export interface RoutePlanSuccess {
     outboundPaths?: [number, number][][];
     returnPaths?: [number, number][][];
     segments?: RoutePlanSegment[];
+    /** HDU5.1/AC6. Ausente mientras el backend no lo calcule. */
+    unassignedZones?: RoutePlanUnassigned[];
   };
 }
 
