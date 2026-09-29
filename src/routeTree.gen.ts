@@ -14,9 +14,8 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthedIndexRouteImport } from './routes/_authed/index'
 import { Route as AuthedAnalysisRouteImport } from './routes/_authed/analysis'
 import { Route as AuthedCargaRouteImport } from './routes/_authed/carga'
-import { Route as AuthedRecursosRouteImport } from './routes/_authed/recursos'
-import { Route as AuthedRutasRouteImport } from './routes/_authed/rutas'
-import { Route as AuthedRecursosPointIdRouteImport } from './routes/_authed/recursos_.$pointId'
+import { Route as AuthedPlanificacionRouteImport } from './routes/_authed/planificacion'
+import { Route as AuthedPlanificacionPointIdRouteImport } from './routes/_authed/planificacion_.$pointId'
 
 const AuthedRoute = AuthedRouteImport.update({
   id: '/_authed',
@@ -42,39 +41,33 @@ const AuthedCargaRoute = AuthedCargaRouteImport.update({
   path: '/carga',
   getParentRoute: () => AuthedRoute,
 } as any)
-const AuthedRecursosRoute = AuthedRecursosRouteImport.update({
-  id: '/recursos',
-  path: '/recursos',
+const AuthedPlanificacionRoute = AuthedPlanificacionRouteImport.update({
+  id: '/planificacion',
+  path: '/planificacion',
   getParentRoute: () => AuthedRoute,
 } as any)
-const AuthedRutasRoute = AuthedRutasRouteImport.update({
-  id: '/rutas',
-  path: '/rutas',
-  getParentRoute: () => AuthedRoute,
-} as any)
-const AuthedRecursosPointIdRoute = AuthedRecursosPointIdRouteImport.update({
-  id: '/recursos_/$pointId',
-  path: '/recursos/$pointId',
-  getParentRoute: () => AuthedRoute,
-} as any)
+const AuthedPlanificacionPointIdRoute =
+  AuthedPlanificacionPointIdRouteImport.update({
+    id: '/planificacion_/$pointId',
+    path: '/planificacion/$pointId',
+    getParentRoute: () => AuthedRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthedIndexRoute
   '/login': typeof LoginRoute
   '/analysis': typeof AuthedAnalysisRoute
   '/carga': typeof AuthedCargaRoute
-  '/recursos': typeof AuthedRecursosRoute
-  '/rutas': typeof AuthedRutasRoute
-  '/recursos/$pointId': typeof AuthedRecursosPointIdRoute
+  '/planificacion': typeof AuthedPlanificacionRoute
+  '/planificacion/$pointId': typeof AuthedPlanificacionPointIdRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/analysis': typeof AuthedAnalysisRoute
   '/carga': typeof AuthedCargaRoute
-  '/recursos': typeof AuthedRecursosRoute
-  '/rutas': typeof AuthedRutasRoute
+  '/planificacion': typeof AuthedPlanificacionRoute
   '/': typeof AuthedIndexRoute
-  '/recursos/$pointId': typeof AuthedRecursosPointIdRoute
+  '/planificacion/$pointId': typeof AuthedPlanificacionPointIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -82,10 +75,9 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/_authed/analysis': typeof AuthedAnalysisRoute
   '/_authed/carga': typeof AuthedCargaRoute
-  '/_authed/recursos': typeof AuthedRecursosRoute
-  '/_authed/rutas': typeof AuthedRutasRoute
+  '/_authed/planificacion': typeof AuthedPlanificacionRoute
   '/_authed/': typeof AuthedIndexRoute
-  '/_authed/recursos_/$pointId': typeof AuthedRecursosPointIdRoute
+  '/_authed/planificacion_/$pointId': typeof AuthedPlanificacionPointIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -94,28 +86,25 @@ export interface FileRouteTypes {
     | '/login'
     | '/analysis'
     | '/carga'
-    | '/recursos'
-    | '/rutas'
-    | '/recursos/$pointId'
+    | '/planificacion'
+    | '/planificacion/$pointId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
     | '/analysis'
     | '/carga'
-    | '/recursos'
-    | '/rutas'
+    | '/planificacion'
     | '/'
-    | '/recursos/$pointId'
+    | '/planificacion/$pointId'
   id:
     | '__root__'
     | '/_authed'
     | '/login'
     | '/_authed/analysis'
     | '/_authed/carga'
-    | '/_authed/recursos'
-    | '/_authed/rutas'
+    | '/_authed/planificacion'
     | '/_authed/'
-    | '/_authed/recursos_/$pointId'
+    | '/_authed/planificacion_/$pointId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -160,25 +149,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedCargaRouteImport
       parentRoute: typeof AuthedRoute
     }
-    '/_authed/recursos': {
-      id: '/_authed/recursos'
-      path: '/recursos'
-      fullPath: '/recursos'
-      preLoaderRoute: typeof AuthedRecursosRouteImport
+    '/_authed/planificacion': {
+      id: '/_authed/planificacion'
+      path: '/planificacion'
+      fullPath: '/planificacion'
+      preLoaderRoute: typeof AuthedPlanificacionRouteImport
       parentRoute: typeof AuthedRoute
     }
-    '/_authed/rutas': {
-      id: '/_authed/rutas'
-      path: '/rutas'
-      fullPath: '/rutas'
-      preLoaderRoute: typeof AuthedRutasRouteImport
-      parentRoute: typeof AuthedRoute
-    }
-    '/_authed/recursos_/$pointId': {
-      id: '/_authed/recursos_/$pointId'
-      path: '/recursos/$pointId'
-      fullPath: '/recursos/$pointId'
-      preLoaderRoute: typeof AuthedRecursosPointIdRouteImport
+    '/_authed/planificacion_/$pointId': {
+      id: '/_authed/planificacion_/$pointId'
+      path: '/planificacion/$pointId'
+      fullPath: '/planificacion/$pointId'
+      preLoaderRoute: typeof AuthedPlanificacionPointIdRouteImport
       parentRoute: typeof AuthedRoute
     }
   }
@@ -187,19 +169,17 @@ declare module '@tanstack/react-router' {
 interface AuthedRouteChildren {
   AuthedAnalysisRoute: typeof AuthedAnalysisRoute
   AuthedCargaRoute: typeof AuthedCargaRoute
-  AuthedRecursosRoute: typeof AuthedRecursosRoute
-  AuthedRutasRoute: typeof AuthedRutasRoute
+  AuthedPlanificacionRoute: typeof AuthedPlanificacionRoute
   AuthedIndexRoute: typeof AuthedIndexRoute
-  AuthedRecursosPointIdRoute: typeof AuthedRecursosPointIdRoute
+  AuthedPlanificacionPointIdRoute: typeof AuthedPlanificacionPointIdRoute
 }
 
 const AuthedRouteChildren: AuthedRouteChildren = {
   AuthedAnalysisRoute: AuthedAnalysisRoute,
   AuthedCargaRoute: AuthedCargaRoute,
-  AuthedRecursosRoute: AuthedRecursosRoute,
-  AuthedRutasRoute: AuthedRutasRoute,
+  AuthedPlanificacionRoute: AuthedPlanificacionRoute,
   AuthedIndexRoute: AuthedIndexRoute,
-  AuthedRecursosPointIdRoute: AuthedRecursosPointIdRoute,
+  AuthedPlanificacionPointIdRoute: AuthedPlanificacionPointIdRoute,
 }
 
 const AuthedRouteWithChildren =

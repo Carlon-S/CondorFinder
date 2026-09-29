@@ -1,4 +1,24 @@
 // =============================================================================
+// CONDORFINDER, PANEL DE PUNTOS (HDU6)
+// Archivo: src/components/PanelPuntos.tsx
+//
+// Todo lo que era la vista /recursos: definir un punto haciendo clic en el
+// mapa, editarlo, eliminarlo, y la lista de los puntos guardados con acceso a
+// la flota de cada uno.
+//
+// Vive como PANEL y ya no como vista propia porque planificar un retiro y
+// administrar desde dónde sale la flota son la misma tarea sobre el mismo
+// mapa: antes había que cambiar de pantalla para ver si un punto tenía
+// capacidad, y volver para generar la ruta.
+//
+// NO dibuja el mapa. La vista anfitriona es la dueña del mapa, y este panel le
+// publica hacia arriba lo que necesita mostrar (el marcador del punto que se
+// está ubicando, el manejador de clic mientras se ubica, y a dónde volar) a
+// través de onMapProps. Un solo mapa con dos paneles que le hablan, en vez de
+// dos mapas que compiten.
+// =============================================================================
+
+// =============================================================================
 // CONDORFINDER, RECURSOS DISPONIBLES (HDU6)
 // Archivo: src/routes/_authed/recursos.tsx
 //
@@ -28,7 +48,7 @@
 // Máquina de 4 modos con useState simple, no hace falta nada del router.
 // =============================================================================
 
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowRightCircle,
@@ -52,7 +72,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { GeoMap, type GeoMapPoint } from "@/components/GeoMap";
 import { forwardGeocode, reverseGeocode } from "@/lib/geocoding";
 import {
   AlertDialog,
@@ -72,23 +91,6 @@ import {
   type ResourcePoint,
 } from "@/lib/resources";
 import { notify } from "@/lib/notify";
-
-interface RecursosSearch {
-  point?: string;
-}
-
-export const Route = createFileRoute("/_authed/recursos")({
-  // ?point=<id>, deep-link desde el accordion de Vista Principal ("Ver en
-  // el mapa"): con el id ya en la URL, el efecto de abajo selecciona ese
-  // punto apenas se cargan los puntos, sin haber clickeado nada acá.
-  // point?: en vez de point: string | undefined, así queda como key
-  // realmente opcional (un <Link to="/recursos"> sin search sigue
-  // compilando), no una requerida cuyo valor puede ser undefined.
-  validateSearch: (search: Record<string, unknown>): RecursosSearch =>
-    typeof search.point === "string" ? { point: search.point } : {},
-  component: RecursosPage,
-});
-
 type Mode = "idle" | "placing" | "configuring" | "listing";
 
 interface FormState {
@@ -108,8 +110,34 @@ const EMPTY_FORM: FormState = {
   active: true,
 };
 
-function RecursosPage() {
-  const { point: deepLinkPointId } = Route.useSearch();
+
+export interface PanelPuntosMapProps {
+  /** El punto que se está creando o editando, mientras se ubica en el mapa. */
+  marker: [number, number] | null;
+  /** Con valor solo en los modos que esperan un clic sobre el mapa. Cuando es
+   *  null, la anfitriona deja que el clic siga su curso normal. */
+  onMapClick: ((lat: number, lng: number) => void) | null;
+  /** A dónde volar: un punto recién seleccionado, o el resultado de geocodificar
+   *  una dirección escrita a mano. */
+  focusPoint: [number, number] | null;
+}
+
+export function PanelPuntos({
+  deepLinkPointId,
+  onMapProps,
+  onPuntosCambiaron,
+  puntoSeleccionadoId,
+}: {
+  /** ?point=id, para abrir directo en un punto concreto. */
+  deepLinkPointId?: string;
+  /** Se llama cada vez que cambia lo que el panel quiere que el mapa muestre. */
+  onMapProps: (props: PanelPuntosMapProps) => void;
+  /** Tras crear, editar o eliminar: la anfitriona vuelve a cargar SUS puntos,
+   *  que son los mismos marcadores del mapa y los orígenes de la ruta. */
+  onPuntosCambiaron: () => void;
+  /** Clic en un marcador de punto en el mapa de la anfitriona. */
+  puntoSeleccionadoId?: string | null;
+}) {
   const navigate = useNavigate();
   const [mode, setMode] = useState<Mode>("idle");
   const [pendingPoint, setPendingPoint] = useState<[number, number] | null>(null);
@@ -167,10 +195,7 @@ function RecursosPage() {
     if (deletingPoint) setDeletingPointDisplay(deletingPoint);
   }, [deletingPoint]);
 
-  // Deep-link (?point=id) desde el accordion de Vista Principal, una vez
-  // que los puntos están cargados, selecciona el mismo que un click real en
-  // el marker seleccionaría (mismo estado, mismo camino hacia el vuelo del
-  // mapa vía el focusPoint derivado más abajo).
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   useEffect(() => {
     if (!deepLinkPointId || points.length === 0) return;
     const found = points.find((p) => p.id === deepLinkPointId);
@@ -269,11 +294,6 @@ function RecursosPage() {
     // propagación, ver GeoMap.tsx), en modo idle, deselecciona el punto
     // que se estuviera mostrando en el panel.
     if (mode === "idle") setSelectedPoint(null);
-  };
-
-  const handlePointClick = (point: GeoMapPoint) => {
-    if (mode !== "idle") return;
-    setSelectedPoint(points.find((p) => p.id === point.id) ?? null);
   };
 
   const startEditing = (point: ResourcePoint) => {
@@ -404,56 +424,30 @@ function RecursosPage() {
       muted: !p.active,
     }));
 
-  // Cifras de toda la flota, para la franja superior. Salen del resumen que
-  // calcula el backend por punto, no de recontar los recursos acá: dos
-  // aritméticas sobre el mismo número terminan discrepando.
-  const totales = {
-    puntos: points.length,
-    recursos: points.reduce((sum, p) => sum + p.resource_count, 0),
-    disponibles: points.reduce((sum, p) => sum + p.available_count, 0),
-    capacidad: points.reduce((sum, p) => sum + p.capacity_m3, 0),
-  };
+  // Publica hacia arriba lo que el mapa tiene que mostrar. Se recalcula solo
+  // cuando cambia algo que el mapa ve, no en cada render: onMapProps escribe
+  // estado en la anfitriona, y llamarlo sin condición sería un bucle.
+  useEffect(() => {
+    onMapProps({
+      marker: mode === "configuring" ? pendingPoint : null,
+      // El mapa solo escucha clics cuando este panel está esperando uno. En los
+      // demás modos la anfitriona conserva su propio comportamiento.
+      onMapClick: mode === "placing" || mode === "configuring" ? handleMapClick : null,
+      focusPoint: selectedPoint ? [selectedPoint.lat, selectedPoint.lng] : geocodeFlyTarget,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, pendingPoint, selectedPoint, geocodeFlyTarget]);
 
-  // El mapa crece cuando se está usando de verdad (ubicar un punto) y se achica
-  // cuando es solo referencia. Antes ocupaba la pantalla completa a la derecha y
-  // empujaba los 21 vehículos a una columna de 280px donde no se leía ninguno.
-  const mapaAlto = mode === "placing" || mode === "configuring"
-    ? "h-[clamp(22rem,46vh,34rem)]"
-    : "h-[clamp(15rem,30vh,24rem)]";
+  // Un clic en un marcador del mapa lo recibe la anfitriona, que avisa acá.
+  useEffect(() => {
+    if (!puntoSeleccionadoId) return;
+    const encontrado = points.find((p) => p.id === puntoSeleccionadoId);
+    if (encontrado) setSelectedPoint(encontrado);
+  }, [puntoSeleccionadoId, points]);
 
   return (
-    <div className="flex min-h-screen flex-col bg-background text-foreground">
-      {/* Encabezado a lo ancho, mismo patrón que Vista Principal. Antes vivía
-          dentro del aside y le comía un tercio del alto a la única columna que
-          tenía contenido. */}
-      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border/25 px-6 py-5">
-        <div>
-          <p className="eyebrow">Planificación</p>
-          <h1 className="font-rubik text-3xl font-semibold tracking-normal text-foreground md:text-4xl">
-            Recursos Disponibles
-          </h1>
-          <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-            Define puntos y los recursos disponibles en cada uno para planificar rutas
-            de recolección.
-          </p>
-        </div>
-      </div>
+    <div className="flex flex-col gap-4">
 
-      <main className="flex min-h-0 flex-1 flex-col gap-5 p-6">
-        {/* Franja de cifras, mismo tratamiento .panel que Vista Principal: lo
-            primero que hay que poder leer al entrar. */}
-        <div className="panel flex flex-wrap items-center divide-x divide-border/10 px-1">
-          <Cifra icono={<MapPin className="h-4 w-4" />} etiqueta="Puntos" valor={String(totales.puntos)} />
-          <Cifra icono={<TruckIcon className="h-4 w-4" />} etiqueta="Recursos" valor={String(totales.recursos)} />
-          <Cifra icono={<TruckIcon className="h-4 w-4" />} etiqueta="Disponibles" valor={`${totales.disponibles} de ${totales.recursos}`} />
-          <Cifra
-            icono={<Boxes className="h-4 w-4" />}
-            etiqueta="Capacidad de transporte"
-            valor={`${totales.capacidad} m³`}
-          />
-        </div>
-
-        <div className="grid min-h-0 gap-5 lg:grid-cols-[clamp(17rem,24vw,23rem)_1fr]">
         <aside className="rounded-xl border border-border bg-card p-5">
           <div className="flex flex-col gap-4">
 
@@ -700,29 +694,6 @@ function RecursosPage() {
           </div>
         </aside>
 
-        <section
-          className={`relative min-w-0 overflow-hidden rounded-xl border border-border bg-background animate-in fade-in duration-500 ${mapaAlto}`}
-        >
-          <GeoMap
-            className="h-full w-full"
-            marker={mode === "configuring" ? pendingPoint : null}
-            points={mapPoints}
-            focusPoint={selectedPoint ? [selectedPoint.lat, selectedPoint.lng] : geocodeFlyTarget}
-            lockToMaipu
-            onMapClick={handleMapClick}
-            onPointClick={handlePointClick}
-          />
-          {/* Sin esto, mientras listResourcePoints() todavía no resuelve el
-              mapa se ve simplemente vacío -- indistinguible de "no hay
-              puntos guardados todavía" para quien lo mira. */}
-          {loadingPoints && (
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/60">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            </div>
-          )}
-        </section>
-        </div>
-
         {/* La flota de cada punto vive en /recursos/{id}, su propia vista. Acá
             queda el listado de puntos, que es de lo que trata esta pantalla. */}
         {(
@@ -769,17 +740,19 @@ function RecursosPage() {
                         Capacidad <span className="mono opacity-70">(m³)</span>
                       </TableHead>
                       <TableHead className="w-[6rem]">Estado</TableHead>
-                      <TableHead className="w-[10rem] text-right"></TableHead>
+                      <TableHead className="w-[3rem]"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {points.map((p) => (
                       <TableRow
                         key={p.id}
-                        onClick={() => navigate({ to: "/recursos/$pointId", params: { pointId: p.id } })}
+                        onClick={() => navigate({ to: "/planificacion/$pointId", params: { pointId: p.id } })}
                         className="group cursor-pointer hover:bg-card/60"
                       >
-                        <TableCell className="font-medium">{p.name}</TableCell>
+                        <TableCell className="font-medium text-foreground transition-colors group-hover:text-primary">
+                          {p.name}
+                        </TableCell>
                         <TableCell className="text-muted-foreground">
                           {[p.address, p.comuna].filter(Boolean).join(", ") || "-"}
                         </TableCell>
@@ -800,14 +773,17 @@ function RecursosPage() {
                             {p.active ? "Activo" : "Inactivo"}
                           </span>
                         </TableCell>
-                        {/* La fila entera es clickeable, pero eso no se ve. Este
-                            texto es lo que anuncia adónde lleva; sin él, que la
-                            flota viva en otra pantalla es un secreto. */}
+                        {/* Una flecha SIEMPRE visible, no un texto que aparece al
+                            pasar el cursor. Con el texto oculto, quien no moviera
+                            el mouse sobre la fila no tenía forma de saber que
+                            llevaba a alguna parte, y con teclado directamente
+                            nunca aparecía. Una flecha permanente dice "esto se
+                            abre" sin ocupar media columna. */}
                         <TableCell className="text-right">
-                          <span className="inline-flex items-center gap-1.5 text-xs text-primary opacity-0 transition-opacity group-hover:opacity-100">
-                            Ver sus recursos
-                            <ArrowRightCircle className="h-3.5 w-3.5" />
-                          </span>
+                          <ArrowRightCircle
+                            aria-hidden="true"
+                            className="ml-auto h-4 w-4 text-muted-foreground transition-colors group-hover:text-primary"
+                          />
                         </TableCell>
                       </TableRow>
                     ))}
@@ -817,8 +793,6 @@ function RecursosPage() {
             </div>
           </div>
         )}
-      </main>
-
       {/* AC6, confirmación de eliminación, mismo patrón que "Eliminar zona" en index.tsx */}
       <AlertDialog
         open={deletingPoint !== null}
@@ -844,43 +818,6 @@ function RecursosPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
-  );
-}
-
-/** Una cifra de la franja superior. Mismo patrón que los KPI de Vista
- *  Principal: ícono, etiqueta chica y el número en .mono, que es donde el
- *  sistema pone las magnitudes. */
-/** Una cifra de la franja superior: ícono, etiqueta chica y el número en .mono,
- *  que es donde el sistema pone las magnitudes.
- *
- *  Todas del mismo tamaño y con el ícono SIN pastilla de fondo. Hubo una
- *  versión con la capacidad al doble y el ícono en una pastilla de color, y
- *  pesaba más el adorno que el dato: cifras de la misma naturaleza en una misma
- *  franja con tipografías distintas se leen como si una estuviera rota. La
- *  jerarquía la da el orden, no el tamaño. */
-function Cifra({
-  icono,
-  etiqueta,
-  valor,
-}: {
-  icono: React.ReactNode;
-  etiqueta: string;
-  valor: string;
-}) {
-  return (
-    <div className="flex flex-shrink-0 items-center gap-3 px-5 py-3.5">
-      <span className="flex h-8 w-8 items-center justify-center text-muted-foreground">
-        {icono}
-      </span>
-      <span>
-        <span className="block text-[0.6875rem] uppercase tracking-wide text-muted-foreground">
-          {etiqueta}
-        </span>
-        <span className="mono block text-sm font-semibold tabular-nums text-foreground">
-          {valor}
-        </span>
-      </span>
     </div>
   );
 }

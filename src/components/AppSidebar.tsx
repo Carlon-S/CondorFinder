@@ -24,8 +24,11 @@ import { logout } from "@/lib/auth";
 const NAV_ITEMS = [
   { to: "/", label: "Zonas Monitoreadas", icon: LayoutDashboard },
   { to: "/carga", label: "Carga De Imágenes", icon: UploadCloud },
-  { to: "/recursos", label: "Recursos Disponibles", icon: Truck },
-  { to: "/rutas", label: "Generar Ruta", icon: Route },
+  // Una sola entrada para las dos cosas: los puntos desde donde sale la flota
+  // y las rutas que se arman con ella comparten mapa y son la misma tarea. Eran
+  // "Recursos Disponibles" y "Generar Ruta" por separado, y obligaban a cambiar
+  // de pantalla para saber si un punto tenía capacidad antes de generar.
+  { to: "/planificacion", label: "Planificación", icon: Route },
 ] as const;
 
 export function AppSidebar() {

@@ -1,15 +1,15 @@
 // =============================================================================
 // CONDORFINDER, RECURSOS DE UN PUNTO (HDU8)
-// Archivo: src/routes/_authed/recursos_.$pointId.tsx
+// Archivo: src/routes/_authed/planificacion_.$pointId.tsx
 //
 // La flota de un punto, en su propia vista. Antes era una tabla al pie de
 // /recursos, debajo del mapa y de la ficha del punto; acá tiene la pantalla
 // entera, que es lo que necesita una tabla de 21 filas con orden, filtros y
 // páginas.
 //
-// El guion bajo de "recursos_" saca esta ruta de debajo de /recursos: esa es
-// una ruta hoja, no un layout, y anidar bajo ella exigiría un <Outlet> que no
-// tiene. La URL igual queda /recursos/{id}.
+// El guion bajo de "planificacion_" saca esta ruta de debajo de /planificacion:
+// esa es una ruta hoja, no un layout, y anidar bajo ella exigiría un <Outlet>
+// que no tiene. La URL igual queda /planificacion/{id}.
 //
 // Los criterios de HDU8 que viven acá:
 //   AC1  "Agregar recurso" abre la modal que pregunta el TIPO, y recién con el
@@ -71,7 +71,7 @@ import {
   type ResourceType,
 } from "@/lib/resources";
 
-export const Route = createFileRoute("/_authed/recursos_/$pointId")({
+export const Route = createFileRoute("/_authed/planificacion_/$pointId")({
   component: RecursosDelPuntoPage,
 });
 
@@ -385,19 +385,23 @@ function RecursosDelPuntoPage() {
               )}
             </p>
           )}
-        </div>
+          {/* Debajo del bloque del título y en el navy del sidebar. Estuvo
+              arriba como enlace gris chico y pasaba desapercibido: esta vista se
+              abre desde otra y este es el único camino de vuelta, así que no
+              puede ser lo menos visible de la pantalla.
 
-        {/* Al extremo derecho y con el peso de un botón primario. Estuvo arriba
-            del título como enlace gris chico y pasaba desapercibido: esta vista
-            se abre desde otra y este es el único camino de vuelta, así que no
-            puede ser lo menos visible de la pantalla. No compite con la acción
-            principal, que es el botón amarillo de la franja de abajo. */}
-        <Link to="/recursos" className="flex-shrink-0">
-          <Button>
-            <ArrowRightCircle className="mr-1.5 h-4 w-4 rotate-180" />
-            Volver a los puntos
-          </Button>
-        </Link>
+              El color va con bg-sidebar y no con el variant por omisión, que usa
+              --primary: son dos navy distintos (#070B14 contra #0F2244) y este
+              tiene que leerse como "navegación", igual que el menú lateral, no
+              como una acción sobre los datos. La acción principal sigue siendo
+              el botón amarillo de la franja de abajo. */}
+          <Link to="/planificacion" className="mt-3 inline-block">
+            <Button className="bg-sidebar text-sidebar-foreground hover:bg-sidebar/90">
+              <ArrowRightCircle className="mr-1.5 h-4 w-4 rotate-180" />
+              Volver a la planificación
+            </Button>
+          </Link>
+        </div>
       </div>
 
       <main className="flex min-h-0 flex-1 flex-col gap-5 p-6">

@@ -67,12 +67,13 @@ import {
 } from "@/components/ui/select";
 import { listAnalyses, setPendingOpenId, type AnalysisSummary, type SavedAnalysisRecord } from "@/lib/analysisStore";
 import { listResourcePoints, type ResourcePoint } from "@/lib/resources";
+import { PanelPuntos, type PanelPuntosMapProps } from "@/components/PanelPuntos";
 import { projectPolygonToWgs84 } from "@/lib/projection";
 import { generateRoute, type RoutePlanSegment } from "@/lib/routePlan";
 import { notify } from "@/lib/notify";
 import { ROUTE_OUTBOUND_COLOR, ROUTE_RETURN_COLOR, ROUTE_RETURN_OPACITY } from "@/components/route-colors";
 
-export const Route = createFileRoute("/_authed/rutas")({
+export const Route = createFileRoute("/_authed/planificacion")({
   component: RutasPage,
 });
 
@@ -284,6 +285,21 @@ function RutasPage() {
   // inactivos), y su subconjunto activo es lo que la confirmación (AC1)
   // necesita. Un solo fetch cubre ambos usos.
   const [originPoints, setOriginPoints] = useState<ResourcePoint[]>([]);
+
+  // Pestaña del panel lateral. Las dos tareas comparten el MISMO mapa: dónde
+  // está la flota y por dónde pasa la ruta son la misma geografía, y tenerlas
+  // en pantallas separadas obligaba a cambiar de vista para saber si un punto
+  // tenía capacidad y volver para generar.
+  const [panel, setPanel] = useState<"ruta" | "puntos">("ruta");
+  // Lo que el panel de puntos necesita del mapa mientras se ubica un punto.
+  // Vive acá porque el mapa es de esta vista, no del panel.
+  const [puntosMapProps, setPuntosMapProps] = useState<PanelPuntosMapProps>({
+    marker: null,
+    onMapClick: null,
+    focusPoint: null,
+  });
+  // Marcador de punto recién clickeado, para que el panel lo abra.
+  const [puntoClickeado, setPuntoClickeado] = useState<string | null>(null);
   // Solo para el mapa principal (mapPoints, abajo) -- se apaga cuando la
   // carga INICIAL de ambas fuentes (zonas + puntos de origen) resuelve, no
   // en cada refresh posterior (multi-pestaña). Antes el mapa se veía vacío
@@ -513,6 +529,14 @@ function RutasPage() {
     }
     const originPoint = originPoints.find((p) => p.id === point.id);
     if (originPoint) {
+      // Con el panel de puntos abierto, el clic lo atiende ese panel (abre su
+      // ficha para editarlo). Con el de ruta, sigue abriendo la ficha de solo
+      // lectura de siempre, que es lo que sirve mientras se planifica.
+      if (panel === "puntos") {
+        setPuntoClickeado(originPoint.id);
+        setFocusPoint(point.position);
+        return;
+      }
       setZoomPoint(originPoint);
       setFocusPoint(point.position);
     }
@@ -639,15 +663,51 @@ function RutasPage() {
         <aside className="overflow-y-auto border-r border-border/35 p-5">
           <div className="flex flex-col gap-4">
             <div className="animate-in fade-in slide-in-from-left-2 duration-300">
-              <p className="eyebrow">Recolección</p>
+              <p className="eyebrow">Planificación</p>
               <h1 className="font-rubik text-3xl font-semibold tracking-normal text-foreground md:text-4xl">
-                Generar Ruta
+                Planificar Retiro
               </h1>
               <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                Carga análisis guardados para ubicar sus basurales en el mapa y genera una ruta
-                óptima de recolección.
+                Los puntos desde donde sale la flota y las zonas a retirar, sobre el mismo mapa.
               </p>
             </div>
+
+            {/* Dos pestañas sobre UN mapa. No son dos vistas disfrazadas: el
+                mapa de abajo sigue mostrando los puntos y las zonas a la vez
+                siempre, y lo que cambia es con cuál de las dos se está
+                trabajando. */}
+            <div className="flex items-center gap-1 rounded-md bg-background/60 p-0.5">
+              {(
+                [
+                  ["ruta", "Ruta"],
+                  ["puntos", "Puntos"],
+                ] as const
+              ).map(([valor, etiqueta]) => (
+                <button
+                  key={valor}
+                  type="button"
+                  onClick={() => setPanel(valor)}
+                  className={`flex-1 cursor-pointer rounded px-3 py-1.5 text-xs font-medium transition-colors ${
+                    panel === valor
+                      ? "bg-card text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {etiqueta}
+                </button>
+              ))}
+            </div>
+
+            {panel === "puntos" && (
+              <PanelPuntos
+                onMapProps={setPuntosMapProps}
+                onPuntosCambiaron={refreshOriginPoints}
+                puntoSeleccionadoId={puntoClickeado}
+              />
+            )}
+
+            {panel === "ruta" && (
+            <>
 
             <div className="animate-in fade-in slide-in-from-left-2 duration-300 flex flex-col gap-2">
               <Button onClick={openLoadDialog} variant="secondary" className="w-full">
@@ -721,12 +781,13 @@ function RutasPage() {
                 <TriangleAlert className="mb-2 h-5 w-5 text-warning" />
                 <p className="text-sm font-semibold">No se pudo generar la ruta</p>
                 <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{routeError}</p>
-                <Link
-                  to="/recursos"
-                  className="mt-3 inline-flex items-center text-xs font-medium text-primary hover:underline"
+                <button
+                  type="button"
+                  onClick={() => setPanel("puntos")}
+                  className="mt-3 inline-flex cursor-pointer items-center text-xs font-medium text-primary hover:underline"
                 >
-                  Revisar recursos disponibles →
-                </Link>
+                  Revisar los puntos →
+                </button>
               </div>
             )}
 
@@ -763,6 +824,8 @@ function RutasPage() {
                 </ul>
               </div>
             )}
+            </>
+            )}
           </div>
         </aside>
 
@@ -776,7 +839,11 @@ function RutasPage() {
             returnPaths={routeReturnPaths}
             routeSegments={routeSegments}
             fitBoundsTo={routeFitPoints}
-            focusPoint={focusPoint}
+            // El panel de puntos manda su propio destino de vuelo mientras está
+            // ubicando o geocodificando; si no, vale el de esta vista.
+            focusPoint={puntosMapProps.focusPoint ?? focusPoint}
+            marker={panel === "puntos" ? puntosMapProps.marker : null}
+            onMapClick={panel === "puntos" ? puntosMapProps.onMapClick ?? undefined : undefined}
           />
           {/* Sin esto, mientras las zonas y los puntos de origen todavía no
               resuelven el mapa se ve vacío -- indistinguible de "no hay
@@ -1256,13 +1323,14 @@ function RutasPage() {
                 </div>
               </div>
 
-              <Link
-                to="/recursos"
-                className="flex items-center gap-2 rounded-md border border-dashed border-border/60 p-2.5 text-xs text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary"
+              <button
+                type="button"
+                onClick={() => setPanel("puntos")}
+                className="flex w-full cursor-pointer items-center gap-2 rounded-md border border-dashed border-border/60 p-2.5 text-left text-xs text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary"
               >
                 <Warehouse className="h-4 w-4 flex-shrink-0" />
-                Editar desde Recursos disponibles
-              </Link>
+                Editar en la pestaña Puntos
+              </button>
             </div>
           )}
         </DialogContent>
@@ -1290,10 +1358,14 @@ function RutasPage() {
                 </div>
               ) : activePoints.length === 0 ? (
                 <p className="rounded-md border border-dashed border-border/50 py-3 text-center text-xs text-muted-foreground">
-                  No hay puntos activos —{" "}
-                  <Link to="/recursos" className="text-primary hover:underline">
-                    revisa Recursos disponibles
-                  </Link>
+                  No hay puntos activos.{" "}
+                  <button
+                    type="button"
+                    onClick={() => setPanel("puntos")}
+                    className="cursor-pointer text-primary hover:underline"
+                  >
+                    Revísalos en la pestaña Puntos
+                  </button>
                   .
                 </p>
               ) : (
