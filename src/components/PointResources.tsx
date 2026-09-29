@@ -20,7 +20,8 @@
 // para planificar nada.
 // =============================================================================
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ImageOff, ImagePlus } from "lucide-react";
 import {
   AlertTriangle,
   Boxes,
@@ -66,6 +67,7 @@ import {
   resourcePhotoUrl,
   setResourceAvailability,
   updateResource,
+  uploadResourcePhoto,
   type Resource,
   type ResourceFamily,
   type ResourceInput,
@@ -118,18 +120,37 @@ function dotacionTexto(r: ResourceInput): string {
   return partes.length > 0 ? partes.join(" + ") : "sin dotación declarada";
 }
 
+/** Anchos de las columnas, declarados en porcentaje y en un solo lugar.
+ *
+ *  Van con `table-fixed` en la tabla: con el ancho automático del navegador
+ *  cada columna mide lo que mide su contenido más largo, así que "Vehículo" se
+ *  comía el espacio con un "CATERPILLAR 416F2 2018" y "Capacidad (m³)" quedaba
+ *  tan angosta que el encabezado se partía en dos líneas. Con anchos fijos las
+ *  columnas quedan parejas y el encabezado entra entero. */
+const ANCHOS = {
+  estado: "w-[15%]",
+  foto: "w-[9%]",
+  equipo: "w-[15%]",
+  tipo: "w-[17%]",
+  capacidad: "w-[14%]",
+  vehiculo: "w-[22%]",
+  acciones: "w-[8%]",
+} as const;
+
 function EncabezadoRecursos() {
   return (
     <TableRow className="bg-muted/50 hover:bg-muted/50">
-      <TableHead className="w-[9rem]">Estado</TableHead>
-      <TableHead className="w-[5.5rem]"></TableHead>
-      <TableHead className="w-[9rem]">Equipo</TableHead>
-      <TableHead>Tipo</TableHead>
-      <TableHead className="w-[8rem] text-right">
+      <TableHead className={ANCHOS.estado}>Estado</TableHead>
+      <TableHead className={ANCHOS.foto}></TableHead>
+      <TableHead className={ANCHOS.equipo}>Equipo</TableHead>
+      <TableHead className={ANCHOS.tipo}>Tipo</TableHead>
+      {/* whitespace-nowrap: la unidad es parte del nombre de la columna y
+          partida en dos líneas deja de leerse como tal. */}
+      <TableHead className={`${ANCHOS.capacidad} whitespace-nowrap text-right`}>
         Capacidad <span className="mono opacity-70">(m³)</span>
       </TableHead>
-      <TableHead>Vehículo</TableHead>
-      <TableHead className="w-[5rem]"></TableHead>
+      <TableHead className={ANCHOS.vehiculo}>Vehículo</TableHead>
+      <TableHead className={ANCHOS.acciones}></TableHead>
     </TableRow>
   );
 }
@@ -157,6 +178,12 @@ export function PointResources({
   const [editandoId, setEditandoId] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
   const [aEliminar, setAEliminar] = useState<Resource | null>(null);
+  // Foto que se está mirando en grande. Es su propio estado y no un booleano
+  // porque se abre desde dos lugares (la tabla y el formulario) y cada uno
+  // muestra una imagen distinta.
+  const [fotoAmpliada, setFotoAmpliada] = useState<string | null>(null);
+  const [subiendoFoto, setSubiendoFoto] = useState(false);
+  const inputFoto = useRef<HTMLInputElement>(null);
   const [eliminando, setEliminando] = useState(false);
 
   const recargar = () => {
@@ -212,6 +239,23 @@ export function PointResources({
   }, [recursos, busqueda, filtroEstado]);
 
   const noDisponibles = recursos.filter((r) => !r.disponible).length;
+
+  // Paginación. Con 21 unidades la tabla entera empujaba el resto de la página
+  // hacia abajo y obligaba a desplazarse para volver a los filtros; con
+  // páginas, la vista mide siempre lo mismo.
+  const POR_PAGINA = 10;
+  const [pagina, setPagina] = useState(1);
+  const totalPaginas = Math.max(1, Math.ceil(visibles.length / POR_PAGINA));
+
+  // Filtrar deja la página actual fuera de rango (estabas en la 3 y ahora hay
+  // una): sin esto la tabla se ve vacía aunque haya resultados.
+  useEffect(() => {
+    setPagina((p) => Math.min(p, totalPaginas));
+  }, [totalPaginas]);
+
+  const pagina_actual = Math.min(pagina, totalPaginas);
+  const desde = (pagina_actual - 1) * POR_PAGINA;
+  const enPagina = visibles.slice(desde, desde + POR_PAGINA);
 
   const abrirNuevo = (tipo: string) => {
     setEligiendoTipo(false);
@@ -277,6 +321,29 @@ export function PointResources({
       );
     } finally {
       setAlternando(null);
+    }
+  };
+
+  const elegirFoto = async (archivo: File | undefined) => {
+    if (!archivo || !borrador) return;
+    setSubiendoFoto(true);
+    try {
+      // Se sube en el momento, no al guardar el formulario: así la miniatura se
+      // ve de inmediato y no hay que cargar el archivo en memoria hasta que
+      // alguien apriete Guardar. El costo es que una foto subida y después
+      // cancelada queda huérfana en disco; son unos 60 kB y el caso es poco
+      // frecuente, mucho menos malo que una carga que falla recién al final.
+      const nombre = await uploadResourcePhoto(archivo);
+      setBorrador({ ...borrador, foto: nombre });
+    } catch (err) {
+      notify.error(
+        "No se pudo subir la imagen",
+        err instanceof Error ? err.message : "Intenta nuevamente.",
+      );
+    } finally {
+      setSubiendoFoto(false);
+      // Sin esto, volver a elegir EL MISMO archivo no dispara onChange.
+      if (inputFoto.current) inputFoto.current.value = "";
     }
   };
 
@@ -442,7 +509,7 @@ export function PointResources({
 
       <div className="px-5 pb-5">
         {cargando ? (
-          <Table>
+          <Table className="table-fixed">
             <TableHeader>
               <EncabezadoRecursos />
             </TableHeader>
@@ -494,12 +561,12 @@ export function PointResources({
             </Button>
           </div>
         ) : (
-          <Table>
+          <Table className="table-fixed">
             <TableHeader>
               <EncabezadoRecursos />
             </TableHeader>
             <TableBody>
-              {visibles.map((r) => {
+              {enPagina.map((r) => {
                 const cap = textoCapacidad(r);
                 return (
                   <TableRow
@@ -547,10 +614,18 @@ export function PointResources({
                       {/* Foto cuando existe, marcador cuando no. 8 de los 21
                           vehiculos de la flota real no tienen, asi que no es un
                           caso raro. */}
-                      <div
-                        className={`detect-frame detect-frame-sm h-11 w-16 overflow-hidden rounded-md bg-muted ${
+                      {/* Clickeable cuando hay foto: la miniatura mide 11x16 y
+                          no alcanza para reconocer una unidad en patio. Cuando
+                          no hay, DICE que no hay en vez de dejar un hueco. */}
+                      <button
+                        type="button"
+                        onClick={() => r.foto && setFotoAmpliada(r.foto)}
+                        disabled={!r.foto}
+                        title={r.foto ? "Ver la foto en grande" : "Sin imagen todavía"}
+                        aria-label={r.foto ? `Ver la foto de ${r.tipo} ${r.numero_equipo}` : undefined}
+                        className={`detect-frame detect-frame-sm block h-11 w-16 overflow-hidden rounded-md bg-muted ${
                           r.disponible ? "" : "opacity-50 grayscale"
-                        }`}
+                        } ${r.foto ? "cursor-zoom-in transition-transform hover:scale-105" : "cursor-default"}`}
                       >
                         <span className="detect-corners" aria-hidden="true" />
                         {r.foto ? (
@@ -562,10 +637,10 @@ export function PointResources({
                           />
                         ) : (
                           <span className="flex h-full w-full items-center justify-center">
-                            <Truck className="h-4 w-4 text-muted-foreground/40" />
+                            <ImageOff className="h-4 w-4 text-muted-foreground/40" />
                           </span>
                         )}
-                      </div>
+                      </button>
                     </TableCell>
 
                     {/* Numero y patente en dos lineas, mismo patron que la lista
@@ -639,6 +714,54 @@ export function PointResources({
             </TableBody>
           </Table>
         )}
+
+        {/* Los controles solo aparecen cuando hay más de una página: con 8
+            unidades, una paginación de una sola página es ruido que ocupa
+            espacio y no hace nada. */}
+        {visibles.length > POR_PAGINA && (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs text-muted-foreground">
+              Mostrando{" "}
+              <span className="mono tabular-nums text-foreground">
+                {desde + 1}-{Math.min(desde + POR_PAGINA, visibles.length)}
+              </span>{" "}
+              de <span className="mono tabular-nums text-foreground">{visibles.length}</span>
+            </p>
+            <div className="flex items-center gap-1">
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={pagina_actual === 1}
+                onClick={() => setPagina(pagina_actual - 1)}
+              >
+                Anterior
+              </Button>
+              {Array.from({ length: totalPaginas }, (_, i) => i + 1).map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => setPagina(n)}
+                  aria-current={n === pagina_actual ? "page" : undefined}
+                  className={`mono h-8 w-8 cursor-pointer rounded-md text-xs tabular-nums transition-colors ${
+                    n === pagina_actual
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  }`}
+                >
+                  {n}
+                </button>
+              ))}
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={pagina_actual === totalPaginas}
+                onClick={() => setPagina(pagina_actual + 1)}
+              >
+                Siguiente
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── AC1: el tipo, antes de cualquier campo ── */}
@@ -691,20 +814,119 @@ export function PointResources({
           }
         }}
       >
-        <DialogContent className="max-h-[85vh] max-w-lg overflow-y-auto">
+        <DialogContent className="max-h-[88vh] max-w-3xl overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>
+            <DialogTitle className="flex flex-wrap items-center gap-2">
               {editandoId ? "Editar recurso" : "Nuevo recurso"}
               {borrador && (
-                <span className="ml-2 text-xs font-normal text-muted-foreground">
-                  {borrador.tipo}
-                </span>
+                <>
+                  <span className="text-xs font-normal text-muted-foreground">
+                    {borrador.tipo}
+                  </span>
+                  {/* El estado como insignia junto al título, igual que en la
+                      ficha de vehículo de la referencia: se lee antes que
+                      cualquier campo. */}
+                  <span
+                    className={`rounded px-1.5 py-0.5 text-[0.5625rem] font-semibold uppercase tracking-wide ${
+                      borrador.disponible
+                        ? "bg-success/15 text-success-strong"
+                        : "bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    {borrador.disponible ? "Disponible" : "En taller"}
+                  </span>
+                </>
               )}
             </DialogTitle>
           </DialogHeader>
 
           {borrador && campos && (
-            <div className="space-y-3">
+            <div className="grid gap-5 md:grid-cols-[15rem_1fr]">
+              {/* ── Panel de la foto ──
+                  A la izquierda y grande, como en la ficha de vehículo de la
+                  referencia: la foto es lo que permite reconocer la unidad en
+                  patio, y en una lista solo entra como miniatura. */}
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={() => borrador.foto && setFotoAmpliada(borrador.foto)}
+                  disabled={!borrador.foto}
+                  className={`detect-frame relative block aspect-[4/3] w-full overflow-hidden rounded-lg border border-border bg-muted ${
+                    borrador.foto ? "cursor-zoom-in" : "cursor-default"
+                  }`}
+                >
+                  <span className="detect-corners" aria-hidden="true" />
+                  {borrador.foto ? (
+                    <img
+                      src={resourcePhotoUrl(borrador.foto)}
+                      alt="Foto del recurso"
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    // Se DICE que no hay imagen, no se deja un hueco: un marco
+                    // vacío se lee como que la foto no cargó.
+                    <span className="flex h-full w-full flex-col items-center justify-center gap-1.5 text-muted-foreground">
+                      <ImageOff className="h-7 w-7 opacity-50" />
+                      <span className="text-[0.6875rem]">Sin imagen todavía</span>
+                    </span>
+                  )}
+                  {subiendoFoto && (
+                    <span className="absolute inset-0 flex items-center justify-center bg-background/70">
+                      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                    </span>
+                  )}
+                </button>
+
+                <input
+                  ref={inputFoto}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => elegirFoto(e.target.files?.[0])}
+                />
+
+                <div className="flex gap-1.5">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="flex-1"
+                    disabled={subiendoFoto}
+                    onClick={() => inputFoto.current?.click()}
+                  >
+                    <ImagePlus className="mr-1.5 h-3.5 w-3.5" />
+                    {borrador.foto ? "Cambiar" : "Subir imagen"}
+                  </Button>
+                  {borrador.foto && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      disabled={subiendoFoto}
+                      onClick={() => setBorrador({ ...borrador, foto: null })}
+                      title="Quitar la imagen de este recurso"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
+                </div>
+
+                <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
+                  La imagen es opcional. Se reduce automáticamente y se guarda en
+                  el servidor.
+                </p>
+
+                <div className="flex items-center justify-between rounded-lg bg-background/40 p-3">
+                  <span className="text-xs font-medium text-foreground">Disponible</span>
+                  <Switch
+                    checked={borrador.disponible}
+                    onCheckedChange={(v) => setBorrador({ ...borrador, disponible: v })}
+                  />
+                </div>
+              </div>
+
+              {/* ── Campos ── */}
+              <div className="space-y-3">
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground">Tipo</label>
                 {/* Se puede cambiar al editar, y al hacerlo se limpian los
@@ -878,14 +1100,6 @@ export function PointResources({
                 />
               </div>
 
-              <div className="flex items-center justify-between rounded-lg bg-background/40 p-3">
-                <span className="text-xs font-medium text-foreground">Disponible</span>
-                <Switch
-                  checked={borrador.disponible}
-                  onCheckedChange={(v) => setBorrador({ ...borrador, disponible: v })}
-                />
-              </div>
-
               <div className="flex gap-2 pt-1">
                 <Button onClick={guardar} disabled={guardando} className="flex-1">
                   {guardando && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -902,7 +1116,26 @@ export function PointResources({
                   <X className="mr-1.5 h-3.5 w-3.5" /> Cancelar
                 </Button>
               </div>
+              </div>
             </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Ver la foto en grande. La miniatura de la tabla mide 11x16 y no
+          alcanza para reconocer una unidad en patio, que es justamente para lo
+          que sirve tener la foto. */}
+      <Dialog open={fotoAmpliada !== null} onOpenChange={(a) => { if (!a) setFotoAmpliada(null); }}>
+        <DialogContent className="max-w-3xl overflow-hidden p-0">
+          <DialogHeader className="sr-only">
+            <DialogTitle>Foto del recurso</DialogTitle>
+          </DialogHeader>
+          {fotoAmpliada && (
+            <img
+              src={resourcePhotoUrl(fotoAmpliada)}
+              alt="Foto del recurso"
+              className="h-auto w-full"
+            />
           )}
         </DialogContent>
       </Dialog>

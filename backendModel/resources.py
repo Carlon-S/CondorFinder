@@ -1,10 +1,12 @@
+import io
 import os
+import uuid
 from datetime import datetime, timezone
 from typing import Literal
 
 from bson import ObjectId
 from bson.errors import InvalidId
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, model_validator
 from pymongo import ReturnDocument
@@ -391,6 +393,84 @@ async def get_resource_photo(
     if not os.path.isfile(ruta):
         raise HTTPException(status_code=404, detail="Foto no encontrada")
     return FileResponse(ruta, media_type="image/jpeg")
+
+
+@router.post("/photo")
+async def upload_resource_photo(
+    file: UploadFile = File(...),
+    current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
+):
+    """Sube la foto de un recurso y devuelve el nombre con el que quedó guardada.
+
+    La imagen se RE-CODIFICA con Pillow en vez de guardarse tal cual, y eso hace
+    tres cosas de una: valida que sea realmente una imagen (un archivo que solo
+    dice ser JPEG falla al abrirse), descarta cualquier contenido que viniera
+    incrustado fuera del ráster, y la deja al mismo tamaño que las 13 de la
+    flota municipal, que el parser ya reduce a 900px. Sin eso, una foto de
+    teléfono de 8 MB entraría entera para verse en una ficha de 20rem.
+
+    El nombre lo genera el servidor, nunca el cliente: con el nombre original se
+    podría sobrescribir la foto de otro recurso, o escribir fuera del
+    directorio.
+
+    Las fotos viven en disco y no en GCS. GCS existe en este proyecto para lo
+    que tiene que sobrevivir a una corrida del pipeline; una foto de vehículo es
+    dato de referencia y el directorio está montado desde el host (ver
+    docker-compose.yml), así que sobrevive a los redespliegues igual.
+    """
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="El archivo no es una imagen")
+
+    crudo = await file.read()
+    # 10 MB antes de procesar: por encima de eso no es una foto de un camión,
+    # y decodificarla costaría memoria del servidor sin ningún beneficio.
+    if len(crudo) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="La imagen supera los 10 MB")
+
+    try:
+        from PIL import Image
+
+        imagen = Image.open(io.BytesIO(crudo))
+        imagen.verify()               # detecta archivos corruptos o que no son imagen
+        imagen = Image.open(io.BytesIO(crudo))  # verify() deja el archivo consumido
+        imagen = imagen.convert("RGB")
+        imagen.thumbnail((900, 900), Image.LANCZOS)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=400, detail="No se pudo leer la imagen")
+
+    os.makedirs(FOTOS_DIR, exist_ok=True)
+    nombre = f"{uuid.uuid4().hex}.jpg"
+    imagen.save(os.path.join(FOTOS_DIR, nombre), "JPEG", quality=82, optimize=True)
+    return {"foto": nombre}
+
+
+@router.delete("/photo/{filename}")
+async def delete_resource_photo(
+    filename: str,
+    current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
+):
+    """Borra una foto subida.
+
+    Solo borra las que subió la interfaz, que son las de nombre generado (32
+    caracteres hexadecimales y extensión .jpg). Las 13 de la flota municipal
+    vienen del repositorio: borrarlas dejaría el directorio distinto de lo que
+    dice git y volverían en el próximo despliegue, así que la operación no
+    tendría el efecto que aparenta.
+    """
+    base, ext = os.path.splitext(filename)
+    if ext.lower() != ".jpg" or len(base) != 32 or not all(c in "0123456789abcdef" for c in base):
+        raise HTTPException(
+            status_code=400,
+            detail="Solo se pueden borrar fotos subidas desde el sistema",
+        )
+    ruta = os.path.realpath(os.path.join(FOTOS_DIR, filename))
+    if not ruta.startswith(os.path.realpath(FOTOS_DIR) + os.sep):
+        raise HTTPException(status_code=404, detail="Foto no encontrada")
+    if os.path.isfile(ruta):
+        os.remove(ruta)
+    return {"message": "Foto eliminada"}
 
 
 @router.get("/types")

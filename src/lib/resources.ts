@@ -315,3 +315,23 @@ export function recursoVacio(tipo: string, pointId: string): ResourceInput {
     point_id: pointId,
   };
 }
+
+/** Sube la foto de un recurso y devuelve el nombre con que quedó guardada.
+ *
+ *  Sin `Content-Type` a mano: con FormData el navegador tiene que poner el
+ *  suyo, que incluye el `boundary` del multipart. Fijarlo rompe el parseo del
+ *  lado del servidor. */
+export async function uploadResourcePhoto(file: File): Promise<string> {
+  const datos = new FormData();
+  datos.append("file", file);
+  const res = await fetch(`${BACKEND_URL}/resources/photo`, {
+    method: "POST",
+    credentials: "include",
+    body: datos,
+  });
+  if (!res.ok) {
+    throw new Error(await parseErrorMessage(res, "No se pudo subir la imagen."));
+  }
+  const { foto } = await res.json();
+  return foto as string;
+}

@@ -38,6 +38,12 @@ services:
       - ./backendModel/joining/output:/app/backendModel/joining/output
       - ./backendModel/joining/task_images:/app/backendModel/joining/task_images
       - ./backendModel/detecting/output:/app/backendModel/detecting/output
+      # Fotos de los recursos (HDU8). Va montado aunque el directorio venga
+      # dentro de la imagen: las 13 fotos de la flota municipal llegan por el
+      # repositorio, pero las que se suben desde la interfaz se escriben acá, y
+      # sin el montaje se perderian en el proximo `up --build`, que recrea el
+      # contenedor desde la imagen.
+      - ./backendModel/static/recursos:/app/backendModel/static/recursos
     depends_on:
       - nodeodm
 
