@@ -755,6 +755,78 @@ html {
 }
 
 /* =============================================================================
+   GEOMAP: controles y fondo
+   Leaflet trae sus controles con su propio aspecto (cajas blancas de borde
+   gris, glifos de Arial, esquinas de 4px) que no tiene relación con el resto
+   del sistema: al lado de una tarjeta con hairline, radio y Sora se leen como
+   un widget pegado encima del producto, no como parte de él. Acá siguen los
+   mismos tokens que todo lo demás, sin cambiar su comportamiento.
+   ============================================================================= */
+
+/* El zoom. Mismo fondo, borde, radio y sombra que una tarjeta. */
+.leaflet-control-zoom.leaflet-bar {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(34, 22, 20, 0.12);
+  overflow: hidden;
+}
+.leaflet-control-zoom.leaflet-bar a {
+  background: var(--card);
+  color: var(--muted-foreground);
+  border-bottom-color: var(--border);
+  font-family: var(--font-sora), sans-serif;
+  font-weight: 600;
+  transition:
+    background-color 0.2s,
+    color 0.2s;
+}
+.leaflet-control-zoom.leaflet-bar a:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+/* El foco visible importa más acá que en un botón normal: el zoom del mapa es
+   de las pocas cosas que se usan con el teclado sin ver dónde está el cursor. */
+.leaflet-control-zoom.leaflet-bar a:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.leaflet-control-zoom.leaflet-bar a.leaflet-disabled {
+  background: var(--muted);
+  color: var(--muted-foreground);
+  opacity: 0.45;
+}
+
+/* La atribución. Es obligatoria por la licencia de OpenStreetMap y no se
+   esconde; lo que sí se puede es que deje de ser una barra blanca opaca
+   cruzando el borde inferior del mapa. */
+.leaflet-control-attribution {
+  background: color-mix(in srgb, var(--card) 85%, transparent);
+  color: var(--muted-foreground);
+  font-family: var(--font-sora), sans-serif;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-top-left-radius: 6px;
+}
+.leaflet-control-attribution a {
+  color: var(--muted-foreground);
+  text-decoration: underline;
+}
+
+/* El mapa base, un punto menos saturado.
+   Es el "reduce clutter" de siempre en el diseño de mapas: los datos que
+   importan acá son los pines, los polígonos de detección y las rutas, y el
+   mapa de OpenStreetMap compite con ellos con verdes, amarillos y rosados a
+   plena saturación. Bajarlo un punto deja los datos al frente sin convertir el
+   mapa en un plano gris donde ya no se distingue un parque de una manzana.
+
+   Va en .leaflet-tile-pane y NO en el contenedor: el filtro solo tiene que
+   tocar las baldosas. Aplicado al mapa entero también apagaría los pines, las
+   rutas y los tooltips, que es exactamente lo contrario de lo que se busca. */
+.leaflet-tile-pane {
+  filter: saturate(0.82) contrast(1.02);
+}
+
+/* =============================================================================
    LOGIN: máscara de contraseña animable
    Un <input type="password"> no puede animar su cambio a type="text" (salto
    de atributo, sin transición CSS posible). -webkit-text-security hace que

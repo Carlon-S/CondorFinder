@@ -77,7 +77,25 @@ export default defineConfig({
       proxy: Object.fromEntries(
         BACKEND_ROUTE_PREFIXES.map((prefix) => [
           prefix,
-          { target: BACKEND_URL, changeOrigin: true },
+          {
+            target: BACKEND_URL,
+            changeOrigin: true,
+            // Le saca el Domain a la cookie de sesión que vuelve del backend.
+            //
+            // Hace falta solo cuando BACKEND_URL apunta a la VM: ahí el
+            // backend corre con COOKIE_DOMAIN=.condorfinder.cl y manda
+            // "Domain=.condorfinder.cl", que el navegador en localhost
+            // descarta entera, porque un host no puede setear cookies de un
+            // dominio ajeno. El login devolvía 200, la cookie no se guardaba
+            // y el guardia de _authed.tsx rebotaba de vuelta al login: la
+            // sesión nunca arrancaba y no se podía revisar nada de la app en
+            // local contra los datos reales.
+            //
+            // Vacío = cookie host-only, o sea, de localhost. Contra un
+            // backend local no cambia nada, porque ahí COOKIE_DOMAIN no está
+            // seteada y la cookie ya viene sin Domain.
+            cookieDomainRewrite: "",
+          },
         ]),
       ),
     },

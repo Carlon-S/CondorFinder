@@ -135,8 +135,26 @@ export function ResourceFormDialog({
     }
   };
 
+  /** Qué falta para poder guardar, o null si no falta nada.
+   *
+   *  Los obligatorios son número de equipo y patente, y NO es una regla
+   *  inventada: en la planilla de la municipalidad los 21 equipos declaran los
+   *  dos. Marca, modelo y año quedan opcionales por el mismo criterio al revés:
+   *  cuatro unidades reales (los carros 1885, 1876, 659 y 660) no los traen, y
+   *  exigirlos haría imposible cargar la flota que existe.
+   *
+   *  Una sola función porque el botón la usa para deshabilitarse Y para decir
+   *  el motivo: separadas, terminaba deshabilitado por una razón y explicando
+   *  otra. */
+  const loQueFalta = (): string | null => {
+    if (!form) return "Falta elegir el tipo";
+    if (!form.numero_equipo.trim()) return "Falta el N° de equipo";
+    if (!form.patente.trim()) return "Falta la patente";
+    return null;
+  };
+
   const guardar = async () => {
-    if (!form) return;
+    if (!form || loQueFalta()) return;
 
     const repetido = hermanos.find(
       (h) =>
@@ -188,7 +206,15 @@ export function ResourceFormDialog({
             recorrido vertical se hace igual de largo que antes. */}
         <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{recurso ? "Editar recurso" : "Nuevo recurso"}</DialogTitle>
+            <DialogTitle className="flex items-baseline justify-between gap-2">
+              <span>{recurso ? "Editar recurso" : "Nuevo recurso"}</span>
+              {/* La leyenda del asterisco, igual que en el formulario de punto.
+                  Sin ella el símbolo es una convención que hay que dar por
+                  sabida. */}
+              <span className="text-[0.625rem] font-normal text-muted-foreground">
+                <span className="text-destructive-strong">*</span> obligatorio
+              </span>
+            </DialogTitle>
           </DialogHeader>
 
           {form && campos && (
@@ -198,219 +224,239 @@ export function ResourceFormDialog({
               </p>
 
               <div className="grid gap-5 md:grid-cols-[17rem_1fr]">
-              <div className="space-y-3">
-
-              {/* ── Imagen ──
+                <div className="space-y-3">
+                  {/* ── Imagen ──
                   Grande y sola: es lo que permite reconocer la unidad en patio,
                   y la zona de arrastre con sus dos líneas de instrucciones
                   ocupaba más alto que la propia foto. Las acciones van DENTRO
                   de la imagen (la papelera) y justo debajo (adjuntar), no en un
                   bloque aparte. */}
-              <div className="detect-frame relative aspect-[16/10] w-full overflow-hidden rounded-lg border border-border bg-muted">
-                <span className="detect-corners" aria-hidden="true" />
-                {form.foto ? (
-                  <img
-                    src={resourcePhotoUrl(form.foto)}
-                    alt="Foto del recurso"
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  // Se DICE que no hay imagen. Un marco vacío se lee como que la
-                  // foto no cargó, no como que no existe.
-                  <span className="flex h-full w-full flex-col items-center justify-center gap-2 text-muted-foreground">
-                    <ImageOff className="h-8 w-8 opacity-50" />
-                    <span className="text-xs">Sin imagen todavía</span>
-                  </span>
-                )}
-
-                {form.foto && (
-                  <button
-                    type="button"
-                    onClick={() => setConfirmandoQuitarFoto(true)}
-                    disabled={subiendoFoto}
-                    title="Quitar la imagen"
-                    aria-label="Quitar la imagen"
-                    className="absolute right-2 top-2 flex h-8 w-8 cursor-pointer items-center justify-center rounded-md bg-card/90 text-muted-foreground shadow-sm backdrop-blur transition-colors hover:bg-destructive/15 hover:text-destructive-strong"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                )}
-
-                {subiendoFoto && (
-                  <span className="absolute inset-0 flex items-center justify-center bg-background/70">
-                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                  </span>
-                )}
-              </div>
-
-              <input
-                ref={inputFoto}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => elegirFoto(e.target.files?.[0])}
-              />
-
-              <Button
-                type="button"
-                variant="secondary"
-                className="w-full"
-                disabled={subiendoFoto}
-                onClick={() => inputFoto.current?.click()}
-              >
-                <ImagePlus className="mr-1.5 h-4 w-4" />
-                {form.foto ? "Cambiar imagen" : "Adjuntar imagen"}
-              </Button>
-
-              <div className="flex items-center justify-between rounded-lg bg-background/40 p-3">
-                <div>
-                  <p className="text-xs font-medium text-foreground">Disponible</p>
-                  <p className="text-[0.6875rem] text-muted-foreground">
-                    Fuera al armar una ruta.
-                  </p>
-                </div>
-                <Switch
-                  checked={form.disponible}
-                  onCheckedChange={(v) => setForm({ ...form, disponible: v })}
-                />
-              </div>
-              </div>
-
-              {/* ── Campos ── */}
-              <div className="space-y-4">
-              <div className="grid gap-4 sm:grid-cols-2">
-              <Campo etiqueta="N° de equipo">
-                <Input
-                  value={form.numero_equipo}
-                  onChange={(e) => setForm({ ...form, numero_equipo: e.target.value })}
-                  placeholder="1143"
-                />
-              </Campo>
-
-              <Campo etiqueta="Patente">
-                <Input
-                  value={form.patente}
-                  onChange={(e) => setForm({ ...form, patente: e.target.value })}
-                  placeholder="JXZS-91"
-                />
-              </Campo>
-              </div>
-
-              {campos.motorizado && (
-                <>
-                  <div className="grid gap-4 sm:grid-cols-3">
-                    <Campo etiqueta="Marca">
-                      <Input
-                        value={form.marca}
-                        onChange={(e) => setForm({ ...form, marca: e.target.value })}
-                        placeholder="FORD"
+                  <div className="detect-frame relative aspect-[16/10] w-full overflow-hidden rounded-lg border border-border bg-muted">
+                    <span className="detect-corners" aria-hidden="true" />
+                    {form.foto ? (
+                      <img
+                        src={resourcePhotoUrl(form.foto)}
+                        alt="Foto del recurso"
+                        className="h-full w-full object-cover"
                       />
-                    </Campo>
-                    <Campo etiqueta="Modelo">
-                      <Input
-                        value={form.modelo}
-                        onChange={(e) => setForm({ ...form, modelo: e.target.value })}
-                        placeholder="CARGO 1723"
-                      />
-                    </Campo>
-                  <Campo etiqueta="Año">
-                    <Input
-                      type="number"
-                      value={form.anio ?? ""}
-                      onChange={(e) =>
-                        setForm({ ...form, anio: e.target.value ? Number(e.target.value) : null })
-                      }
-                      placeholder="2018"
-                    />
-                  </Campo>
+                    ) : (
+                      // Se DICE que no hay imagen. Un marco vacío se lee como que la
+                      // foto no cargó, no como que no existe.
+                      <span className="flex h-full w-full flex-col items-center justify-center gap-2 text-muted-foreground">
+                        <ImageOff className="h-8 w-8 opacity-50" />
+                        <span className="text-xs">Sin imagen todavía</span>
+                      </span>
+                    )}
+
+                    {form.foto && (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmandoQuitarFoto(true)}
+                        disabled={subiendoFoto}
+                        title="Quitar la imagen"
+                        aria-label="Quitar la imagen"
+                        className="absolute right-2 top-2 flex h-8 w-8 cursor-pointer items-center justify-center rounded-md bg-card/90 text-muted-foreground shadow-sm backdrop-blur transition-colors hover:bg-destructive/15 hover:text-destructive-strong"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
+
+                    {subiendoFoto && (
+                      <span className="absolute inset-0 flex items-center justify-center bg-background/70">
+                        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                      </span>
+                    )}
                   </div>
-                </>
-              )}
 
-              {campos.capacidadCarga && (
-                <Campo etiqueta="Capacidad de carga">
-                  <ConUnidad unidad="m³">
-                    <Input
-                      type="number"
-                      step="0.1"
-                      value={form.capacidad_m3 ?? ""}
-                      // `|| null` y no un ternario sobre el texto: escribir 0
-                      // manda 0, y el backend exige > 0 porque una capacidad de
-                      // cero no es un dato, es la ausencia de uno.
-                      onChange={(e) =>
-                        setForm({ ...form, capacidad_m3: Number(e.target.value) || null })
-                      }
-                      placeholder="10"
-                      className="border-0 shadow-none focus-visible:ring-0"
+                  <input
+                    ref={inputFoto}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => elegirFoto(e.target.files?.[0])}
+                  />
+
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="w-full"
+                    disabled={subiendoFoto}
+                    onClick={() => inputFoto.current?.click()}
+                  >
+                    <ImagePlus className="mr-1.5 h-4 w-4" />
+                    {form.foto ? "Cambiar imagen" : "Adjuntar imagen"}
+                  </Button>
+
+                  <div className="flex items-center justify-between rounded-lg bg-background/40 p-3">
+                    <div>
+                      <p className="text-xs font-medium text-foreground">Disponible</p>
+                      <p className="text-[0.6875rem] text-muted-foreground">
+                        Fuera al armar una ruta.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={form.disponible}
+                      onCheckedChange={(v) => setForm({ ...form, disponible: v })}
                     />
-                  </ConUnidad>
-                  {form.capacidad_m3 == null && (
-                    <p className="mt-1.5 text-xs leading-relaxed text-warning-strong">
-                      Sin capacidad declarada el recurso se guardará igual, pero no sumará
-                      para las rutas.
-                    </p>
-                  )}
-                </Campo>
-              )}
+                  </div>
+                </div>
 
-              {campos.capacidadBalde && (
-                <Campo etiqueta="Capacidad del balde">
-                  <ConUnidad unidad="m³">
-                    <Input
-                      type="number"
-                      step="0.1"
-                      value={form.capacidad_balde_m3 ?? ""}
-                      onChange={(e) =>
-                        setForm({ ...form, capacidad_balde_m3: Number(e.target.value) || null })
-                      }
-                      placeholder="1"
-                      className="border-0 shadow-none focus-visible:ring-0"
-                    />
-                  </ConUnidad>
-                </Campo>
-              )}
-
-              {campos.dotacion && (
-                <div>
-                  <p className="mb-2 text-xs font-medium text-muted-foreground">
-                    Dotación requerida
+                {/* ── Campos ── */}
+                <div className="space-y-4">
+                  {/* Los obligatorios son los dos identificadores, y solo
+                  esos. Lo demás queda opcional a propósito: la planilla real
+                  viene incompleta (cuatro vehículos de carga no declaran
+                  capacidad, tres máquinas no declaran balde, cuatro carros no
+                  traen marca ni modelo ni año), y quien la carga tiene que
+                  poder guardar lo que sabe sin inventar lo que no. */}
+                  <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
+                    Fuera del número de equipo y la patente, lo demás puede quedar sin declarar: el
+                    recurso se guarda igual.
                   </p>
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    {(
-                      [
-                        ["conductores_requeridos", "Conductores"],
-                        ["peonetas_requeridas", "Peonetas"],
-                        ["operadores_requeridos", "Operadores"],
-                      ] as const
-                    ).map(([clave, etiqueta]) => (
-                      <Campo key={clave} etiqueta={etiqueta}>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Campo etiqueta="N° de equipo" obligatorio>
+                      <Input
+                        value={form.numero_equipo}
+                        onChange={(e) => setForm({ ...form, numero_equipo: e.target.value })}
+                        placeholder="1143"
+                      />
+                    </Campo>
+
+                    <Campo etiqueta="Patente" obligatorio>
+                      <Input
+                        value={form.patente}
+                        onChange={(e) => setForm({ ...form, patente: e.target.value })}
+                        placeholder="JXZS-91"
+                      />
+                    </Campo>
+                  </div>
+
+                  {campos.motorizado && (
+                    <>
+                      <div className="grid gap-4 sm:grid-cols-3">
+                        <Campo etiqueta="Marca">
+                          <Input
+                            value={form.marca}
+                            onChange={(e) => setForm({ ...form, marca: e.target.value })}
+                            placeholder="FORD"
+                          />
+                        </Campo>
+                        <Campo etiqueta="Modelo">
+                          <Input
+                            value={form.modelo}
+                            onChange={(e) => setForm({ ...form, modelo: e.target.value })}
+                            placeholder="CARGO 1723"
+                          />
+                        </Campo>
+                        <Campo etiqueta="Año">
+                          <Input
+                            type="number"
+                            value={form.anio ?? ""}
+                            onChange={(e) =>
+                              setForm({
+                                ...form,
+                                anio: e.target.value ? Number(e.target.value) : null,
+                              })
+                            }
+                            placeholder="2018"
+                          />
+                        </Campo>
+                      </div>
+                    </>
+                  )}
+
+                  {campos.capacidadCarga && (
+                    <Campo etiqueta="Capacidad de carga">
+                      <ConUnidad unidad="m³">
                         <Input
                           type="number"
-                          min={0}
-                          value={form[clave] || ""}
+                          step="0.1"
+                          value={form.capacidad_m3 ?? ""}
+                          // `|| null` y no un ternario sobre el texto: escribir 0
+                          // manda 0, y el backend exige > 0 porque una capacidad de
+                          // cero no es un dato, es la ausencia de uno.
                           onChange={(e) =>
-                            setForm({ ...form, [clave]: Number(e.target.value) || 0 })
+                            setForm({ ...form, capacidad_m3: Number(e.target.value) || null })
                           }
+                          placeholder="10"
+                          className="border-0 shadow-none focus-visible:ring-0"
                         />
-                      </Campo>
-                    ))}
-                  </div>
-                  <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
-                    Es lo que este vehículo <strong>requiere</strong> para operar, distinto
-                    del personal que el punto tiene.
-                  </p>
-                </div>
-              )}
+                      </ConUnidad>
+                      {form.capacidad_m3 == null && (
+                        <p className="mt-1.5 text-xs leading-relaxed text-warning-strong">
+                          Sin capacidad declarada el recurso se guardará igual, pero no sumará para
+                          las rutas.
+                        </p>
+                      )}
+                    </Campo>
+                  )}
 
-              </div>
+                  {campos.capacidadBalde && (
+                    <Campo etiqueta="Capacidad del balde">
+                      <ConUnidad unidad="m³">
+                        <Input
+                          type="number"
+                          step="0.1"
+                          value={form.capacidad_balde_m3 ?? ""}
+                          onChange={(e) =>
+                            setForm({ ...form, capacidad_balde_m3: Number(e.target.value) || null })
+                          }
+                          placeholder="1"
+                          className="border-0 shadow-none focus-visible:ring-0"
+                        />
+                      </ConUnidad>
+                    </Campo>
+                  )}
+
+                  {campos.dotacion && (
+                    <div>
+                      <p className="mb-2 text-xs font-medium text-muted-foreground">
+                        Dotación requerida
+                      </p>
+                      <div className="grid gap-3 sm:grid-cols-3">
+                        {(
+                          [
+                            ["conductores_requeridos", "Conductores"],
+                            ["peonetas_requeridas", "Peonetas"],
+                            ["operadores_requeridos", "Operadores"],
+                          ] as const
+                        ).map(([clave, etiqueta]) => (
+                          <Campo key={clave} etiqueta={etiqueta}>
+                            <Input
+                              type="number"
+                              min={0}
+                              value={form[clave] || ""}
+                              onChange={(e) =>
+                                setForm({ ...form, [clave]: Number(e.target.value) || 0 })
+                              }
+                            />
+                          </Campo>
+                        ))}
+                      </div>
+                      <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+                        Es lo que este vehículo <strong>requiere</strong> para operar, distinto del
+                        personal que el punto tiene.
+                      </p>
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="flex gap-2 border-t border-border/40 pt-4">
-                <Button onClick={guardar} disabled={guardando} className="flex-1">
+                <Button
+                  onClick={guardar}
+                  disabled={guardando || loQueFalta() !== null}
+                  title={loQueFalta() ?? undefined}
+                  className="flex-1"
+                >
                   {guardando && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   {recurso ? "Guardar cambios" : "Agregar recurso"}
                 </Button>
-                <Button variant="secondary" disabled={guardando} onClick={() => onOpenChange(false)}>
+                <Button
+                  variant="secondary"
+                  disabled={guardando}
+                  onClick={() => onOpenChange(false)}
+                >
                   Cancelar
                 </Button>
               </div>
@@ -426,8 +472,8 @@ export function ResourceFormDialog({
           <AlertDialogHeader>
             <AlertDialogTitle>Quitar la imagen</AlertDialogTitle>
             <AlertDialogDescription>
-              El recurso queda sin imagen. El cambio se aplica al guardar, así que si
-              cancelas el formulario la imagen sigue como estaba.
+              El recurso queda sin imagen. El cambio se aplica al guardar, así que si cancelas el
+              formulario la imagen sigue como estaba.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -447,10 +493,28 @@ export function ResourceFormDialog({
   );
 }
 
-function Campo({ etiqueta, children }: { etiqueta: string; children: React.ReactNode }) {
+function Campo({
+  etiqueta,
+  obligatorio = false,
+  children,
+}: {
+  etiqueta: string;
+  obligatorio?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <div className="space-y-1.5">
-      <label className="text-xs font-medium text-muted-foreground">{etiqueta}</label>
+      <label className="text-xs font-medium text-muted-foreground">
+        {etiqueta}
+        {/* El asterisco lleva su propio texto para lectores de pantalla: el
+            símbolo solo no se anuncia. */}
+        {obligatorio && (
+          <span className="text-destructive-strong" title="Campo obligatorio">
+            {" "}
+            *<span className="sr-only"> (obligatorio)</span>
+          </span>
+        )}
+      </label>
       {children}
     </div>
   );

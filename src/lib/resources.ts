@@ -175,7 +175,10 @@ export async function getResourcePoint(id: string): Promise<ResourcePoint> {
   return res.json();
 }
 
-export async function updateResourcePoint(id: string, point: ResourcePointInput): Promise<ResourcePoint> {
+export async function updateResourcePoint(
+  id: string,
+  point: ResourcePointInput,
+): Promise<ResourcePoint> {
   const res = await fetch(`${BACKEND_URL}/resources/points/${encodeURIComponent(id)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -188,6 +191,30 @@ export async function updateResourcePoint(id: string, point: ResourcePointInput)
   }
 
   return res.json();
+}
+
+/** Activa o desactiva un punto sin abrir el formulario, para el interruptor de
+ *  la lista.
+ *
+ *  Reusa el PUT completo en vez de pedir un PATCH nuevo al backend, como el que
+ *  sí tienen los recursos (`/units/{id}/disponibilidad`): el cliente ya tiene el
+ *  punto entero, así que reenviarlo con `active` invertido da exactamente el
+ *  mismo resultado y no obliga a desplegar la VM para un cambio que es de
+ *  interfaz. Si alguna vez hay más de un usuario editando a la vez, esto pisa
+ *  los campos del otro y ahí sí conviene el PATCH. */
+export async function setPointActive(
+  point: ResourcePoint,
+  active: boolean,
+): Promise<ResourcePoint> {
+  return updateResourcePoint(point.id, {
+    name: point.name,
+    address: point.address,
+    comuna: point.comuna,
+    lat: point.lat,
+    lng: point.lng,
+    personal_count: point.personal_count,
+    active,
+  });
 }
 
 export async function deleteResourcePoint(id: string): Promise<void> {

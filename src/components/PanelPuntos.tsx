@@ -90,7 +90,14 @@ import {
   type ResourcePoint,
 } from "@/lib/resources";
 import { notify } from "@/lib/notify";
-type Mode = "idle" | "placing" | "configuring";
+// Dos modos, no tres. "placing" (esperar un clic en el mapa con el panel
+// vacío) desapareció junto con el botón "Definir punto": el formulario está
+// desde el principio, y ubicar el punto es un campo más de ese formulario,
+// no un paso previo que haya que desbloquear.
+//
+//   configuring -> creando un punto nuevo (editingId null) o editando uno
+//   idle        -> mostrando la ficha de solo lectura de un punto del mapa
+type Mode = "idle" | "configuring";
 
 interface FormState {
   name: string;
@@ -109,7 +116,6 @@ const EMPTY_FORM: FormState = {
   active: true,
 };
 
-
 export interface PanelPuntosMapProps {
   /** El punto que se está creando o editando, mientras se ubica en el mapa. */
   marker: [number, number] | null;
@@ -127,6 +133,7 @@ export function PanelPuntos({
   onPuntosCambiaron,
   puntoSeleccionadoId,
   puntoAEditarId,
+  onIntencionAtendida,
 }: {
   /** ?point=id, para abrir directo en un punto concreto. */
   deepLinkPointId?: string;
@@ -141,9 +148,25 @@ export function PanelPuntos({
    *  Es una prop aparte de la anterior porque son dos intenciones distintas:
    *  mirar un punto y modificarlo. */
   puntoAEditarId?: string | null;
+  /** Aviso de que el panel ya atendió la intención, para que la anfitriona la
+   *  borre. Las dos props de arriba son ÓRDENES de un solo uso, no estado.
+   *
+   *  Sin esto eran estado: la anfitriona ponía el id y no lo sacaba nunca, y el
+   *  efecto que las lee depende también de la lista de puntos, así que volvía a
+   *  ejecutarse en CADA recarga de puntos (guardar, borrar, o mover el
+   *  interruptor de cualquier fila). El panel entraba de nuevo, sin avisar, a
+   *  editar el punto de aquel lápiz apretado hacía rato; lo que se escribía
+   *  después se guardaba con PUT contra ese id viejo. Si ese punto ya no
+   *  existía daba 404 "Punto no encontrado", y si existía sobrescribía otro
+   *  punto en vez de crear el nuevo. Recargar la página lo "arreglaba" porque
+   *  el id se perdía, que es lo que lo hacía parecer intermitente. */
+  onIntencionAtendida?: () => void;
 }) {
   const navigate = useNavigate();
-  const [mode, setMode] = useState<Mode>("idle");
+  // Arranca en el formulario, no en una pantalla de espera. Crear un punto es
+  // lo que se viene a hacer acá, y tenerlo detrás de un botón obligaba a
+  // descubrir primero que el botón existe.
+  const [mode, setMode] = useState<Mode>("configuring");
   const [pendingPoint, setPendingPoint] = useState<[number, number] | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
@@ -199,22 +222,25 @@ export function PanelPuntos({
     if (deletingPoint) setDeletingPointDisplay(deletingPoint);
   }, [deletingPoint]);
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   useEffect(() => {
     if (!deepLinkPointId || points.length === 0) return;
     const found = points.find((p) => p.id === deepLinkPointId);
     if (found) setSelectedPoint(found);
   }, [deepLinkPointId, points]);
 
-  const backToIdle = () => {
-    setMode("idle");
+  /** Deja el panel como recién abierto: formulario en blanco para un punto
+   *  nuevo. Es a donde se vuelve al guardar, al cancelar y al cerrar la ficha
+   *  de un punto, porque no hay ningún estado "sin nada" al que regresar. */
+  const nuevoPunto = () => {
+    setMode("configuring");
+    setForm(EMPTY_FORM);
     setPendingPoint(null);
     setEditingId(null);
+    setSelectedPoint(null);
     setGeocodeFlyTarget(null);
     setGeocodeNotFound(false);
+    addressDirtyRef.current = false;
   };
-
-  const startPlacing = () => setMode("placing");
 
   // Los puntos ahora se ven siempre en el mapa (no solo en modo "listing"),
   // así que este fetch corre al montar la página y se reusa después de
@@ -232,7 +258,7 @@ export function PanelPuntos({
       // alguien más), la ficha se cierra en vez de quedar mostrando algo que
       // ya no existe.
       setSelectedPoint((actual) =>
-        actual ? puntos.find((p) => p.id === actual.id) ?? null : null,
+        actual ? (puntos.find((p) => p.id === actual.id) ?? null) : null,
       );
     } catch (err) {
       notify.error(
@@ -246,9 +272,7 @@ export function PanelPuntos({
 
   useEffect(() => {
     refreshPoints();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
 
   // Ubica el punto pendiente en (lat, lng) y refresca Dirección/Comuna por
   // geocodificación inversa, usado tanto al definir la ubicación inicial
@@ -270,23 +294,17 @@ export function PanelPuntos({
         // este resultado quedó obsoleto, aplicarlo pisaría lo que el
         // usuario ya confirmó con texto más nuevo.
         if (result && locationGenRef.current === gen) {
-          setForm((f) => ({ ...f, address: result.address || f.address, comuna: result.comuna || f.comuna }));
+          setForm((f) => ({
+            ...f,
+            address: result.address || f.address,
+            comuna: result.comuna || f.comuna,
+          }));
         }
       })
       .finally(() => setGeocodingAddress(false));
   };
 
   const handleMapClick = (lat: number, lng: number) => {
-    if (mode === "placing") {
-      setForm(EMPTY_FORM);
-      setEditingId(null);
-      setMode("configuring");
-      // El formulario se abre al toque, la dirección/comuna se completan
-      // solas un instante después, sin bloquear la apertura del modo
-      // "configuring".
-      locatePoint(lat, lng);
-      return;
-    }
     if (mode === "configuring") {
       // Reposicionar: el usuario ya está definiendo el punto y clickea otro
       // lugar del mapa para corregirlo, sin salir del formulario.
@@ -296,7 +314,9 @@ export function PanelPuntos({
     // Click en el mapa fuera de cualquier marker (esos ya cortan su propia
     // propagación, ver GeoMap.tsx), en modo idle, deselecciona el punto
     // que se estuviera mostrando en el panel.
-    if (mode === "idle") setSelectedPoint(null);
+    // Clic en el mapa con una ficha abierta: la cierra y devuelve el panel al
+    // formulario, que es su estado normal.
+    if (mode === "idle") nuevoPunto();
   };
 
   const startEditing = (point: ResourcePoint) => {
@@ -359,8 +379,20 @@ export function PanelPuntos({
     return promise;
   };
 
+  /** Qué falta para poder guardar, o null si no falta nada. Es una sola
+   *  función y no una condición repetida, porque el botón la usa para
+   *  deshabilitarse Y para decir el motivo: separadas, terminaba deshabilitado
+   *  por una razón y explicando otra. */
+  const loQueFalta = (): string | null => {
+    if (!form.name.trim()) return "Falta el nombre del punto";
+    if (!pendingPoint) return "Falta ubicar el punto en el mapa";
+    if (!form.address.trim()) return "Falta la dirección";
+    if (!form.comuna.trim()) return "Falta la comuna";
+    return null;
+  };
+
   const handleSave = async () => {
-    if (!pendingPoint || !form.name.trim()) return;
+    if (loQueFalta() || !pendingPoint) return;
 
     setSaving(true);
     // Si la dirección se editó y todavía no se reflejó en el mapa (el
@@ -383,11 +415,32 @@ export function PanelPuntos({
         await updateResourcePoint(editingId, payload);
         notify.success("Punto actualizado", `Los cambios en "${payload.name}" quedaron guardados.`);
       } else {
-        await createResourcePoint(payload);
-        notify.success("Punto guardado", `"${payload.name}" quedó guardado en tu perfil.`);
+        // Un punto recién creado no tiene flota, y sin flota no participa de
+        // ninguna ruta: es lo primero que hay que hacerle. Así que en vez de
+        // dejar el formulario en blanco, se entra a su flota con el diálogo de
+        // agregar recurso ya abierto.
+        //
+        // Se navega DESPUÉS de crear, y por eso los recursos no se retienen en
+        // este formulario: cada uno se guarda contra un punto que ya existe.
+        // Reteniéndolos habría que crear el punto y luego N recursos, y decidir
+        // qué hacer cuando el punto entra y el tercer recurso no.
+        const creado = await createResourcePoint(payload);
+        notify.success("Punto guardado", `Ahora agrega los recursos de "${payload.name}".`);
+        onPuntosCambiaron();
+        nuevoPunto();
+        navigate({
+          to: "/planificacion/recursos/$pointId",
+          params: { pointId: creado.id },
+          search: { agregar: true },
+        });
+        return;
       }
       await refreshPoints();
-      backToIdle();
+      // La anfitriona tiene SUS puntos: los marcadores del mapa y las filas de
+      // la tabla de abajo. Sin avisarle, el punto recién creado no aparecía en
+      // ninguno de los dos hasta recargar la página.
+      onPuntosCambiaron();
+      nuevoPunto();
     } catch (err) {
       notify.error(
         editingId ? "No se pudo actualizar el punto" : "No se pudo guardar el punto",
@@ -406,6 +459,7 @@ export function PanelPuntos({
       notify.success("Punto eliminado", `"${deletingPoint.name}" se borró de tu perfil.`);
       setDeletingPoint(null);
       await refreshPoints();
+      onPuntosCambiaron();
     } catch (err) {
       notify.error(
         "No se pudo eliminar el punto",
@@ -433,226 +487,278 @@ export function PanelPuntos({
   useEffect(() => {
     onMapProps({
       marker: mode === "configuring" ? pendingPoint : null,
-      // El mapa solo escucha clics cuando este panel está esperando uno. En los
-      // demás modos la anfitriona conserva su propio comportamiento.
-      onMapClick: mode === "placing" || mode === "configuring" ? handleMapClick : null,
+      // El mapa escucha siempre: con el formulario abierto desde el principio,
+      // un clic ubica o recoloca el punto, y con una ficha abierta la cierra.
+      onMapClick: handleMapClick,
       focusPoint: selectedPoint ? [selectedPoint.lat, selectedPoint.lng] : geocodeFlyTarget,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, pendingPoint, selectedPoint, geocodeFlyTarget]);
 
+  /** ¿El formulario está en blanco? Decide si un clic en un marcador puede
+   *  tomarse el panel. Ahora que el formulario está abierto desde el principio,
+   *  sin esta pregunta un clic en el mapa borraría un punto a medio escribir. */
+  const formularioVacio = !editingId && !pendingPoint && !form.name.trim();
+
   // Un clic en un marcador del mapa lo recibe la anfitriona, que avisa acá.
   useEffect(() => {
     if (!puntoSeleccionadoId) return;
     const encontrado = points.find((p) => p.id === puntoSeleccionadoId);
-    if (encontrado) setSelectedPoint(encontrado);
+    // Sin encontrar todavía: los puntos aún no llegaron. La intención se guarda
+    // para el render en que sí estén, en vez de perderse acá.
+    if (!encontrado) return;
+    onIntencionAtendida?.();
+    if (!formularioVacio) return;
+    setSelectedPoint(encontrado);
+    setMode("idle");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [puntoSeleccionadoId, points]);
+
+  // El modo "idle" existe solo mientras haya una ficha que mostrar. Si el punto
+  // abierto desaparece (lo borró este mismo panel, o la papelera de la tabla de
+  // abajo), refreshPoints deja selectedPoint en null y el panel se quedaría sin
+  // nada que dibujar: antes ahí abajo estaba el botón "Definir punto" tapando el
+  // hueco. Ahora se vuelve al formulario, que es el estado normal.
+  useEffect(() => {
+    if (mode === "idle" && !selectedPoint) nuevoPunto();
+  }, [mode, selectedPoint]);
 
   // El lápiz de la tabla de abajo abre el formulario directo, sin pasar por la
   // ficha de solo lectura: quien aprieta un lápiz ya decidió que va a editar.
   useEffect(() => {
     if (!puntoAEditarId) return;
     const encontrado = points.find((p) => p.id === puntoAEditarId);
-    if (encontrado) startEditing(encontrado);
+    if (!encontrado) return;
+    onIntencionAtendida?.();
+    startEditing(encontrado);
+    // onIntencionAtendida queda fuera de las dependencias a propósito: la
+    // anfitriona la pasa como función anónima, así que cambia de identidad en
+    // cada render y el efecto se dispararía sin parar.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [puntoAEditarId, points]);
 
   return (
     <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-4">
+        {mode === "idle" &&
+          (selectedPoint ? (
+            <div className="animate-in fade-in slide-in-from-left-2 duration-300 space-y-5">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Punto</p>
+                <button
+                  type="button"
+                  onClick={nuevoPunto}
+                  aria-label="Cerrar"
+                  className="flex h-6 w-6 flex-shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
 
-          <div className="flex flex-col gap-4">
-
-            {mode === "idle" && (
-              selectedPoint ? (
-                <div className="animate-in fade-in slide-in-from-left-2 duration-300 space-y-5">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-semibold text-foreground">Punto</p>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedPoint(null)}
-                      aria-label="Cerrar"
-                      className="flex h-6 w-6 flex-shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-
-                  {/* Mismo layout que el formulario de AC2 (para que "verlo"
+              {/* Mismo layout que el formulario de AC2 (para que "verlo"
                       se sienta consistente con "editarlo"), pero con todos
                       los Input deshabilitados, es una vista, no se guarda
                       nada desde acá. */}
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">Nombre del punto</label>
-                    <Input value={selectedPoint.name} disabled className="disabled:cursor-default" />
-                  </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">
+                  Nombre del punto
+                </label>
+                <Input value={selectedPoint.name} disabled className="disabled:cursor-default" />
+              </div>
 
-                  <div className="flex items-center justify-between rounded-lg bg-background/40 p-3">
-                    <span className="text-xs font-medium text-foreground">Punto activo</span>
-                    <Switch checked={selectedPoint.active} disabled className="disabled:cursor-default disabled:opacity-100" />
-                  </div>
+              <div className="flex items-center justify-between rounded-lg bg-background/40 p-3">
+                <span className="text-xs font-medium text-foreground">Punto activo</span>
+                <Switch
+                  checked={selectedPoint.active}
+                  disabled
+                  className="disabled:cursor-default disabled:opacity-100"
+                />
+              </div>
 
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">Dirección</label>
-                    <Input value={selectedPoint.address} disabled className="disabled:cursor-default" />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">Comuna</label>
-                    <Input value={selectedPoint.comuna} disabled className="disabled:cursor-default" />
-                  </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">Dirección</label>
+                <Input value={selectedPoint.address} disabled className="disabled:cursor-default" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">Comuna</label>
+                <Input value={selectedPoint.comuna} disabled className="disabled:cursor-default" />
+              </div>
 
-                  {/* Los recursos de este punto NO van acá. Estuvieron un rato
+              {/* Los recursos de este punto NO van acá. Estuvieron un rato
                       y era el problema: 21 vehículos en una columna de 280px
                       donde no se leía ni la patente completa. Van en la tabla a
                       lo ancho, al pie de la vista. Lo que queda en el aside son
                       los datos del lugar, que son cinco campos y sí entran. */}
+            </div>
+          ) : null)}
 
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">
-                      Personal (cantidad de trabajadores)
-                    </label>
-                    <Input value={selectedPoint.personal_count} disabled className="disabled:cursor-default" />
-                  </div>
-                </div>
-              ) : (
-                <div className="animate-in fade-in slide-in-from-left-2 duration-300 flex flex-col gap-5">
-                  <div className="flex flex-col gap-2 rounded-lg bg-background/40 p-3">
-                    <Button onClick={startPlacing} size="lg" className="btn-cta w-full">
-                      <MapPin className="mr-2 h-4 w-4" /> Definir punto
-                    </Button>
-                  </div>
-                </div>
-              )
-            )}
-
-            {mode === "placing" && (
-              <div className="animate-in fade-in slide-in-from-left-2 duration-300 rounded-lg border border-primary/30 bg-primary/5 p-4 text-center">
-                <MapPin className="mx-auto mb-2 h-6 w-6 text-primary" />
-                <p className="text-sm font-medium">Haz clic en el mapa para ubicar el punto</p>
-                <Button variant="ghost" size="sm" onClick={backToIdle} className="mt-3">
-                  Cancelar
-                </Button>
-              </div>
-            )}
-
-            {/* El modo "listing" ya no existe. Era una segunda lista de los
+        {/* El modo "listing" ya no existe. Era una segunda lista de los
                 mismos puntos dentro de un panel angosto, y la de abajo los
                 muestra con sus cifras. Para editar uno se hace clic en su
                 marcador del mapa o en el lápiz de esa tabla. */}
 
-            {mode === "configuring" && (
-              <div className="animate-in fade-in slide-in-from-left-2 duration-300 space-y-5">
-                <p className="text-[0.6875rem] text-muted-foreground">
-                  ¿La ubicación no quedó bien? Haz clic en otro lugar del mapa para corregirla.
+        {mode === "configuring" && (
+          <div className="animate-in fade-in slide-in-from-left-2 duration-300 space-y-5">
+            <div className="flex items-baseline justify-between gap-2">
+              <p className="text-sm font-semibold text-foreground">
+                {editingId ? "Editar punto" : "Nuevo punto"}
+              </p>
+              {/* La leyenda del asterisco. Sin ella el símbolo es una
+                  convención que hay que dar por sabida. */}
+              <p className="text-[0.625rem] text-muted-foreground">
+                <span className="text-destructive-strong">*</span> obligatorio
+              </p>
+            </div>
+
+            {/* La ubicación es un campo más, con su estado a la vista. Antes
+                    era un paso previo: se apretaba "Definir punto", se clickeaba
+                    el mapa y recién ahí aparecía el formulario. Acá se dice qué
+                    falta, en vez de esconder el formulario hasta que no falte. */}
+            <div
+              className={`flex items-start gap-2.5 rounded-lg border p-3 ${
+                pendingPoint ? "border-border bg-background/40" : "border-primary/30 bg-primary/5"
+              }`}
+            >
+              <MapPin
+                className={`mt-0.5 h-4 w-4 flex-shrink-0 ${
+                  pendingPoint ? "text-muted-foreground" : "text-primary"
+                }`}
+              />
+              <span className="text-[0.6875rem] leading-relaxed">
+                {pendingPoint ? (
+                  <>
+                    <span className="block font-medium text-foreground">Ubicación marcada</span>
+                    <span className="block text-muted-foreground">
+                      Para moverla, marca otro lugar en el mapa. Para más precisión, escribe la
+                      dirección en el campo de abajo.
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className="block font-medium text-foreground">Falta ubicar el punto</span>
+                    <span className="block text-muted-foreground">
+                      Márcalo en el mapa, o escribe la dirección en el campo de abajo si necesitas
+                      más precisión.
+                    </span>
+                  </>
+                )}
+              </span>
+            </div>
+
+            <div className="space-y-1.5">
+              <label htmlFor="point-name" className="text-xs font-medium text-muted-foreground">
+                Nombre del punto <Obligatorio />
+              </label>
+              <Input
+                id="point-name"
+                autoFocus
+                placeholder="Ej: Patio municipal Maipú"
+                value={form.name}
+                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+              />
+            </div>
+
+            <div className="flex items-center justify-between rounded-lg bg-background/40 p-3">
+              <div>
+                <label htmlFor="point-active" className="text-xs font-medium text-foreground">
+                  Punto activo
+                </label>
+                <p className="text-[0.625rem] text-muted-foreground">
+                  Participa como origen al generar una ruta.
                 </p>
-
-                <div className="space-y-1.5">
-                  <label htmlFor="point-name" className="text-xs font-medium text-muted-foreground">
-                    Nombre del punto
-                  </label>
-                  <Input
-                    id="point-name"
-                    autoFocus
-                    placeholder="Ej: Patio municipal Maipú"
-                    value={form.name}
-                    onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between rounded-lg bg-background/40 p-3">
-                  <div>
-                    <label htmlFor="point-active" className="text-xs font-medium text-foreground">
-                      Punto activo
-                    </label>
-                    <p className="text-[0.625rem] text-muted-foreground">
-                      Participa como origen al generar una ruta.
-                    </p>
-                  </div>
-                  <Switch
-                    id="point-active"
-                    checked={form.active}
-                    onCheckedChange={(checked) => setForm((f) => ({ ...f, active: checked }))}
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <label htmlFor="point-address" className="text-xs font-medium text-muted-foreground">
-                      Dirección
-                    </label>
-                    {geocodingAddress && (
-                      <span className="flex items-center gap-1 text-[0.625rem] text-muted-foreground">
-                        <Loader2 className="h-3 w-3 animate-spin" /> Buscando dirección…
-                      </span>
-                    )}
-                  </div>
-                  <Input
-                    id="point-address"
-                    placeholder="Ej: Av. Pajaritos 1234"
-                    value={form.address}
-                    onChange={(e) => {
-                      addressDirtyRef.current = true;
-                      setForm((f) => ({ ...f, address: e.target.value }));
-                    }}
-                    onBlur={ensureAddressGeocoded}
-                  />
-                  {geocodeNotFound && (
-                    <p className="text-[0.625rem] text-muted-foreground">
-                      No se encontró esta dirección en el mapa, el punto no se movió.
-                    </p>
-                  )}
-                </div>
-
-                <div className="space-y-1.5">
-                  <label htmlFor="point-comuna" className="text-xs font-medium text-muted-foreground">
-                    Comuna
-                  </label>
-                  <Input
-                    id="point-comuna"
-                    placeholder="Ej: Maipú"
-                    value={form.comuna}
-                    onChange={(e) => {
-                      addressDirtyRef.current = true;
-                      setForm((f) => ({ ...f, comuna: e.target.value }));
-                    }}
-                    onBlur={ensureAddressGeocoded}
-                  />
-                </div>
-
-                {/* Acá estaban los contadores de tolvas, retroexcavadoras y
-                    camiones. Ya no: con HDU8 la maquinaria son recursos
-                    individuales que se agregan desde la ficha del punto, uno por
-                    uno y con su patente. Mantener también los contadores dejaba
-                    dos formas de declarar lo mismo y ninguna manera de saber
-                    cuál manda.
-
-                    Personal se queda: es el único dato de HDU6 sin equivalente
-                    en la planilla de flota, que trae la dotación que un vehículo
-                    REQUIERE, no los trabajadores que el punto TIENE. */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-muted-foreground">
-                    Personal (cantidad de trabajadores)
-                  </label>
-                  <Input
-                    type="number"
-                    min={0}
-                    value={form.personalCount}
-                    onChange={(e) => setForm((f) => ({ ...f, personalCount: e.target.value }))}
-                  />
-                </div>
-
-                <div className="flex gap-2 pt-2">
-                  <Button variant="ghost" onClick={backToIdle} className="flex-1" disabled={saving}>
-                    Cancelar
-                  </Button>
-                  <Button onClick={handleSave} className="flex-1" disabled={saving || !form.name.trim()}>
-                    {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    {editingId ? "Guardar cambios" : "Guardar punto"}
-                  </Button>
-                </div>
               </div>
-            )}
+              <Switch
+                id="point-active"
+                checked={form.active}
+                onCheckedChange={(checked) => setForm((f) => ({ ...f, active: checked }))}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label
+                  htmlFor="point-address"
+                  className="text-xs font-medium text-muted-foreground"
+                >
+                  Dirección <Obligatorio />
+                </label>
+                {geocodingAddress && (
+                  <span className="flex items-center gap-1 text-[0.625rem] text-muted-foreground">
+                    <Loader2 className="h-3 w-3 animate-spin" /> Buscando dirección…
+                  </span>
+                )}
+              </div>
+              <Input
+                id="point-address"
+                placeholder="Ej: Av. Pajaritos 1234"
+                value={form.address}
+                onChange={(e) => {
+                  addressDirtyRef.current = true;
+                  setForm((f) => ({ ...f, address: e.target.value }));
+                }}
+                onBlur={ensureAddressGeocoded}
+              />
+              {geocodeNotFound && (
+                <p className="text-[0.625rem] text-muted-foreground">
+                  No se encontró esta dirección en el mapa, el punto no se movió.
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              <label htmlFor="point-comuna" className="text-xs font-medium text-muted-foreground">
+                Comuna <Obligatorio />
+              </label>
+              <Input
+                id="point-comuna"
+                placeholder="Ej: Maipú"
+                value={form.comuna}
+                onChange={(e) => {
+                  addressDirtyRef.current = true;
+                  setForm((f) => ({ ...f, comuna: e.target.value }));
+                }}
+                onBlur={ensureAddressGeocoded}
+              />
+            </div>
+
+            {/* Acá estaban los contadores de tolvas, retroexcavadoras y
+                camiones, y también el personal del punto. Ya no queda ninguno.
+
+                La maquinaria se fue con HDU8: son recursos individuales, con su
+                patente, y mantener además los contadores dejaba dos formas de
+                declarar lo mismo sin manera de saber cuál manda.
+
+                El personal se va ahora, y por una razón distinta: la pregunta
+                no es cuánta gente TIENE el punto, es quién va en cada tramo de
+                la ruta, que es lo que pide HDU5.1. Un número suelto en el punto
+                no contesta eso y, puesto acá, se lee como si sí lo contestara.
+                El campo sigue existiendo en el backend y su valor se conserva
+                al editar (ver handleSave), así que nada de lo ya guardado se
+                pierde mientras se decide dónde va de verdad. */}
+
+            {/* "Cancelar" solo cuando hay algo que cancelar. Con el
+                    formulario siempre abierto y en blanco, cancelar no tiene
+                    qué deshacer y queda como un botón que no hace nada. */}
+            <div className="flex gap-2 pt-2">
+              {!formularioVacio && (
+                <Button variant="ghost" onClick={nuevoPunto} className="flex-1" disabled={saving}>
+                  {editingId ? "Cancelar" : "Limpiar"}
+                </Button>
+              )}
+              <Button
+                onClick={handleSave}
+                className="flex-1"
+                disabled={saving || loQueFalta() !== null}
+                title={loQueFalta() ?? undefined}
+              >
+                {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {editingId ? "Guardar cambios" : "Guardar punto"}
+              </Button>
+            </div>
           </div>
-        {/* La LISTA de puntos no va acá. Vive en la tabla al pie de la vista
+        )}
+      </div>
+      {/* La LISTA de puntos no va acá. Vive en la tabla al pie de la vista
             de planificación, con las cifras de cada punto (recursos, capacidad,
             estado), que es lo que se compara. En el panel era una segunda copia
             de la misma lista, sin esas cifras y sin sitio para mostrarlas.
@@ -686,5 +792,15 @@ export function PanelPuntos({
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  );
+}
+
+/** El asterisco de campo obligatorio. Lleva su propio texto para lectores de
+ *  pantalla: el símbolo solo no se anuncia. */
+function Obligatorio() {
+  return (
+    <span className="text-destructive-strong" title="Campo obligatorio">
+      *<span className="sr-only"> (obligatorio)</span>
+    </span>
   );
 }

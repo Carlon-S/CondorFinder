@@ -20,13 +20,15 @@
 // =============================================================================
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { ImageOff } from "lucide-react";
 import {
   AlertTriangle,
   ArrowRightCircle,
   Boxes,
+  CheckCircle2,
   Eye,
+  Layers,
   Loader2,
   Pencil,
   Plus,
@@ -74,6 +76,16 @@ import {
 
 export const Route = createFileRoute("/_authed/planificacion/recursos_/$pointId")({
   component: RecursosDelPuntoPage,
+  // ?agregar=1 abre el diálogo de tipo al entrar. Lo usa el panel de puntos
+  // después de crear uno: un punto sin flota no sirve para ninguna ruta, así
+  // que el camino natural es seguir cargándola.
+  // El tipo de retorno deja `agregar` OPCIONAL a propósito: devolviéndolo
+  // siempre, el router lo vuelve obligatorio y cada navegación hacia esta ruta
+  // (la tabla de puntos, el botón "Ver punto") tendría que mandarlo.
+  validateSearch: (search: Record<string, unknown>): { agregar?: true } =>
+    search.agregar === true || search.agregar === "1" || search.agregar === "true"
+      ? { agregar: true }
+      : {},
 });
 
 type Campo = "estado" | "equipo" | "tipo" | "capacidad" | "vehiculo";
@@ -147,13 +159,15 @@ function dotacionTexto(r: Resource): string {
 
 function RecursosDelPuntoPage() {
   const { pointId } = Route.useParams();
+  const { agregar } = Route.useSearch();
+  const navegar = useNavigate();
 
   const [punto, setPunto] = useState<ResourcePoint | null>(null);
   const [recursos, setRecursos] = useState<Resource[]>([]);
   const [tipos, setTipos] = useState<ResourceType[]>([]);
   const [cargando, setCargando] = useState(true);
   const [alternando, setAlternando] = useState<string | null>(null);
-  const [eligiendoTipo, setEligiendoTipo] = useState(false);
+  const [eligiendoTipo, setEligiendoTipo] = useState(agregar === true);
   const [aEliminar, setAEliminar] = useState<Resource | null>(null);
   const [eliminando, setEliminando] = useState(false);
   const [fotoAmpliada, setFotoAmpliada] = useState<string | null>(null);
@@ -170,6 +184,14 @@ function RecursosDelPuntoPage() {
   const [sortBy, setSortBy] = useState<Campo>("tipo");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [pagina, setPagina] = useState(1);
+
+  // La orden se borra de la URL apenas se atiende. Si se quedara, recargar la
+  // página volvería a abrir el diálogo, y el enlace copiado a un compañero le
+  // abriría un formulario de alta que nadie pidió.
+  useEffect(() => {
+    if (agregar) navegar({ to: ".", search: {}, replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agregar]);
 
   const recargar = async () => {
     try {
@@ -424,6 +446,12 @@ function RecursosDelPuntoPage() {
             doble, y aunque sea la que decide, tres cifras de la misma
             naturaleza en una misma franja con tipografías distintas se leen
             como si una estuviera rota. La jerarquía la da el orden. */}
+        {/* Los iconos son los MISMOS que en la lista de puntos para las mismas
+            cosas: el cubo es siempre capacidad, el visto es siempre
+            disponibilidad y el camión es siempre una unidad de la flota. Acá
+            "Disponibles" llevaba camión y "Tipos distintos" repetía el cubo de
+            capacidad, así que el mismo dibujo significaba dos cosas en la misma
+            franja y dos dibujos distintos significaban lo mismo entre vistas. */}
         <div className="panel flex flex-wrap items-center divide-x divide-border/10 px-1">
           <Cifra
             icono={<Boxes className="h-4 w-4" />}
@@ -431,12 +459,12 @@ function RecursosDelPuntoPage() {
             valor={`${punto?.capacity_m3 ?? 0} m³`}
           />
           <Cifra
-            icono={<Truck className="h-4 w-4" />}
+            icono={<CheckCircle2 className="h-4 w-4" />}
             etiqueta="Disponibles"
             valor={`${punto?.available_count ?? 0} de ${punto?.resource_count ?? 0}`}
           />
           <Cifra
-            icono={<Boxes className="h-4 w-4" />}
+            icono={<Layers className="h-4 w-4" />}
             etiqueta="Tipos distintos"
             valor={String(new Set(recursos.map((r) => r.tipo)).size)}
           />
@@ -607,7 +635,7 @@ function RecursosDelPuntoPage() {
                     return (
                       <TableRow
                         key={r.id}
-                        className="group animate-in fade-in duration-300 fill-mode-both hover:bg-card/60"
+                        className="animate-in fade-in duration-300 fill-mode-both hover:bg-card/60"
                       >
                         {/* ESTADO PRIMERO, antes de la identidad: es lo que
                             decide si esta unidad entra en una ruta. */}
@@ -703,35 +731,32 @@ function RecursosDelPuntoPage() {
                           <p className="text-xs text-muted-foreground/80">{dotacionTexto(r)}</p>
                         </TableCell>
 
-                        {/* "Ver recurso" con texto, igual que el listado de
-                            zonas de Vista Principal y que el de puntos. Editar
-                            y eliminar siguen siendo íconos que asoman al pasar
-                            el cursor: se usan menos y una de las dos borra. */}
+                        {/* "Ver recurso" y la papelera, en ese orden. El lápiz
+                            se fue de la fila: editar vive dentro de la ficha,
+                            que es donde se ve lo que se va a cambiar. Tener las
+                            dos entradas obligaba a decidir por cuál entrar
+                            antes de saber qué trae la unidad.
+
+                            La papelera se queda afuera y no entra a la ficha
+                            porque borrar no necesita abrir nada, y enterrarla
+                            un nivel más adentro convierte una acción de una
+                            fila en una de tres pasos. Va visible siempre, igual
+                            que en la lista de zonas: escondida hasta pasar el
+                            cursor, solo la encuentra quien usa ratón. */}
                         <TableCell>
                           <div className="flex items-center justify-end gap-1">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setTipoNuevo(null);
-                                setEnEdicion(r);
-                              }}
-                              title="Editar recurso"
-                              aria-label={`Editar ${r.tipo} ${r.numero_equipo}`}
-                              className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition-all hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </button>
-                            <button
-                              type="button"
+                            <Button size="sm" onClick={() => setEnDetalle(r)}>
+                              <Eye className="mr-1.5 h-3.5 w-3.5" /> Ver recurso
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-8 w-8 p-0 text-muted-foreground hover:bg-destructive/15 hover:text-destructive-strong"
                               onClick={() => setAEliminar(r)}
                               title="Eliminar recurso"
                               aria-label={`Eliminar ${r.tipo} ${r.numero_equipo}`}
-                              className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition-all hover:bg-destructive/15 hover:text-destructive-strong focus-visible:opacity-100 group-hover:opacity-100"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                            <Button size="sm" onClick={() => setEnDetalle(r)}>
-                              <Eye className="mr-1.5 h-3.5 w-3.5" /> Ver recurso
                             </Button>
                           </div>
                         </TableCell>

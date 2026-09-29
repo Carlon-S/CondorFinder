@@ -67,7 +67,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { listAnalyses, setPendingOpenId, type AnalysisSummary, type SavedAnalysisRecord } from "@/lib/analysisStore";
+import {
+  listAnalyses,
+  setPendingOpenId,
+  type AnalysisSummary,
+  type SavedAnalysisRecord,
+} from "@/lib/analysisStore";
 import { listResourcePoints, type ResourcePoint } from "@/lib/resources";
 import { MAIPU_BBOX } from "@/lib/maipuBoundary";
 import {
@@ -81,7 +86,11 @@ import {
 import { projectPolygonToWgs84 } from "@/lib/projection";
 import { generateRoute, type RoutePlanSegment } from "@/lib/routePlan";
 import { notify } from "@/lib/notify";
-import { ROUTE_OUTBOUND_COLOR, ROUTE_RETURN_COLOR, ROUTE_RETURN_OPACITY } from "@/components/route-colors";
+import {
+  ROUTE_OUTBOUND_COLOR,
+  ROUTE_RETURN_COLOR,
+  ROUTE_RETURN_OPACITY,
+} from "@/components/route-colors";
 
 export const Route = createFileRoute("/_authed/planificacion/rutas")({
   component: RutasPage,
@@ -410,7 +419,9 @@ function RutasPage() {
   // librerías de fetching tipo react-query. Sin esto, una zona eliminada
   // en otra pestaña/sesión seguía viéndose acá como si nada.
   useEffect(() => {
-    Promise.all([refreshOriginPoints(), refreshAllAnalyses()]).finally(() => setMapDataLoading(false));
+    Promise.all([refreshOriginPoints(), refreshAllAnalyses()]).finally(() =>
+      setMapDataLoading(false),
+    );
 
     const handleFocus = () => {
       refreshOriginPoints();
@@ -680,7 +691,7 @@ function RutasPage() {
       <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border/25 px-6 py-4">
         <div>
           <p className="eyebrow">Planificación</p>
-          <h1 className="font-rubik text-2xl font-semibold tracking-normal text-foreground md:text-3xl">
+          <h1 className="font-rubik text-3xl font-semibold tracking-normal text-foreground md:text-4xl">
             Planificar Retiro
           </h1>
         </div>
@@ -748,71 +759,70 @@ function RutasPage() {
                 <h2 className="text-sm font-semibold tracking-tight text-foreground">Ruta</h2>
               </div>
 
-            <div className="animate-in fade-in slide-in-from-left-2 duration-300 flex flex-col gap-2">
-              <Button onClick={openLoadDialog} variant="secondary" className="w-full">
-                <FolderOpen className="mr-2 h-4 w-4" /> Cargar archivo de análisis
-              </Button>
-              <Button
-                onClick={openConfirm}
-                disabled={loadedAnalyses.length === 0}
-                size="lg"
-                className="btn-cta w-full"
-              >
-                <RouteIcon className="mr-2 h-4 w-4" /> Generar ruta
-              </Button>
-            </div>
+              <div className="animate-in fade-in slide-in-from-left-2 duration-300 flex flex-col gap-2">
+                <Button onClick={openLoadDialog} variant="secondary" className="w-full">
+                  <FolderOpen className="mr-2 h-4 w-4" /> Cargar archivo de análisis
+                </Button>
+                <Button
+                  onClick={openConfirm}
+                  disabled={loadedAnalyses.length === 0}
+                  size="lg"
+                  className="btn-cta w-full"
+                >
+                  <RouteIcon className="mr-2 h-4 w-4" /> Generar ruta
+                </Button>
+              </div>
 
-            {/* La lista de zonas cargadas NO va acá. Vive en la tabla al pie,
+              {/* La lista de zonas cargadas NO va acá. Vive en la tabla al pie,
                 donde cada zona muestra su volumen, su área y su peso, que es lo
                 que se compara al decidir. En el panel era una lista de nombres
                 sin cifras que además duplicaba lo de abajo. */}
 
-            {routeError && (
-              <div className="animate-in fade-in slide-in-from-left-2 duration-300 rounded-lg border border-warning/40 bg-warning/10 p-4">
-                <TriangleAlert className="mb-2 h-5 w-5 text-warning" />
-                <p className="text-sm font-semibold">No se pudo generar la ruta</p>
-                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{routeError}</p>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Revisa los puntos en el bloque de abajo.
-                </p>
-              </div>
-            )}
-
-            {routeStops && (
-              <div className="animate-in fade-in slide-in-from-left-2 duration-300 space-y-2">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-semibold text-foreground">Ruta propuesta</p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRouteStops(null);
-                      setRouteOutboundPaths(null);
-                      setRouteReturnPaths(null);
-                      setRouteSegments(null);
-                    }}
-                    aria-label="Cerrar"
-                    className="flex h-6 w-6 flex-shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
+              {routeError && (
+                <div className="animate-in fade-in slide-in-from-left-2 duration-300 rounded-lg border border-warning/40 bg-warning/10 p-4">
+                  <TriangleAlert className="mb-2 h-5 w-5 text-warning" />
+                  <p className="text-sm font-semibold">No se pudo generar la ruta</p>
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{routeError}</p>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Revisa los puntos en el bloque de abajo.
+                  </p>
                 </div>
-                <ul className="space-y-1.5">
-                  {routeStops.map((s) => (
-                    <li
-                      key={s.order}
-                      className="flex items-center gap-2 rounded-md border border-border/60 bg-background/60 p-2 text-sm"
-                    >
-                      <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-primary/15 text-[0.625rem] font-semibold text-primary">
-                        {s.order}
-                      </span>
-                      <span className="min-w-0 flex-1 truncate">{s.label}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            </div>
+              )}
 
+              {routeStops && (
+                <div className="animate-in fade-in slide-in-from-left-2 duration-300 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-semibold text-foreground">Ruta propuesta</p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRouteStops(null);
+                        setRouteOutboundPaths(null);
+                        setRouteReturnPaths(null);
+                        setRouteSegments(null);
+                      }}
+                      aria-label="Cerrar"
+                      className="flex h-6 w-6 flex-shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                  <ul className="space-y-1.5">
+                    {routeStops.map((s) => (
+                      <li
+                        key={s.order}
+                        className="flex items-center gap-2 rounded-md border border-border/60 bg-background/60 p-2 text-sm"
+                      >
+                        <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-primary/15 text-[0.625rem] font-semibold text-primary">
+                          {s.order}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate">{s.label}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
           </div>
         </aside>
       </main>
@@ -941,9 +951,7 @@ function RutasPage() {
                         {seg.vehicle ? (
                           <>
                             <span className="mono font-medium">{seg.vehicle.patente}</span>
-                            <span className="ml-1.5 text-muted-foreground">
-                              {seg.vehicle.tipo}
-                            </span>
+                            <span className="ml-1.5 text-muted-foreground">{seg.vehicle.tipo}</span>
                           </>
                         ) : (
                           <span className="text-muted-foreground">sin asignar</span>
@@ -1228,7 +1236,9 @@ function RutasPage() {
                   <div className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100">
                     <div className="flex items-center gap-2 rounded-md bg-background/85 px-4 py-2 shadow-xl backdrop-blur">
                       <MapIcon className="h-4 w-4 text-primary" />
-                      <span className="text-sm font-semibold text-foreground">Ver análisis de detección</span>
+                      <span className="text-sm font-semibold text-foreground">
+                        Ver análisis de detección
+                      </span>
                     </div>
                   </div>
                 )}
@@ -1338,7 +1348,9 @@ function RutasPage() {
                 </span>
               )}
             </div>
-            <DialogDescription>Punto de origen o destino para la generación de ruta.</DialogDescription>
+            <DialogDescription>
+              Punto de origen o destino para la generación de ruta.
+            </DialogDescription>
           </DialogHeader>
           {zoomPoint && (
             <div className="space-y-4">
@@ -1381,14 +1393,13 @@ function RutasPage() {
                     válido que después hace fallar la ruta sin motivo aparente. */}
                 {zoomPoint.resource_count > 0 && zoomPoint.capacity_m3 === 0 && (
                   <p className="rounded-md border border-warning/40 bg-warning/10 px-2.5 py-2 text-[0.6875rem] leading-relaxed">
-                    Este punto tiene recursos registrados pero ninguno con capacidad de
-                    transporte disponible, así que no puede recibir zonas en una ruta.
+                    Este punto tiene recursos registrados pero ninguno con capacidad de transporte
+                    disponible, así que no puede recibir zonas en una ruta.
                   </p>
                 )}
                 {zoomPoint.resource_count === 0 && (
                   <p className="rounded-md border border-border/60 bg-muted/40 px-2.5 py-2 text-[0.6875rem] leading-relaxed text-muted-foreground">
-                    Sin recursos registrados todavía. Se agregan desde Recursos
-                    Disponibles.
+                    Sin recursos registrados todavía. Se agregan desde Recursos Disponibles.
                   </p>
                 )}
 
