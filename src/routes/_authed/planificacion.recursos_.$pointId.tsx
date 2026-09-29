@@ -26,6 +26,7 @@ import {
   AlertTriangle,
   ArrowRightCircle,
   Boxes,
+  Eye,
   Loader2,
   Pencil,
   Plus,
@@ -86,10 +87,10 @@ const ANCHOS = {
   estado: "w-[16%]",
   foto: "w-[9%]",
   equipo: "w-[17%]",
-  tipo: "w-[16%]",
+  tipo: "w-[12%]",
   capacidad: "w-[15%]",
-  vehiculo: "w-[23%]",
-  acciones: "w-[4%]",
+  vehiculo: "w-[16%]",
+  acciones: "w-[15%]",
 } as const;
 
 /** La cifra de capacidad separada de qué mide. Antes la celda decía "balde 3"
@@ -156,6 +157,9 @@ function RecursosDelPuntoPage() {
   const [aEliminar, setAEliminar] = useState<Resource | null>(null);
   const [eliminando, setEliminando] = useState(false);
   const [fotoAmpliada, setFotoAmpliada] = useState<string | null>(null);
+  // Ficha de un recurso, en solo lectura. Es lo que abre "Ver recurso":
+  // la fila muestra seis columnas y la unidad tiene más datos que eso.
+  const [enDetalle, setEnDetalle] = useState<Resource | null>(null);
   // Formulario: `tipoNuevo` con valor = alta, `enEdicion` con valor = edición.
   // Nunca los dos a la vez.
   const [tipoNuevo, setTipoNuevo] = useState<string | null>(null);
@@ -179,9 +183,12 @@ function RecursosDelPuntoPage() {
 
   useEffect(() => {
     setCargando(true);
-    Promise.all([recargar(), listResourceTypes().then(setTipos).catch(() => {})]).finally(() =>
-      setCargando(false),
-    );
+    Promise.all([
+      recargar(),
+      listResourceTypes()
+        .then(setTipos)
+        .catch(() => {}),
+    ]).finally(() => setCargando(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pointId]);
 
@@ -325,7 +332,9 @@ function RecursosDelPuntoPage() {
       setRecursos((prev) => prev.map((x) => (x.id === r.id ? actualizado : x)));
       // El punto trae su capacidad calculada por el backend: hay que volver a
       // pedirla, no recalcularla acá, o las dos cifras pueden discrepar.
-      getResourcePoint(pointId).then(setPunto).catch(() => {});
+      getResourcePoint(pointId)
+        .then(setPunto)
+        .catch(() => {});
     } catch (err) {
       notify.error(
         "No se pudo cambiar la disponibilidad",
@@ -442,8 +451,8 @@ function RecursosDelPuntoPage() {
             ruteo descarta el punto entero antes de mirar sus unidades. */}
         {punto && !punto.active && punto.resource_count > 0 && (
           <p className="mb-4 rounded-lg border border-warning/40 bg-warning/10 px-4 py-2.5 text-xs leading-relaxed">
-            El punto está inactivo, así que sus recursos no participan de ninguna ruta
-            aunque estén disponibles.
+            El punto está inactivo, así que sus recursos no participan de ninguna ruta aunque estén
+            disponibles.
           </p>
         )}
 
@@ -512,8 +521,8 @@ function RecursosDelPuntoPage() {
                     Este punto no tiene recursos
                   </p>
                   <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                    Sin al menos un vehículo con capacidad de transporte no puede participar
-                    de una ruta.
+                    Sin al menos un vehículo con capacidad de transporte no puede participar de una
+                    ruta.
                   </p>
                 </div>
                 <Button size="sm" variant="secondary" onClick={() => setEligiendoTipo(true)}>
@@ -694,6 +703,10 @@ function RecursosDelPuntoPage() {
                           <p className="text-xs text-muted-foreground/80">{dotacionTexto(r)}</p>
                         </TableCell>
 
+                        {/* "Ver recurso" con texto, igual que el listado de
+                            zonas de Vista Principal y que el de puntos. Editar
+                            y eliminar siguen siendo íconos que asoman al pasar
+                            el cursor: se usan menos y una de las dos borra. */}
                         <TableCell>
                           <div className="flex items-center justify-end gap-1">
                             <button
@@ -717,6 +730,9 @@ function RecursosDelPuntoPage() {
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
+                            <Button size="sm" onClick={() => setEnDetalle(r)}>
+                              <Eye className="mr-1.5 h-3.5 w-3.5" /> Ver recurso
+                            </Button>
                           </div>
                         </TableCell>
                       </TableRow>
@@ -856,6 +872,109 @@ function RecursosDelPuntoPage() {
         onGuardado={recargar}
       />
 
+      {/* Ficha del recurso, en solo lectura. Foto grande a la izquierda y los
+          datos a la derecha: la misma forma que el formulario, para que ver y
+          editar se lean como la misma cosa de dos maneras.
+          No agrega ningún dato que la tabla no tenga ya calculado, usa
+          capacidadDeFila igual que las filas, así que no afirma nada sobre un
+          tipo que la planilla de la municipalidad no diga. */}
+      <Dialog
+        open={enDetalle !== null}
+        onOpenChange={(abierto) => {
+          if (!abierto) setEnDetalle(null);
+        }}
+      >
+        <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex flex-wrap items-center gap-2">
+              {enDetalle?.tipo} {enDetalle?.numero_equipo}
+              {enDetalle && (
+                <span
+                  className={`rounded px-1.5 py-0.5 text-[0.5625rem] font-semibold uppercase tracking-wide ${
+                    enDetalle.disponible
+                      ? "bg-success/15 text-success-strong"
+                      : "bg-muted text-muted-foreground"
+                  }`}
+                >
+                  {enDetalle.disponible ? "Disponible" : "No disponible"}
+                </span>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+
+          {enDetalle && (
+            <div className="grid gap-5 md:grid-cols-[17rem_1fr]">
+              <button
+                type="button"
+                onClick={() => enDetalle.foto && setFotoAmpliada(enDetalle.foto)}
+                disabled={!enDetalle.foto}
+                title={enDetalle.foto ? "Ver la foto en grande" : "Sin imagen todavía"}
+                className={`detect-frame relative block aspect-[16/10] w-full self-start overflow-hidden rounded-lg border border-border bg-muted ${
+                  enDetalle.foto ? "cursor-zoom-in" : "cursor-default"
+                }`}
+              >
+                <span className="detect-corners" aria-hidden="true" />
+                {enDetalle.foto ? (
+                  <img
+                    src={resourcePhotoUrl(enDetalle.foto)}
+                    alt={`${enDetalle.tipo} ${enDetalle.numero_equipo}`}
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <span className="flex h-full w-full flex-col items-center justify-center gap-2 text-muted-foreground">
+                    <ImageOff className="h-8 w-8 opacity-40" />
+                    <span className="text-xs">Sin imagen todavía</span>
+                  </span>
+                )}
+              </button>
+
+              <div className="flex flex-col gap-5">
+                <dl className="grid grid-cols-2 gap-x-4 gap-y-3.5">
+                  <Dato etiqueta="N° de equipo" valor={enDetalle.numero_equipo || "sin N°"} />
+                  <Dato etiqueta="Patente" valor={enDetalle.patente || "sin patente"} />
+                  <Dato etiqueta="Tipo" valor={enDetalle.tipo} />
+                  <Dato
+                    etiqueta="Vehículo"
+                    valor={
+                      [enDetalle.marca, enDetalle.modelo, enDetalle.anio]
+                        .filter(Boolean)
+                        .join(" ") || "sin datos"
+                    }
+                  />
+                  <Dato
+                    etiqueta="Capacidad"
+                    valor={
+                      capacidadDeFila(enDetalle).valor !== null
+                        ? `${capacidadDeFila(enDetalle).valor} m³ de ${capacidadDeFila(enDetalle).nota}`
+                        : capacidadDeFila(enDetalle).nota
+                    }
+                    alerta={capacidadDeFila(enDetalle).falta}
+                  />
+                  <Dato etiqueta="Dotación requerida" valor={dotacionTexto(enDetalle)} />
+                  <Dato etiqueta="Punto" valor={punto?.name ?? "-"} />
+                </dl>
+
+                <div className="flex gap-2 border-t border-border/40 pt-4">
+                  <Button
+                    className="flex-1"
+                    onClick={() => {
+                      setTipoNuevo(null);
+                      setEnEdicion(enDetalle);
+                      setEnDetalle(null);
+                    }}
+                  >
+                    <Pencil className="mr-1.5 h-4 w-4" /> Editar este recurso
+                  </Button>
+                  <Button variant="secondary" onClick={() => setEnDetalle(null)}>
+                    Cerrar
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
       <Dialog
         open={fotoAmpliada !== null}
         onOpenChange={(a) => {
@@ -892,9 +1011,9 @@ function RecursosDelPuntoPage() {
               {aEliminar && (
                 <>
                   Se va a eliminar {aEliminar.tipo} {aEliminar.numero_equipo || "sin número"}
-                  {aEliminar.patente && ` (${aEliminar.patente})`}. No se puede deshacer. Si
-                  el vehículo está fuera de servicio de forma temporal, conviene marcarlo
-                  como no disponible en vez de borrarlo.
+                  {aEliminar.patente && ` (${aEliminar.patente})`}. No se puede deshacer. Si el
+                  vehículo está fuera de servicio de forma temporal, conviene marcarlo como no
+                  disponible en vez de borrarlo.
                 </>
               )}
             </AlertDialogDescription>
@@ -940,6 +1059,28 @@ function Cifra({
           {valor}
         </span>
       </span>
+    </div>
+  );
+}
+
+/** Un dato de la ficha: etiqueta chica arriba, valor debajo. `alerta` lo pinta
+ *  en ámbar y es el mismo criterio que la tabla, un hueco real y no algo que
+ *  simplemente no sabemos (ver capacidadDe). */
+function Dato({
+  etiqueta,
+  valor,
+  alerta = false,
+}: {
+  etiqueta: string;
+  valor: string;
+  alerta?: boolean;
+}) {
+  return (
+    <div>
+      <dt className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">{etiqueta}</dt>
+      <dd className={`mt-0.5 text-xs ${alerta ? "text-warning-strong" : "text-foreground"}`}>
+        {valor}
+      </dd>
     </div>
   );
 }

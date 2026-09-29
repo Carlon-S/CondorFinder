@@ -20,7 +20,8 @@
 
 import { useEffect, useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ArrowRightCircle, Loader2, MapPin, Pencil } from "@/components/icons/Icons";
+import { Eye, Loader2, MapPin, Pencil } from "@/components/icons/Icons";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -68,7 +69,6 @@ function RecursosPage() {
 
   useEffect(() => {
     recargar();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const totales = {
@@ -156,9 +156,7 @@ function RecursosPage() {
               <div className="flex flex-col items-center gap-3 py-12 text-center">
                 <MapPin className="h-10 w-10 text-muted-foreground/30" />
                 <div>
-                  <p className="text-sm font-semibold text-foreground">
-                    Todavía no hay puntos
-                  </p>
+                  <p className="text-sm font-semibold text-foreground">Todavía no hay puntos</p>
                   <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
                     Un punto es el lugar donde está la flota. Sin al menos uno no se puede
                     planificar ninguna ruta. Se define desde el panel de arriba.
@@ -176,7 +174,7 @@ function RecursosPage() {
                       Capacidad <span className="mono opacity-70">(m³)</span>
                     </TableHead>
                     <TableHead className="w-[6rem]">Estado</TableHead>
-                    <TableHead className="w-[5rem]"></TableHead>
+                    <TableHead className="w-[13rem]"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -217,28 +215,40 @@ function RecursosPage() {
                           {p.active ? "Activo" : "Inactivo"}
                         </span>
                       </TableCell>
-                      {/* Dos acciones sobre la misma fila, y por eso el lápiz
-                          corta la propagación: la fila abre la FLOTA del punto
-                          (otra pantalla) y el lápiz lo abre para EDITARLO en el
-                          panel de arriba, sin salir de acá. */}
+                      {/* Botones con texto, como el listado de zonas de Vista
+                          Principal. Estuvo con una flecha muda al final de la
+                          fila y no decía a dónde llevaba; con dos acciones
+                          distintas sobre la misma fila, menos todavía.
+
+                          Los dos cortan la propagación porque la fila entera
+                          también es clickeable: sin eso, apretar "Editar"
+                          abriría además la flota. */}
                       <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <button
-                            type="button"
+                        <div className="flex items-center justify-end gap-2">
+                          <Button
+                            size="sm"
+                            variant="secondary"
                             onClick={(e) => {
                               e.stopPropagation();
                               setPuntoAEditar(p.id);
                             }}
-                            title="Editar este punto"
-                            aria-label={`Editar ${p.name}`}
-                            className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition-all hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                            title="Editar los datos de este punto"
                           >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </button>
-                          <ArrowRightCircle
-                            aria-hidden="true"
-                            className="h-4 w-4 text-muted-foreground transition-colors group-hover:text-primary"
-                          />
+                            <Pencil className="mr-1.5 h-3.5 w-3.5" /> Editar
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate({
+                                to: "/planificacion/recursos/$pointId",
+                                params: { pointId: p.id },
+                              });
+                            }}
+                            title="Ver la flota de este punto"
+                          >
+                            <Eye className="mr-1.5 h-3.5 w-3.5" /> Ver punto
+                          </Button>
                         </div>
                       </TableCell>
                     </TableRow>
