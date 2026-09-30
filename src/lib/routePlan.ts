@@ -37,6 +37,28 @@ export interface RoutePlanStop {
   lat: number;
   lng: number;
   label: string;
+  /** Qué análisis guardado (HDU4) es esta parada. Opcional mientras el backend
+   *  no lo mande.
+   *
+   *  Con él, la vista puede mostrar el volumen y el tipo de residuo de cada
+   *  parada SIN pedirlos por la red: ya tiene los análisis cargados en memoria,
+   *  solo le falta saber cuál es cuál. Sin él tendría que emparejar por nombre,
+   *  que se rompe en cuanto dos zonas se llaman parecido. */
+  analysisId?: string;
+}
+
+/** Un tramo entre dos paradas consecutivas. HDU5.1/AC7 habla de "cada tramo del
+ *  plan", y un tramo es esto: lo que se recorre entre un punto y el siguiente.
+ *
+ *  Opcional, como el resto de HDU5.1. Mientras no llegue, la vista muestra los
+ *  totales de ida y vuelta que sí trae el segmento, que es lo que hay hoy. */
+export interface RoutePlanLeg {
+  /** Orden de la parada de la que sale. null = sale del punto de origen. */
+  fromOrder: number | null;
+  /** Orden de la parada a la que llega. null = vuelve al punto de origen. */
+  toOrder: number | null;
+  distanceKm: number;
+  durationHours: number;
 }
 
 /** Resumen de una sub-ruta/punto de origen usado -- mismo índice que
@@ -80,6 +102,15 @@ export interface RoutePlanSegment {
   /** Autonomía del vehículo en km, contra la que se descarta un tramo
    *  demasiado largo. AC3. */
   autonomyKm?: number;
+  /** El recorrido partido en tramos, en orden. Es lo que dibuja la línea de
+   *  tiempo del plan. */
+  legs?: RoutePlanLeg[];
+  /** Qué paradas recorre este segmento, por su `order`. Hoy `route.stops` es
+   *  una lista plana sin dueño, así que la vista no puede saber qué paradas
+   *  pertenecen a qué recorrido: con un solo punto de origen da igual, con
+   *  varios no. Descartar un recorrido, por ejemplo, debería llevarse sus
+   *  paradas, y sin este campo solo puede quitar el trazo. */
+  stopOrders?: number[];
 }
 
 /** Una zona que no se pudo asignar a ningún vehículo, con el motivo. HDU5.1/AC6:

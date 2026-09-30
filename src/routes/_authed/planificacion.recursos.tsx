@@ -313,7 +313,7 @@ function RecursosPage() {
             />
           </aside>
 
-          <section className="relative h-full overflow-hidden rounded-xl border border-border bg-background">
+          <section className="map-frame h-full bg-background">
             <GeoMap
               className="h-full w-full"
               points={mapPoints}

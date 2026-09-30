@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   MapContainer,
   TileLayer,
+  ZoomControl,
   Marker,
   Polygon,
   Polyline,
@@ -15,8 +16,18 @@ import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
 import markerIcon from "leaflet/dist/images/marker-icon.png";
 import markerShadow from "leaflet/dist/images/marker-shadow.png";
 import type { GeoMapProps } from "@/components/GeoMap";
-import { ROUTE_OUTBOUND_COLOR, ROUTE_OUTLINE_COLOR, ROUTE_RETURN_COLOR, ROUTE_RETURN_OPACITY } from "@/components/route-colors";
-import { MAIPU_BBOX, MAIPU_BOUNDARY, MAIPU_VIEW_CENTER } from "@/lib/maipuBoundary";
+import {
+  ROUTE_OUTBOUND_COLOR,
+  ROUTE_OUTLINE_COLOR,
+  ROUTE_RETURN_COLOR,
+  ROUTE_RETURN_OPACITY,
+} from "@/components/route-colors";
+import {
+  MAIPU_BBOX,
+  MAIPU_BOUNDARY,
+  MAIPU_VIEW_BBOX,
+  MAIPU_VIEW_CENTER,
+} from "@/lib/maipuBoundary";
 
 /** Encuadre inicial: el casco urbano de Maipú. Ver la nota de
  *  MAIPU_VIEW_CENTER sobre por qué no es el centro geométrico de la comuna.
@@ -78,13 +89,21 @@ function pinDivIcon(path: string, color: string, size: number): L.DivIcon {
 // Zonas (HDU5): pin más grande, "precisión espectacular" para distinguirlas
 // de los pines de puntos (HDU6) aunque compartan la misma familia de forma.
 function zoneIcon(color: string, filled: boolean): L.DivIcon {
-  return pinDivIcon(filled ? ZONE_PIN_FILL : ZONE_PIN_REGULAR, filled ? color : "var(--muted-foreground)", 44);
+  return pinDivIcon(
+    filled ? ZONE_PIN_FILL : ZONE_PIN_REGULAR,
+    filled ? color : "var(--muted-foreground)",
+    44,
+  );
 }
 
 // Puntos de origen (HDU6): pin "de área" (silueta con base ovalada en la
 // versión fill), mismo criterio sólido=activo/hueco=inactivo que zoneIcon.
 function originIcon(active: boolean): L.DivIcon {
-  return pinDivIcon(active ? ORIGIN_PIN_FILL : ORIGIN_PIN_REGULAR, active ? "var(--primary)" : "var(--muted-foreground)", 36);
+  return pinDivIcon(
+    active ? ORIGIN_PIN_FILL : ORIGIN_PIN_REGULAR,
+    active ? "var(--primary)" : "var(--muted-foreground)",
+    36,
+  );
 }
 
 /** Recuadros de detecciones superpuestos sobre la miniatura del tooltip
@@ -184,44 +203,57 @@ function FitBounds({ points }: { points: [number, number][] | null | undefined }
 function RouteClickZoom({
   outboundPaths,
   returnPaths,
+  onRouteClick,
 }: {
   outboundPaths: [number, number][][] | null | undefined;
   returnPaths: [number, number][][] | null | undefined;
+  /** Índice del recorrido cuyo trazo se apretó. Es el mismo índice de
+   *  `routeSegments`, así que la vista puede abrir su detalle. */
+  onRouteClick?: (segmentIndex: number) => void;
 }) {
   const CLICK_TOLERANCE_PX = 20;
   const map = useMapEvents({
     click(e) {
-      const paths = [...(outboundPaths ?? []), ...(returnPaths ?? [])];
-      if (paths.length === 0) return;
+      const outbound = outboundPaths ?? [];
+      const ret = returnPaths ?? [];
+      if (outbound.length === 0 && ret.length === 0) return;
       const clickPoint = map.latLngToContainerPoint(e.latlng);
+
+      // Se busca el vértice más cercano guardando de QUÉ recorrido es. Ida y
+      // vuelta comparten índice con routeSegments (ver el contrato en
+      // routePlan.ts), así que los dos arreglos se recorren por separado pero
+      // reportan el mismo número.
       let closestDist = Infinity;
-      for (const path of paths) {
+      let closestIndex = -1;
+      for (const [i, path] of [...outbound.entries()]) {
         for (const vertex of path) {
           const dist = clickPoint.distanceTo(map.latLngToContainerPoint(vertex));
-          if (dist < closestDist) closestDist = dist;
+          if (dist < closestDist) {
+            closestDist = dist;
+            closestIndex = i;
+          }
         }
       }
+      for (const [i, path] of [...ret.entries()]) {
+        for (const vertex of path) {
+          const dist = clickPoint.distanceTo(map.latLngToContainerPoint(vertex));
+          if (dist < closestDist) {
+            closestDist = dist;
+            closestIndex = i;
+          }
+        }
+      }
+
       if (closestDist <= CLICK_TOLERANCE_PX) {
-        map.flyToBounds(L.latLngBounds(paths.flat()), { padding: [48, 48], duration: 0.6 });
+        map.flyToBounds(L.latLngBounds([...outbound, ...ret].flat()), {
+          padding: [48, 48],
+          duration: 0.6,
+        });
+        if (closestIndex >= 0) onRouteClick?.(closestIndex);
       }
     },
   });
   return null;
-}
-
-/** Texto de la ventana flotante sobre un tramo de ruta (estilo Google
- *  Maps), velocidad calculada acá mismo (distancia/tiempo), no viaja como
- *  campo aparte del backend. */
-function segmentTooltipText(
-  direction: "Ida" | "Vuelta",
-  trucksUsed: number,
-  distanceKm: number,
-  durationHours: number,
-): string {
-  const minutes = Math.round(durationHours * 60);
-  const speedKmh = durationHours > 0 ? Math.round(distanceKm / durationHours) : 0;
-  const trucksLabel = trucksUsed > 0 ? `🚚×${trucksUsed} · ` : "";
-  return `${trucksLabel}${direction} · ${minutes} min · ${distanceKm.toFixed(1)} km · ~${speedKmh} km/h`;
 }
 
 /** Distancia aproximada (en grados, NO metros) entre dos puntos, alcanza
@@ -299,36 +331,6 @@ const ROUTE_CANVAS_RENDERER = L.canvas({ padding: 1 });
  *  quedaba pegada en el lugar de la ruta vieja. Un Marker si sigue su
  *  propia posición correctamente, y la key (más abajo) fuerza además un
  *  remonte completo cuando cambia la ruta, como garantía extra. */
-function RouteSegmentLabel({
-  path,
-  fraction,
-  text,
-  offset,
-}: {
-  path: [number, number][];
-  fraction: number;
-  text: string;
-  /** Desplazamiento en píxeles (x, y), en un tramo de ida y vuelta por la
-   *  MISMA carretera (ej. un solo camino de montaña con curvas), el punto
-   *  al 25% del recorrido de cada trazo puede caer geográficamente cerca
-   *  del otro aunque se midan desde extremos opuestos (las curvas
-   *  concentran buena parte de la distancia recorrida en un tramo corto).
-   *  Un offset horizontal distinto para ida/vuelta garantiza que las dos
-   *  burbujas nunca queden una encima de la otra, sin depender de la
-   *  geometría real de la calle. */
-  offset: [number, number];
-}) {
-  const anchor = pointAtFraction(path, fraction);
-  if (!anchor) return null;
-  return (
-    <Marker position={anchor} icon={INVISIBLE_ICON} interactive={false}>
-      <Tooltip permanent direction="top" offset={offset} className="condorfinder-route-tooltip">
-        {text}
-      </Tooltip>
-    </Marker>
-  );
-}
-
 export function GeoMapImpl({
   center = MAIPU_CENTER,
   zoom = 13,
@@ -342,11 +344,13 @@ export function GeoMapImpl({
   fitBoundsTo,
   onMapClick,
   onPointClick,
+  onRouteClick,
   focusPoint,
   lockToMaipu,
   className,
 }: GeoMapProps) {
-  const hasRealPaths = (outboundPaths && outboundPaths.length > 0) || (returnPaths && returnPaths.length > 0);
+  const hasRealPaths =
+    (outboundPaths && outboundPaths.length > 0) || (returnPaths && returnPaths.length > 0);
   return (
     // renderer=ROUTE_CANVAS_RENDERER: sin canvas, cada trazo de ruta
     // (potencialmente cientos de vértices en una ruta larga, x2 por el
@@ -360,9 +364,18 @@ export function GeoMapImpl({
       // en toda la comuna" es que entre entera en pantalla, y eso depende del
       // tamaño del contenedor, así que un zoom fijo no lo garantiza. Leaflet
       // calcula el zoom que hace calzar la caja.
+      // El zoom por defecto de Leaflet va arriba a la izquierda, que es justo
+      // donde flota el panel del plan en la vista de rutas: los botones + y -
+      // quedaban debajo de la tarjeta, inalcanzables. Abajo a la derecha no
+      // choca con nada y es donde lo ponen las herramientas de mapas.
+      zoomControl={false}
       {...(lockToMaipu
         ? {
-            bounds: MAIPU_BBOX,
+            // Abre sobre el casco urbano, no sobre la comuna entera (ver
+            // MAIPU_VIEW_BBOX). El paneo sigue limitado por MAIPU_BBOX, asi
+            // que no se pierde nada: solo cambia desde dónde se empieza a
+            // mirar.
+            bounds: MAIPU_VIEW_BBOX,
             // El límite de paneo lleva MARGEN: la caja de la comuna ensanchada
             // un 30%. Ceñido exactamente a la comuna, mirar un punto del borde
             // era imposible porque el pin quedaba pegado al canto de la
@@ -383,6 +396,7 @@ export function GeoMapImpl({
       scrollWheelZoom
       renderer={ROUTE_CANVAS_RENDERER}
     >
+      <ZoomControl position="bottomright" />
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -420,7 +434,11 @@ export function GeoMapImpl({
       <ClickHandler onMapClick={onMapClick} />
       <FlyToPoint target={focusPoint ?? null} />
       <FitBounds points={fitBoundsTo ?? null} />
-      <RouteClickZoom outboundPaths={outboundPaths} returnPaths={returnPaths} />
+      <RouteClickZoom
+        outboundPaths={outboundPaths}
+        returnPaths={returnPaths}
+        onRouteClick={onRouteClick}
+      />
       {marker && <Marker position={marker} />}
       {hasRealPaths ? (
         <>
@@ -456,20 +474,12 @@ export function GeoMapImpl({
               />
             );
           })}
-          {outboundPaths?.map((path, i) => {
-            const seg = routeSegments?.[i];
-            if (!seg) return null;
-            const key = `outbound-label-${pathKey(path as [number, number][])}-${i}`;
-            return (
-              <RouteSegmentLabel
-                key={key}
-                path={path as [number, number][]}
-                fraction={0.25}
-                offset={[-60, 0]}
-                text={segmentTooltipText("Ida", seg.trucksUsed, seg.outboundDistanceKm, seg.outboundDurationHours)}
-              />
-            );
-          })}
+          {/* Acá iban unas burbujas permanentes sobre cada trazo, con los
+              camiones, la distancia, el tiempo y la velocidad media. Se
+              eliminaron: son etiquetas fijas encima del mapa que tapan calles
+              justo en el recorrido que hay que leer, y todo lo que decían está
+              ahora en la línea de tiempo del panel, donde cada tramo tiene su
+              propia fila y no compite con la cartografía. */}
           {/* Vuelta, mismo tramo tipo de calle, pero más lento (camiones
               cargados, ver _RETURN_SPEED_FACTOR en routing.py), mismo azul,
               más claro/semitransparente, sin punteado (estilo Google Maps:
@@ -480,21 +490,11 @@ export function GeoMapImpl({
               <Polyline
                 key={key}
                 positions={path as [number, number][]}
-                pathOptions={{ color: ROUTE_RETURN_COLOR, weight: 5, opacity: ROUTE_RETURN_OPACITY }}
-              />
-            );
-          })}
-          {returnPaths?.map((path, i) => {
-            const seg = routeSegments?.[i];
-            if (!seg) return null;
-            const key = `return-label-${pathKey(path as [number, number][])}-${i}`;
-            return (
-              <RouteSegmentLabel
-                key={key}
-                offset={[60, 0]}
-                path={path as [number, number][]}
-                fraction={0.25}
-                text={segmentTooltipText("Vuelta", seg.trucksUsed, seg.returnDistanceKm, seg.returnDurationHours)}
+                pathOptions={{
+                  color: ROUTE_RETURN_COLOR,
+                  weight: 5,
+                  opacity: ROUTE_RETURN_OPACITY,
+                }}
               />
             );
           })}
@@ -502,7 +502,10 @@ export function GeoMapImpl({
       ) : (
         routePositions &&
         routePositions.length > 1 && (
-          <Polyline positions={routePositions} pathOptions={{ color: ROUTE_OUTBOUND_COLOR, weight: 4 }} />
+          <Polyline
+            positions={routePositions}
+            pathOptions={{ color: ROUTE_OUTBOUND_COLOR, weight: 4 }}
+          />
         )
       )}
       {polygons?.map((poly) => (

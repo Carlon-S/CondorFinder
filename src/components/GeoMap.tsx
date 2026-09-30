@@ -80,6 +80,8 @@ export interface GeoMapProps {
    *  que quede completa en pantalla sin que el trabajador tenga que hacer
    *  zoom out a mano. Necesita 2+ puntos; con menos no hace nada. */
   fitBoundsTo?: [number, number][] | null;
+  /** Clic sobre el trazo de un recorrido, con su índice en `routeSegments`. */
+  onRouteClick?: (segmentIndex: number) => void;
   onMapClick?: (lat: number, lng: number) => void;
   /** Click en un marker de `points` — el padre decide qué hacer (ej. setSelectedPoint). */
   onPointClick?: (point: GeoMapPoint) => void;

@@ -421,6 +421,44 @@ html {
 
 
 /* =============================================================================
+   MARCO DEL MAPA
+   Un mapa es una imagen a sangre: tiles de colores que llegan hasta el último
+   pixel del contenedor. Sin un borde declarado, no se sabe dónde termina el
+   mapa y dónde empieza la página, y el efecto es que el mapa se "derrama".
+
+   Son tres capas y cada una hace algo distinto:
+     - el borde exterior y el radio, que dicen dónde termina;
+     - la misma sombra de .panel, para que el mapa pese lo mismo que las
+       tarjetas que tiene al lado en vez de leerse como un hueco;
+     - una hairline interior clara (el ::after), que separa el borde de los
+       tiles. Sin ella, sobre un tile oscuro el borde desaparece y sobre uno
+       claro se confunde con el mapa; con ella, el canto se lee sobre
+       cualquier cosa que dibuje OSM debajo.
+
+   El ::after va con pointer-events:none: es decoración sobre un elemento que
+   recibe clicks (ubicar un punto, seleccionar una zona) y no puede robárselos.
+   ============================================================================= */
+.map-frame {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  box-shadow:
+    0 1px 2px rgba(34, 22, 20, 0.04),
+    0 8px 16px -4px rgba(34, 22, 20, 0.08),
+    0 24px 48px -12px rgba(34, 22, 20, 0.1);
+}
+.map-frame::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 500;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.55);
+}
+
+/* =============================================================================
    SCROLLBARS PERSONALIZADOS
    Track = fondo de página, thumb = borde del tema.
    ============================================================================= */
@@ -738,22 +776,6 @@ html {
    marker invisible (ver RouteSegmentLabel en GeoMapImpl.tsx) en vez de
    directo al Polyline, con direction="top" -- por eso SÍ necesita la
    flecha (::before), mismo mecanismo que .condorfinder-map-tooltip. */
-.leaflet-tooltip.condorfinder-route-tooltip {
-  background: var(--card);
-  color: var(--foreground);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 4px 9px;
-  font-family: var(--font-sora), sans-serif;
-  font-size: 11px;
-  font-weight: 600;
-  white-space: nowrap;
-  box-shadow: 0 3px 10px rgba(34, 22, 20, 0.18);
-}
-.leaflet-tooltip.condorfinder-route-tooltip::before {
-  border-top-color: var(--card);
-}
-
 /* =============================================================================
    GEOMAP: controles y fondo
    Leaflet trae sus controles con su propio aspecto (cajas blancas de borde

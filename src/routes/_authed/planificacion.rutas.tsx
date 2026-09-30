@@ -32,10 +32,15 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowLeft,
   ArrowRightCircle,
   Boxes,
   Pencil,
+  Clock,
+  Construction,
   Crosshair,
+  Layers,
+  Trash2,
   FolderOpen,
   Loader2,
   Map as MapIcon,
@@ -90,7 +95,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { projectPolygonToWgs84 } from "@/lib/projection";
-import { generateRoute, type RoutePlanSegment } from "@/lib/routePlan";
+import {
+  generateRoute,
+  type RoutePlanSegment,
+  type RoutePlanStop,
+  type RoutePlanUnassigned,
+} from "@/lib/routePlan";
+import { RouteTimeline, type DatosDeParada } from "@/components/RouteTimeline";
+import { reverseGeocode } from "@/lib/geocoding";
 import { notify } from "@/lib/notify";
 import {
   ROUTE_OUTBOUND_COLOR,
@@ -141,6 +153,10 @@ interface StoredDetection {
   volume_m3?: number | null;
   weight_kg?: number | null;
   area_m2?: number | null;
+  /** Si el trabajador la dejó activa en la vista de análisis. Ausente en los
+   *  análisis guardados antes de que el campo existiera, y ahí significa
+   *  activa. */
+  enabled?: boolean;
 }
 
 interface LoadedDetection {
@@ -225,6 +241,13 @@ function processRecord(record: SavedAnalysisRecord): LoadedAnalysis | null {
   const detections = (record.detections as StoredDetection[]) ?? [];
   const resolved: LoadedDetection[] = [];
   for (const d of detections) {
+    // Las detecciones que el trabajador desactivó en la vista de análisis NO
+    // entran. Esta vista las estaba contando, así que el volumen de una zona
+    // acá podía no coincidir con el que muestran Vista Principal y la vista de
+    // análisis, que sí respetan la bandera. El plan en sí no estaba mal, porque
+    // routing.py resuelve los volúmenes contra Mongo por su cuenta, pero la
+    // cifra que el trabajador leía antes de generar la ruta sí lo estaba.
+    if (d.enabled === false) continue;
     if (!d.geo_polygon || d.geo_polygon.length < 3) continue;
     const geoPolygon = projectPolygonToWgs84(d.geo_polygon, record.crs);
     if (!geoPolygon) continue;
@@ -318,7 +341,13 @@ function RutasPage() {
   // Pestaña de la tabla al pie. Es el detalle de lo que el mapa muestra
   // como marcadores: las zonas que se van a retirar y los puntos desde
   // donde sale la flota. En el mapa son círculos; acá son cifras.
-  const [tabla, setTabla] = useState<"zonas" | "tramos">("zonas");
+  // El cajón de detalle arranca plegado: al entrar, lo que importa es el mapa
+  // y el panel, no una tabla de cifras que todavía no tiene nada que comparar.
+  // Qué recorrido se está mirando en detalle, o null si se está viendo el plan
+  // completo. Es el índice dentro de routeSegments y no el objeto: así, cuando
+  // se regenera la ruta, el detalle abierto apunta al recorrido equivalente del
+  // plan nuevo en vez de a uno que ya no existe.
+  const [rutaAbierta, setRutaAbierta] = useState<number | null>(null);
   // Encuadre manual a la comuna. Es un array nuevo en cada clic a propósito:
   // FitBounds en GeoMapImpl reacciona al cambio de REFERENCIA, así que mandar
   // la misma constante no volvería a encuadrar la segunda vez.
@@ -329,6 +358,55 @@ function RutasPage() {
   // sin ningún indicio de carga hasta que ambos fetches resolvían solos.
   const [mapDataLoading, setMapDataLoading] = useState(true);
   const activePoints = originPoints.filter((p) => p.active);
+
+  /** Saca UN recorrido del plan, con su trazo del mapa. El resto del plan
+   *  sigue en pie, que es la diferencia con descartar la ruta entera.
+   *
+   *  Las paradas de ese recorrido NO se quitan, y no es un olvido: hoy
+   *  `route.stops` llega como una lista plana sin dueño, así que la vista no
+   *  tiene cómo saber cuáles eran suyas. Cuando el backend mande `stopOrders`
+   *  por segmento (ya está declarado en routePlan.ts), esta función las quita
+   *  también. Con un solo punto de origen, que es el caso de hoy, descartar el
+   *  único recorrido equivale a descartar el plan, así que la diferencia no se
+   *  nota todavía. */
+  const descartarRecorrido = (indice: number) => {
+    const quedan = (routeSegments ?? []).filter((_, i) => i !== indice);
+    if (quedan.length === 0) {
+      descartarRuta();
+      return;
+    }
+    const sinEl = <T,>(xs: T[] | null) => (xs ? xs.filter((_, i) => i !== indice) : null);
+    setRouteSegments(quedan);
+    setRouteOutboundPaths(sinEl(routeOutboundPaths));
+    setRouteReturnPaths(sinEl(routeReturnPaths));
+    // El detalle abierto se corrige: si se borró el que se estaba mirando se
+    // vuelve a la lista, y si se borró uno anterior el índice del que queda
+    // abierto se corrió en uno.
+    setRutaAbierta((abierta) => {
+      if (abierta === null) return null;
+      if (abierta === indice) return null;
+      return abierta > indice ? abierta - 1 : abierta;
+    });
+    // Los totales del plan dejan de corresponder: el backend los mandó para el
+    // plan completo. Se ponen en null y la vista vuelve a sumar los segmentos
+    // que quedan, que es el camino que ya tenía previsto.
+    setRouteTotals(null);
+  };
+
+  /** Descarta el plan y deja la vista como antes de generarlo. Una sola
+   *  función porque son seis estados que tienen que caer juntos: sueltos, el
+   *  mapa quedaba con el trazo de una ruta que el panel ya no mostraba. */
+  const descartarRuta = () => {
+    setRutaAbierta(null);
+    setRouteStops(null);
+    setRouteOutboundPaths(null);
+    setRouteReturnPaths(null);
+    setRouteSegments(null);
+    setRouteTotals(null);
+    setUnassigned(null);
+    setSalidaPlan(null);
+    setRouteError(null);
+  };
   /** Desglose de la flota del punto abierto en la ficha. */
   const resumenPunto = resumenParaRuta(zoomPoint ? (recursosPorPunto[zoomPoint.id] ?? []) : []);
 
@@ -340,9 +418,10 @@ function RutasPage() {
 
   // AC2/AC6.
   const [generating, setGenerating] = useState(false);
-  const [routeStops, setRouteStops] = useState<
-    { order: number; lat: number; lng: number; label: string }[] | null
-  >(null);
+  // RoutePlanStop y no una forma propia: la parada trae ahora `analysisId`, que
+  // es lo que permite mostrar el volumen de cada zona en la línea de tiempo sin
+  // volver a pedirlo por la red.
+  const [routeStops, setRouteStops] = useState<RoutePlanStop[] | null>(null);
   // Trazos reales (calles, vía OSRM) de ida/vuelta -- separados para
   // pintarlos con estilos distintos (ver GeoMapImpl.tsx). Null hasta que
   // se genera una ruta con éxito.
@@ -353,6 +432,20 @@ function RutasPage() {
   // sobre cada tramo del mapa. null hasta que hay una ruta exitosa.
   const [routeSegments, setRouteSegments] = useState<RoutePlanSegment[] | null>(null);
   const [routeError, setRouteError] = useState<string | null>(null);
+  // Totales del plan, para las dos cifras grandes del panel.
+  const [routeTotals, setRouteTotals] = useState<{
+    distanceKm?: number;
+    durationHours?: number;
+  } | null>(null);
+  // HDU5.1/AC6. Ausente mientras el backend no lo calcule, y entonces la
+  // sección no se dibuja: una lista vacía de "zonas sin asignar" se lee como
+  // que todas entraron, y eso todavía no lo podemos afirmar.
+  const [unassigned, setUnassigned] = useState<RoutePlanUnassigned[] | null>(null);
+  /** Cuándo empieza el plan. Se captura al generarlo y NO se recalcula: si
+   *  fuera la hora actual en cada render, las horas de llegada correrían solas
+   *  mientras el trabajador lee la pantalla, y un plan cuyas horas cambian por
+   *  el solo hecho de mirarlo no sirve para coordinar a nadie. */
+  const [salidaPlan, setSalidaPlan] = useState<Date | null>(null);
 
   // ¿El backend está mandando ya los datos de HDU5.1? Las columnas de vehículo
   // y personal existen solo si SÍ. Preguntarlo por los datos y no por una
@@ -616,13 +709,27 @@ function RutasPage() {
       setRouteOutboundPaths(result.route.outboundPaths ?? null);
       setRouteReturnPaths(result.route.returnPaths ?? null);
       setRouteSegments(result.route.segments ?? null);
+      setRouteTotals({
+        distanceKm: result.route.totalDistanceKm,
+        durationHours: result.route.totalDurationHours,
+      });
+      setUnassigned(result.route.unassignedZones ?? null);
+      setSalidaPlan(new Date());
       setRouteError(null);
+      // Con UN recorrido se entra directo a su detalle: es lo que el trabajador
+      // viene a ver, y dejarlo en la lista lo obliga a apretar el único
+      // elemento que hay. Con varios, en cambio, la lista es la información:
+      // saltar al primero escondería que hay más de uno.
+      setRutaAbierta(result.route.segments?.length === 1 ? 0 : null);
       notify.success("Ruta generada", "Revisa el orden de paradas propuesto en el panel.");
     } else {
       setRouteStops(null);
       setRouteOutboundPaths(null);
       setRouteReturnPaths(null);
       setRouteSegments(null);
+      setRouteTotals(null);
+      setUnassigned(null);
+      setSalidaPlan(null);
       setRouteError(result.message);
     }
   };
@@ -647,7 +754,7 @@ function RutasPage() {
       color: ZONE_COLORS[i % ZONE_COLORS.length],
       muted: false,
       previewImageUrl: a.mapUrl,
-      previewSubtitle: `${a.summary.totalVolumeM3} m³ · ${a.summary.totalWeightKg} kg · ${a.detections.length} zona${
+      previewSubtitle: `${a.summary.totalVolumeM3} m³, ${a.summary.totalWeightKg} kg, ${a.detections.length} zona${
         a.detections.length === 1 ? "" : "s"
       }`,
       previewImageSize: a.imgSize ?? undefined,
@@ -670,7 +777,7 @@ function RutasPage() {
     return {
       id: p.id,
       position: [p.lat, p.lng] as [number, number],
-      label: p.active ? `${p.name} · ${capacityLabel}` : `${p.name} (inactivo) · ${capacityLabel}`,
+      label: p.active ? `${p.name}, ${capacityLabel}` : `${p.name} (inactivo), ${capacityLabel}`,
       muted: !p.active,
     };
   });
@@ -699,11 +806,115 @@ function RutasPage() {
 
   // Cifras de cabecera. Las cuatro responden la pregunta con la que se entra a
   // esta vista: con qué cuento y cuánto hay que retirar.
+  // ── Lo que el panel del plan necesita derivar ─────────────────────────────
+
+  /** Qué zona es cada parada de un recorrido, con lo que hace falta para
+   *  dibujarla: dónde queda, cuánto hay y de qué es.
+   *
+   *  Resuelve por `analysisId` cuando la parada lo trae, y cae a emparejar por
+   *  NOMBRE cuando no. El respaldo existe porque el backend todavía no manda
+   *  ese campo, y sin él la línea de tiempo muestra paradas mudas aunque la
+   *  vista tenga los datos a mano. Es deliberadamente estricto: solo empareja
+   *  si hay UNA zona cargada con ese nombre exacto, porque con dos zonas
+   *  homónimas adivinar cuál es sería peor que no mostrar nada. */
+  const datosDeParada = (stop: RoutePlanStop): DatosDeParada | undefined => {
+    let zona = stop.analysisId ? loadedAnalyses.find((a) => a.id === stop.analysisId) : undefined;
+    if (!zona) {
+      const porNombre = loadedAnalyses.filter((a) => a.name === stop.label);
+      if (porNombre.length === 1) zona = porNombre[0];
+    }
+    if (!zona) return undefined;
+    const tipos = tiposDeZona(zona);
+    return {
+      volumeM3: zona.summary.totalVolumeM3,
+      wasteLabel: tipos[0]?.[0],
+      wasteColor: tipos[0] ? classColor(tipos[0][0]) : undefined,
+      direccion: direcciones[zona.id] || undefined,
+    };
+  };
+
+  /** Los totales del plan. El backend puede mandarlos ya sumados; si no lo
+   *  hace, se suman los segmentos, que es exactamente lo mismo. Sin esto, dos
+   *  backends igualmente correctos darían paneles distintos. */
+  const distanciaDelPlan =
+    routeTotals?.distanceKm != null
+      ? `${routeTotals.distanceKm.toFixed(1)} km`
+      : routeSegments
+        ? `${routeSegments
+            .reduce((t, x) => t + x.outboundDistanceKm + x.returnDistanceKm, 0)
+            .toFixed(1)} km`
+        : "sin dato";
+
+  const duracionDelPlan =
+    routeTotals?.durationHours != null
+      ? formatDuration(routeTotals.durationHours)
+      : routeSegments
+        ? formatDuration(
+            routeSegments.reduce((t, x) => t + x.outboundDurationHours + x.returnDurationHours, 0),
+          )
+        : "sin dato";
+
+  /** Volumen cargado, sumando lo que las filas MUESTRAN y no el dato crudo.
+   *
+   *  Parece lo mismo y no lo es: cada fila imprime su volumen con dos
+   *  decimales, así que sumar los valores sin redondear y después redondear el
+   *  total da una cifra que no coincide con la suma de lo que se ve. Con dos
+   *  zonas de 3,33 y 3,61 la cabecera decía 6,9, y el lector que suma a mano
+   *  obtiene 6,94 y concluye, con razón, que una de las dos cifras está mal.
+   *  Un total que no cuadra con su detalle no es un redondeo, es un error. */
+  const volumenCargado = loadedAnalyses.reduce(
+    (suma, a) => suma + Number(a.summary.totalVolumeM3.toFixed(2)),
+    0,
+  );
+
+  /** Dirección de cada zona cargada, resuelta contra Nominatim a partir de su
+   *  centro. Una zona se llama "Zona A", que no dice dónde queda; la dirección
+   *  sí, y es lo que un trabajador necesita para reconocerla en terreno.
+   *
+   *  Se pide UNA sola vez por zona y queda en caché mientras dure la vista.
+   *  Nominatim pide no más de una consulta por segundo, así que las zonas
+   *  nuevas se resuelven de a una y con pausa, en vez de disparar todas juntas
+   *  al cargar varias: es el mismo servicio que usa el formulario de puntos y
+   *  no queremos que nos corte por abuso. */
+  const [direcciones, setDirecciones] = useState<Record<string, string>>({});
+  useEffect(() => {
+    const faltantes = loadedAnalyses.filter((a) => !(a.id in direcciones));
+    if (faltantes.length === 0) return;
+    let vivo = true;
+    (async () => {
+      for (const a of faltantes) {
+        const r = await reverseGeocode(a.center[0], a.center[1]);
+        if (!vivo) return;
+        // Se guarda incluso el fallo, como cadena vacía: sin eso, una zona que
+        // Nominatim no resuelve se volvería a pedir en cada render.
+        setDirecciones((prev) => ({
+          ...prev,
+          [a.id]: r ? [r.address, r.comuna].filter(Boolean).join(", ") : "",
+        }));
+        await new Promise((listo) => setTimeout(listo, 1100));
+      }
+    })();
+    return () => {
+      vivo = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadedAnalyses]);
+
+  /** Los tipos de residuo de una zona, ordenados por cuánto volumen aporta
+   *  cada uno. El primero es el que la caracteriza. */
+  const tiposDeZona = (a: LoadedAnalysis) => {
+    const porClase: Record<string, number> = {};
+    for (const d of a.detections) {
+      porClase[d.wasteClass] = (porClase[d.wasteClass] ?? 0) + (d.volumeM3 ?? 0);
+    }
+    return Object.entries(porClase).sort((x, y) => y[1] - x[1]);
+  };
+
   const totalesCabecera = {
     puntos: activePoints.length,
     capacidad: originPoints.reduce((sum, p) => sum + p.capacity_m3, 0),
     zonas: loadedAnalyses.length,
-    volumen: loadedAnalyses.reduce((sum, a) => sum + a.summary.totalVolumeM3, 0),
+    volumen: volumenCargado,
   };
 
   return (
@@ -711,39 +922,107 @@ function RutasPage() {
       {/* Cabecera y franja de cifras a lo ancho, arriba de todo. Es la
           estructura de un tablero de operaciones: primero el estado general,
           después el mapa con su panel, y al pie el detalle en tabla. */}
-      <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border/25 px-6 py-4">
+      {/* Cabecera con el mismo tratamiento .panel e íconos que la vista de
+          recursos. Las cuatro cifras estaban sueltas sobre el fondo, alineadas
+          a la derecha del título, sin superficie propia y compitiendo con él
+          por la misma línea.
+
+          El orden no es casual y es lo que hace útil la franja: capacidad y
+          volumen a retirar son LA comparación que decide si un plan es posible,
+          así que van una al lado de la otra, y cada una junto al número que la
+          explica (cuántos puntos aportan esa capacidad, cuántas zonas ese
+          volumen). Leída de izquierda a derecha dice "tengo esto, tengo que
+          mover esto otro".
+
+          Los íconos siguen la misma convención que el resto del sistema: el
+          cubo es siempre capacidad, y el residuo a retirar lleva el suyo
+          propio para no repetir el cubo con dos significados. */}
+      <div className="flex flex-wrap items-end justify-between gap-4 px-6 pb-4 pt-4">
         <div>
           <p className="eyebrow">Planificación</p>
           <h1 className="font-rubik text-3xl font-semibold tracking-normal text-foreground md:text-4xl">
             Planificar Retiro
           </h1>
         </div>
-        <div className="flex flex-wrap items-center divide-x divide-border/10">
-          <CifraCabecera etiqueta="Puntos activos" valor={String(totalesCabecera.puntos)} />
-          <CifraCabecera etiqueta="Capacidad" valor={`${totalesCabecera.capacidad} m³`} />
-          <CifraCabecera etiqueta="Zonas cargadas" valor={String(totalesCabecera.zonas)} />
+      </div>
+      <div className="px-6 pb-4">
+        <div className="panel flex flex-wrap items-center divide-x divide-border/10 px-1">
           <CifraCabecera
-            etiqueta="Volumen a retirar"
-            valor={`${totalesCabecera.volumen.toFixed(1)} m³`}
+            icono={<MapPin className="h-4 w-4" />}
+            etiqueta="Puntos activos"
+            valor={String(totalesCabecera.puntos)}
           />
+          <CifraCabecera
+            icono={<Boxes className="h-4 w-4" />}
+            etiqueta="Capacidad"
+            valor={`${totalesCabecera.capacidad} m³`}
+          />
+          <CifraCabecera
+            icono={<Layers className="h-4 w-4" />}
+            etiqueta="Zonas cargadas"
+            valor={String(totalesCabecera.zonas)}
+          />
+          <CifraCabecera
+            icono={<Construction className="h-4 w-4" />}
+            etiqueta="Volumen a retirar"
+            valor={`${totalesCabecera.volumen.toFixed(2)} m³`}
+          />
+          {/* La holgura, que es la lectura que las dos cifras de m³ piden y
+              que nadie debería tener que hacer de cabeza. Solo aparece cuando
+              hay zonas cargadas: sin nada que retirar no hay nada que comparar. */}
+          {totalesCabecera.zonas > 0 && (
+            <div className="ml-auto flex flex-shrink-0 items-center gap-2 border-l-0 px-5 py-3.5">
+              <span
+                className={`rounded px-2 py-1 text-[0.6875rem] font-semibold ${
+                  totalesCabecera.volumen <= totalesCabecera.capacidad
+                    ? "bg-success/15 text-success-strong"
+                    : "bg-warning/15 text-warning-strong"
+                }`}
+              >
+                {totalesCabecera.volumen <= totalesCabecera.capacidad
+                  ? `Alcanza, sobran ${(totalesCabecera.capacidad - totalesCabecera.volumen).toFixed(1)} m³`
+                  : `Faltan ${(totalesCabecera.volumen - totalesCabecera.capacidad).toFixed(1)} m³ de capacidad`}
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
       {/* El mapa a la IZQUIERDA y grande, el panel a la derecha. Era al revés,
           con el panel ocupando la columna de lectura y el mapa relegado: acá el
           mapa es el contenido y el panel son los controles. */}
-      <main className="grid min-h-0 flex-1 grid-cols-[1fr_clamp(19rem,26vw,25rem)]">
-        <section className="relative min-w-0 overflow-hidden border-r border-border/35 bg-background animate-in fade-in duration-500">
+      {/* Panel y mapa son dos BLOQUES hermanos de la misma grilla, cada uno
+          con su superficie y su marco.
+
+          El panel estuvo flotando sobre un mapa a sangre, y se revirtió: un
+          mapa sin borde llega hasta el último pixel de la página y no se sabe
+          dónde termina el mapa y dónde empieza la interfaz, así que se lee como
+          si se derramara. Acotado, el mapa es una pieza más de la página, del
+          mismo peso visual que el panel de al lado, y el panel deja de tapar
+          parte del territorio que el trabajador necesita ver.
+
+          El alto lo fija la fila: los dos bloques miden exactamente lo mismo,
+          que es lo que evita el escalón al pie que deja una columna más corta
+          que la otra. */}
+      <main className="grid min-h-0 flex-1 gap-5 px-6 pb-6 lg:grid-cols-[clamp(21rem,30vw,28rem)_1fr]">
+        <section className="map-frame order-2 min-h-[24rem] min-w-0 bg-background animate-in fade-in duration-500 lg:min-h-0">
           <GeoMap
             className="h-full w-full"
             points={mapPoints}
             onPointClick={handlePointClick}
+            // Apretar el trazo abre SU recorrido en el panel. El mapa dice
+            // dónde va la ruta y el panel dice qué pasa en ella; sin esto, la
+            // única forma de pasar de uno al otro era buscar el recorrido en
+            // la lista a mano.
+            onRouteClick={setRutaAbierta}
             routePositions={routePositions}
             outboundPaths={routeOutboundPaths}
             returnPaths={routeReturnPaths}
             routeSegments={routeSegments}
             // El recentrado manual gana sobre el encuadre automático de la
             // ruta: es una acción explícita y reciente del usuario.
+            // Sin fitPadLeft: el panel dejó de flotar sobre el mapa, así que
+            // el encuadre ya no tiene nada que esquivar.
             fitBoundsTo={recentrar ?? routeFitPoints}
             focusPoint={focusPoint}
             lockToMaipu
@@ -757,7 +1036,7 @@ function RutasPage() {
             variant="secondary"
             onClick={() => setRecentrar([...MAIPU_BBOX])}
             title="Volver a ver toda la comuna"
-            className="absolute right-4 top-4 z-[500] shadow-md"
+            className="absolute right-4 top-4 z-[550] shadow-md"
           >
             <Crosshair className="mr-1.5 h-3.5 w-3.5" /> Centrar en Maipú
           </Button>
@@ -769,242 +1048,429 @@ function RutasPage() {
           )}
         </section>
 
-        <aside className="overflow-y-auto p-5">
-          <div className="flex flex-col gap-4">
-            {/* Los dos bloques conviven, uno debajo del otro, como el panel de
-                la referencia (Fleet arriba, Alerts abajo). Estuvieron detrás de
-                un par de pestañas y era un estorbo: planificar es mirar la ruta
-                Y los puntos a la vez, y alternar obligaba a recordar lo que
-                mostraba la otra. */}
-            <div className="rounded-xl border border-border bg-card p-4">
-              <div className="mb-3 flex items-center gap-2.5 border-l-2 border-primary/50 pl-3">
-                <RouteIcon className="h-3.5 w-3.5 text-foreground/70" />
-                <h2 className="text-sm font-semibold tracking-tight text-foreground">Ruta</h2>
-              </div>
+        {/* ── Panel del plan ──────────────────────────────────────────────
+            Flota sobre el mapa, con margen, y de alto completo. Es el único
+            lugar donde se lee la planificación: acá viven las zonas cargadas y
+            los recorridos, que antes estaban repartidos entre el panel y una
+            tabla al pie con pestañas.
 
-              <div className="animate-in fade-in slide-in-from-left-2 duration-300 flex flex-col gap-2">
-                <Button onClick={openLoadDialog} variant="secondary" className="w-full">
-                  <FolderOpen className="mr-2 h-4 w-4" /> Cargar archivo de análisis
-                </Button>
-                <Button
-                  onClick={openConfirm}
-                  disabled={loadedAnalyses.length === 0}
-                  size="lg"
-                  className="btn-cta w-full"
+            Esa tabla se eliminó, y no porque estorbara: mientras las dos
+            listas vivían en pestañas, ver una obligaba a dejar de ver la otra,
+            y la pregunta de la planificación es precisamente cuánto hay que
+            retirar CONTRA con qué se cuenta. Juntas en una columna se leen a la
+            vez. Ningún criterio de HDU5 ni de HDU5.1 pide una tabla: el más
+            cercano habla de cargar los polígonos "junto con su metadata", y eso
+            lo cumple cada fila con su volumen, su área y su peso.
+
+            Dos niveles, no pestañas: la lista de recorridos, y el detalle de
+            uno. Se entra apretando un recorrido y se vuelve con la flecha, que
+            es la misma navegación de una bandeja de correo. */}
+        {/* El panel va PRIMERO en las dos direcciones, y el `order` no se
+            resetea en pantalla ancha: la grilla declara la columna angosta a la
+            izquierda, así que dejar que mandara el orden del código ponía el
+            mapa en esa columna y el panel en la ancha, al revés. En una
+            columna, el panel arriba es lo correcto: es desde donde se carga y
+            se genera. */}
+        <aside className="order-1 flex min-h-0 flex-col">
+          <div className="panel flex min-h-0 flex-1 flex-col overflow-hidden bg-card">
+            <div className="flex items-start justify-between gap-2 border-b border-border/60 px-4 py-3.5">
+              {rutaAbierta === null ? (
+                <div className="min-w-0">
+                  <p className="eyebrow">Planificación</p>
+                  <h2 className="truncate font-rubik text-base font-semibold text-foreground">
+                    Plan de retiro
+                  </h2>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setRutaAbierta(null)}
+                  className="flex min-w-0 cursor-pointer items-center gap-2 text-left"
                 >
-                  <RouteIcon className="mr-2 h-4 w-4" /> Generar ruta
-                </Button>
-              </div>
+                  <ArrowLeft className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                  <span className="min-w-0">
+                    <span className="eyebrow block">Volver al plan</span>
+                    <span className="block truncate font-rubik text-base font-semibold text-foreground">
+                      Recorrido {rutaAbierta + 1}
+                    </span>
+                  </span>
+                </button>
+              )}
+              {/* Acá había una X para descartar la ruta entera. Se fue: cada
+                  recorrido ya se descarta desde su propia fila, y al sacar el
+                  último el plan queda vacío por sí solo. Con las dos, la X de
+                  la cabecera borraba de un golpe algo que la lista de abajo
+                  deja borrar pieza por pieza, y ninguna de las dos decía cuál
+                  hacía qué. */}
+            </div>
 
-              {/* La lista de zonas cargadas NO va acá. Vive en la tabla al pie,
-                donde cada zona muestra su volumen, su área y su peso, que es lo
-                que se compara al decidir. En el panel era una lista de nombres
-                sin cifras que además duplicaba lo de abajo. */}
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+              {/* ── Nivel 1: el plan completo ── */}
+              {rutaAbierta === null && (
+                <div className="animate-in fade-in flex flex-col gap-5 duration-300">
+                  <div className="flex flex-col gap-2">
+                    <Button onClick={openLoadDialog} variant="secondary" className="w-full">
+                      <FolderOpen className="mr-2 h-4 w-4" /> Cargar archivo de análisis
+                    </Button>
+                    <Button
+                      onClick={openConfirm}
+                      disabled={loadedAnalyses.length === 0}
+                      size="lg"
+                      className="btn-cta w-full"
+                      title={
+                        loadedAnalyses.length === 0
+                          ? "Carga al menos una zona para poder generar una ruta"
+                          : undefined
+                      }
+                    >
+                      <RouteIcon className="mr-2 h-4 w-4" /> Generar ruta
+                    </Button>
+                  </div>
 
-              {routeError && (
-                <div className="animate-in fade-in slide-in-from-left-2 duration-300 rounded-lg border border-warning/40 bg-warning/10 p-4">
-                  <TriangleAlert className="mb-2 h-5 w-5 text-warning" />
-                  <p className="text-sm font-semibold">No se pudo generar la ruta</p>
-                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{routeError}</p>
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    Revisa los puntos en el bloque de abajo.
-                  </p>
+                  {routeError && (
+                    <div className="animate-in fade-in rounded-lg border border-warning/40 bg-warning/10 p-3 duration-300">
+                      <TriangleAlert className="mb-1.5 h-4 w-4 text-warning-strong" />
+                      <p className="text-xs font-semibold">No se pudo generar la ruta</p>
+                      <p className="mt-1 text-[0.6875rem] leading-relaxed text-muted-foreground">
+                        {routeError}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* ── Zonas cargadas ──
+                      La lista tiene ALTO FIJO y hace scroll. Antes crecía con
+                      la cantidad de zonas, así que el bloque medía distinto en
+                      cada sesión y empujaba a los recorridos fuera de la vista
+                      justo cuando más zonas había, que es cuando más importa
+                      verlos. Cuatro filas es lo que entra sin comerse la mitad
+                      del panel; de ahí en adelante se desplaza.
+
+                      Cada fila puede descargarse desde acá con su papelera:
+                      antes había que abrir el diálogo de carga para sacar una
+                      zona de la ruta, o sea salir del plan para editar el plan. */}
+                  <section className="flex min-h-0 flex-col">
+                    <div className="mb-2 flex items-baseline justify-between gap-2">
+                      {/* El conteo va en una pastilla, no entre paréntesis.
+                          Un paréntesis dentro de un título se lee como una
+                          aclaración de la frase, no como un dato, y además lo
+                          hace crecer y encoger cuando el número cambia de
+                          dígitos. La pastilla es un dato con forma de dato. */}
+                      <h3 className="flex items-center gap-2 text-xs font-semibold text-foreground">
+                        Zonas cargadas
+                        <Conteo n={loadedAnalyses.length} />
+                      </h3>
+                      {loadedAnalyses.length > 0 && (
+                        <span className="flex items-baseline gap-1.5">
+                          <span className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">
+                            Volumen total
+                          </span>
+                          <span className="mono text-xs font-semibold tabular-nums text-foreground">
+                            {volumenCargado.toFixed(2)} m³
+                          </span>
+                        </span>
+                      )}
+                    </div>
+                    {loadedAnalyses.length === 0 ? (
+                      <p className="rounded-lg border border-dashed border-border/60 px-3 py-5 text-center text-[0.6875rem] leading-relaxed text-muted-foreground">
+                        Ninguna zona cargada todavía. Una ruta se arma con las zonas que elijas.
+                      </p>
+                    ) : (
+                      <ul className="max-h-[19rem] space-y-1.5 overflow-y-auto pr-0.5">
+                        {loadedAnalyses.map((a) => (
+                          <li
+                            key={a.id}
+                            className="rounded-lg border border-border/60 bg-background/60 transition-colors hover:border-primary/40 hover:bg-primary/5"
+                          >
+                            {/* La fila estaba comprimida en cuatro líneas de
+                                texto chico apiladas sin respiro, todas del
+                                mismo peso: nombre, dirección, tipos y tres
+                                cifras corridas. Todo cabía, pero nada
+                                destacaba, y leer el volumen de una zona
+                                obligaba a recorrer las otras tres líneas.
+
+                                Ahora son dos zonas separadas por una hairline:
+                                arriba QUÉ es (nombre, dónde queda, de qué es),
+                                abajo CUÁNTO mide, en tres columnas con su
+                                etiqueta encima. Las columnas son lo que permite
+                                comparar una zona con otra de un vistazo, que es
+                                para lo que se mira esta lista. */}
+                            <div className="flex items-start gap-1.5 px-3 pb-2.5 pt-2.5">
+                              <button
+                                type="button"
+                                onClick={() => setZoomAnalysis(a)}
+                                title="Ver el detalle de esta zona"
+                                className="min-w-0 flex-1 cursor-pointer text-left"
+                              >
+                                <span className="block truncate text-[0.8125rem] font-semibold text-foreground">
+                                  {a.name}
+                                </span>
+
+                                {/* La dirección, que es lo que permite
+                                    reconocer la zona en terreno. Mientras
+                                    Nominatim responde no se dibuja nada, en vez
+                                    de un esqueleto que haría saltar la fila. */}
+                                {direcciones[a.id] && (
+                                  <span className="mt-1 flex items-center gap-1.5 text-[0.6875rem] text-muted-foreground">
+                                    <MapPin className="h-3 w-3 flex-shrink-0 opacity-70" />
+                                    <span className="min-w-0 truncate">{direcciones[a.id]}</span>
+                                  </span>
+                                )}
+
+                                {/* Los tipos de residuo. El primero, que es el
+                                    que más volumen aporta, va con su nombre;
+                                    los demás quedan como puntos de color con su
+                                    detalle al pasar el cursor. Nombrarlos todos
+                                    en esta columna los parte en varias líneas. */}
+                                {(() => {
+                                  const tipos = tiposDeZona(a);
+                                  if (tipos.length === 0) return null;
+                                  return (
+                                    <span className="mt-1.5 flex items-center gap-1.5">
+                                      <span className="flex min-w-0 items-center gap-1.5 rounded-full bg-muted/70 py-0.5 pl-1.5 pr-2">
+                                        <span
+                                          className="h-2 w-2 flex-shrink-0 rounded-full"
+                                          style={{ background: classColor(tipos[0][0]) }}
+                                        />
+                                        <span className="min-w-0 truncate text-[0.625rem] text-foreground/80">
+                                          {tipos[0][0]}
+                                        </span>
+                                      </span>
+                                      {tipos.length > 1 && (
+                                        <span
+                                          className="flex flex-shrink-0 items-center gap-1"
+                                          title={tipos
+                                            .slice(1)
+                                            .map(([clase, vol]) => `${clase}: ${vol.toFixed(2)} m³`)
+                                            .join("\n")}
+                                        >
+                                          {tipos.slice(1).map(([clase]) => (
+                                            <span
+                                              key={clase}
+                                              className="h-2 w-2 rounded-full opacity-70"
+                                              style={{ background: classColor(clase) }}
+                                            />
+                                          ))}
+                                          <span className="text-[0.625rem] text-muted-foreground">
+                                            +{tipos.length - 1}
+                                          </span>
+                                        </span>
+                                      )}
+                                      {/* El número de detecciones va acá y no
+                                          con las medidas: una detección es un
+                                          montón, y lo que la caracteriza es su
+                                          tipo, no sus metros. */}
+                                      <span className="flex-shrink-0 text-[0.625rem] text-muted-foreground">
+                                        <span className="mono tabular-nums">
+                                          {a.detections.length}
+                                        </span>{" "}
+                                        detección{a.detections.length === 1 ? "" : "es"}
+                                      </span>
+                                    </span>
+                                  );
+                                })()}
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => handleUnload(a.id)}
+                                aria-label={`Quitar ${a.name} de la ruta`}
+                                title="Quitar de la ruta"
+                                className="flex h-6 w-6 flex-shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive-strong"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </div>
+
+                            <dl className="grid grid-cols-3 gap-2 border-t border-border/50 px-3 py-2">
+                              <Medida
+                                etiqueta="Volumen"
+                                valor={a.summary.totalVolumeM3.toFixed(2)}
+                                unidad="m³"
+                                destacada
+                              />
+                              <Medida
+                                etiqueta="Área"
+                                valor={String(a.summary.totalAreaM2)}
+                                unidad="m²"
+                              />
+                              <Medida
+                                etiqueta="Peso"
+                                valor={String(a.summary.totalWeightKg)}
+                                unidad="kg"
+                              />
+                            </dl>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </section>
+
+                  {/* ── Recorridos generados ── */}
+                  <section>
+                    <div className="mb-2 flex items-baseline justify-between gap-2">
+                      <h3 className="flex items-center gap-2 text-xs font-semibold text-foreground">
+                        Recorridos
+                        <Conteo n={routeSegments?.length ?? 0} />
+                      </h3>
+                      {routeStops && (
+                        <span className="mono text-xs tabular-nums text-muted-foreground">
+                          {distanciaDelPlan} en {duracionDelPlan}
+                        </span>
+                      )}
+                    </div>
+                    {!routeSegments || routeSegments.length === 0 ? (
+                      <p className="rounded-lg border border-dashed border-border/60 px-3 py-5 text-center text-[0.6875rem] leading-relaxed text-muted-foreground">
+                        Todavía no hay ningún recorrido. Se generan a partir de las zonas cargadas.
+                      </p>
+                    ) : (
+                      <ul className="space-y-1">
+                        {routeSegments.map((seg, i) => (
+                          <li key={i}>
+                            {/* Misma estructura que una zona cargada: arriba
+                                qué es, abajo cuánto mide en columnas con su
+                                etiqueta. Dos listas del mismo panel que se
+                                leyeran distinto obligarían a aprender dos
+                                formatos para comparar lo mismo. */}
+                            {/* La papelera va FUERA del botón que abre el
+                                detalle: anidar un botón dentro de otro no es
+                                válido en HTML y el navegador los separa como
+                                quiere, así que el contenedor pasa a ser un div
+                                y cada acción tiene su propio botón. */}
+                            <div className="relative rounded-lg border border-border/60 bg-background/60 transition-colors hover:border-primary/40 hover:bg-primary/5">
+                              <button
+                                type="button"
+                                onClick={() => descartarRecorrido(i)}
+                                aria-label={`Descartar el recorrido ${i + 1}`}
+                                title="Descartar este recorrido"
+                                className="absolute right-2 top-2 z-10 flex h-6 w-6 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive-strong"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setRutaAbierta(i)}
+                                title="Ver el detalle de este recorrido"
+                                className="w-full cursor-pointer text-left"
+                              >
+                                <span className="flex items-start gap-2.5 px-3 pt-2.5">
+                                  <span className="mono flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-primary/15 text-[0.625rem] font-semibold text-primary">
+                                    {i + 1}
+                                  </span>
+                                  <span className="min-w-0 flex-1">
+                                    <span className="block truncate text-[0.8125rem] font-semibold text-foreground">
+                                      {seg.originName}
+                                    </span>
+                                    <span className="mt-0.5 block text-[0.6875rem] text-muted-foreground">
+                                      {routeStops?.length ?? 0} parada
+                                      {routeStops?.length === 1 ? "" : "s"}
+                                    </span>
+                                  </span>
+                                  <ArrowRightCircle className="mt-0.5 mr-7 h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                                </span>
+                                <span className="mt-2 grid grid-cols-3 gap-2 border-t border-border/50 px-3 py-2">
+                                  <Medida
+                                    etiqueta="Distancia"
+                                    valor={(seg.outboundDistanceKm + seg.returnDistanceKm).toFixed(
+                                      1,
+                                    )}
+                                    unidad="km"
+                                    destacada
+                                  />
+                                  <Medida
+                                    etiqueta="Duración"
+                                    valor={formatDuration(
+                                      seg.outboundDurationHours + seg.returnDurationHours,
+                                    )}
+                                    unidad=""
+                                  />
+                                  <Medida
+                                    etiqueta="Camiones"
+                                    valor={String(seg.trucksUsed)}
+                                    unidad=""
+                                  />
+                                </span>
+                              </button>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </section>
+
+                  {/* ── HDU5.1/AC6 ──
+                      Va en el nivel del plan y no dentro de un recorrido: una
+                      zona sin asignar no pertenece a ningún recorrido, esa es
+                      justamente su condición. Solo aparece cuando el backend
+                      manda el campo; una lista vacía se leería como "todas
+                      entraron", y eso todavía no se puede afirmar. */}
+                  {unassigned && unassigned.length > 0 && (
+                    <div className="rounded-lg border border-warning/40 bg-warning/10 p-3">
+                      <p className="flex items-center gap-1.5 text-xs font-semibold">
+                        <TriangleAlert className="h-3.5 w-3.5 flex-shrink-0 text-warning-strong" />
+                        {unassigned.length} zona{unassigned.length === 1 ? "" : "s"} sin asignar
+                      </p>
+                      <ul className="mt-2 space-y-1.5">
+                        {unassigned.map((z) => (
+                          <li key={z.analysisId}>
+                            <p className="text-xs font-medium text-foreground">{z.name}</p>
+                            <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
+                              {z.reason}
+                            </p>
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="mt-2.5 text-[0.6875rem] leading-relaxed text-muted-foreground">
+                        El resto del plan sigue siendo válido. Estas zonas quedan pendientes para
+                        otra jornada.
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
 
-              {routeStops && (
-                <div className="animate-in fade-in slide-in-from-left-2 duration-300 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-semibold text-foreground">Ruta propuesta</p>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setRouteStops(null);
-                        setRouteOutboundPaths(null);
-                        setRouteReturnPaths(null);
-                        setRouteSegments(null);
-                      }}
-                      aria-label="Cerrar"
-                      className="flex h-6 w-6 flex-shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
+              {/* ── Nivel 2: un recorrido en detalle ── */}
+              {rutaAbierta !== null && routeSegments?.[rutaAbierta] && routeStops && (
+                <div className="animate-in fade-in slide-in-from-right-2 flex flex-col gap-4 duration-300">
+                  <div className="grid grid-cols-2 gap-2">
+                    <CifraPlan
+                      icono={<RouteIcon className="h-3.5 w-3.5" />}
+                      etiqueta="Distancia"
+                      valor={`${(
+                        routeSegments[rutaAbierta].outboundDistanceKm +
+                        routeSegments[rutaAbierta].returnDistanceKm
+                      ).toFixed(1)} km`}
+                    />
+                    <CifraPlan
+                      icono={<Clock className="h-3.5 w-3.5" />}
+                      etiqueta="Duración"
+                      valor={formatDuration(
+                        routeSegments[rutaAbierta].outboundDurationHours +
+                          routeSegments[rutaAbierta].returnDurationHours,
+                      )}
+                    />
                   </div>
-                  <ul className="space-y-1.5">
-                    {routeStops.map((s) => (
-                      <li
-                        key={s.order}
-                        className="flex items-center gap-2 rounded-md border border-border/60 bg-background/60 p-2 text-sm"
-                      >
-                        <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-primary/15 text-[0.625rem] font-semibold text-primary">
-                          {s.order}
-                        </span>
-                        <span className="min-w-0 flex-1 truncate">{s.label}</span>
-                      </li>
-                    ))}
-                  </ul>
+
+                  <RouteTimeline
+                    segment={routeSegments[rutaAbierta]}
+                    stops={routeStops}
+                    datosDeParada={datosDeParada}
+                    salida={salidaPlan ?? undefined}
+                    onStopClick={(stop) => setFocusPoint([stop.lat, stop.lng])}
+                  />
+
+                  <Button
+                    variant="secondary"
+                    onClick={() => descartarRecorrido(rutaAbierta)}
+                    className="w-full text-destructive-strong hover:bg-destructive/10"
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" /> Descartar este recorrido
+                  </Button>
                 </div>
               )}
             </div>
           </div>
         </aside>
       </main>
-
-      {/* Detalle en tabla al pie, con pestañas. El mapa dice DÓNDE y esta tabla
-          dice CUÁNTO: un círculo en el mapa no se puede comparar con otro, y
-          las dos preguntas de la planificación (cuánto hay que retirar, con qué
-          cuento) son comparaciones entre filas. */}
-      <div className="flex h-[clamp(11rem,26vh,18rem)] flex-shrink-0 flex-col border-t border-border/35 bg-card">
-        <div className="flex items-center gap-1 border-b border-border px-5 py-2">
-          {(
-            [
-              ["zonas", `Zonas cargadas (${loadedAnalyses.length})`],
-              ["tramos", `Tramos de la ruta (${routeSegments?.length ?? 0})`],
-            ] as const
-          ).map(([valor, etiqueta]) => (
-            <button
-              key={valor}
-              type="button"
-              onClick={() => setTabla(valor)}
-              className={`cursor-pointer rounded px-3 py-1.5 text-xs font-medium transition-colors ${
-                tabla === valor
-                  ? "bg-muted text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {etiqueta}
-            </button>
-          ))}
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4">
-          {tabla === "zonas" ? (
-            loadedAnalyses.length === 0 ? (
-              <p className="py-8 text-center text-xs text-muted-foreground">
-                Ninguna zona cargada todavía. Se cargan desde el panel de la derecha.
-              </p>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/50 hover:bg-muted/50">
-                    <TableHead>Zona</TableHead>
-                    <TableHead className="w-[7rem] text-right">
-                      Volumen <span className="mono opacity-70">(m³)</span>
-                    </TableHead>
-                    <TableHead className="w-[7rem] text-right">
-                      Área <span className="mono opacity-70">(m²)</span>
-                    </TableHead>
-                    <TableHead className="w-[7rem] text-right">
-                      Peso <span className="mono opacity-70">(kg)</span>
-                    </TableHead>
-                    <TableHead className="w-[6rem]">Detecciones</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {loadedAnalyses.map((a) => (
-                    <TableRow
-                      key={a.id}
-                      onClick={() => {
-                        setFocusPoint(a.center);
-                      }}
-                      title="Centrar el mapa en esta zona"
-                      className="cursor-pointer hover:bg-card/60"
-                    >
-                      <TableCell className="text-xs font-medium">{a.name}</TableCell>
-                      <TableCell className="mono text-right text-xs tabular-nums">
-                        {a.summary.totalVolumeM3}
-                      </TableCell>
-                      <TableCell className="mono text-right text-xs tabular-nums">
-                        {a.summary.totalAreaM2}
-                      </TableCell>
-                      <TableCell className="mono text-right text-xs tabular-nums">
-                        {a.summary.totalWeightKg}
-                      </TableCell>
-                      <TableCell className="mono text-xs tabular-nums text-muted-foreground">
-                        {a.detections.length}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )
-          ) : !routeSegments || routeSegments.length === 0 ? (
-            <p className="py-8 text-center text-xs text-muted-foreground">
-              Todavía no hay una ruta generada. Los tramos aparecen acá al generarla.
-            </p>
-          ) : (
-            // Tabla de tramos. Hoy muestra lo que el backend devuelve: origen,
-            // camiones usados y las distancias y duraciones de ida y vuelta.
-            //
-            // Es también donde aterriza HDU5.1, que pide que "cada tramo del
-            // plan muestre qué vehículo lo recorre, por patente y tipo, y su
-            // personal asociado". Esas columnas se renderizan SOLO cuando el
-            // backend las manda (son campos opcionales del contrato en
-            // routePlan.ts): mientras no existan, la tabla muestra lo que hay.
-            // No se dibujan columnas vacías ni guiones a la espera de un dato,
-            // que es lo que convertiría una tabla en una promesa.
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-muted/50 hover:bg-muted/50">
-                  <TableHead className="w-[3rem]">#</TableHead>
-                  <TableHead>Origen</TableHead>
-                  {hayVehiculo && <TableHead>Vehículo</TableHead>}
-                  {hayDotacion && <TableHead>Personal</TableHead>}
-                  <TableHead className="w-[7rem] text-right">Camiones</TableHead>
-                  <TableHead className="w-[8rem] text-right">
-                    Ida <span className="mono opacity-70">(km)</span>
-                  </TableHead>
-                  <TableHead className="w-[8rem] text-right">
-                    Vuelta <span className="mono opacity-70">(km)</span>
-                  </TableHead>
-                  <TableHead className="w-[7rem] text-right">
-                    Duración <span className="mono opacity-70">(h)</span>
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {routeSegments.map((seg, i) => (
-                  <TableRow key={i} className="hover:bg-card/60">
-                    <TableCell className="mono text-xs tabular-nums text-muted-foreground">
-                      {i + 1}
-                    </TableCell>
-                    <TableCell className="text-xs font-medium">{seg.originName}</TableCell>
-                    {hayVehiculo && (
-                      <TableCell className="text-xs">
-                        {seg.vehicle ? (
-                          <>
-                            <span className="mono font-medium">{seg.vehicle.patente}</span>
-                            <span className="ml-1.5 text-muted-foreground">{seg.vehicle.tipo}</span>
-                          </>
-                        ) : (
-                          <span className="text-muted-foreground">sin asignar</span>
-                        )}
-                      </TableCell>
-                    )}
-                    {hayDotacion && (
-                      <TableCell className="text-xs text-muted-foreground">
-                        {seg.crew && seg.crew.length > 0 ? seg.crew.join(", ") : "sin asignar"}
-                      </TableCell>
-                    )}
-                    <TableCell className="mono text-right text-xs tabular-nums">
-                      {seg.trucksUsed}
-                    </TableCell>
-                    <TableCell className="mono text-right text-xs tabular-nums">
-                      {seg.outboundDistanceKm.toFixed(1)}
-                    </TableCell>
-                    <TableCell className="mono text-right text-xs tabular-nums">
-                      {seg.returnDistanceKm.toFixed(1)}
-                    </TableCell>
-                    <TableCell className="mono text-right text-xs tabular-nums">
-                      {(seg.outboundDurationHours + seg.returnDurationHours).toFixed(1)}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </div>
-      </div>
 
       {/* AC4 — elegir uno o varios análisis guardados para cargar */}
       <Dialog open={loadDialogOpen} onOpenChange={setLoadDialogOpen}>
@@ -1078,7 +1544,7 @@ function RutasPage() {
                       <p className="truncate text-sm font-medium">{record.name}</p>
                       <p className="text-[0.625rem] text-muted-foreground">
                         {new Date(record.savedAt).toLocaleDateString("es-CL")}
-                        {record.summary && ` · ${record.summary.totalVolumeM3} m³`}
+                        {record.summary && `, ${record.summary.totalVolumeM3} m³`}
                       </p>
                     </div>
                     {alreadyLoaded ? (
@@ -1133,7 +1599,17 @@ function RutasPage() {
               )}
             </div>
             <DialogDescription>
-              Mapa unificado real de esta zona, con los basurales detectados.
+              {/* La dirección antes que la descripción genérica: es el dato que
+                  permite reconocer la zona en terreno, y "Zona A" no lo da.
+                  Solo aparece cuando Nominatim la resolvió. */}
+              {zoomAnalysis && direcciones[zoomAnalysis.id] ? (
+                <span className="flex items-center gap-1.5">
+                  <MapPin className="h-3.5 w-3.5 flex-shrink-0 text-primary/70" />
+                  {direcciones[zoomAnalysis.id]}
+                </span>
+              ) : (
+                "Mapa unificado real de esta zona, con los basurales detectados."
+              )}
             </DialogDescription>
           </DialogHeader>
           {zoomAnalysis && (
@@ -1509,7 +1985,7 @@ function RutasPage() {
                       >
                         <span className="truncate">{p.name}</span>
                         <span className="mono flex-shrink-0 tabular-nums text-muted-foreground">
-                          {resumen.suman.length} u · {resumen.capacidad} m³
+                          {resumen.suman.length} de {p.resource_count} suman {resumen.capacidad} m³
                         </span>
                       </li>
                     );
@@ -1580,14 +2056,99 @@ function RutasPage() {
   );
 }
 
-/** Una cifra de la cabecera. Sin ícono ni pastilla: son cuatro seguidas y a
- *  este tamaño lo que las separa es el divisor vertical, no un adorno por
- *  cifra. */
-function CifraCabecera({ etiqueta, valor }: { etiqueta: string; valor: string }) {
+/** Una cifra de la franja. Idéntica a la de las otras dos vistas de
+ *  planificación, a propósito: ícono al costado, etiqueta chica arriba y el
+ *  valor en .mono debajo. */
+function CifraCabecera({
+  icono,
+  etiqueta,
+  valor,
+}: {
+  icono: React.ReactNode;
+  etiqueta: string;
+  valor: string;
+}) {
   return (
-    <div className="flex-shrink-0 px-4">
-      <p className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">{etiqueta}</p>
-      <p className="mono text-lg font-semibold tabular-nums text-foreground">{valor}</p>
+    <div className="flex flex-shrink-0 items-center gap-3 px-5 py-3.5">
+      <span className="flex h-8 w-8 items-center justify-center text-muted-foreground">
+        {icono}
+      </span>
+      <span>
+        <span className="block text-[0.6875rem] uppercase tracking-wide text-muted-foreground">
+          {etiqueta}
+        </span>
+        <span className="mono block text-sm font-semibold tabular-nums text-foreground">
+          {valor}
+        </span>
+      </span>
+    </div>
+  );
+}
+
+/** Una de las dos cifras grandes del plan. Las dos al mismo tamaño: son la
+ *  misma clase de magnitud y ninguna manda sobre la otra. */
+function CifraPlan({
+  icono,
+  etiqueta,
+  valor,
+}: {
+  icono: React.ReactNode;
+  etiqueta: string;
+  valor: string;
+}) {
+  return (
+    <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2.5">
+      <p className="flex items-center gap-1.5 text-[0.625rem] uppercase tracking-wide text-muted-foreground">
+        <span className="flex-shrink-0 opacity-70">{icono}</span>
+        {etiqueta}
+      </p>
+      <p className="mono mt-1 text-base font-semibold tabular-nums text-foreground">{valor}</p>
+    </div>
+  );
+}
+
+/** El conteo de una sección, con forma de dato y no de aclaración. En cero se
+ *  atenúa en vez de desaparecer: que la sección exista y esté vacía es
+ *  información, y un conteo que aparece y desaparece mueve el título. */
+function Conteo({ n }: { n: number }) {
+  return (
+    <span
+      className={`mono inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.5625rem] font-semibold tabular-nums ${
+        n === 0 ? "bg-muted text-muted-foreground" : "bg-primary/15 text-primary"
+      }`}
+    >
+      {n}
+    </span>
+  );
+}
+
+/** Una de las tres medidas de una fila, sea una zona o un recorrido. Etiqueta arriba y cifra debajo, en
+ *  columnas: es lo que permite comparar la misma magnitud entre dos zonas sin
+ *  buscarla dentro de una frase. La unidad va junto a la cifra y en su propio
+ *  tamaño, porque es la cifra lo que se compara, no la unidad. */
+function Medida({
+  etiqueta,
+  valor,
+  unidad,
+  destacada = false,
+}: {
+  etiqueta: string;
+  valor: string;
+  unidad: string;
+  destacada?: boolean;
+}) {
+  return (
+    <div className="min-w-0">
+      <dt className="truncate text-[0.5625rem] uppercase tracking-wide text-muted-foreground">
+        {etiqueta}
+      </dt>
+      <dd
+        className={`mono truncate text-[0.6875rem] tabular-nums ${
+          destacada ? "font-semibold text-foreground" : "text-muted-foreground"
+        }`}
+      >
+        {valor} <span className="opacity-70">{unidad}</span>
+      </dd>
     </div>
   );
 }
