@@ -432,6 +432,18 @@ Historias comprometidas: HDU5.1 (13), HDU8 (5), HDU9 (5), HDU10 (5) y SP2 (13). 
 > - El mensaje del AC4 de HDU9 colgaba de un elemento deshabilitado, que no emite eventos de puntero: existía y era inalcanzable.
 > - El botón de evolución se ocultaba con una sola captura, lo que dejaba el AC3 de HDU10 sin forma de alcanzarse.
 
+> **HDU8 verificada end to end** (2026-10-01), sobre la flota real del punto Gral. José San Martín 2730: 21 unidades en 9 tipos. Los cinco criterios, diez casos borde y tres regresiones, con los datos definitivos cargados.
+>
+> Las capacidades que faltaban las **confirmó la Municipalidad de Maipú por escrito** (respuesta del 30-09-2026 a la consulta del equipo): AMPLIROLL `1151` y `1179` con 20 m³, MINICARGADOR `1861` y `1865` con balde de 0,5 m³, RETRO `1993` con balde de 1 m³, y CARRO RECICLAJE `659` y `660` con 30 m³. La capacidad de transporte del punto pasó de 60 a **100 m³**.
+>
+> El recorrido destapó dos defectos y un supuesto equivocado:
+>
+> - La vista de rutas contaba las detecciones desactivadas: el volumen de una zona ahí podía no coincidir con el que muestran Vista Principal y la vista de análisis, que sí respetan la bandera `enabled`. El plan no estaba mal, porque `routing.py` resuelve los volúmenes contra Mongo, pero la cifra que el trabajador leía antes de generar la ruta sí.
+> - El total de volumen no cuadraba con su propio detalle: sumaba los valores sin redondear y redondeaba después, mientras cada fila redondeaba antes. Con dos zonas de 3,33 y 3,61 la cabecera decía 6,9. Ahora suma lo que las filas muestran.
+> - La validación de recursos impedía que una unidad de familia `arrastre` declarara capacidad de carga, confundiendo **transportar** con **moverse solo**. Un carro de reciclaje lleva 30 m³ y necesita que alguien lo tire: las dos cosas son ciertas. La regla ahora acepta `carga` y `arrastre`, y el ruteo sigue filtrando solo por `carga`, así que un carro declara su capacidad sin sumarla a ninguna ruta.
+>
+> **El único dato que queda sin declarar** es la capacidad del CAMION 3/4 PLANO `1163` y `1429`: la municipalidad respondió esa pregunta describiendo un carro de arrastre, y se repreguntó. No bloquea nada, porque ese camión hace retiros de reciclaje y no de escombros, así que su exclusión de una ruta de microbasural es correcta por dos razones independientes.
+
 | Historia | Criterio de aceptación | Estado |
 |---|---|---|
 | HDU5.1 | Solo se consideran vehículos cuyo personal requerido esté completo con perfiles disponibles | 🔲 Pendiente |
@@ -441,11 +453,11 @@ Historias comprometidas: HDU5.1 (13), HDU8 (5), HDU9 (5), HDU10 (5) y SP2 (13). 
 | HDU5.1 | Los tiempos de cada tramo se ajustan por las condiciones de tráfico vigentes, sin intervención del trabajador | 🔲 Pendiente |
 | HDU5.1 | Las zonas sin vehículo posible quedan marcadas "sin asignar" con el motivo, sin invalidar el resto del plan | 🔲 Pendiente |
 | HDU5.1 | Cada tramo del plan muestra qué vehículo lo recorre, por patente y tipo, y su personal asociado | 🔲 Pendiente |
-| HDU8 | "Agregar recurso" pide el tipo de recurso a añadir | 🔲 Pendiente |
-| HDU8 | Al elegir el tipo, el sistema pide los detalles relevantes de ese tipo | 🔲 Pendiente |
-| HDU8 | "Editar" sobre un recurso registrado permite modificar su registro | 🔲 Pendiente |
-| HDU8 | El botón de disponibilidad alterna el recurso entre disponible y no disponible | 🔲 Pendiente |
-| HDU8 | Un recurso no disponible queda excluido al armar la asignación de una ruta | 🔲 Pendiente |
+| HDU8 | "Agregar recurso" pide el tipo de recurso a añadir | ✅ Cumplido |
+| HDU8 | Al elegir el tipo, el sistema pide los detalles relevantes de ese tipo | ✅ Cumplido |
+| HDU8 | "Editar" sobre un recurso registrado permite modificar su registro | ✅ Cumplido |
+| HDU8 | El botón de disponibilidad alterna el recurso entre disponible y no disponible | ✅ Cumplido |
+| HDU8 | Un recurso no disponible queda excluido al armar la asignación de una ruta | ✅ Cumplido |
 | HDU9 | Al seleccionar una o más zonas y presionar "generar informe", se exporta un PDF con el volumen total y por zona | ✅ Cumplido |
 | HDU9 | Con zonas de distintos tipos de residuo, el PDF detalla el volumen por tipo además del total | ✅ Cumplido |
 | HDU9 | Con dos versiones guardadas de la misma zona, el PDF muestra la comparación de volumen entre ambos períodos | ✅ Cumplido |
