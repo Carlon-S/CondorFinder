@@ -438,7 +438,7 @@ Historias comprometidas: HDU5.1 (13), HDU8 (5), HDU9 (5), HDU10 (5) y SP2 (13). 
 >
 > El recorrido destapó dos defectos y un supuesto equivocado:
 >
-> - La vista de rutas contaba las detecciones desactivadas: el volumen de una zona ahí podía no coincidir con el que muestran Vista Principal y la vista de análisis, que sí respetan la bandera `enabled`. El plan no estaba mal, porque `routing.py` resuelve los volúmenes contra Mongo, pero la cifra que el trabajador leía antes de generar la ruta sí.
+> - **Las detecciones desactivadas se contaban en los dos lados.** En la vista de rutas, el volumen de una zona podía no coincidir con el que muestran Vista Principal y la vista de análisis, que sí respetan la bandera `enabled`. Y `routing.py::_load_route_stops` tenía exactamente el mismo defecto, así que el plan tampoco estaba bien: el ruteo decidía qué cabía con un volumen mayor al que el propio sistema mostraba en pantalla. Corregido en los dos.
 > - El total de volumen no cuadraba con su propio detalle: sumaba los valores sin redondear y redondeaba después, mientras cada fila redondeaba antes. Con dos zonas de 3,33 y 3,61 la cabecera decía 6,9. Ahora suma lo que las filas muestran.
 > - La validación de recursos impedía que una unidad de familia `arrastre` declarara capacidad de carga, confundiendo **transportar** con **moverse solo**. Un carro de reciclaje lleva 30 m³ y necesita que alguien lo tire: las dos cosas son ciertas. La regla ahora acepta `carga` y `arrastre`, y el ruteo sigue filtrando solo por `carga`, así que un carro declara su capacidad sin sumarla a ninguna ruta.
 >

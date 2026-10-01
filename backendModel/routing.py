@@ -100,6 +100,19 @@ class RoutePlanStopOut(BaseModel):
     lat: float
     lng: float
     label: str
+    # Qué análisis guardado es esta parada. El dato ya lo tenía _load_route_stops
+    # y el handler lo descartaba al armar la salida, así que la vista tenía que
+    # emparejar la parada con su zona POR NOMBRE para mostrarle el volumen y el
+    # tipo de residuo, cosa que se rompe con dos zonas que se llamen parecido.
+    analysisId: str | None = None
+
+
+class RoutePlanVehicleOut(BaseModel):
+    """Identidad del vehículo que recorre un tramo. AC7 de HDU5.1. Calca
+    RoutePlanVehicle de src/lib/routePlan.ts campo por campo."""
+    patente: str
+    tipo: str
+    resourceId: str | None = None
 
 
 class RouteSegmentOut(BaseModel):
@@ -110,10 +123,30 @@ class RouteSegmentOut(BaseModel):
     frontend como distancia/tiempo, no hace falta mandarla aparte)."""
     originName: str
     trucksUsed: int
+    # ── AC7 de HDU5.1 ──
+    # Opcionales en el contrato de TypeScript, así que se mandan solo cuando hay
+    # algo que mandar. `vehicle` viaja cuando el tramo lo recorre UN camión: el
+    # criterio dice "qué vehículo" en singular, y con varios habría que partir la
+    # sub-ruta por camión, que es trabajo del algoritmo y no de este modelo.
+    vehicle: RoutePlanVehicleOut | None = None
+    crew: list[str] | None = None
     outboundDistanceKm: float
     outboundDurationHours: float
     returnDistanceKm: float
     returnDurationHours: float
+
+
+class RoutePlanUnassignedOut(BaseModel):
+    """Una zona que no entró al plan, con el motivo. AC6 de HDU5.1.
+
+    El motivo viaja como TEXTO y no como código: es lo que se le muestra al
+    trabajador tal cual, y el conjunto de motivos va a crecer con cada
+    restricción que se implemente (personal incompleto, fuera de autonomía,
+    ningún vehículo compatible). Un enum obligaría a sincronizar backend y
+    frontend cada vez que aparece uno nuevo."""
+    analysisId: str
+    name: str
+    reason: str
 
 
 class RoutePlanRouteOut(BaseModel):
@@ -126,6 +159,9 @@ class RoutePlanRouteOut(BaseModel):
     outboundPaths: list[list[list[float]]] = []
     returnPaths: list[list[list[float]]] = []
     segments: list[RouteSegmentOut] = []
+    # AC6: el plan sigue siendo válido para el resto. Lista vacía significa que
+    # todas las zonas entraron.
+    unassignedZones: list[RoutePlanUnassignedOut] = []
 
 
 class RoutePlanSuccessOut(BaseModel):
@@ -230,9 +266,7 @@ async def _load_active_points(point_ids: list[str]) -> list[dict]:
         [str(p["_id"]) for p in puntos]
     )
     for punto in puntos:
-        punto["trucks"] = [
-            {"capacity_m3": c} for c in capacidades.get(str(punto["_id"]), [])
-        ]
+        punto["trucks"] = capacidades.get(str(punto["_id"]), [])
     return puntos
 
 
@@ -240,27 +274,56 @@ def _point_truck_capacity(point: dict) -> float:
     return sum(t.get("capacity_m3", 0) for t in point.get("trucks", []))
 
 
-def _min_trucks_used(point: dict, assigned_volume: float) -> int:
-    """Cantidad MÍNIMA de camiones de `point` que hacen falta para cubrir
-    `assigned_volume` — heurística voraz (los más grandes primero), no una
-    combinación óptima exacta, pero es lo que se muestra en la ventana
-    flotante de la ruta ("camiones usados") y no hace falta más precisión
-    que esa para ese propósito. Con al menos un camión y una parada, el
-    mínimo es 1 aunque el volumen asignado sea 0 (igual hay que despachar
-    un camión para hacer el viaje)."""
-    caps = sorted((t.get("capacity_m3", 0) for t in point.get("trucks", [])), reverse=True)
-    if not caps:
-        return 0
+def _trucks_used(point: dict, assigned_volume: float) -> list[dict]:
+    """QUÉ camiones de `point` hacen falta para cubrir `assigned_volume`.
+
+    Misma heurística voraz de siempre (los más grandes primero), no una
+    combinación óptima exacta, pero devuelve las UNIDADES en vez de contarlas.
+    Antes esta función se llamaba _min_trucks_used y retornaba un entero: sabía
+    perfectamente cuáles camiones había elegido y descartaba esa información
+    justo al retornar, que es la razón por la que el plan nunca pudo decir qué
+    vehículo recorre cada tramo (AC7 de HDU5.1).
+
+    Con al menos un camión y una parada se despacha uno aunque el volumen
+    asignado sea 0: igual hay que hacer el viaje."""
+    camiones = sorted(
+        point.get("trucks", []), key=lambda t: t.get("capacity_m3", 0), reverse=True
+    )
+    if not camiones:
+        return []
     if assigned_volume <= 0:
-        return 1
+        return camiones[:1]
     total = 0.0
-    count = 0
-    for c in caps:
-        count += 1
-        total += c
+    elegidos: list[dict] = []
+    for c in camiones:
+        elegidos.append(c)
+        total += c.get("capacity_m3", 0)
         if total >= assigned_volume:
             break
-    return count
+    return elegidos
+
+
+def _dotacion_de(camion: dict) -> list[str]:
+    """La dotación de un vehículo como texto legible, que es lo que el AC7 llama
+    "su personal asociado".
+
+    Sale de la planilla de la municipalidad (conductores/peonetas/operadores
+    requeridos por unidad), así que son los ROLES y no los nombres. El criterio
+    detalla el nivel del vehículo ("por patente y tipo") y deja el del personal
+    sin calificar, a diferencia del AC2, que sí habla de "un mismo perfil de
+    trabajador" y por eso sí va a necesitar identidad.
+
+    El día que exista el registro de trabajadores, esta función devuelve nombres
+    y la vista no cambia: el contrato es `crew?: string[]`."""
+    partes: list[str] = []
+    for cantidad, singular, plural in (
+        (camion.get("conductores", 0), "conductor", "conductores"),
+        (camion.get("peonetas", 0), "peoneta", "peonetas"),
+        (camion.get("operadores", 0), "operador", "operadores"),
+    ):
+        if cantidad:
+            partes.append(f"{cantidad} {singular if cantidad == 1 else plural}")
+    return partes
 
 
 # =============================================================================
@@ -293,7 +356,17 @@ async def _load_route_stops(analysis_ids: list[str]) -> list[dict]:
         if latlng is None:
             continue
         lat, lng = latlng
-        total_volume = sum((d.get("volume_m3") or 0) for d in doc.get("detections", []))
+        # Las detecciones que el trabajador desactivó en la vista de análisis
+        # NO cuentan. Sin este filtro el ruteo planificaba con un volumen mayor
+        # al que el propio sistema muestra en pantalla, y como ese número decide
+        # qué cabe y qué no, una zona podía quedar fuera de la ruta por un
+        # volumen que el trabajador ya había descartado. Mismo criterio que
+        # computeSummary() en el frontend: ausente significa activa.
+        total_volume = sum(
+            (d.get("volume_m3") or 0)
+            for d in doc.get("detections", [])
+            if d.get("enabled", True)
+        )
         stops.append({
             "analysisId": str(doc["_id"]),
             "name": doc.get("name") or "Zona sin nombre",
@@ -430,8 +503,13 @@ async def _best_stop_order(
 async def _build_subroute(point: dict, point_stops: list[dict], available_hours: float) -> dict | None:
     """Arma la ida+vuelta completa desde `point` por `point_stops` — orden
     óptimo, geometría real (calles) de cada tramo, y chequeo de
-    availableHours. None si OSRM falla o si ni el mejor orden posible
-    respeta el tiempo disponible (infeasible para este punto)."""
+    availableHours.
+
+    Devuelve None cuando OSRM falla, y `{"excedeHoras": True, ...}` cuando el
+    recorrido se armó pero no cabe en el tiempo disponible. **Antes las dos
+    cosas devolvían None**, y el handler no podía distinguirlas: un servicio
+    caído y un recorrido demasiado largo son problemas distintos, el primero es
+    un error y el segundo es una zona que hay que dejar fuera (AC6)."""
     origin = (point["lat"], point["lng"])
     stop_coords = [(s["lat"], s["lng"]) for s in point_stops]
 
@@ -442,7 +520,9 @@ async def _build_subroute(point: dict, point_stops: list[dict], available_hours:
 
     total_hours = (ida_seconds + vuelta_seconds) / 3600
     if total_hours > available_hours:
-        return None
+        # No es un fallo del servicio: el recorrido existe y es demasiado largo.
+        # El handler lo resuelve sacando la parada más lejana y reintentando.
+        return {"excedeHoras": True, "horas": total_hours}
 
     ordered_stops = [point_stops[i - 1] for i in order]
 
@@ -466,7 +546,9 @@ async def _build_subroute(point: dict, point_stops: list[dict], available_hours:
 
     return {
         "originName": point.get("name", ""),
-        "trucksUsed": _min_trucks_used(point, sum(s["volumeM3"] for s in point_stops)),
+        # Los camiones elegidos viajan enteros, no solo su cantidad: el handler
+        # necesita la patente y la dotación para el AC7.
+        "trucks": _trucks_used(point, sum(s["volumeM3"] for s in point_stops)),
         "stops": ordered_stops,
         "outboundPath": outbound_geo["path"],
         "returnPath": return_geo["path"],
@@ -506,54 +588,132 @@ async def generate_route(
     )
     points_by_proximity = sorted(active_points, key=lambda p: _haversine((p["lat"], p["lng"]), centroid))
 
+    # ── AC6 de HDU5.1: el plan se arma con lo que SÍ cabe ────────────────────
+    #
+    # Antes, cada una de estas situaciones mataba el plan entero con un
+    # infeasible: que la capacidad total no alcanzara, que el reparto entre
+    # puntos no calzara, o que el recorrido no cupiera en las horas. El criterio
+    # pide lo contrario, que las zonas sin vehículo posible queden marcadas "sin
+    # asignar" con el motivo SIN invalidar el resto del plan.
+    #
+    # Las dos salidas por infeasible que sí se conservan están más arriba (sin
+    # puntos activos y sin zonas ubicables): ahí no hay nada que armar, y
+    # devolver un plan vacío sería peor que decirlo.
+    sin_asignar: list[RoutePlanUnassignedOut] = []
+
+    def descartar(zona: dict, motivo: str) -> None:
+        sin_asignar.append(RoutePlanUnassignedOut(
+            analysisId=zona["analysisId"], name=zona["name"], reason=motivo
+        ))
+
+    # Paso 1, la capacidad. Se elige el grupo de puntos que más volumen cubre y
+    # se llenan sus camiones con las zonas que caben.
+    #
+    # El orden de llenado es por volumen ASCENDENTE, y es una decisión de
+    # negocio, no técnica: el objetivo municipal es eliminar microbasurales, así
+    # que entran más zonas por jornada atendiendo primero las chicas. Llenando
+    # por volumen descendente se retiraría más material en menos paradas. La
+    # zona grande que queda fuera no se pierde de vista: aparece en la lista de
+    # sin asignar con su motivo, y el trabajador puede generarla sola.
     origin_group = _select_origin_group(points_by_proximity, total_volume)
     if origin_group is None:
+        # Ningún conjunto cubre el volumen completo: se usan todos los puntos
+        # activos y se recorta la carga, en vez de no hacer nada.
+        origin_group = [p for p in points_by_proximity if _point_truck_capacity(p) > 0]
+
+    capacidad_total = sum(_point_truck_capacity(p) for p in origin_group)
+    if not origin_group or capacidad_total <= 0:
         return RoutePlanInfeasibleOut(
             message=(
-                f"Ningún conjunto de puntos activos tiene camiones suficientes para cubrir "
-                f"los {_format_number(total_volume)} m³ requeridos por las zonas cargadas."
+                "Ningún punto activo tiene vehículos disponibles con capacidad declarada. "
+                "Revisa los recursos del punto antes de generar la ruta."
+            )
+        )
+
+    stops_que_caben: list[dict] = []
+    acumulado = 0.0
+    for zona in sorted(stops, key=lambda z: z["volumeM3"]):
+        if acumulado + zona["volumeM3"] <= capacidad_total:
+            stops_que_caben.append(zona)
+            acumulado += zona["volumeM3"]
+        else:
+            descartar(
+                zona,
+                f"La capacidad disponible ({_format_number(capacidad_total)} m³) no alcanza "
+                f"para esta zona.",
+            )
+
+    if not stops_que_caben:
+        return RoutePlanInfeasibleOut(
+            message=(
+                f"Ninguna zona cargada cabe en la capacidad disponible "
+                f"({_format_number(capacidad_total)} m³)."
             )
         )
 
     if len(origin_group) == 1:
-        stops_by_point = {str(origin_group[0]["_id"]): stops}
+        # Copia: más abajo se le quitan paradas con .remove() al relajar por
+        # horas, y sin copiar se estaría mutando la misma lista que acaba de
+        # servir para decidir qué cabía.
+        stops_by_point = {str(origin_group[0]["_id"]): list(stops_que_caben)}
     else:
-        stops_by_point = _split_stops_by_nearest(origin_group, stops)
+        stops_by_point = _split_stops_by_nearest(origin_group, stops_que_caben)
 
     sub_routes: list[dict] = []
     for point in origin_group:
         point_stops = stops_by_point.get(str(point["_id"]), [])
         if not point_stops:
             continue
-        # _split_stops_by_nearest es una heurística (reparte por cercanía y
-        # rebalancea moviendo zonas de a una) — puede terminar sin lograr
-        # calzar un punto individual dentro de su propia capacidad de
-        # camiones aunque la capacidad COMBINADA del grupo sí alcance. Se
-        # revalida acá antes de construir la sub-ruta, en vez de confiar en
-        # que el reparto siempre calza perfecto.
-        assigned_volume = sum(s["volumeM3"] for s in point_stops)
-        if assigned_volume > _point_truck_capacity(point):
-            return RoutePlanInfeasibleOut(
-                message=(
-                    f'El reparto de zonas entre los puntos elegidos no logró calzar dentro de la '
-                    f'capacidad de camiones de "{point.get("name", "un punto")}" '
-                    f'({_format_number(assigned_volume)} m³ asignados, {_format_number(_point_truck_capacity(point))} m³ '
-                    f'de capacidad) — intenta generar la ruta con menos zonas cargadas a la vez.'
-                )
+
+        # Paso 2, el reparto. _split_stops_by_nearest es una heurística y puede
+        # dejar un punto por sobre su propia capacidad aunque la del grupo
+        # alcance. Antes eso devolvía infeasible; ahora se recorta ese punto.
+        capacidad_punto = _point_truck_capacity(point)
+        asignado = sum(s["volumeM3"] for s in point_stops)
+        while point_stops and asignado > capacidad_punto:
+            fuera = max(point_stops, key=lambda z: z["volumeM3"])
+            point_stops.remove(fuera)
+            asignado -= fuera["volumeM3"]
+            descartar(
+                fuera,
+                f'El reparto dejó esta zona fuera de la capacidad de "{point.get("name", "el punto")}" '
+                f"({_format_number(capacidad_punto)} m³).",
             )
-        result = await _build_subroute(point, point_stops, payload.availableHours)
-        if result is None:
-            return RoutePlanInfeasibleOut(
-                message=(
-                    f'No se encontró una ruta desde "{point.get("name", "un punto")}" que respete '
-                    f"las {_format_number(payload.availableHours)} horas disponibles (ida + vuelta), o el "
-                    f"servicio de ruteo no respondió."
+        if not point_stops:
+            continue
+
+        # Paso 3, las horas. Se saca la parada más lejana del punto y se
+        # reintenta, hasta que el recorrido quepa o no queden paradas. Es la
+        # relajación que convierte "no se pudo" en "esto sí, esto no".
+        while point_stops:
+            result = await _build_subroute(point, point_stops, payload.availableHours)
+            if result is None:
+                # OSRM no respondió. Esto NO es una zona sin asignar: es un
+                # servicio caído, y fingir un plan parcial escondería la causa.
+                return RoutePlanInfeasibleOut(
+                    message=(
+                        f'El servicio de ruteo no respondió al calcular el recorrido desde '
+                        f'"{point.get("name", "un punto")}". Intenta nuevamente en unos minutos.'
+                    )
                 )
+            if not result.get("excedeHoras"):
+                sub_routes.append(result)
+                break
+            lejana = max(
+                point_stops,
+                key=lambda z: _haversine((point["lat"], point["lng"]), (z["lat"], z["lng"])),
             )
-        sub_routes.append(result)
+            point_stops.remove(lejana)
+            descartar(
+                lejana,
+                f"No alcanza dentro de las {_format_number(payload.availableHours)} horas "
+                f"disponibles.",
+            )
 
     if not sub_routes:
-        return RoutePlanInfeasibleOut(message="No fue posible asignar las zonas cargadas a ningún punto activo.")
+        return RoutePlanInfeasibleOut(
+            message="No fue posible asignar ninguna zona cargada a un punto activo."
+        )
 
     out_stops: list[RoutePlanStopOut] = []
     outbound_paths: list[list[list[float]]] = []
@@ -564,13 +724,42 @@ async def generate_route(
     max_duration = 0.0  # sub-rutas de puntos distintos corren en paralelo (cuadrillas separadas)
     for sub in sub_routes:
         for s in sub["stops"]:
-            out_stops.append(RoutePlanStopOut(order=order, lat=s["lat"], lng=s["lng"], label=s["name"]))
+            out_stops.append(RoutePlanStopOut(
+                order=order,
+                lat=s["lat"],
+                lng=s["lng"],
+                label=s["name"],
+                analysisId=s.get("analysisId"),
+            ))
             order += 1
         outbound_paths.append(sub["outboundPath"])
         return_paths.append(sub["returnPath"])
+
+        # ── AC7 ──
+        # El vehículo viaja solo cuando el tramo lo recorre UNO. El criterio dice
+        # "qué vehículo lo recorre" en singular, y con varios camiones habría que
+        # partir la sub-ruta por camión: eso es trabajo del algoritmo (hoy la
+        # sub-ruta es por punto de origen, no por vehículo) y además es lo que
+        # haría verificable el AC2, que compara vehículos que operan a la vez.
+        # Mientras tanto, con varios camiones se manda `trucksUsed` como siempre
+        # y la vista muestra "N camiones", que es lo que hay y es cierto.
+        camiones = sub.get("trucks", [])
+        vehiculo = None
+        dotacion = None
+        if len(camiones) == 1:
+            unico_camion = camiones[0]
+            vehiculo = RoutePlanVehicleOut(
+                patente=unico_camion.get("patente") or unico_camion.get("numeroEquipo", ""),
+                tipo=unico_camion.get("tipo", ""),
+                resourceId=unico_camion.get("resourceId"),
+            )
+            dotacion = _dotacion_de(unico_camion) or None
+
         segments.append(RouteSegmentOut(
             originName=sub["originName"],
-            trucksUsed=sub["trucksUsed"],
+            trucksUsed=len(camiones),
+            vehicle=vehiculo,
+            crew=dotacion,
             outboundDistanceKm=round(sub["outboundDistanceKm"], 2),
             outboundDurationHours=round(sub["outboundDurationHours"], 2),
             returnDistanceKm=round(sub["returnDistanceKm"], 2),
@@ -587,5 +776,6 @@ async def generate_route(
             outboundPaths=outbound_paths,
             returnPaths=return_paths,
             segments=segments,
+            unassignedZones=sin_asignar,
         )
     )

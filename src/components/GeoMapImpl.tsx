@@ -72,6 +72,12 @@ const ORIGIN_PIN_REGULAR =
 const ORIGIN_PIN_FILL =
   "M128,16a88.1,88.1,0,0,0-88,88c0,31.4,14.51,64.68,42,96.25a254.19,254.19,0,0,0,41.45,38.3,8,8,0,0,0,9.18,0A254.19,254.19,0,0,0,174,200.25c27.45-31.57,42-64.85,42-96.25A88.1,88.1,0,0,0,128,16Zm32,96H136v24a8,8,0,0,1-16,0V112H96a8,8,0,0,1,0-16h24V72a8,8,0,0,1,16,0V96h24a8,8,0,0,1,0,16Z";
 
+// Sitio de disposición final (Phosphor "Warehouse"). Pin distinto al de zona y
+// al de punto porque es una tercera cosa: no es un basural que se retira ni un
+// patio desde donde sale la flota, es a dónde termina yendo el material.
+const DISPOSAL_PIN =
+  "M231.65,194.55,224,164.11V88a16,16,0,0,0-16-16H176V40a16,16,0,0,0-16-16H96A16,16,0,0,0,80,40V72H48A16,16,0,0,0,32,88v76.11L24.35,194.55A8,8,0,0,0,32,204.52V216a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V204.52A8,8,0,0,0,231.65,194.55ZM96,40h64V72H96ZM48,88H208v72H48Zm160,128H48V176H208Z";
+
 function pinDivIcon(path: string, color: string, size: number): L.DivIcon {
   return L.divIcon({
     className: "",
@@ -104,6 +110,12 @@ function originIcon(active: boolean): L.DivIcon {
     active ? "var(--primary)" : "var(--muted-foreground)",
     36,
   );
+}
+
+/** El relleno sanitario. Va en el navy del sistema y un poco más grande que un
+ *  punto: es el destino de todo lo que se retira, no una parada más. */
+function disposalIcon(): L.DivIcon {
+  return pinDivIcon(DISPOSAL_PIN, "var(--primary)", 40);
 }
 
 /** Recuadros de detecciones superpuestos sobre la miniatura del tooltip
@@ -345,6 +357,7 @@ export function GeoMapImpl({
   onMapClick,
   onPointClick,
   onRouteClick,
+  disposalSite,
   focusPoint,
   lockToMaipu,
   className,
@@ -517,6 +530,16 @@ export function GeoMapImpl({
           {poly.label && <Tooltip direction="top">{poly.label}</Tooltip>}
         </Polygon>
       ))}
+      {/* El sitio de disposición, debajo de los demás marcadores en el orden
+          de dibujo porque es contexto permanente del territorio, no algo que se
+          elija. No es clickeable por la misma razón. */}
+      {disposalSite && (
+        <Marker position={disposalSite.position} icon={disposalIcon()} interactive={false}>
+          <Tooltip direction="top" className="condorfinder-map-tooltip">
+            {disposalSite.name}
+          </Tooltip>
+        </Marker>
+      )}
       {points?.map((p) => (
         <Marker
           key={p.id}

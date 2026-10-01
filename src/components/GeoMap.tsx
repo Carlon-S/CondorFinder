@@ -82,6 +82,9 @@ export interface GeoMapProps {
   fitBoundsTo?: [number, number][] | null;
   /** Clic sobre el trazo de un recorrido, con su índice en `routeSegments`. */
   onRouteClick?: (segmentIndex: number) => void;
+  /** Sitio de disposición final, dibujado como contexto permanente. No es
+   *  clickeable: es a dónde va el material, no algo que el trabajador elija. */
+  disposalSite?: { name: string; position: [number, number] } | null;
   onMapClick?: (lat: number, lng: number) => void;
   /** Click en un marker de `points` — el padre decide qué hacer (ej. setSelectedPoint). */
   onPointClick?: (point: GeoMapPoint) => void;

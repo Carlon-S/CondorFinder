@@ -94,6 +94,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { RELLENO_SANITARIO } from "@/lib/disposalSite";
 import { projectPolygonToWgs84 } from "@/lib/projection";
 import {
   generateRoute,
@@ -798,7 +799,16 @@ function RutasPage() {
   // cambian cuando de verdad llega una ruta nueva.
   const routeFitPoints = useMemo<[number, number][] | null>(() => {
     if (routeOutboundPaths || routeReturnPaths) {
-      return [...(routeOutboundPaths ?? []).flat(), ...(routeReturnPaths ?? []).flat()];
+      return [
+        ...(routeOutboundPaths ?? []).flat(),
+        ...(routeReturnPaths ?? []).flat(),
+        // El relleno sanitario entra al encuadre de la ruta, aunque el trazo
+        // todavía no pase por él. Está al poniente del casco urbano, fuera de
+        // la caja con la que abre el mapa, así que sin incluirlo acá el
+        // marcador existe y no se ve nunca. Y es información de la ruta: es a
+        // dónde va lo que se retira.
+        RELLENO_SANITARIO.position,
+      ];
     }
     return routePositions;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1015,6 +1025,7 @@ function RutasPage() {
             // única forma de pasar de uno al otro era buscar el recorrido en
             // la lista a mano.
             onRouteClick={setRutaAbierta}
+            disposalSite={RELLENO_SANITARIO}
             routePositions={routePositions}
             outboundPaths={routeOutboundPaths}
             returnPaths={routeReturnPaths}

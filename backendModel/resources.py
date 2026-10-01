@@ -579,14 +579,21 @@ async def delete_resource(
     return {"message": "Recurso eliminado"}
 
 
-async def capacidad_de_carga_por_punto(point_ids: list[str]) -> dict[str, list[float]]:
-    """Capacidades de carga DISPONIBLES, solo de los puntos que tienen recursos.
+async def capacidad_de_carga_por_punto(point_ids: list[str]) -> dict[str, list[dict]]:
+    """Los vehículos de transporte DISPONIBLES de cada punto, con su identidad.
 
     Por cada punto que tenga al menos un recurso cargado, devuelve la lista de
-    capacidades en m3 de sus recursos de familia "carga" que están disponibles y
-    que declaran capacidad. Es una lista y no un total porque routing.py necesita
-    las unidades por separado para saber cuántos camiones hacen falta, no solo
+    sus recursos de familia "carga" que están disponibles y que declaran
+    capacidad. Es una lista y no un total porque routing.py necesita las
+    unidades por separado para saber cuántos camiones hacen falta, no solo
     cuánto cabe.
+
+    Devuelve el VEHÍCULO y no solo su capacidad, que es lo que permite el AC7 de
+    HDU5.1 ("cada tramo del plan muestra qué vehículo lo recorre, por patente y
+    tipo, y su personal asociado"). Antes devolvía `list[float]`: el ruteo sabía
+    perfectamente cuáles camiones elegía y tiraba esa información al retornar,
+    así que el plan podía decir "2 camiones" y jamás cuáles. La dotación viaja en
+    el mismo documento, así que el personal asociado sale gratis con el cambio.
 
     Un punto sin nada que aportar simplemente no aparece en el resultado, y
     routing.py lo lee como lista vacía. Ya no hace falta distinguir "sin
@@ -610,12 +617,22 @@ async def capacidad_de_carga_por_punto(point_ids: list[str]) -> dict[str, list[f
 
     docs = await get_db().resources.find(
         {"pointId": {"$in": point_ids}},
-        {"pointId": 1, "tipo": 1, "disponible": 1, "capacidad_m3": 1},
+        {
+            "pointId": 1,
+            "tipo": 1,
+            "disponible": 1,
+            "capacidad_m3": 1,
+            "numero_equipo": 1,
+            "patente": 1,
+            "conductores_requeridos": 1,
+            "peonetas_requeridas": 1,
+            "operadores_requeridos": 1,
+        },
     ).to_list(length=None)
 
-    por_punto: dict[str, list[float]] = {}
+    por_punto: dict[str, list[dict]] = {}
     for d in docs:
-        capacidades = por_punto.setdefault(d["pointId"], [])
+        unidades = por_punto.setdefault(d["pointId"], [])
         if not d.get("disponible", True):
             continue
         if FAMILIA_POR_TIPO.get(d.get("tipo", "")) != "carga":
@@ -623,5 +640,18 @@ async def capacidad_de_carga_por_punto(point_ids: list[str]) -> dict[str, list[f
         capacidad = d.get("capacidad_m3")
         if not capacidad or capacidad <= 0:
             continue
-        capacidades.append(float(capacidad))
+        unidades.append({
+            # La clave se llama capacity_m3 y no capacidad_m3 a propósito: es la
+            # forma que routing.py ya lee en su lista `trucks`, y cambiar la
+            # FUENTE del dato sin cambiar su forma deja intacto el algoritmo de
+            # ruteo, que es de otro integrante del equipo.
+            "capacity_m3": float(capacidad),
+            "resourceId": str(d["_id"]),
+            "numeroEquipo": d.get("numero_equipo", ""),
+            "patente": d.get("patente", ""),
+            "tipo": d.get("tipo", ""),
+            "conductores": d.get("conductores_requeridos", 0),
+            "peonetas": d.get("peonetas_requeridas", 0),
+            "operadores": d.get("operadores_requeridos", 0),
+        })
     return por_punto
