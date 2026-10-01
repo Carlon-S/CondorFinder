@@ -1893,24 +1893,25 @@ function RutasPage() {
                   </div>
                 </div>
 
-                {(["no_disponible", "sin_capacidad", "no_transporta"] as const).map((motivo) =>
-                  resumenPunto.fuera[motivo].length === 0 ? null : (
-                    <div
-                      key={motivo}
-                      className="flex items-baseline justify-between gap-2 rounded-md bg-background/40 px-2.5 py-1.5"
-                    >
-                      <span className="text-[0.6875rem] text-muted-foreground">
-                        Fuera, {TEXTO_FUERA_DE_RUTA[motivo]}
-                      </span>
-                      <span
-                        className={`mono text-xs font-semibold tabular-nums ${
-                          motivo === "sin_capacidad" ? "text-warning-strong" : "text-foreground"
-                        }`}
+                {(["no_disponible", "sin_capacidad", "no_transporta", "se_remolca"] as const).map(
+                  (motivo) =>
+                    resumenPunto.fuera[motivo].length === 0 ? null : (
+                      <div
+                        key={motivo}
+                        className="flex items-baseline justify-between gap-2 rounded-md bg-background/40 px-2.5 py-1.5"
                       >
-                        {resumenPunto.fuera[motivo].length}
-                      </span>
-                    </div>
-                  ),
+                        <span className="text-[0.6875rem] text-muted-foreground">
+                          Fuera, {TEXTO_FUERA_DE_RUTA[motivo]}
+                        </span>
+                        <span
+                          className={`mono text-xs font-semibold tabular-nums ${
+                            motivo === "sin_capacidad" ? "text-warning-strong" : "text-foreground"
+                          }`}
+                        >
+                          {resumenPunto.fuera[motivo].length}
+                        </span>
+                      </div>
+                    ),
                 )}
 
                 {/* Un punto con recursos pero sin capacidad disponible no puede

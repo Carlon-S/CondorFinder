@@ -317,7 +317,18 @@ class ResourceIn(BaseModel):
         # ignorarlo en silencio: una capacidad de carga guardada en una
         # retroexcavadora la haría aparecer como transporte disponible en el
         # ruteo, y nadie se enteraría hasta ver una ruta imposible.
-        if familia != "carga" and self.capacidad_m3 is not None:
+        #
+        # El arrastre SÍ puede declararla, y no es una excepción al criterio
+        # anterior: es que la regla confundía dos cosas distintas. La familia
+        # dice cómo se MUEVE una unidad, no si CARGA. Un carro de reciclaje
+        # lleva 30 m3 (confirmado por la municipalidad) y necesita que alguien
+        # lo tire; las dos cosas son ciertas a la vez.
+        #
+        # Que la declare no lo mete en ninguna ruta: capacidad_de_carga_por_punto()
+        # filtra por familia "carga", y un carro sigue siendo "arrastre". El
+        # riesgo que motivó esta validación, una unidad que aparece como
+        # transporte disponible sin serlo, sigue cubierto por ese filtro.
+        if familia not in ("carga", "arrastre") and self.capacidad_m3 is not None:
             raise ValueError(f"Un recurso de tipo {self.tipo} no lleva capacidad de carga")
         if familia != "maquina" and self.capacidad_balde_m3 is not None:
             raise ValueError(f"Un recurso de tipo {self.tipo} no lleva capacidad de balde")

@@ -102,13 +102,17 @@ export interface ResourcePoint extends ResourcePointInput {
  *  la alternativa (pedirle al backend un desglose solo para mostrarlo) sería un
  *  endpoint nuevo para no decir nada que el cliente no pueda deducir de datos
  *  que ya tiene. Si cambia una de las dos, tiene que cambiar la otra. */
-export type MotivoFueraDeRuta = "no_disponible" | "no_transporta" | "sin_capacidad";
+export type MotivoFueraDeRuta = "no_disponible" | "se_remolca" | "no_transporta" | "sin_capacidad";
 
 export function motivoFueraDeRuta(r: Resource): MotivoFueraDeRuta | null {
   // El orden importa: cada unidad cae en UN motivo, y el primero es el que se
   // reporta. Una retroexcavadora fuera de servicio se informa como fuera de
   // servicio, que es lo que el trabajador puede cambiar.
   if (!r.disponible) return "no_disponible";
+  // El arrastre va antes y con motivo propio: decirle "no transporta carga" a
+  // un carro que declara 30 m³ es falso. Lo que lo deja fuera de una ruta no
+  // es que no cargue, es que no circula solo.
+  if (r.familia === "arrastre") return "se_remolca";
   if (r.familia !== "carga") return "no_transporta";
   if (r.capacidad_m3 == null) return "sin_capacidad";
   return null;
@@ -116,6 +120,7 @@ export function motivoFueraDeRuta(r: Resource): MotivoFueraDeRuta | null {
 
 export const TEXTO_FUERA_DE_RUTA: Record<MotivoFueraDeRuta, string> = {
   no_disponible: "marcado como no disponible",
+  se_remolca: "se remolca, no circula por sí solo",
   no_transporta: "no transporta carga",
   sin_capacidad: "sin capacidad declarada",
 };
@@ -133,7 +138,7 @@ export function resumenParaRuta(recursos: Resource[]): ResumenRuta {
   const resumen: ResumenRuta = {
     suman: [],
     capacidad: 0,
-    fuera: { no_disponible: [], no_transporta: [], sin_capacidad: [] },
+    fuera: { no_disponible: [], se_remolca: [], no_transporta: [], sin_capacidad: [] },
   };
   for (const r of recursos) {
     const motivo = motivoFueraDeRuta(r);
@@ -374,7 +379,14 @@ export function camposDeFamilia(familia: ResourceFamily): {
   motorizado: boolean;
 } {
   return {
-    capacidadCarga: familia === "carga",
+    // Los carros también declaran capacidad. Un CARRO RECICLAJE lleva 30 m³
+    // según la municipalidad, así que esconderle el campo obligaba a guardar un
+    // dato confirmado en un lugar donde nadie puede verlo ni corregirlo.
+    //
+    // Que la declare NO lo mete en las rutas: el ruteo filtra por familia
+    // "carga" (ver capacidad_de_carga_por_punto en resources.py), y un carro
+    // sigue siendo "arrastre". La familia dice cómo se mueve, no si carga.
+    capacidadCarga: familia === "carga" || familia === "arrastre",
     capacidadBalde: familia === "maquina",
     // Un carro se remolca: no lleva tripulación propia.
     dotacion: familia !== "arrastre",

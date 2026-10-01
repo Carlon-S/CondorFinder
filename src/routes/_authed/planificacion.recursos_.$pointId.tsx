@@ -143,7 +143,13 @@ function capacidadDe(
       ? { valor: null, nota: "balde sin declarar", falta: true }
       : { valor: null, nota: "sin dato", falta: false };
   }
-  if (r.familia === "arrastre") return { valor: null, nota: "se remolca", falta: false };
+  if (r.familia === "arrastre") {
+    // Un carro que declara su capacidad la muestra como cualquier otro. La
+    // nota sigue diciendo "se remolca" porque es lo que lo distingue: carga,
+    // pero alguien tiene que tirarlo.
+    if (r.capacidad_m3 != null) return { valor: r.capacidad_m3, nota: "se remolca", falta: false };
+    return { valor: null, nota: "se remolca", falta: false };
+  }
   return { valor: null, nota: "sin dato", falta: false };
 }
 
