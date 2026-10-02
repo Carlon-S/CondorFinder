@@ -30,6 +30,13 @@ export interface RoutePlanRequest {
   availableHours: number;
   /** null = sin prioridad ("Sin prioridad" en el selector). */
   priorityWasteType: string | null;
+  /** Subconjunto de `analysisIds` que el trabajador marcó como prioritario:
+   *  entra al plan antes que el resto y es el último en salir cuando hay que
+   *  recortar por capacidad o por horas.
+   *
+   *  No se guarda en ninguna parte. Es una decisión de este plan, de esta
+   *  jornada, y la vista la sostiene en memoria junto con las zonas cargadas. */
+  priorityAnalysisIds?: string[];
 }
 
 export interface RoutePlanStop {
@@ -130,6 +137,12 @@ export interface RoutePlanSuccess {
     stops: RoutePlanStop[];
     totalDistanceKm?: number;
     totalDurationHours?: number;
+    /** Con cuánto volumen se armó el plan de verdad.
+     *
+     *  No es el volumen de las zonas cargadas: desde AC6 el plan puede dejar
+     *  zonas fuera, así que "cargué 6,94 m³" y "el plan mueve 3,61 m³" son dos
+     *  cifras distintas, y la segunda es la que describe el trabajo del día. */
+    totalVolumeM3?: number;
     /** Un trazo (calles reales, vía OSRM) por sub-ruta/punto de origen
      *  usado — casi siempre uno solo. Separado de returnPaths para poder
      *  pintar ida y vuelta con estilos distintos en el mapa. */

@@ -72,7 +72,16 @@ def _campos_del_recurso(r, point_id, familia):
         "marca": r.get("marca") or "",
         "modelo": r.get("modelo") or "",
         "anio": r.get("anio"),
-        "capacidad_m3": r.get("capacidadM3") if familia == "carga" else None,
+        # "carga" Y "arrastre", igual que _validar_tipo_y_familia() en
+        # resources.py. El arrastre la declara porque un CARRO RECICLAJE lleva
+        # 30 m³ y necesita que alguien lo tire, y las dos cosas son ciertas;
+        # que la declare no lo mete en ninguna ruta, porque
+        # capacidad_de_carga_por_punto() sigue filtrando por "carga".
+        #
+        # Esta línea decía solo "carga", de antes de esa corrección, y como el
+        # upsert hace $set con todos los campos, volver a correr el importador
+        # borraba los 30 m³ de los dos carros de reciclaje sin decir nada.
+        "capacidad_m3": r.get("capacidadM3") if familia in ("carga", "arrastre") else None,
         "capacidad_balde_m3": r.get("capacidadBaldeM3") if familia == "maquina" else None,
         "conductores_requeridos": 0 if familia == "arrastre" else r.get("conductoresRequeridos", 0),
         "peonetas_requeridas": 0 if familia == "arrastre" else r.get("peonetasRequeridas", 0),

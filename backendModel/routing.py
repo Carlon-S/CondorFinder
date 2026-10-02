@@ -93,6 +93,22 @@ class RoutePlanRequestIn(BaseModel):
     activePointIds: list[str]
     availableHours: float
     priorityWasteType: str | None = None
+    # Zonas que el trabajador marcó como prioritarias: entran al plan antes que
+    # las demás y son las últimas en salir cuando la capacidad o las horas
+    # obligan a recortar.
+    #
+    # Existe porque el criterio automático con el que se llena el plan (volumen
+    # ascendente, ver el handler) no puede saber que una zona es urgente: que
+    # haya un reclamo, un colegio al lado o un riesgo sanitario es información
+    # que vive fuera del sistema. En vez de inventar una heurística que lo
+    # adivine, se le da la palanca a quien sí lo sabe.
+    #
+    # Es del PLAN y no de la zona, así que no se persiste: una zona urgente hoy
+    # puede no serlo mañana, y guardarlo convertiría una decisión del día en un
+    # atributo permanente del basural. Los ids que no estén también en
+    # `analysisIds` se ignoran solos, porque la marca se cruza contra las zonas
+    # efectivamente cargadas.
+    priorityAnalysisIds: list[str] = []
 
 
 class RoutePlanStopOut(BaseModel):
@@ -153,6 +169,12 @@ class RoutePlanRouteOut(BaseModel):
     stops: list[RoutePlanStopOut]
     totalDistanceKm: float | None = None
     totalDurationHours: float | None = None
+    # Con cuánto se armó el plan DE VERDAD. No es lo mismo que el volumen de las
+    # zonas cargadas: desde que existe AC6, el plan puede dejar zonas fuera, y
+    # sin esta cifra el trabajador vería "6,94 m³ cargados" sin forma de saber
+    # que el recorrido mueve 3,61. También es lo único que hace observable que
+    # el ruteo respeta la bandera `enabled` de cada detección.
+    totalVolumeM3: float | None = None
     # Un trazo (lista de [lat, lng]) por sub-ruta/punto de origen usado —
     # casi siempre uno solo. Separados en ida/vuelta para que el frontend
     # los pinte con estilos distintos (ver GeoMapImpl.tsx).
@@ -581,6 +603,14 @@ async def generate_route(
     if not stops:
         return RoutePlanInfeasibleOut(message="No hay zonas de basura ubicables para generar la ruta.")
 
+    # La marca de prioridad se cruza contra las zonas que SÍ se pudieron cargar,
+    # así que un id marcado que no se pudo ubicar (sin orthoCenter, sin CRS
+    # reproyectable) desaparece por sí solo en vez de arrastrarse como una
+    # prioridad sobre una zona que no está en el plan.
+    prioritarias = set(payload.priorityAnalysisIds)
+    for z in stops:
+        z["prioritaria"] = z["analysisId"] in prioritarias
+
     total_volume = sum(s["volumeM3"] for s in stops)
     centroid = (
         sum(s["lat"] for s in stops) / len(stops),
@@ -602,6 +632,13 @@ async def generate_route(
     sin_asignar: list[RoutePlanUnassignedOut] = []
 
     def descartar(zona: dict, motivo: str) -> None:
+        # Una zona marcada como prioritaria que igual queda fuera tiene que
+        # decirlo en el motivo. El trabajador la marcó justamente para que no
+        # pasara; si el plan la descarta con el mismo texto que a cualquier otra,
+        # se enteraría solo comparando su propia marca contra la lista, que es
+        # exactamente el trabajo que la marca venía a ahorrarle.
+        if zona.get("prioritaria"):
+            motivo = f"{motivo} Estaba marcada como prioritaria."
         sin_asignar.append(RoutePlanUnassignedOut(
             analysisId=zona["analysisId"], name=zona["name"], reason=motivo
         ))
@@ -615,6 +652,11 @@ async def generate_route(
     # por volumen descendente se retiraría más material en menos paradas. La
     # zona grande que queda fuera no se pierde de vista: aparece en la lista de
     # sin asignar con su motivo, y el trabajador puede generarla sola.
+    #
+    # Las marcadas como prioritarias van PRIMERO, y entre ellas sigue rigiendo el
+    # mismo orden ascendente. Esto es lo que hace que la marca signifique algo:
+    # sin ella, una zona urgente que además es grande es la primera candidata a
+    # quedar fuera, precisamente al revés de lo que se quería.
     origin_group = _select_origin_group(points_by_proximity, total_volume)
     if origin_group is None:
         # Ningún conjunto cubre el volumen completo: se usan todos los puntos
@@ -632,7 +674,7 @@ async def generate_route(
 
     stops_que_caben: list[dict] = []
     acumulado = 0.0
-    for zona in sorted(stops, key=lambda z: z["volumeM3"]):
+    for zona in sorted(stops, key=lambda z: (not z["prioritaria"], z["volumeM3"])):
         if acumulado + zona["volumeM3"] <= capacidad_total:
             stops_que_caben.append(zona)
             acumulado += zona["volumeM3"]
@@ -671,7 +713,14 @@ async def generate_route(
         capacidad_punto = _point_truck_capacity(point)
         asignado = sum(s["volumeM3"] for s in point_stops)
         while point_stops and asignado > capacidad_punto:
-            fuera = max(point_stops, key=lambda z: z["volumeM3"])
+            # `not prioritaria` delante del volumen en la clave de `max` es lo que
+            # hace que una prioritaria sea la ÚLTIMA en salir: las no prioritarias
+            # puntúan 1 y las marcadas 0, así que se recorta entre las no
+            # marcadas (y de ellas, la más grande) mientras quede alguna. Si todas
+            # las que quedan están marcadas, empatan en 0 y el criterio vuelve a
+            # ser el volumen: la marca no puede volver imposible un recorte que de
+            # todos modos hay que hacer.
+            fuera = max(point_stops, key=lambda z: (not z["prioritaria"], z["volumeM3"]))
             point_stops.remove(fuera)
             asignado -= fuera["volumeM3"]
             descartar(
@@ -699,9 +748,15 @@ async def generate_route(
             if not result.get("excedeHoras"):
                 sub_routes.append(result)
                 break
+            # Misma precedencia que en el recorte por capacidad: se saca la más
+            # lejana DE LAS NO PRIORITARIAS, y solo se toca una marcada cuando no
+            # queda ninguna otra.
             lejana = max(
                 point_stops,
-                key=lambda z: _haversine((point["lat"], point["lng"]), (z["lat"], z["lng"])),
+                key=lambda z: (
+                    not z["prioritaria"],
+                    _haversine((point["lat"], point["lng"]), (z["lat"], z["lng"])),
+                ),
             )
             point_stops.remove(lejana)
             descartar(
@@ -721,6 +776,7 @@ async def generate_route(
     segments: list[RouteSegmentOut] = []
     order = 1
     total_distance = 0.0
+    total_volume_planificado = 0.0
     max_duration = 0.0  # sub-rutas de puntos distintos corren en paralelo (cuadrillas separadas)
     for sub in sub_routes:
         for s in sub["stops"]:
@@ -766,6 +822,11 @@ async def generate_route(
             returnDurationHours=round(sub["returnDurationHours"], 2),
         ))
         total_distance += sub["distanceKm"]
+        # Se suma sobre las paradas que QUEDARON en la sub-ruta, no sobre las que
+        # se eligieron por capacidad: la relajación por horas saca paradas
+        # después de ese reparto, y sumar antes daría un volumen que el plan no
+        # mueve.
+        total_volume_planificado += sum(s["volumeM3"] for s in sub["stops"])
         max_duration = max(max_duration, sub["durationHours"])
 
     return RoutePlanSuccessOut(
@@ -773,6 +834,7 @@ async def generate_route(
             stops=out_stops,
             totalDistanceKm=round(total_distance, 2),
             totalDurationHours=round(max_duration, 2),
+            totalVolumeM3=round(total_volume_planificado, 2),
             outboundPaths=outbound_paths,
             returnPaths=return_paths,
             segments=segments,

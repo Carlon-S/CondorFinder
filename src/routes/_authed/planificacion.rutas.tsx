@@ -47,6 +47,8 @@ import {
   MapPin,
   Route as RouteIcon,
   Scale,
+  Star,
+  StarFill,
   TriangleAlert,
   Truck,
   Warehouse,
@@ -305,6 +307,29 @@ function RutasPage() {
   const [loadedIds, setLoadedIds] = useState<Set<string>>(new Set());
   const loadedAnalyses = allAnalyses.filter((a) => loadedIds.has(a.id));
 
+  // Zonas marcadas como prioritarias: entran al plan antes que el resto y son
+  // las últimas en salir cuando la capacidad o las horas obligan a recortar.
+  //
+  // Vive acá, en la vista, y no en Mongo: es una decisión de ESTE plan. Que una
+  // zona sea urgente hoy, por un reclamo o por estar al lado de un colegio, es
+  // información que el sistema no tiene forma de deducir, y tampoco es un
+  // atributo permanente del basural. Guardarla convertiría la urgencia de una
+  // jornada en una propiedad de la zona, y la siguiente ruta la arrastraría sin
+  // que nadie la haya vuelto a pedir.
+  //
+  // La lista las sube al tope (ver `zonasOrdenadas` más abajo): la lista hace
+  // scroll a partir de la cuarta fila, así que una zona marcada podía quedar
+  // fuera de la vista y la marca dejaba de ser verificable justo cuando hay
+  // muchas zonas, que es cuando sirve.
+  const [prioritarias, setPrioritarias] = useState<Set<string>>(new Set());
+  const togglePrioritaria = (id: string) => {
+    setPrioritarias((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  };
+
   // Punto al que el mapa vuela — mismo mecanismo que focusPoint en
   // recursos.tsx. Sin esto, el mapa se queda en el centro por defecto de
   // Maipú (zoom de toda la comuna).
@@ -437,6 +462,7 @@ function RutasPage() {
   const [routeTotals, setRouteTotals] = useState<{
     distanceKm?: number;
     durationHours?: number;
+    volumeM3?: number;
   } | null>(null);
   // HDU5.1/AC6. Ausente mientras el backend no lo calcule, y entonces la
   // sección no se dibuja: una lista vacía de "zonas sin asignar" se lee como
@@ -448,12 +474,13 @@ function RutasPage() {
    *  el solo hecho de mirarlo no sirve para coordinar a nadie. */
   const [salidaPlan, setSalidaPlan] = useState<Date | null>(null);
 
-  // ¿El backend está mandando ya los datos de HDU5.1? Las columnas de vehículo
-  // y personal existen solo si SÍ. Preguntarlo por los datos y no por una
-  // bandera de configuración es lo que hace que aparezcan solas el día que el
-  // backend las devuelva, sin tocar esta vista.
-  const hayVehiculo = routeSegments?.some((seg) => seg.vehicle) ?? false;
-  const hayDotacion = routeSegments?.some((seg) => seg.crew && seg.crew.length > 0) ?? false;
+  // Acá vivían `hayVehiculo` y `hayDotacion`, que preguntaban si el backend ya
+  // mandaba los datos del AC7 para decidir si dibujar sus columnas. Quedaron sin
+  // uso cuando el vehículo y la dotación pasaron a mostrarse DENTRO de la línea
+  // de tiempo, en el nodo de salida de cada recorrido (RouteTimeline.tsx), que
+  // hace la misma pregunta pero por segmento: con varios puntos de origen, un
+  // recorrido puede traer su patente y el otro no, y una bandera global los
+  // trataba a los dos igual.
 
   // Horas disponibles: 0/negativo/vacío no es una entrada válida — sin esto
   // se podía confirmar una ruta con "0 horas" en silencio (Number("") || 0).
@@ -635,6 +662,16 @@ function RutasPage() {
       next.delete(id);
       return next;
     });
+    // La marca de prioridad se va con la zona. El backend igual cruza los ids
+    // marcados contra los cargados, así que dejarla no cambiaría ninguna ruta,
+    // pero sí la interfaz: al volver a cargar la zona reaparecería con la
+    // estrella encendida sin que nadie la haya vuelto a marcar.
+    setPrioritarias((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
   };
 
   // Volver a centrar el mapa en un análisis ya cargado — para cuando el
@@ -701,6 +738,11 @@ function RutasPage() {
       activePointIds: activePoints.map((p) => p.id),
       availableHours: hoursNum,
       priorityWasteType: priorityWasteType === "none" ? null : priorityWasteType,
+      // Se filtra contra las cargadas antes de salir. El backend hace la misma
+      // intersección por su cuenta (no confía en lo que mande el navegador),
+      // pero mandar un id que no está en la ruta igual sería mandar una
+      // contradicción, y el contrato se lee mejor sin ella.
+      priorityAnalysisIds: Array.from(prioritarias).filter((id) => loadedIds.has(id)),
     });
     setGenerating(false);
     setConfirmOpen(false);
@@ -713,6 +755,7 @@ function RutasPage() {
       setRouteTotals({
         distanceKm: result.route.totalDistanceKm,
         durationHours: result.route.totalDurationHours,
+        volumeM3: result.route.totalVolumeM3,
       });
       setUnassigned(result.route.unassignedZones ?? null);
       setSalidaPlan(new Date());
@@ -876,6 +919,19 @@ function RutasPage() {
     (suma, a) => suma + Number(a.summary.totalVolumeM3.toFixed(2)),
     0,
   );
+
+  /** Las zonas cargadas con las prioritarias arriba, que es el orden en el que
+   *  se LISTAN. No es el orden en el que se visitan: eso lo decide el backend
+   *  contra la matriz de tiempos de OSRM, y esta lista no tiene nada que decir
+   *  al respecto.
+   *
+   *  Copia antes de ordenar, y sobre `loadedAnalyses` y no sobre `allAnalyses`:
+   *  `sort` muta, y `allAnalyses` es la fuente de los círculos del mapa. El
+   *  orden relativo del resto se conserva porque `sort` es estable. */
+  const zonasOrdenadas = [...loadedAnalyses].sort(
+    (a, b) => Number(prioritarias.has(b.id)) - Number(prioritarias.has(a.id)),
+  );
+  const cantidadPrioritarias = loadedAnalyses.filter((a) => prioritarias.has(a.id)).length;
 
   /** Dirección de cada zona cargada, resuelta contra Nominatim a partir de su
    *  centro. Una zona se llama "Zona A", que no dice dónde queda; la dirección
@@ -1187,10 +1243,18 @@ function RutasPage() {
                       </p>
                     ) : (
                       <ul className="max-h-[19rem] space-y-1.5 overflow-y-auto pr-0.5">
-                        {loadedAnalyses.map((a) => (
+                        {zonasOrdenadas.map((a) => (
                           <li
                             key={a.id}
-                            className="rounded-lg border border-border/60 bg-background/60 transition-colors hover:border-primary/40 hover:bg-primary/5"
+                            className={`rounded-lg border bg-background/60 transition-colors hover:bg-primary/5 ${
+                              prioritarias.has(a.id)
+                                ? /* El borde ámbar, además de la estrella: una
+                                     fila marcada se reconoce desde el bloque
+                                     entero sin tener que leer un ícono de
+                                     14 px en la esquina. */
+                                  "border-warning-strong/40"
+                                : "border-border/60 hover:border-primary/40"
+                            }`}
                           >
                             {/* La fila estaba comprimida en cuatro líneas de
                                 texto chico apiladas sin respiro, todas del
@@ -1281,6 +1345,49 @@ function RutasPage() {
                                 })()}
                               </button>
 
+                              {/* Marcar la zona como prioritaria.
+                                  Va junto a la papelera y no en el diálogo de
+                                  confirmación porque es una propiedad de ESTA
+                                  zona: se decide mirándola, con su volumen y su
+                                  dirección a la vista, no en una pantalla
+                                  aparte donde las zonas ya no se ven.
+
+                                  Enciende y apaga en el mismo lugar, sin
+                                  confirmación: equivocarse cuesta otro clic. */}
+                              <button
+                                type="button"
+                                onClick={() => togglePrioritaria(a.id)}
+                                aria-pressed={prioritarias.has(a.id)}
+                                aria-label={
+                                  prioritarias.has(a.id)
+                                    ? `Quitar la prioridad de ${a.name}`
+                                    : `Marcar ${a.name} como prioritaria`
+                                }
+                                title={
+                                  prioritarias.has(a.id)
+                                    ? "Prioritaria: entra al plan antes que las demás. Clic para quitarla."
+                                    : "Marcar como prioritaria, para que entre al plan aunque haya que recortar"
+                                }
+                                // El ámbar es --warning-strong y no --cta ni
+                                // --yellow-dark: el del CTA no tiene contraste
+                                // como texto sobre el cuerpo claro (por eso
+                                // existe --primary aparte), y --yellow-dark no
+                                // está declarado en el @theme, así que la clase
+                                // no generaría ninguna utilidad y la estrella
+                                // quedaría heredando el gris.
+                                className={`flex h-6 w-6 flex-shrink-0 cursor-pointer items-center justify-center rounded transition-colors ${
+                                  prioritarias.has(a.id)
+                                    ? "text-warning-strong hover:bg-muted"
+                                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                                }`}
+                              >
+                                {prioritarias.has(a.id) ? (
+                                  <StarFill className="h-3.5 w-3.5" />
+                                ) : (
+                                  <Star className="h-3.5 w-3.5" />
+                                )}
+                              </button>
+
                               <button
                                 type="button"
                                 onClick={() => handleUnload(a.id)}
@@ -1324,8 +1431,29 @@ function RutasPage() {
                         <Conteo n={routeSegments?.length ?? 0} />
                       </h3>
                       {routeStops && (
-                        <span className="mono text-xs tabular-nums text-muted-foreground">
-                          {distanciaDelPlan} en {duracionDelPlan}
+                        <span className="text-right">
+                          <span className="mono block text-xs tabular-nums text-muted-foreground">
+                            {distanciaDelPlan} en {duracionDelPlan}
+                          </span>
+                          {/* El volumen que el plan mueve, contra el que se
+                              cargó. Son dos cifras distintas desde que el plan
+                              puede dejar zonas fuera, y la diferencia es
+                              exactamente lo que el trabajador necesita ver: sin
+                              esto, la cabecera dice "6,94 m³ cargados" y nada
+                              delata que el recorrido mueve la mitad. Cuando
+                              coinciden se imprime una sola, porque repetir el
+                              mismo número dos veces no informa nada. */}
+                          {routeTotals?.volumeM3 != null && (
+                            <span className="mono block text-[0.625rem] tabular-nums text-muted-foreground">
+                              {routeTotals.volumeM3.toFixed(2)} m³
+                              {Math.abs(routeTotals.volumeM3 - volumenCargado) > 0.005 && (
+                                <span className="text-warning-strong">
+                                  {" "}
+                                  de {volumenCargado.toFixed(2)} cargados
+                                </span>
+                              )}
+                            </span>
+                          )}
                         </span>
                       )}
                     </div>
@@ -2048,6 +2176,27 @@ function RutasPage() {
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Las zonas marcadas, recordadas en el último paso antes de
+                generar. La marca se pone en la lista de zonas, que acá ya no
+                está a la vista, así que sin esta línea no habría forma de
+                confirmar que quedó puesta sin cerrar el diálogo y volver.
+
+                Solo aparece si hay alguna: una línea que dice "0 prioritarias"
+                describe el caso normal y ocupa lugar sin informar nada. */}
+            {cantidadPrioritarias > 0 && (
+              <p className="flex items-start gap-2 rounded-md border border-warning-strong/30 bg-warning/10 px-2.5 py-2 text-[0.6875rem] leading-relaxed">
+                <StarFill className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-warning-strong" />
+                <span>
+                  <span className="mono tabular-nums">{cantidadPrioritarias}</span>{" "}
+                  {cantidadPrioritarias === 1 ? "zona marcada" : "zonas marcadas"} como{" "}
+                  {cantidadPrioritarias === 1 ? "prioritaria" : "prioritarias"}:{" "}
+                  {cantidadPrioritarias === 1 ? "entra" : "entran"} al plan antes que el resto y{" "}
+                  {cantidadPrioritarias === 1 ? "es la última" : "son las últimas"} en salir si hay
+                  que recortar por capacidad u horas.
+                </span>
+              </p>
+            )}
           </div>
 
           <DialogFooter>
