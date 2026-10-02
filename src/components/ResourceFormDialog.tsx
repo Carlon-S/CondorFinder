@@ -98,6 +98,7 @@ export function ResourceFormDialog({
         modelo: recurso.modelo,
         anio: recurso.anio,
         capacidad_m3: recurso.capacidad_m3,
+        capacidad_ton: recurso.capacidad_ton,
         capacidad_balde_m3: recurso.capacidad_balde_m3,
         conductores_requeridos: recurso.conductores_requeridos,
         peonetas_requeridas: recurso.peonetas_requeridas,
@@ -417,6 +418,36 @@ export function ResourceFormDialog({
                           las rutas.
                         </p>
                       )}
+                    </Campo>
+                  )}
+
+                  {/* El límite de PESO, al lado del de volumen. Un camión tiene
+                      los dos y hasta HDU8 el sistema solo modelaba el primero,
+                      así que las dos cifras que la municipalidad entregó en
+                      toneladas (el CAMION 3/4 PLANO con 1 t y el AMPLIROLL con
+                      15 t, por la maniobra de descarga) no tenían dónde ir.
+
+                      Va aparte y no reemplaza al de m³ porque no son lo mismo:
+                      el ruteo reparte por volumen, y este campo es el que el
+                      AC4 de HDU5.1 va a contrastar contra el peso estimado de
+                      la zona, que volumeCalc.py ya calcula. */}
+                  {campos.capacidadPeso && (
+                    <Campo etiqueta="Peso máximo">
+                      <ConUnidad unidad="t">
+                        <Input
+                          type="number"
+                          step="0.1"
+                          value={form.capacidad_ton ?? ""}
+                          onChange={(e) =>
+                            setForm({ ...form, capacidad_ton: Number(e.target.value) || null })
+                          }
+                          placeholder="15"
+                          className="border-0 shadow-none focus-visible:ring-0"
+                        />
+                      </ConUnidad>
+                      {/* Sin aviso cuando está vacío, a diferencia del de m³:
+                          que falte no deja al vehículo fuera de ninguna ruta,
+                          así que advertirlo sería inventar una consecuencia. */}
                     </Campo>
                   )}
 

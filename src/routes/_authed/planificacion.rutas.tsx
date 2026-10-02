@@ -2110,25 +2110,38 @@ function RutasPage() {
                   </div>
                 </div>
 
-                {(["no_disponible", "sin_capacidad", "no_transporta", "se_remolca"] as const).map(
-                  (motivo) =>
-                    resumenPunto.fuera[motivo].length === 0 ? null : (
-                      <div
-                        key={motivo}
-                        className="flex items-baseline justify-between gap-2 rounded-md bg-background/40 px-2.5 py-1.5"
+                {/* La lista va a mano y no recorriendo las claves de `fuera`
+                    para fijar el ORDEN en que se leen los motivos. El precio es
+                    que un motivo nuevo hay que agregarlo acá o no se muestra:
+                    pasó con `solo_toneladas`, que si no estuviera dejaría al
+                    CAMION 3/4 PLANO sin aparecer en ningún renglón y el
+                    desglose no sumaría 21. */}
+                {(
+                  [
+                    "no_disponible",
+                    "sin_capacidad",
+                    "solo_toneladas",
+                    "no_transporta",
+                    "se_remolca",
+                  ] as const
+                ).map((motivo) =>
+                  resumenPunto.fuera[motivo].length === 0 ? null : (
+                    <div
+                      key={motivo}
+                      className="flex items-baseline justify-between gap-2 rounded-md bg-background/40 px-2.5 py-1.5"
+                    >
+                      <span className="text-[0.6875rem] text-muted-foreground">
+                        Fuera, {TEXTO_FUERA_DE_RUTA[motivo]}
+                      </span>
+                      <span
+                        className={`mono text-xs font-semibold tabular-nums ${
+                          motivo === "sin_capacidad" ? "text-warning-strong" : "text-foreground"
+                        }`}
                       >
-                        <span className="text-[0.6875rem] text-muted-foreground">
-                          Fuera, {TEXTO_FUERA_DE_RUTA[motivo]}
-                        </span>
-                        <span
-                          className={`mono text-xs font-semibold tabular-nums ${
-                            motivo === "sin_capacidad" ? "text-warning-strong" : "text-foreground"
-                          }`}
-                        >
-                          {resumenPunto.fuera[motivo].length}
-                        </span>
-                      </div>
-                    ),
+                        {resumenPunto.fuera[motivo].length}
+                      </span>
+                    </div>
+                  ),
                 )}
 
                 {/* Un punto con recursos pero sin capacidad disponible no puede

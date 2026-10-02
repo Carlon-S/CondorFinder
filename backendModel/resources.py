@@ -295,6 +295,13 @@ class ResourceIn(BaseModel):
     modelo: str = ""
     anio: int | None = Field(default=None, ge=1950, le=2100)
     capacidad_m3: float | None = Field(default=None, gt=0)
+    # Límite de PESO, al lado del de volumen. Un camión tiene los dos y el
+    # sistema solo modelaba el primero, así que no había dónde guardar las dos
+    # cifras que la municipalidad entregó en toneladas: el CAMION 3/4 PLANO
+    # (1 t) y el AMPLIROLL (15 t, por la maniobra de descarga). Un ortomosaico
+    # ya produce `weight_kg` por detección, así que el peso de una zona es un
+    # dato que el sistema tiene y hasta ahora no podía contrastar con nada.
+    capacidad_ton: float | None = Field(default=None, gt=0)
     capacidad_balde_m3: float | None = Field(default=None, gt=0)
     conductores_requeridos: int = Field(default=0, ge=0)
     peonetas_requeridas: int = Field(default=0, ge=0)
@@ -330,6 +337,10 @@ class ResourceIn(BaseModel):
         # transporte disponible sin serlo, sigue cubierto por ese filtro.
         if familia not in ("carga", "arrastre") and self.capacidad_m3 is not None:
             raise ValueError(f"Un recurso de tipo {self.tipo} no lleva capacidad de carga")
+        # El peso sigue exactamente la misma regla que el volumen: lo declara
+        # lo que carga, se mueva solo o lo remolquen.
+        if familia not in ("carga", "arrastre") and self.capacidad_ton is not None:
+            raise ValueError(f"Un recurso de tipo {self.tipo} no lleva capacidad en toneladas")
         if familia != "maquina" and self.capacidad_balde_m3 is not None:
             raise ValueError(f"Un recurso de tipo {self.tipo} no lleva capacidad de balde")
         if familia == "arrastre" and (
@@ -362,6 +373,7 @@ def _resource_to_out(doc: dict) -> ResourceOut:
         modelo=doc.get("modelo", ""),
         anio=doc.get("anio"),
         capacidad_m3=doc.get("capacidad_m3"),
+        capacidad_ton=doc.get("capacidad_ton"),
         capacidad_balde_m3=doc.get("capacidad_balde_m3"),
         conductores_requeridos=doc.get("conductores_requeridos", 0),
         peonetas_requeridas=doc.get("peonetas_requeridas", 0),
@@ -622,6 +634,7 @@ async def capacidad_de_carga_por_punto(point_ids: list[str]) -> dict[str, list[d
             "tipo": 1,
             "disponible": 1,
             "capacidad_m3": 1,
+            "capacidad_ton": 1,
             "numero_equipo": 1,
             "patente": 1,
             "conductores_requeridos": 1,
@@ -647,6 +660,9 @@ async def capacidad_de_carga_por_punto(point_ids: list[str]) -> dict[str, list[d
             # FUENTE del dato sin cambiar su forma deja intacto el algoritmo de
             # ruteo, que es de otro integrante del equipo.
             "capacity_m3": float(capacidad),
+            # Viaja aunque hoy el ruteo no lo use: es el límite que el AC4 de
+            # HDU5.1 va a contrastar contra el peso de la zona.
+            "capacity_ton": d.get("capacidad_ton"),
             "resourceId": str(d["_id"]),
             "numeroEquipo": d.get("numero_equipo", ""),
             "patente": d.get("patente", ""),

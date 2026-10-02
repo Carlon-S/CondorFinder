@@ -442,7 +442,15 @@ Historias comprometidas: HDU5.1 (13), HDU8 (5), HDU9 (5), HDU10 (5) y SP2 (13). 
 > - El total de volumen no cuadraba con su propio detalle: sumaba los valores sin redondear y redondeaba después, mientras cada fila redondeaba antes. Con dos zonas de 3,33 y 3,61 la cabecera decía 6,9. Ahora suma lo que las filas muestran.
 > - La validación de recursos impedía que una unidad de familia `arrastre` declarara capacidad de carga, confundiendo **transportar** con **moverse solo**. Un carro de reciclaje lleva 30 m³ y necesita que alguien lo tire: las dos cosas son ciertas. La regla ahora acepta `carga` y `arrastre`, y el ruteo sigue filtrando solo por `carga`, así que un carro declara su capacidad sin sumarla a ninguna ruta.
 >
-> **El único dato que queda sin declarar** es la capacidad del CAMION 3/4 PLANO `1163` y `1429`: la municipalidad respondió esa pregunta describiendo un carro de arrastre, y se repreguntó. No bloquea nada, porque ese camión hace retiros de reciclaje y no de escombros, así que su exclusión de una ruta de microbasural es correcta por dos razones independientes.
+> **HDU8 queda cerrada con la segunda ronda de respuestas** (02-10-2026), que entregó el único dato que faltaba y obligó a un cambio de modelo.
+>
+> La capacidad del CAMION 3/4 PLANO `1163` y `1429` es de **1 tonelada**, no un volumen, y vino con una instrucción explícita: *"este vehículo no tiene fines de retiro de escombros, sino más bien de reciclaje (cajas y embalajes, colchones), por lo que no sería prudente incorporarlo a las rutas que estamos trabajando"*. En la misma ronda dieron el límite del AMPLIROLL, **15 toneladas**, por la maniobra de descarga.
+>
+> Eso descubrió que el sistema modelaba un solo límite. Un camión tiene **dos**: cuánto le entra y cuánto peso aguanta. Se agregó `capacidad_ton` al recurso, con la misma regla de familia que el volumen. No cambia ninguna ruta todavía, porque el reparto es por m³; es el campo que el AC4 de HDU5.1 va a contrastar contra el `weight_kg` que el sistema ya calcula por detección.
+>
+> Con eso, los dos camiones dejan de reportarse como un hueco: **declaran su capacidad, solo que en otra magnitud**. `motivoFueraDeRuta()` tiene ahora un motivo propio para ese caso, y el desglose del punto pasa a reconciliar como 8 cuentan + 2 declaran toneladas + 4 se remolca + 7 no transporta = 21, con la capacidad de transporte intacta en 100 m³.
+>
+> **Dos cosas quedan anotadas y sin resolver, y no se puede repreguntar.** Primero, una contradicción: el 30-09 dieron 30 m³ para los CARRO RECICLAJE `659` y `660`, y el 02-10 respondieron que *"no existen carros de reciclaje, los camiones PLANOS ¾ son los de reciclaje"*. Las dos unidades están en la planilla oficial, así que se dejan registradas; no afectan ninguna ruta porque son familia `arrastre`. Segundo, el **convoy**: que el AMPLIROLL remolque los carros, que el minicargador necesite uno y que la retroexcavadora y el frontal se trasladen por su cuenta. Nada de eso está en ningún criterio de ninguna historia, así que es alcance a acordar con el equipo y no algo que HDU8 pueda cerrar.
 
 | Historia | Criterio de aceptación | Estado |
 |---|---|---|

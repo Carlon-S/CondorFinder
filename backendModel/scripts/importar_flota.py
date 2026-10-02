@@ -82,6 +82,8 @@ def _campos_del_recurso(r, point_id, familia):
         # upsert hace $set con todos los campos, volver a correr el importador
         # borraba los 30 m³ de los dos carros de reciclaje sin decir nada.
         "capacidad_m3": r.get("capacidadM3") if familia in ("carga", "arrastre") else None,
+        # Peso maximo, misma regla de familia que el volumen.
+        "capacidad_ton": r.get("capacidadTon") if familia in ("carga", "arrastre") else None,
         "capacidad_balde_m3": r.get("capacidadBaldeM3") if familia == "maquina" else None,
         "conductores_requeridos": 0 if familia == "arrastre" else r.get("conductoresRequeridos", 0),
         "peonetas_requeridas": 0 if familia == "arrastre" else r.get("peonetasRequeridas", 0),
@@ -184,13 +186,17 @@ def main():
         )
 
         etiqueta = f"{r['numeroEquipo']:>5} {r['tipo']:<18}"
-        capacidad = (
-            f"carga {campos['capacidad_m3']} m³"
-            if campos["capacidad_m3"]
-            else f"balde {campos['capacidad_balde_m3']} m³"
-            if campos["capacidad_balde_m3"]
-            else "sin capacidad declarada"
-        )
+        if campos["capacidad_m3"]:
+            capacidad = f"carga {campos['capacidad_m3']} m³"
+        elif campos["capacidad_ton"]:
+            # El CAMION 3/4 PLANO declara su limite en TONELADAS y no en m³, asi
+            # que sin esta rama se seguia imprimiendo "sin capacidad declarada"
+            # para una unidad cuyo dato ya tenemos.
+            capacidad = f"carga {campos['capacidad_ton']} t"
+        elif campos["capacidad_balde_m3"]:
+            capacidad = f"balde {campos['capacidad_balde_m3']} m³"
+        else:
+            capacidad = "sin capacidad declarada"
         foto = campos["foto"] or "sin foto"
 
         if previo:
@@ -213,10 +219,16 @@ def main():
     print()
     print(f"{nuevos} a crear, {actualizados} a actualizar, {len(saltados)} saltados")
 
+    # Un vehiculo de carga sin NINGUNA capacidad declarada, ni en m³ ni en
+    # toneladas. El CAMION 3/4 PLANO salia aca hasta que la municipalidad
+    # entrego su limite (1 t, 02-10-2026): tenia el dato, solo que en otra
+    # unidad, y seguir reportandolo como un hueco era falso.
     sin_capacidad = [
         r["numeroEquipo"]
         for r in recursos
-        if FAMILIA_POR_TIPO.get(r["tipo"]) == "carga" and not r.get("capacidadM3")
+        if FAMILIA_POR_TIPO.get(r["tipo"]) == "carga"
+        and not r.get("capacidadM3")
+        and not r.get("capacidadTon")
     ]
     if sin_capacidad:
         print()
@@ -225,6 +237,25 @@ def main():
         print("El ruteo los excluye, porque despachar un camión que no puede llevar")
         print("nada da una ruta imposible. Es un dato que hay que pedirle a la")
         print("municipalidad, no algo que se pueda deducir.")
+
+    # Capacidad declarada SOLO en toneladas: el ruteo tampoco los despacha,
+    # porque reparte por volumen, pero es una exclusion distinta y conviene que
+    # se lean distinto. No es un dato que falte.
+    solo_toneladas = [
+        r["numeroEquipo"]
+        for r in recursos
+        if FAMILIA_POR_TIPO.get(r["tipo"]) == "carga"
+        and not r.get("capacidadM3")
+        and r.get("capacidadTon")
+    ]
+    if solo_toneladas:
+        print()
+        print(f"NOTA: {len(solo_toneladas)} vehículos declaran su capacidad en toneladas "
+              f"y no en m³: {', '.join(solo_toneladas)}")
+        print("El ruteo reparte por volumen, así que no los despacha. En el caso del")
+        print("CAMION 3/4 PLANO eso además coincide con lo que pidió la municipalidad:")
+        print('"no sería prudente incorporarlo a las rutas que estamos trabajando",')
+        print("porque hace retiros de reciclaje y no de escombros.")
 
     for s in saltados:
         print(f"SALTADO: {s}")

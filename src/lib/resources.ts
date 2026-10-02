@@ -44,6 +44,13 @@ export interface ResourceInput {
    *  ignora: una capacidad de carga guardada en una retroexcavadora la haría
    *  aparecer como transporte disponible en el ruteo. */
   capacidad_m3: number | null;
+  /** Limite de PESO, al lado del de volumen. Un camion tiene los dos y hasta
+   *  HDU8 el sistema solo modelaba el primero: la municipalidad entrego el
+   *  del CAMION 3/4 PLANO (1 t) y el del AMPLIROLL (15 t) y no habia donde
+   *  guardarlos. El ruteo reparte por VOLUMEN, asi que este campo no decide
+   *  ninguna ruta todavia; es el limite que el AC4 de HDU5.1 va a contrastar
+   *  contra el peso estimado de la zona. */
+  capacidad_ton: number | null;
   /** Solo familia "maquina". */
   capacidad_balde_m3: number | null;
   conductores_requeridos: number;
@@ -102,7 +109,12 @@ export interface ResourcePoint extends ResourcePointInput {
  *  la alternativa (pedirle al backend un desglose solo para mostrarlo) sería un
  *  endpoint nuevo para no decir nada que el cliente no pueda deducir de datos
  *  que ya tiene. Si cambia una de las dos, tiene que cambiar la otra. */
-export type MotivoFueraDeRuta = "no_disponible" | "se_remolca" | "no_transporta" | "sin_capacidad";
+export type MotivoFueraDeRuta =
+  | "no_disponible"
+  | "se_remolca"
+  | "no_transporta"
+  | "solo_toneladas"
+  | "sin_capacidad";
 
 export function motivoFueraDeRuta(r: Resource): MotivoFueraDeRuta | null {
   // El orden importa: cada unidad cae en UN motivo, y el primero es el que se
@@ -114,6 +126,12 @@ export function motivoFueraDeRuta(r: Resource): MotivoFueraDeRuta | null {
   // es que no cargue, es que no circula solo.
   if (r.familia === "arrastre") return "se_remolca";
   if (r.familia !== "carga") return "no_transporta";
+  // Antes de "sin capacidad": el CAMION 3/4 PLANO declara 1 tonelada y no un
+  // volumen, asi que decirle "sin capacidad declarada" seria falso. Queda
+  // fuera igual, porque el ruteo reparte por m3, pero por un motivo distinto
+  // y que ademas coincide con lo que pidio la municipalidad: ese camion hace
+  // reciclaje, no escombros.
+  if (r.capacidad_m3 == null && r.capacidad_ton != null) return "solo_toneladas";
   if (r.capacidad_m3 == null) return "sin_capacidad";
   return null;
 }
@@ -122,6 +140,7 @@ export const TEXTO_FUERA_DE_RUTA: Record<MotivoFueraDeRuta, string> = {
   no_disponible: "marcado como no disponible",
   se_remolca: "se remolca, no circula por sí solo",
   no_transporta: "no transporta carga",
+  solo_toneladas: "declara su capacidad en toneladas, no en m³",
   sin_capacidad: "sin capacidad declarada",
 };
 
@@ -138,7 +157,13 @@ export function resumenParaRuta(recursos: Resource[]): ResumenRuta {
   const resumen: ResumenRuta = {
     suman: [],
     capacidad: 0,
-    fuera: { no_disponible: [], se_remolca: [], no_transporta: [], sin_capacidad: [] },
+    fuera: {
+      no_disponible: [],
+      se_remolca: [],
+      no_transporta: [],
+      solo_toneladas: [],
+      sin_capacidad: [],
+    },
   };
   for (const r of recursos) {
     const motivo = motivoFueraDeRuta(r);
@@ -374,6 +399,7 @@ export async function deleteResource(id: string): Promise<void> {
  *  cuenta, el formulario podría pedir un campo que el backend rechaza. */
 export function camposDeFamilia(familia: ResourceFamily): {
   capacidadCarga: boolean;
+  capacidadPeso: boolean;
   capacidadBalde: boolean;
   dotacion: boolean;
   motorizado: boolean;
@@ -387,6 +413,7 @@ export function camposDeFamilia(familia: ResourceFamily): {
     // "carga" (ver capacidad_de_carga_por_punto en resources.py), y un carro
     // sigue siendo "arrastre". La familia dice cómo se mueve, no si carga.
     capacidadCarga: familia === "carga" || familia === "arrastre",
+    capacidadPeso: familia === "carga" || familia === "arrastre",
     capacidadBalde: familia === "maquina",
     // Un carro se remolca: no lleva tripulación propia.
     dotacion: familia !== "arrastre",
@@ -408,6 +435,7 @@ export function recursoVacio(tipo: string, pointId: string): ResourceInput {
     modelo: "",
     anio: null,
     capacidad_m3: null,
+    capacidad_ton: null,
     capacidad_balde_m3: null,
     conductores_requeridos: 0,
     peonetas_requeridas: 0,

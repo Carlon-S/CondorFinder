@@ -1,5 +1,5 @@
 {
-  "fuente": "DETALLE DE FLOTA.xlsx, mas las capacidades confirmadas por escrito por la Municipalidad de Maipu el 30-09-2026",
+  "fuente": "DETALLE DE FLOTA.xlsx, mas las capacidades confirmadas por escrito por la Municipalidad de Maipu el 30-09-2026 y el 02-10-2026",
   "punto": {
     "nombre": "Gral. José San Martín 2730",
     "direccion": "Gral. José San Martín 2730",
@@ -23,7 +23,8 @@
       "operadoresRequeridos": 0,
       "observaciones": "Capacidad 10 M3",
       "foto": "1143.jpeg",
-      "disponible": true
+      "disponible": true,
+      "capacidadTon": null
     },
     {
       "numeroEquipo": "2224",
@@ -40,7 +41,8 @@
       "operadoresRequeridos": 0,
       "observaciones": "Capacidad 10 M3",
       "foto": "2224.jpeg",
-      "disponible": true
+      "disponible": true,
+      "capacidadTon": null
     },
     {
       "numeroEquipo": "1156",
@@ -57,7 +59,8 @@
       "operadoresRequeridos": 0,
       "observaciones": "Capacidad 10 M3",
       "foto": "1156.jpeg",
-      "disponible": true
+      "disponible": true,
+      "capacidadTon": null
     },
     {
       "numeroEquipo": "1157",
@@ -74,7 +77,8 @@
       "operadoresRequeridos": 0,
       "observaciones": "Capacidad 10 M3",
       "foto": "1157.jpeg",
-      "disponible": true
+      "disponible": true,
+      "capacidadTon": null
     },
     {
       "numeroEquipo": "2184",
@@ -91,7 +95,8 @@
       "operadoresRequeridos": 0,
       "observaciones": "Capacidad 10 M3",
       "foto": "2184.jpeg",
-      "disponible": true
+      "disponible": true,
+      "capacidadTon": null
     },
     {
       "numeroEquipo": "2183",
@@ -108,7 +113,8 @@
       "operadoresRequeridos": 0,
       "observaciones": "Capacidad 10 M3",
       "foto": "2183.jpeg",
-      "disponible": true
+      "disponible": true,
+      "capacidadTon": null
     },
     {
       "numeroEquipo": "1885",
@@ -125,7 +131,8 @@
       "operadoresRequeridos": 0,
       "observaciones": "Traslado minicargador",
       "foto": null,
-      "disponible": true
+      "disponible": true,
+      "capacidadTon": null
     },
     {
       "numeroEquipo": "1876",
@@ -142,7 +149,8 @@
       "operadoresRequeridos": 0,
       "observaciones": "Traslado minicargador",
       "foto": null,
-      "disponible": true
+      "disponible": true,
+      "capacidadTon": null
     },
     {
       "numeroEquipo": "1151",
@@ -157,9 +165,10 @@
       "conductoresRequeridos": 1,
       "peonetasRequeridas": 1,
       "operadoresRequeridos": 0,
-      "observaciones": null,
+      "observaciones": "Máximo 15 toneladas: no debe llevar material muy pesado por la maniobra de descarga.",
       "foto": "1151.jpeg",
-      "disponible": true
+      "disponible": true,
+      "capacidadTon": 15.0
     },
     {
       "numeroEquipo": "1179",
@@ -174,9 +183,10 @@
       "conductoresRequeridos": 1,
       "peonetasRequeridas": 1,
       "operadoresRequeridos": 0,
-      "observaciones": null,
+      "observaciones": "Máximo 15 toneladas: no debe llevar material muy pesado por la maniobra de descarga.",
       "foto": "1179.jpeg",
-      "disponible": true
+      "disponible": true,
+      "capacidadTon": 15.0
     },
     {
       "numeroEquipo": "1163",
@@ -191,9 +201,10 @@
       "conductoresRequeridos": 1,
       "peonetasRequeridas": 2,
       "operadoresRequeridos": 0,
-      "observaciones": null,
+      "observaciones": "Capacidad máxima 1 tonelada. Hace retiro de reciclaje (cajas, embalajes, colchones), no escombros.",
       "foto": null,
-      "disponible": true
+      "disponible": true,
+      "capacidadTon": 1.0
     },
     {
       "numeroEquipo": "659",
@@ -210,7 +221,8 @@
       "operadoresRequeridos": 0,
       "observaciones": null,
       "foto": null,
-      "disponible": true
+      "disponible": true,
+      "capacidadTon": null
     },
     {
       "numeroEquipo": "1429",
@@ -225,9 +237,10 @@
       "conductoresRequeridos": 1,
       "peonetasRequeridas": 2,
       "operadoresRequeridos": 0,
-      "observaciones": null,
+      "observaciones": "Capacidad máxima 1 tonelada. Hace retiro de reciclaje (cajas, embalajes, colchones), no escombros.",
       "foto": null,
-      "disponible": true
+      "disponible": true,
+      "capacidadTon": 1.0
     },
     {
       "numeroEquipo": "660",
@@ -244,7 +257,8 @@
       "operadoresRequeridos": 0,
       "observaciones": null,
       "foto": null,
-      "disponible": true
+      "disponible": true,
+      "capacidadTon": null
     },
     {
       "numeroEquipo": "1861",
@@ -261,7 +275,8 @@
       "operadoresRequeridos": 1,
       "observaciones": null,
       "foto": "1861.jpeg",
-      "disponible": true
+      "disponible": true,
+      "capacidadTon": null
     },
     {
       "numeroEquipo": "1865",
@@ -278,7 +293,8 @@
       "operadoresRequeridos": 1,
       "observaciones": null,
       "foto": "1865.jpeg",
-      "disponible": true
+      "disponible": true,
+      "capacidadTon": null
     },
     {
       "numeroEquipo": "1606",
@@ -295,7 +311,8 @@
       "operadoresRequeridos": 0,
       "observaciones": "Uso de supervisor",
       "foto": null,
-      "disponible": true
+      "disponible": true,
+      "capacidadTon": null
     },
     {
       "numeroEquipo": "1866",
@@ -312,7 +329,8 @@
       "operadoresRequeridos": 0,
       "observaciones": "Con balde de cap. 3M3",
       "foto": "1866.jpeg",
-      "disponible": true
+      "disponible": true,
+      "capacidadTon": null
     },
     {
       "numeroEquipo": "1864",
@@ -329,7 +347,8 @@
       "operadoresRequeridos": 0,
       "observaciones": "Con balde de cap. 1M3",
       "foto": "1864.jpeg",
-      "disponible": true
+      "disponible": true,
+      "capacidadTon": null
     },
     {
       "numeroEquipo": "1863",
@@ -346,7 +365,8 @@
       "operadoresRequeridos": 0,
       "observaciones": "Con balde de cap. 1M3",
       "foto": "1863.jpeg",
-      "disponible": true
+      "disponible": true,
+      "capacidadTon": null
     },
     {
       "numeroEquipo": "1993",
@@ -363,7 +383,8 @@
       "operadoresRequeridos": 0,
       "observaciones": null,
       "foto": null,
-      "disponible": true
+      "disponible": true,
+      "capacidadTon": null
     }
   ]
 }
