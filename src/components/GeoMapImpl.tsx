@@ -17,6 +17,8 @@ import markerIcon from "leaflet/dist/images/marker-icon.png";
 import markerShadow from "leaflet/dist/images/marker-shadow.png";
 import type { GeoMapProps } from "@/components/GeoMap";
 import {
+  ROUTE_DISPOSAL_COLOR,
+  ROUTE_DISPOSAL_OPACITY,
   ROUTE_OUTBOUND_COLOR,
   ROUTE_OUTLINE_COLOR,
   ROUTE_RETURN_COLOR,
@@ -112,10 +114,41 @@ function originIcon(active: boolean): L.DivIcon {
   );
 }
 
-/** El relleno sanitario. Va en el navy del sistema y un poco más grande que un
- *  punto: es el destino de todo lo que se retira, no una parada más. */
-function disposalIcon(): L.DivIcon {
-  return pinDivIcon(DISPOSAL_PIN, "var(--primary)", 40);
+/** El relleno sanitario: placa circular con su nombre impreso, no un pin.
+ *
+ *  La forma lo distingue de los otros dos marcadores sin necesidad de leyenda:
+ *  las zonas y los puntos son gotas, que marcan lugares del plan del día; el
+ *  relleno es un círculo, porque es infraestructura fija. Y por eso se ancla en
+ *  su CENTRO (`iconAnchor` a la mitad del alto de la placa) y no en una punta
+ *  que no tiene. Ver `.disposal-marker` en styles.css para el detalle del
+ *  tratamiento. */
+const DISPOSAL_PLATE = 32; // px de la placa, en lockstep con .disposal-marker__plate (2rem)
+
+function disposalIcon(name: string): L.DivIcon {
+  return L.divIcon({
+    className: "",
+    html:
+      `<div class="disposal-marker">` +
+      `<span class="disposal-marker__plate">` +
+      `<svg viewBox="0 0 256 256" fill="currentColor"><path d="${DISPOSAL_PIN}"/></svg>` +
+      `</span>` +
+      // El nombre va escapado: hoy es una constante del repositorio, pero el
+      // día que el relleno sea un punto de recursos (ver disposalSite.ts) este
+      // texto viene de la base y entraría como HTML crudo.
+      `<span class="disposal-marker__label">${escapeHtml(name)}</span>` +
+      `</div>`,
+    // Alto total aproximado (placa + gap + etiqueta) solo para que Leaflet
+    // reserve la caja; el centrado real lo hace el flex del contenido.
+    iconSize: [DISPOSAL_PLATE, DISPOSAL_PLATE + 18],
+    iconAnchor: [DISPOSAL_PLATE / 2, DISPOSAL_PLATE / 2],
+  });
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(
+    /[&<>"']/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c,
+  );
 }
 
 /** Recuadros de detecciones superpuestos sobre la miniatura del tooltip
@@ -214,10 +247,12 @@ function FitBounds({ points }: { points: [number, number][] | null | undefined }
  *  canvas o SVG, sin depender del hit-testing de la capa. */
 function RouteClickZoom({
   outboundPaths,
+  disposalPaths,
   returnPaths,
   onRouteClick,
 }: {
   outboundPaths: [number, number][][] | null | undefined;
+  disposalPaths: [number, number][][] | null | undefined;
   returnPaths: [number, number][][] | null | undefined;
   /** Índice del recorrido cuyo trazo se apretó. Es el mismo índice de
    *  `routeSegments`, así que la vista puede abrir su detalle. */
@@ -226,38 +261,33 @@ function RouteClickZoom({
   const CLICK_TOLERANCE_PX = 20;
   const map = useMapEvents({
     click(e) {
-      const outbound = outboundPaths ?? [];
-      const ret = returnPaths ?? [];
-      if (outbound.length === 0 && ret.length === 0) return;
+      // Los TRES tramos del recorrido, en un solo arreglo. Los tres comparten
+      // índice con routeSegments (ver el contrato en routePlan.ts), así que se
+      // recorren juntos y reportan el mismo número: apretar el tramo de
+      // descarga abre el mismo recorrido que apretar la ida.
+      const familias = [outboundPaths ?? [], disposalPaths ?? [], returnPaths ?? []];
+      if (familias.every((f) => f.length === 0)) return;
       const clickPoint = map.latLngToContainerPoint(e.latlng);
 
-      // Se busca el vértice más cercano guardando de QUÉ recorrido es. Ida y
-      // vuelta comparten índice con routeSegments (ver el contrato en
-      // routePlan.ts), así que los dos arreglos se recorren por separado pero
-      // reportan el mismo número.
       let closestDist = Infinity;
       let closestIndex = -1;
-      for (const [i, path] of [...outbound.entries()]) {
-        for (const vertex of path) {
-          const dist = clickPoint.distanceTo(map.latLngToContainerPoint(vertex));
-          if (dist < closestDist) {
-            closestDist = dist;
-            closestIndex = i;
-          }
-        }
-      }
-      for (const [i, path] of [...ret.entries()]) {
-        for (const vertex of path) {
-          const dist = clickPoint.distanceTo(map.latLngToContainerPoint(vertex));
-          if (dist < closestDist) {
-            closestDist = dist;
-            closestIndex = i;
+      for (const familia of familias) {
+        for (const [i, path] of familia.entries()) {
+          for (const vertex of path) {
+            const dist = clickPoint.distanceTo(map.latLngToContainerPoint(vertex));
+            if (dist < closestDist) {
+              closestDist = dist;
+              closestIndex = i;
+            }
           }
         }
       }
 
       if (closestDist <= CLICK_TOLERANCE_PX) {
-        map.flyToBounds(L.latLngBounds([...outbound, ...ret].flat()), {
+        // El encuadre abarca los tres tramos: con el relleno al poniente de la
+        // comuna, encuadrar solo ida y vuelta dejaba la descarga fuera de
+        // pantalla justo después de apretarla.
+        map.flyToBounds(L.latLngBounds(familias.flat(2)), {
           padding: [48, 48],
           duration: 0.6,
         });
@@ -351,6 +381,7 @@ export function GeoMapImpl({
   polygons,
   routePositions,
   outboundPaths,
+  disposalPaths,
   returnPaths,
   routeSegments,
   fitBoundsTo,
@@ -363,7 +394,9 @@ export function GeoMapImpl({
   className,
 }: GeoMapProps) {
   const hasRealPaths =
-    (outboundPaths && outboundPaths.length > 0) || (returnPaths && returnPaths.length > 0);
+    (outboundPaths && outboundPaths.length > 0) ||
+    (disposalPaths && disposalPaths.length > 0) ||
+    (returnPaths && returnPaths.length > 0);
   return (
     // renderer=ROUTE_CANVAS_RENDERER: sin canvas, cada trazo de ruta
     // (potencialmente cientos de vértices en una ruta larga, x2 por el
@@ -449,6 +482,7 @@ export function GeoMapImpl({
       <FitBounds points={fitBoundsTo ?? null} />
       <RouteClickZoom
         outboundPaths={outboundPaths}
+        disposalPaths={disposalPaths}
         returnPaths={returnPaths}
         onRouteClick={onRouteClick}
       />
@@ -462,6 +496,13 @@ export function GeoMapImpl({
           {outboundPaths?.map((path, i) => (
             <Polyline
               key={`outbound-outline-${pathKey(path as [number, number][])}-${i}`}
+              positions={path as [number, number][]}
+              pathOptions={{ color: ROUTE_OUTLINE_COLOR, weight: 8, opacity: 0.5 }}
+            />
+          ))}
+          {disposalPaths?.map((path, i) => (
+            <Polyline
+              key={`disposal-outline-${pathKey(path as [number, number][])}-${i}`}
               positions={path as [number, number][]}
               pathOptions={{ color: ROUTE_OUTLINE_COLOR, weight: 8, opacity: 0.5 }}
             />
@@ -493,10 +534,31 @@ export function GeoMapImpl({
               justo en el recorrido que hay que leer, y todo lo que decían está
               ahora en la línea de tiempo del panel, donde cada tramo tiene su
               propia fila y no compite con la cartografía. */}
-          {/* Vuelta, mismo tramo tipo de calle, pero más lento (camiones
-              cargados, ver _RETURN_SPEED_FACTOR en routing.py), mismo azul,
-              más claro/semitransparente, sin punteado (estilo Google Maps:
-              mismo color de ruta, dos sentidos). */}
+          {/* Descarga: de la última zona al relleno sanitario. Sale de la
+              familia azul a propósito, en el teal de --disposal, porque no es
+              "la misma ruta en el otro sentido": es el único tramo que el
+              camión hace CARGADO (el único al que routing.py le aplica
+              _LOADED_SPEED_FACTOR) y el único que no empieza ni termina en el
+              patio. Pintado del mismo azul, el recorrido parecía ir y volver
+              de la base, que es justo la geometría equivocada que esto vino a
+              corregir. */}
+          {disposalPaths?.map((path, i) => {
+            const key = `disposal-${pathKey(path as [number, number][])}-${i}`;
+            return (
+              <Polyline
+                key={key}
+                positions={path as [number, number][]}
+                pathOptions={{
+                  color: ROUTE_DISPOSAL_COLOR,
+                  weight: 5,
+                  opacity: ROUTE_DISPOSAL_OPACITY,
+                }}
+              />
+            );
+          })}
+          {/* Vuelta del relleno al patio, vacío. Mismo azul que la ida, más
+              claro y semitransparente, sin punteado (estilo Google Maps: mismo
+              color de ruta, dos sentidos). */}
           {returnPaths?.map((path, i) => {
             const key = `return-${pathKey(path as [number, number][])}-${i}`;
             return (
@@ -534,11 +596,14 @@ export function GeoMapImpl({
           de dibujo porque es contexto permanente del territorio, no algo que se
           elija. No es clickeable por la misma razón. */}
       {disposalSite && (
-        <Marker position={disposalSite.position} icon={disposalIcon()} interactive={false}>
-          <Tooltip direction="top" className="condorfinder-map-tooltip">
-            {disposalSite.name}
-          </Tooltip>
-        </Marker>
+        // Sin Tooltip: el nombre ya va impreso en la placa, así que un tooltip
+        // al pasar el mouse repetiría el mismo texto sobre el texto, y además
+        // el marcador es interactive={false} y no recibe el hover.
+        <Marker
+          position={disposalSite.position}
+          icon={disposalIcon(disposalSite.name)}
+          interactive={false}
+        />
       )}
       {points?.map((p) => (
         <Marker

@@ -72,12 +72,24 @@ export interface RoutePlanLeg {
  *  route.outboundPaths[i]/returnPaths[i], para la ventana flotante sobre
  *  cada tramo (estilo Google Maps). La velocidad no viaja aparte -- se
  *  calcula en el frontend como distancia/tiempo cuando hace falta mostrarla. */
-/** Identidad del vehículo que recorre un tramo. HDU5.1/AC7. */
+/** Identidad de un vehículo asignado a un tramo. HDU5.1/AC7. */
 export interface RoutePlanVehicle {
   patente: string;
   tipo: string;
   /** Id del recurso en /resources/units, para poder abrirlo desde la ruta. */
   resourceId?: string;
+  /** El identificador que la municipalidad usa en sus propias planillas. Es
+   *  también lo que viaja en `patente` cuando la unidad no la trae cargada. */
+  numeroEquipo?: string;
+  capacityM3?: number;
+  /** Nombre del archivo, no la URL: la sirve GET /resources/photo/{filename}.
+   *  Ausente en 8 de las 21 unidades de la flota real. */
+  foto?: string;
+  /** La dotación de ESTE vehículo, como roles ("1 conductor", "2 peonetas").
+   *  Estaba a nivel del tramo, lo que servía mientras el tramo tenía un solo
+   *  camión; con varios, un "1 conductor, 2 peonetas" sin decir de cuál es
+   *  información que no se puede usar. */
+  crew?: string[];
 }
 
 export interface RoutePlanSegment {
@@ -88,24 +100,28 @@ export interface RoutePlanSegment {
   returnDistanceKm: number;
   returnDurationHours: number;
 
+  /** Tramo de la última zona al relleno sanitario, el único que el camión hace
+   *  cargado. Opcionales porque un plan generado por una versión anterior del
+   *  backend no los trae, y la línea de tiempo no dibuja el nodo si faltan. */
+  disposalName?: string;
+  disposalDistanceKm?: number;
+  disposalDurationHours?: number;
+
   // ── Campos de HDU5.1 ──
   //
-  // OPCIONALES a propósito, y es una decisión, no un descuido. El backend de
-  // HDU5.1 todavía no existe: hoy estos campos llegan ausentes y la interfaz
-  // muestra lo que hay. Declararlos igual deja el contrato escrito, así que
-  // cuando el backend empiece a devolverlos las columnas aparecen solas sin
-  // tocar la vista.
-  //
-  // Lo que NO se hace es dibujar las columnas vacías o con guiones a la espera
-  // del dato: una tabla que promete algo que no tiene es peor que una tabla
-  // más corta. planificacion.rutas.tsx decide si las renderiza preguntando por
-  // los datos (hayVehiculo, hayDotacion), no por una bandera de configuración.
+  // OPCIONALES a propósito, y es una decisión, no un descuido. Lo que NO se
+  // hace es dibujar un dato vacío o con guiones a la espera del valor: una
+  // interfaz que promete algo que no tiene es peor que una más corta. Cada
+  // componente decide si lo renderiza preguntando por el dato, no por una
+  // bandera de configuración.
 
-  /** Qué vehículo recorre este tramo, por patente y tipo. AC7. */
-  vehicle?: RoutePlanVehicle;
-  /** Personal asignado al vehículo de este tramo. AC7, y su disponibilidad es
-   *  la restricción del AC1 y el AC2. */
-  crew?: string[];
+  /** **Todos** los vehículos que recorren este tramo, cada uno con su patente,
+   *  su tipo, su capacidad, su foto y su propia dotación. AC7.
+   *
+   *  Antes era un `vehicle` singular que el backend mandaba solo cuando el
+   *  tramo lo recorría UN camión, así que con dos o más la vista caía a
+   *  "2 camiones" y no decía cuáles. */
+  vehicles?: RoutePlanVehicle[];
   /** Autonomía del vehículo en km, contra la que se descarta un tramo
    *  demasiado largo. AC3. */
   autonomyKm?: number;
@@ -147,6 +163,9 @@ export interface RoutePlanSuccess {
      *  usado — casi siempre uno solo. Separado de returnPaths para poder
      *  pintar ida y vuelta con estilos distintos en el mapa. */
     outboundPaths?: [number, number][][];
+    /** El tramo cargado, de la última zona al relleno. Separado de los otros
+     *  dos para poder pintarlo distinto: es el único que el camión hace lleno. */
+    disposalPaths?: [number, number][][];
     returnPaths?: [number, number][][];
     segments?: RoutePlanSegment[];
     /** HDU5.1/AC6. Ausente mientras el backend no lo calcule. */

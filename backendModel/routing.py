@@ -51,14 +51,16 @@ import resources as resources_module
 #     con combinaciones de 2+ puntos (mochila por tamaño creciente) y se
 #     reparte cada zona al punto más cercano dentro del grupo elegido
 #     (con rebalanceo si algún punto queda sobrecargado) — cada punto
-#     resultante arma su PROPIA ida+vuelta independiente (una cuadrilla por
+#     resultante arma su PROPIO recorrido independiente (una cuadrilla por
 #     patio, no una ruta fusionada entre depósitos distintos).
-#   - Ida a velocidad normal, vuelta más lenta (camiones cargados) —
-#     _RETURN_SPEED_FACTOR abajo. El tiempo total del plan (para el chequeo
-#     contra availableHours y lo que se muestra) asume que las
-#     sub-rutas de distintos puntos corren en PARALELO (cuadrillas
-#     distintas saliendo a la vez), así que se usa el máximo entre
-#     sub-rutas, no la suma.
+#   - Cada recorrido es base -> zonas -> relleno sanitario -> base, tres
+#     tramos. El único que se hace cargado es el de la última zona al
+#     relleno, y por eso es el único al que se le aplica
+#     _LOADED_SPEED_FACTOR; la ida y el regreso se hacen vacíos. El tiempo
+#     total del plan (para el chequeo contra availableHours y lo que se
+#     muestra) asume que las sub-rutas de distintos puntos corren en
+#     PARALELO (cuadrillas distintas saliendo a la vez), así que se usa el
+#     máximo entre sub-rutas, no la suma.
 #
 # `priorityWasteType` queda en el contrato (AC1 lo pide en la confirmación)
 # pero no cambia el orden de paradas hoy: el algoritmo visita TODAS las
@@ -124,11 +126,21 @@ class RoutePlanStopOut(BaseModel):
 
 
 class RoutePlanVehicleOut(BaseModel):
-    """Identidad del vehículo que recorre un tramo. AC7 de HDU5.1. Calca
+    """Identidad de un vehículo asignado a un tramo. AC7 de HDU5.1. Calca
     RoutePlanVehicle de src/lib/routePlan.ts campo por campo."""
     patente: str
     tipo: str
     resourceId: str | None = None
+    numeroEquipo: str | None = None
+    capacityM3: float | None = None
+    # Nombre del archivo, no la URL: la sirve GET /resources/photo/{filename} y
+    # el frontend la arma, igual que en la lista de recursos. None en 8 de las 21
+    # unidades de la flota real.
+    foto: str | None = None
+    # La dotación de ESTE vehículo. Estaba a nivel del tramo, que servía mientras
+    # el tramo tenía un solo camión; con varios, "1 conductor, 2 peonetas" sin
+    # decir de cuál no significa nada.
+    crew: list[str] = []
 
 
 class RouteSegmentOut(BaseModel):
@@ -140,14 +152,24 @@ class RouteSegmentOut(BaseModel):
     originName: str
     trucksUsed: int
     # ── AC7 de HDU5.1 ──
-    # Opcionales en el contrato de TypeScript, así que se mandan solo cuando hay
-    # algo que mandar. `vehicle` viaja cuando el tramo lo recorre UN camión: el
-    # criterio dice "qué vehículo" en singular, y con varios habría que partir la
-    # sub-ruta por camión, que es trabajo del algoritmo y no de este modelo.
-    vehicle: RoutePlanVehicleOut | None = None
-    crew: list[str] | None = None
+    # **Todos** los vehículos del tramo, cada uno con su patente, su tipo, su
+    # capacidad, su foto y su propia dotación.
+    #
+    # Antes viajaba un `vehicle` singular y solo cuando el tramo lo recorría un
+    # camión; con dos o más, la vista caía a "2 camiones" y no decía cuáles.
+    # Interpretar el criterio ("qué vehículo lo recorre, por patente y tipo") en
+    # singular estricto llevaba a partir la sub-ruta por camión, que es trabajo
+    # del algoritmo; nombrar a los dos que efectivamente recorren el tramo lo
+    # cumple sin inventar un reparto de zonas que nadie decidió, y es verdad.
+    vehicles: list[RoutePlanVehicleOut] = []
     outboundDistanceKm: float
     outboundDurationHours: float
+    # Tramo de la última zona al relleno sanitario, el único que se recorre
+    # cargado. Opcionales en el contrato de TypeScript para que un plan generado
+    # por una versión anterior del backend siga parseando.
+    disposalName: str | None = None
+    disposalDistanceKm: float | None = None
+    disposalDurationHours: float | None = None
     returnDistanceKm: float
     returnDurationHours: float
 
@@ -179,6 +201,9 @@ class RoutePlanRouteOut(BaseModel):
     # casi siempre uno solo. Separados en ida/vuelta para que el frontend
     # los pinte con estilos distintos (ver GeoMapImpl.tsx).
     outboundPaths: list[list[list[float]]] = []
+    # El tramo cargado, de la última zona al relleno. Separado de los otros dos
+    # para poder pintarlo distinto: es el único que el camión hace lleno.
+    disposalPaths: list[list[list[float]]] = []
     returnPaths: list[list[list[float]]] = []
     segments: list[RouteSegmentOut] = []
     # AC6: el plan sigue siendo válido para el resto. Lista vacía significa que
@@ -296,28 +321,66 @@ def _point_truck_capacity(point: dict) -> float:
     return sum(t.get("capacity_m3", 0) for t in point.get("trucks", []))
 
 
+_MAX_UNIDADES_FUERZA_BRUTA = 14  # 2^14 = 16384 subconjuntos, instantáneo
+
+
 def _trucks_used(point: dict, assigned_volume: float) -> list[dict]:
     """QUÉ camiones de `point` hacen falta para cubrir `assigned_volume`.
 
-    Misma heurística voraz de siempre (los más grandes primero), no una
-    combinación óptima exacta, pero devuelve las UNIDADES en vez de contarlas.
-    Antes esta función se llamaba _min_trucks_used y retornaba un entero: sabía
-    perfectamente cuáles camiones había elegido y descartaba esa información
-    justo al retornar, que es la razón por la que el plan nunca pudo decir qué
-    vehículo recorre cada tramo (AC7 de HDU5.1).
+    Devuelve las UNIDADES, no su cantidad. Antes se llamaba _min_trucks_used y
+    retornaba un entero: sabía perfectamente cuáles camiones había elegido y
+    descartaba esa información justo al retornar, que es la razón por la que el
+    plan nunca pudo decir qué vehículo recorre cada tramo (AC7 de HDU5.1).
 
-    Con al menos un camión y una parada se despacha uno aunque el volumen
-    asignado sea 0: igual hay que hacer el viaje."""
-    camiones = sorted(
-        point.get("trucks", []), key=lambda t: t.get("capacity_m3", 0), reverse=True
-    )
+    **Elige el conjunto con menos vehículos y, entre los de ese tamaño, el de
+    menor capacidad sobrante.** Los dos criterios en ese orden, y ninguno es
+    arbitrario: cada vehículo de más es una dotación de más (un conductor y una
+    o dos peonetas que ese día no están en otra parte), así que la cantidad pesa
+    primero; a igual cantidad, el vehículo justo es mejor que el grande, porque
+    mandar un AMPLIROLL de 20 m³ a retirar 6,94 deja 13 m³ de capacidad parada.
+
+    Antes era una voraz por capacidad descendente, que minimiza la cantidad pero
+    ignora el desperdicio: con la flota real elegía siempre un ampliroll, aunque
+    una tolva de 10 m³ hiciera el mismo viaje. Ese era un defecto observable en
+    pantalla, no una imprecisión teórica.
+
+    La enumeración es exacta porque la flota de un punto es chica (21 unidades en
+    total, 8 con capacidad). Se corta en el primer tamaño que alcanza, así que
+    para el caso normal (un solo vehículo basta) ni siquiera recorre los pares.
+    Por encima de _MAX_UNIDADES_FUERZA_BRUTA cae a la voraz de antes, que sigue
+    dando una respuesta válida aunque no la mejor.
+
+    Con al menos un camión se despacha uno aunque el volumen asignado sea 0:
+    igual hay que hacer el viaje, y se manda el más chico."""
+    camiones = [c for c in point.get("trucks", []) if c.get("capacity_m3", 0) > 0]
     if not camiones:
         return []
+
+    por_capacidad = sorted(camiones, key=lambda t: t.get("capacity_m3", 0))
     if assigned_volume <= 0:
-        return camiones[:1]
+        return por_capacidad[:1]
+
+    if len(camiones) <= _MAX_UNIDADES_FUERZA_BRUTA:
+        for tamano in range(1, len(camiones) + 1):
+            mejor: tuple[float, list[dict]] | None = None
+            for combo in itertools.combinations(por_capacidad, tamano):
+                capacidad = sum(c.get("capacity_m3", 0) for c in combo)
+                if capacidad < assigned_volume:
+                    continue
+                if mejor is None or capacidad < mejor[0]:
+                    mejor = (capacidad, list(combo))
+            # El primer tamaño con solución es el mínimo de vehículos, y dentro
+            # de él ya se eligió la capacidad más baja que alcanza.
+            if mejor is not None:
+                return mejor[1]
+
+    # Respaldo: voraz por capacidad descendente. Se llega acá con una flota
+    # grande, o cuando ningún subconjunto alcanza (no debería pasar, porque el
+    # handler recorta la carga antes, pero devolver la flota entera es más útil
+    # que devolver nada).
     total = 0.0
     elegidos: list[dict] = []
-    for c in camiones:
+    for c in reversed(por_capacidad):
         elegidos.append(c)
         total += c.get("capacity_m3", 0)
         if total >= assigned_volume:
@@ -467,19 +530,57 @@ def _split_stops_by_nearest(points: list[dict], stops: list[dict]) -> dict[str, 
 # ORDEN DE PARADAS (TSP acotado) + GEOMETRÍA REAL POR SUB-RUTA
 # =============================================================================
 
-_RETURN_SPEED_FACTOR = 0.85  # camiones cargados de vuelta ≈ 85% de la velocidad de ida
+# Camión cargado ≈ 85% de la velocidad del vacío. Se llamaba
+# _RETURN_SPEED_FACTOR mientras el tramo cargado era el de vuelta a la base;
+# ahora el cargado es el que va de la última zona al relleno, y el de vuelta
+# desde el relleno a la base se hace vacío, a velocidad normal.
+_LOADED_SPEED_FACTOR = 0.85
 _MAX_STOPS_BRUTE_FORCE = 8  # 8! = 40320 permutaciones, instantáneo
+
+# =============================================================================
+# SITIO DE DISPOSICIÓN FINAL
+#
+# La Municipalidad de Maipú lo confirmó por escrito el 30-09-2026: "Se descarga
+# en el Relleno Sanitario Santiago Poniente. Dependiendo de la ruta asignada, el
+# camión debe volver a concluirla, o bien, llegar a la base si concluye el turno
+# o la hora de colación."
+#
+# Hasta ahora el ruteo calculaba base -> zonas -> base, o sea el camión volvía
+# cargado al patio, que no es lo que ocurre. Ahora calcula
+# base -> zonas -> relleno -> base.
+#
+# **Y para los planes que este sistema genera, esa geometría es exacta, no una
+# aproximación.** Lo que la municipalidad describe como "volver a concluir la
+# ruta" son los viajes intermedios de un camión que se llena a mitad de camino,
+# y eso acá no puede pasar: el handler solo deja entrar al plan las zonas cuyo
+# volumen cabe en la capacidad despachada, así que la carga llega completa a la
+# primera descarga. El día que el plan permita exceder la capacidad con viajes
+# múltiples, esto vuelve a ser una simplificación y hay que decirlo.
+#
+# Duplicado en src/lib/disposalSite.ts, que lo necesita para dibujar el marcador
+# antes de que exista una ruta. Si cambia, cambia en los dos. El arreglo de
+# fondo es que sea un punto de recursos con su tipo, no una constante.
+# =============================================================================
+
+RELLENO_SANITARIO_NOMBRE = "Relleno Sanitario Santiago Poniente"
+RELLENO_SANITARIO = (-33.521018456153946, -70.86714285793538)
 
 
 async def _best_stop_order(
     origin: tuple[float, float], stop_coords: list[tuple[float, float]]
-) -> tuple[list[int], float, float] | None:
+) -> tuple[list[int], float, float, float] | None:
     """Evalúa todas las permutaciones de `stop_coords` (fuerza bruta hasta
     _MAX_STOPS_BRUTE_FORCE, vecino-más-cercano por encima de eso) usando la
-    matriz real de OSRM, y devuelve (orden de índices 1-based sobre
-    stop_coords, tiempo_ida_segundos, tiempo_vuelta_segundos) del mejor
-    resultado. None si OSRM no responde."""
-    all_points = [origin] + stop_coords
+    matriz real de OSRM, y devuelve el mejor orden con los tres tiempos del
+    recorrido: (orden de índices 1-based, ida, descarga, regreso) en segundos.
+    None si OSRM no responde.
+
+    **El relleno entra en la matriz como un nodo más**, así que el orden elegido
+    ya tiene en cuenta dónde termina el recorrido: con la base y el relleno en
+    extremos distintos de la comuna, el mejor orden sin contar la descarga puede
+    no ser el mejor contándola. Sigue siendo UNA sola llamada a OSRM, porque la
+    matriz se pide completa de una vez y la búsqueda es aritmética sobre ella."""
+    all_points = [origin] + stop_coords + [RELLENO_SANITARIO]
     matrix = await asyncio.to_thread(osrm_client.table_matrix, all_points)
     if matrix is None:
         return None
@@ -487,6 +588,7 @@ async def _best_stop_order(
 
     n = len(stop_coords)
     indices = list(range(1, n + 1))
+    relleno = n + 1  # último punto de la matriz
 
     def orders_to_try():
         if n <= _MAX_STOPS_BRUTE_FORCE:
@@ -504,22 +606,29 @@ async def _best_stop_order(
             current = nxt
         yield tuple(order)
 
+    # El regreso sale del relleno y es el mismo para toda permutación, pero se
+    # suma igual al total: si no, se compararían recorridos incompletos.
+    regreso = durations[relleno][0]
+
     best_order: tuple[int, ...] | None = None
     best_total = None
-    best_ida = best_vuelta = 0.0
+    best_ida = best_descarga = 0.0
     for order in orders_to_try():
         ida = 0.0
         prev = 0
         for idx in order:
             ida += durations[prev][idx]
             prev = idx
-        vuelta = durations[prev][0] / _RETURN_SPEED_FACTOR
-        total = ida + vuelta
+        # Cargado desde la última zona hasta el relleno. La ida va a velocidad
+        # normal porque el camión se va llenando recién en el camino, y el
+        # regreso también, porque vuelve vacío.
+        descarga = durations[prev][relleno] / _LOADED_SPEED_FACTOR
+        total = ida + descarga + regreso
         if best_total is None or total < best_total:
-            best_total, best_order, best_ida, best_vuelta = total, order, ida, vuelta
+            best_total, best_order, best_ida, best_descarga = total, order, ida, descarga
 
     assert best_order is not None
-    return list(best_order), best_ida, best_vuelta
+    return list(best_order), best_ida, best_descarga, regreso
 
 
 async def _build_subroute(point: dict, point_stops: list[dict], available_hours: float) -> dict | None:
@@ -538,33 +647,39 @@ async def _build_subroute(point: dict, point_stops: list[dict], available_hours:
     order_result = await _best_stop_order(origin, stop_coords)
     if order_result is None:
         return None
-    order, ida_seconds, vuelta_seconds = order_result
+    order, ida_seconds, descarga_seconds, regreso_seconds = order_result
 
-    total_hours = (ida_seconds + vuelta_seconds) / 3600
+    total_hours = (ida_seconds + descarga_seconds + regreso_seconds) / 3600
     if total_hours > available_hours:
         # No es un fallo del servicio: el recorrido existe y es demasiado largo.
         # El handler lo resuelve sacando la parada más lejana y reintentando.
         return {"excedeHoras": True, "horas": total_hours}
 
     ordered_stops = [point_stops[i - 1] for i in order]
+    ultima = (ordered_stops[-1]["lat"], ordered_stops[-1]["lng"])
 
+    # Tres tramos, no dos: la carga se descarga en el relleno y el camión
+    # recién después vuelve al patio. Las tres geometrías se piden en paralelo,
+    # así que agregar la descarga no agrega latencia, solo una llamada.
     outbound_coords = [origin] + [(s["lat"], s["lng"]) for s in ordered_stops]
-    return_coords = [(ordered_stops[-1]["lat"], ordered_stops[-1]["lng"]), origin]
-    outbound_geo, return_geo = await asyncio.gather(
+    disposal_coords = [ultima, RELLENO_SANITARIO]
+    return_coords = [RELLENO_SANITARIO, origin]
+    outbound_geo, disposal_geo, return_geo = await asyncio.gather(
         asyncio.to_thread(osrm_client.route_geometry, outbound_coords),
+        asyncio.to_thread(osrm_client.route_geometry, disposal_coords),
         asyncio.to_thread(osrm_client.route_geometry, return_coords),
     )
-    if outbound_geo is None or return_geo is None:
+    if outbound_geo is None or disposal_geo is None or return_geo is None:
         return None
 
-    # Duraciones "reales" (de la geometría final que se va a dibujar, no
-    # del estimado de la matriz que solo se usó para elegir el orden) — la
-    # vuelta se ajusta con el mismo _RETURN_SPEED_FACTOR que ya se aplicó
-    # para decidir factibilidad, para no mostrarle al usuario un número "a
-    # velocidad normal" que contradiga por qué la vuelta se dibuja más
-    # lenta que la ida.
+    # Duraciones "reales" (de la geometría final que se va a dibujar, no del
+    # estimado de la matriz, que solo sirvió para elegir el orden). El factor de
+    # carga se aplica al tramo de descarga, el mismo que ya se usó para decidir
+    # factibilidad, para no mostrar un número "a velocidad de vacío" que
+    # contradiga por qué ese tramo se calcula más lento.
     outbound_hours = outbound_geo["durationHours"]
-    return_hours = return_geo["durationHours"] / _RETURN_SPEED_FACTOR
+    disposal_hours = disposal_geo["durationHours"] / _LOADED_SPEED_FACTOR
+    return_hours = return_geo["durationHours"]
 
     return {
         "originName": point.get("name", ""),
@@ -573,13 +688,18 @@ async def _build_subroute(point: dict, point_stops: list[dict], available_hours:
         "trucks": _trucks_used(point, sum(s["volumeM3"] for s in point_stops)),
         "stops": ordered_stops,
         "outboundPath": outbound_geo["path"],
+        "disposalPath": disposal_geo["path"],
         "returnPath": return_geo["path"],
         "outboundDistanceKm": outbound_geo["distanceKm"],
         "outboundDurationHours": outbound_hours,
+        "disposalDistanceKm": disposal_geo["distanceKm"],
+        "disposalDurationHours": disposal_hours,
         "returnDistanceKm": return_geo["distanceKm"],
         "returnDurationHours": return_hours,
-        "distanceKm": outbound_geo["distanceKm"] + return_geo["distanceKm"],
-        "durationHours": outbound_hours + return_hours,
+        "distanceKm": (
+            outbound_geo["distanceKm"] + disposal_geo["distanceKm"] + return_geo["distanceKm"]
+        ),
+        "durationHours": outbound_hours + disposal_hours + return_hours,
     }
 
 
@@ -772,6 +892,7 @@ async def generate_route(
 
     out_stops: list[RoutePlanStopOut] = []
     outbound_paths: list[list[list[float]]] = []
+    disposal_paths: list[list[list[float]]] = []
     return_paths: list[list[list[float]]] = []
     segments: list[RouteSegmentOut] = []
     order = 1
@@ -789,33 +910,38 @@ async def generate_route(
             ))
             order += 1
         outbound_paths.append(sub["outboundPath"])
+        disposal_paths.append(sub["disposalPath"])
         return_paths.append(sub["returnPath"])
 
         # ── AC7 ──
-        # El vehículo viaja solo cuando el tramo lo recorre UNO. El criterio dice
-        # "qué vehículo lo recorre" en singular, y con varios camiones habría que
-        # partir la sub-ruta por camión: eso es trabajo del algoritmo (hoy la
-        # sub-ruta es por punto de origen, no por vehículo) y además es lo que
-        # haría verificable el AC2, que compara vehículos que operan a la vez.
-        # Mientras tanto, con varios camiones se manda `trucksUsed` como siempre
-        # y la vista muestra "N camiones", que es lo que hay y es cierto.
+        # Todos los camiones del tramo, cada uno con su identidad y su propia
+        # dotación. Antes solo viajaba el vehículo cuando era UNO, y con varios
+        # la vista decía "2 camiones" sin decir cuáles.
         camiones = sub.get("trucks", [])
-        vehiculo = None
-        dotacion = None
-        if len(camiones) == 1:
-            unico_camion = camiones[0]
-            vehiculo = RoutePlanVehicleOut(
-                patente=unico_camion.get("patente") or unico_camion.get("numeroEquipo", ""),
-                tipo=unico_camion.get("tipo", ""),
-                resourceId=unico_camion.get("resourceId"),
+        vehiculos = [
+            RoutePlanVehicleOut(
+                # La patente es lo que el criterio nombra, pero cuatro unidades
+                # de la flota real no la traen cargada; en ese caso el N° de
+                # equipo es el identificador que la municipalidad usa en sus
+                # propias planillas, así que es el respaldo correcto.
+                patente=c.get("patente") or c.get("numeroEquipo", ""),
+                tipo=c.get("tipo", ""),
+                resourceId=c.get("resourceId"),
+                numeroEquipo=c.get("numeroEquipo"),
+                capacityM3=c.get("capacity_m3"),
+                foto=c.get("foto"),
+                crew=_dotacion_de(c),
             )
-            dotacion = _dotacion_de(unico_camion) or None
+            for c in camiones
+        ]
 
         segments.append(RouteSegmentOut(
             originName=sub["originName"],
             trucksUsed=len(camiones),
-            vehicle=vehiculo,
-            crew=dotacion,
+            vehicles=vehiculos,
+            disposalName=RELLENO_SANITARIO_NOMBRE,
+            disposalDistanceKm=round(sub["disposalDistanceKm"], 2),
+            disposalDurationHours=round(sub["disposalDurationHours"], 2),
             outboundDistanceKm=round(sub["outboundDistanceKm"], 2),
             outboundDurationHours=round(sub["outboundDurationHours"], 2),
             returnDistanceKm=round(sub["returnDistanceKm"], 2),
@@ -836,6 +962,7 @@ async def generate_route(
             totalDurationHours=round(max_duration, 2),
             totalVolumeM3=round(total_volume_planificado, 2),
             outboundPaths=outbound_paths,
+            disposalPaths=disposal_paths,
             returnPaths=return_paths,
             segments=segments,
             unassignedZones=sin_asignar,

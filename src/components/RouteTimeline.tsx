@@ -35,8 +35,13 @@
 // resto de la vista.
 // =============================================================================
 
-import { Truck, Users } from "@/components/icons/Icons";
-import type { RoutePlanLeg, RoutePlanSegment, RoutePlanStop } from "@/lib/routePlan";
+import { ImageIcon, Truck, Users, Warehouse } from "@/components/icons/Icons";
+import type {
+  RoutePlanLeg,
+  RoutePlanSegment,
+  RoutePlanStop,
+  RoutePlanVehicle,
+} from "@/lib/routePlan";
 
 /** Lo que la vista sabe de cada zona y el timeline no: dónde queda, cuánto
  *  hay y de qué es. */
@@ -160,11 +165,70 @@ function Tramo({
   );
 }
 
+/** Un vehículo asignado al recorrido: patente, tipo, capacidad y su dotación.
+ *
+ *  Es un <button> cuando tiene foto, y abre la imagen. Un trabajador reconoce
+ *  "el ampliroll amarillo" antes que "KBVZ-41", así que la foto es lo que
+ *  convierte una patente en un vehículo identificable en el patio. Sin foto es
+ *  un <span> y no finge ser apretable: 8 de las 21 unidades de la flota real no
+ *  tienen imagen cargada, y un botón que no hace nada es peor que ninguno. */
+function Vehiculo({
+  vehiculo,
+  onVerFoto,
+}: {
+  vehiculo: RoutePlanVehicle;
+  onVerFoto?: (v: RoutePlanVehicle) => void;
+}) {
+  const puedeVerFoto = Boolean(vehiculo.foto && onVerFoto);
+  const cuerpo = (
+    <>
+      <span className="flex items-center gap-1.5">
+        <Truck className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
+        <span className="mono text-[0.6875rem] font-medium text-foreground">
+          {vehiculo.patente}
+        </span>
+        <span className="min-w-0 truncate text-[0.6875rem] text-muted-foreground">
+          {vehiculo.tipo}
+        </span>
+        {vehiculo.capacityM3 != null && (
+          <span className="mono flex-shrink-0 text-[0.625rem] tabular-nums text-muted-foreground">
+            {vehiculo.capacityM3} m³
+          </span>
+        )}
+        {/* El ícono de imagen avisa que la fila se puede apretar. Sin él, que
+            una fila abra una foto y la de al lado no es invisible. */}
+        {puedeVerFoto && (
+          <ImageIcon className="h-3 w-3 flex-shrink-0 text-muted-foreground opacity-70" />
+        )}
+      </span>
+      {vehiculo.crew && vehiculo.crew.length > 0 && (
+        <span className="mt-0.5 flex items-center gap-1.5 pl-[1.125rem] text-[0.625rem] text-muted-foreground">
+          <Users className="h-3 w-3 flex-shrink-0" />
+          {vehiculo.crew.join(", ")}
+        </span>
+      )}
+    </>
+  );
+
+  if (!puedeVerFoto) return <span className="block">{cuerpo}</span>;
+  return (
+    <button
+      type="button"
+      onClick={() => onVerFoto?.(vehiculo)}
+      title={`Ver la foto de ${vehiculo.patente}`}
+      className="-mx-1.5 block w-[calc(100%+0.75rem)] cursor-pointer rounded-md px-1.5 py-0.5 text-left transition-colors hover:bg-muted/60"
+    >
+      {cuerpo}
+    </button>
+  );
+}
+
 export function RouteTimeline({
   segment,
   stops,
   datosDeParada,
   onStopClick,
+  onVerFoto,
   salida,
 }: {
   segment: RoutePlanSegment;
@@ -175,6 +239,9 @@ export function RouteTimeline({
    *  suya, no del timeline. */
   datosDeParada?: (stop: RoutePlanStop) => DatosDeParada | undefined;
   onStopClick?: (stop: RoutePlanStop) => void;
+  /** Abre la foto de un vehículo. Sin este manejador las filas de vehículo no
+   *  se dibujan como apretables, aunque traigan `foto`. */
+  onVerFoto?: (v: RoutePlanVehicle) => void;
   /** Momento en que se sale del punto. Es el instante en que se generó el
    *  plan, no "ahora": si fuera "ahora" las horas correrían solas mientras el
    *  trabajador lee la pantalla, y un plan cuyas horas cambian solo por mirarlo
@@ -182,6 +249,7 @@ export function RouteTimeline({
   salida?: Date;
 }) {
   const { legs } = segment;
+  const vehiculos = segment.vehicles ?? [];
   const filas: Fila[] = [];
   // Reloj acumulado del recorrido, en horas desde la salida. Va sumando cada
   // tramo a medida que se arman las filas, así que cada nodo conoce la hora a
@@ -197,26 +265,31 @@ export function RouteTimeline({
         <span className="block truncate text-[0.6875rem] text-muted-foreground">
           {segment.originName}
         </span>
-        {/* El vehículo y la dotación van en la salida y no repetidos en cada
-            parada: es el mismo camión todo el recorrido. Repetirlos por parada
-            convertiría el dato en ruido. */}
-        {segment.vehicle || (segment.crew && segment.crew.length > 0) ? (
-          <span className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1">
-            {segment.vehicle && (
-              <span className="flex items-center gap-1.5 text-[0.6875rem]">
-                <Truck className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
-                <span className="mono font-medium text-foreground">{segment.vehicle.patente}</span>
-                <span className="text-muted-foreground">{segment.vehicle.tipo}</span>
-              </span>
-            )}
-            {segment.crew && segment.crew.length > 0 && (
-              <span className="flex items-center gap-1.5 text-[0.6875rem] text-muted-foreground">
-                <Users className="h-3 w-3 flex-shrink-0" />
-                {segment.crew.join(", ")}
-              </span>
-            )}
+        {/* Los vehículos van en la salida y no repetidos en cada parada: son
+            los mismos todo el recorrido, y repetirlos por parada convertiría el
+            dato en ruido.
+
+            Van TODOS, uno por fila, cada uno con su patente, su tipo, su
+            capacidad y su propia dotación. Antes se mostraba uno solo y
+            únicamente cuando el tramo lo recorría un camión; con dos o más la
+            fila caía a "2 camiones", que dice cuántos son y nada de cuáles,
+            justo en el plan que la cuadrilla usa para saber qué sacar del
+            patio. Una fila por vehículo y no todo en una línea porque cada uno
+            trae cuatro datos: en una sola línea, con dos camiones, no se sabría
+            qué dotación es de cuál. */}
+        {vehiculos.length > 0 ? (
+          <span className="mt-1.5 block space-y-1">
+            {vehiculos.map((v, i) => (
+              <Vehiculo
+                key={v.resourceId ?? `${v.patente}-${i}`}
+                vehiculo={v}
+                onVerFoto={onVerFoto}
+              />
+            ))}
           </span>
         ) : (
+          // Respaldo para un plan generado por una versión anterior del
+          // backend, que mandaba la cantidad y no las unidades.
           <span className="mt-1 block text-[0.6875rem] text-muted-foreground">
             <span className="mono tabular-nums">{segment.trucksUsed}</span> camión
             {segment.trucksUsed === 1 ? "" : "es"}
@@ -298,6 +371,44 @@ export function RouteTimeline({
     });
   });
 
+  // ── Descarga en el relleno sanitario ──
+  // El recorrido no vuelve cargado al patio: descarga primero. Es la geometría
+  // que la municipalidad describió por escrito, y el nodo existe para que el
+  // plan la diga en vez de dejar la vuelta como si fuera directa.
+  //
+  // Se dibuja solo si el backend mandó el tramo: un plan generado por una
+  // versión anterior no lo trae, y fabricar el nodo con el relleno supuesto
+  // afirmaría un recorrido que ese plan no calculó ni contó en sus horas.
+  const hayDescarga = segment.disposalDurationHours != null;
+
+  if (hayDescarga) {
+    filas.push({
+      marcador: null,
+      contenido: (
+        <Tramo
+          respaldo={{
+            distanceKm: segment.disposalDistanceKm ?? 0,
+            durationHours: segment.disposalDurationHours ?? 0,
+          }}
+          etiqueta="cargado"
+        />
+      ),
+    });
+    transcurrido += segment.disposalDurationHours ?? 0;
+    filas.push({
+      hora: salida ? horaDeLlegada(salida, transcurrido) : undefined,
+      marcador: <Circulo icono={<Warehouse className="h-3.5 w-3.5" />} />,
+      contenido: (
+        <span className="block py-1">
+          <span className="block text-xs font-semibold text-foreground">Descarga</span>
+          <span className="block truncate text-[0.6875rem] text-muted-foreground">
+            {segment.disposalName ?? "Relleno sanitario"}
+          </span>
+        </span>
+      ),
+    });
+  }
+
   filas.push({
     marcador: null,
     contenido: (
@@ -307,7 +418,7 @@ export function RouteTimeline({
           distanceKm: segment.returnDistanceKm,
           durationHours: segment.returnDurationHours,
         }}
-        etiqueta="regreso"
+        etiqueta={hayDescarga ? "vacío" : "regreso"}
       />
     ),
   });

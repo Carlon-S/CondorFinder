@@ -627,6 +627,7 @@ async def capacidad_de_carga_por_punto(point_ids: list[str]) -> dict[str, list[d
             "conductores_requeridos": 1,
             "peonetas_requeridas": 1,
             "operadores_requeridos": 1,
+            "foto": 1,
         },
     ).to_list(length=None)
 
@@ -653,5 +654,13 @@ async def capacidad_de_carga_por_punto(point_ids: list[str]) -> dict[str, list[d
             "conductores": d.get("conductores_requeridos", 0),
             "peonetas": d.get("peonetas_requeridas", 0),
             "operadores": d.get("operadores_requeridos", 0),
+            # Para que el plan pueda mostrar la foto del vehículo asignado. Un
+            # trabajador reconoce "el ampliroll amarillo" antes que "KBVZ-41",
+            # y la patente sola no sirve para identificarlo en el patio. Viaja
+            # el nombre del archivo, no la URL: la sirve
+            # GET /resources/photo/{filename} y el frontend la arma, igual que
+            # ya hace en la lista de recursos. 8 de las 21 unidades no tienen
+            # foto, así que esto es None a menudo y la vista lo contempla.
+            "foto": d.get("foto"),
         })
     return por_punto

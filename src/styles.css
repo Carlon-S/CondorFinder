@@ -86,6 +86,8 @@
   --color-success-strong: var(--success-strong);
   --color-destructive-strong: var(--destructive-strong);
   --color-warning-strong: var(--warning-strong);
+  --color-disposal: var(--disposal);
+  --color-disposal-foreground: var(--disposal-foreground);
   --color-info: var(--info);
 
   --font-rubik:         "Rubik", sans-serif;
@@ -186,6 +188,16 @@
   --success-strong:     #047857;
   --destructive-strong: #B91C1C;
   --warning-strong:     #B45309;
+  /* Sitio de disposición final (relleno sanitario), en el mapa de rutas.
+     Un color PROPIO y no --primary, que es el de los puntos de origen: el
+     relleno no es un patio del que sale la flota ni una zona que se retira,
+     es infraestructura externa, y pintado del mismo navy que los puntos
+     parecía un punto más. Un teal profundo lo separa de los tres colores de
+     estado (no es una advertencia ni un error) y de la escala verde-a-rojo con
+     la que se pintan las zonas por volumen, así que no compite con ninguna
+     lectura existente del mapa. 7,12:1 sobre el cuerpo claro. */
+  --disposal:            #0E6E6E;
+  --disposal-foreground: #ffffff;
   --chart-1: #0F2244; --chart-2: #FFC53D; --chart-3: #34d399;
   --chart-4: #5B7FBD; --chart-5: #96A2BC;
   /* Sidebar: navy, sin cambios, sigue siendo donde vive la identidad de
@@ -693,6 +705,66 @@ html {
 }
 .leaflet-tooltip.condorfinder-map-tooltip::before {
   border-top-color: var(--card);
+}
+
+/* =============================================================================
+   MARCADOR DEL RELLENO SANITARIO (mapa de rutas)
+   Antes era el glifo de Phosphor "Warehouse" suelto, en el mismo navy que los
+   puntos de origen y anclado por abajo como si fuera un pin. Tres problemas en
+   uno: del mismo color que los puntos se leía como un punto más, un glifo sin
+   placa pesa MENOS que los pines que lo rodean aunque sea el destino de todo lo
+   que se retira, y anclar por la punta a un dibujo que no tiene punta lo dejaba
+   flotando respecto de su coordenada.
+
+   Ahora es una PLACA CIRCULAR con etiqueta, y la forma es la que informa: los
+   dos pines del mapa (zonas y puntos) marcan lugares del plan del día, que
+   cambian de un día a otro, mientras el relleno es infraestructura fija. Un
+   círculo anclado en su centro, y no una gota anclada en su punta, es lo que
+   dice eso sin leer nada. El nombre va impreso porque es UNO y no cambia: no
+   hay ambigüedad que un tooltip al pasar el mouse tenga que resolver, y un dato
+   permanente no debería necesitar que lo busques.
+   ============================================================================= */
+.disposal-marker {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  /* El marcador no debe comerse los clics del mapa. El <Marker> ya va con
+     interactive={false}, pero el contenido del divIcon es DOM real y lo
+     recibiría igual. */
+  pointer-events: none;
+}
+.disposal-marker__plate {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  background: var(--disposal);
+  color: var(--disposal-foreground);
+  /* El aro blanco es lo que lo despega del basemap: sobre un tile oscuro el
+     teal se hundiría, y sobre uno claro el borde se perdería. Mismo criterio
+     que la hairline interior de .map-frame. */
+  box-shadow:
+    0 0 0 2px #fff,
+    0 2px 6px rgba(0, 0, 0, 0.35);
+}
+.disposal-marker__plate svg {
+  width: 1.125rem;
+  height: 1.125rem;
+  display: block;
+}
+.disposal-marker__label {
+  font-family: var(--font-sora), sans-serif;
+  font-size: 0.625rem;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--disposal);
+  color: var(--disposal-foreground);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
 }
 
 /* Variante con preview de imagen (HDU5), al pasar el mouse sobre una zona

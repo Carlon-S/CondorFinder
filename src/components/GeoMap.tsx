@@ -71,6 +71,10 @@ export interface GeoMapProps {
    *  cuando vienen, se pintan en vez de routePositions, cada uno con su
    *  propio estilo (ver GeoMapImpl.tsx). */
   outboundPaths?: [number, number][][] | null;
+  /** Tramo de la última zona al relleno sanitario, el único que el camión hace
+   *  cargado. Mismo índice que los otros dos. Separado para poder pintarlo
+   *  distinto: no es "la misma ruta en el otro sentido". */
+  disposalPaths?: [number, number][][] | null;
   returnPaths?: [number, number][][] | null;
   /** Mismo índice que outboundPaths/returnPaths -- datos para la ventana
    *  flotante de cada tramo. */

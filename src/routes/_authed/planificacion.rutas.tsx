@@ -51,6 +51,7 @@ import {
   StarFill,
   TriangleAlert,
   Truck,
+  Users,
   Warehouse,
   X,
 } from "@/components/icons/Icons";
@@ -82,6 +83,7 @@ import {
 import {
   listResourcePoints,
   listResources,
+  resourcePhotoUrl,
   resumenParaRuta,
   TEXTO_FUERA_DE_RUTA,
   type Resource,
@@ -103,15 +105,16 @@ import {
   type RoutePlanSegment,
   type RoutePlanStop,
   type RoutePlanUnassigned,
+  type RoutePlanVehicle,
 } from "@/lib/routePlan";
 import { RouteTimeline, type DatosDeParada } from "@/components/RouteTimeline";
 import { reverseGeocode } from "@/lib/geocoding";
 import { notify } from "@/lib/notify";
-import {
-  ROUTE_OUTBOUND_COLOR,
-  ROUTE_RETURN_COLOR,
-  ROUTE_RETURN_OPACITY,
-} from "@/components/route-colors";
+// Aca se importaban ROUTE_OUTBOUND_COLOR/RETURN_COLOR/RETURN_OPACITY para
+// armar la leyenda de colores del trazo. La leyenda se elimino junto con las
+// burbujas sobre el mapa, y los imports quedaron sin uso: afirmaban que esta
+// vista todavia dibujaba una. Los colores siguen viviendo en route-colors.ts,
+// que es desde donde GeoMapImpl.tsx los dibuja.
 
 export const Route = createFileRoute("/_authed/planificacion/rutas")({
   component: RutasPage,
@@ -404,6 +407,7 @@ function RutasPage() {
     const sinEl = <T,>(xs: T[] | null) => (xs ? xs.filter((_, i) => i !== indice) : null);
     setRouteSegments(quedan);
     setRouteOutboundPaths(sinEl(routeOutboundPaths));
+    setRouteDisposalPaths(sinEl(routeDisposalPaths));
     setRouteReturnPaths(sinEl(routeReturnPaths));
     // El detalle abierto se corrige: si se borró el que se estaba mirando se
     // vuelve a la lista, y si se borró uno anterior el índice del que queda
@@ -426,6 +430,7 @@ function RutasPage() {
     setRutaAbierta(null);
     setRouteStops(null);
     setRouteOutboundPaths(null);
+    setRouteDisposalPaths(null);
     setRouteReturnPaths(null);
     setRouteSegments(null);
     setRouteTotals(null);
@@ -452,6 +457,11 @@ function RutasPage() {
   // pintarlos con estilos distintos (ver GeoMapImpl.tsx). Null hasta que
   // se genera una ruta con éxito.
   const [routeOutboundPaths, setRouteOutboundPaths] = useState<[number, number][][] | null>(null);
+  const [routeDisposalPaths, setRouteDisposalPaths] = useState<[number, number][][] | null>(null);
+  /** Vehiculo cuya foto se esta mirando, o null. Un trabajador reconoce "el
+   *  ampliroll amarillo" antes que "KBVZ-41", asi que la foto es lo que
+   *  convierte una patente en un vehiculo identificable en el patio. */
+  const [vehiculoEnFoto, setVehiculoEnFoto] = useState<RoutePlanVehicle | null>(null);
   const [routeReturnPaths, setRouteReturnPaths] = useState<[number, number][][] | null>(null);
   // Resumen por sub-ruta/origen (mismo índice que los paths de arriba) --
   // para la leyenda (ida/vuelta por separado) y las ventanas flotantes
@@ -750,6 +760,7 @@ function RutasPage() {
     if (result.status === "success") {
       setRouteStops(result.route.stops);
       setRouteOutboundPaths(result.route.outboundPaths ?? null);
+      setRouteDisposalPaths(result.route.disposalPaths ?? null);
       setRouteReturnPaths(result.route.returnPaths ?? null);
       setRouteSegments(result.route.segments ?? null);
       setRouteTotals({
@@ -769,6 +780,7 @@ function RutasPage() {
     } else {
       setRouteStops(null);
       setRouteOutboundPaths(null);
+      setRouteDisposalPaths(null);
       setRouteReturnPaths(null);
       setRouteSegments(null);
       setRouteTotals(null);
@@ -841,9 +853,13 @@ function RutasPage() {
   // generar. Memoizado sobre las referencias reales de estado, que solo
   // cambian cuando de verdad llega una ruta nueva.
   const routeFitPoints = useMemo<[number, number][] | null>(() => {
-    if (routeOutboundPaths || routeReturnPaths) {
+    if (routeOutboundPaths || routeDisposalPaths || routeReturnPaths) {
       return [
         ...(routeOutboundPaths ?? []).flat(),
+        // El relleno queda al poniente de la comuna, bastante lejos de las
+        // zonas: sin este tramo el encuadre automatico lo dejaba fuera de
+        // pantalla y el plan parecia terminar en la ultima zona.
+        ...(routeDisposalPaths ?? []).flat(),
         ...(routeReturnPaths ?? []).flat(),
         // El relleno sanitario entra al encuadre de la ruta, aunque el trazo
         // todavía no pase por él. Está al poniente del casco urbano, fuera de
@@ -855,7 +871,7 @@ function RutasPage() {
     }
     return routePositions;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeOutboundPaths, routeReturnPaths]);
+  }, [routeOutboundPaths, routeDisposalPaths, routeReturnPaths]);
 
   // Cifras de cabecera. Las cuatro responden la pregunta con la que se entra a
   // esta vista: con qué cuento y cuánto hay que retirar.
@@ -1084,6 +1100,7 @@ function RutasPage() {
             disposalSite={RELLENO_SANITARIO}
             routePositions={routePositions}
             outboundPaths={routeOutboundPaths}
+            disposalPaths={routeDisposalPaths}
             returnPaths={routeReturnPaths}
             routeSegments={routeSegments}
             // El recentrado manual gana sobre el encuadre automático de la
@@ -1574,8 +1591,14 @@ function RutasPage() {
                     <CifraPlan
                       icono={<RouteIcon className="h-3.5 w-3.5" />}
                       etiqueta="Distancia"
+                      // Los TRES tramos: ida, descarga en el relleno y
+                      // regreso. Sumando solo ida y vuelta, estas dos cifras
+                      // subestimaban el recorrido justo en el tramo que se
+                      // acababa de agregar, y no coincidian con la suma de lo
+                      // que la linea de tiempo muestra fila por fila.
                       valor={`${(
                         routeSegments[rutaAbierta].outboundDistanceKm +
+                        (routeSegments[rutaAbierta].disposalDistanceKm ?? 0) +
                         routeSegments[rutaAbierta].returnDistanceKm
                       ).toFixed(1)} km`}
                     />
@@ -1584,6 +1607,7 @@ function RutasPage() {
                       etiqueta="Duración"
                       valor={formatDuration(
                         routeSegments[rutaAbierta].outboundDurationHours +
+                          (routeSegments[rutaAbierta].disposalDurationHours ?? 0) +
                           routeSegments[rutaAbierta].returnDurationHours,
                       )}
                     />
@@ -1595,6 +1619,7 @@ function RutasPage() {
                     datosDeParada={datosDeParada}
                     salida={salidaPlan ?? undefined}
                     onStopClick={(stop) => setFocusPoint([stop.lat, stop.lng])}
+                    onVerFoto={setVehiculoEnFoto}
                   />
 
                   <Button
@@ -1969,6 +1994,59 @@ function RutasPage() {
           como en zoomAnalysis, así que es una sola columna con la
           información del punto en modo solo lectura (mismos datos que
           recursos.tsx, sin poder editarlos desde acá). */}
+      {/* ── Foto del vehículo asignado ──
+          Se llega desde la fila del vehículo en la línea de tiempo. La patente
+          identifica la unidad en la planilla, pero no en el patio: lo que
+          permite salir a buscarla es verla. La ficha repite el tipo, la
+          capacidad y la dotación bajo la imagen, porque quien abre esto está
+          decidiendo si ese es el vehículo que va a sacar, y volver a la línea
+          de tiempo para confirmar el dato anula el propósito. */}
+      <Dialog
+        open={vehiculoEnFoto !== null}
+        onOpenChange={(open) => !open && setVehiculoEnFoto(null)}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="mono">{vehiculoEnFoto?.patente}</DialogTitle>
+            <DialogDescription>
+              {vehiculoEnFoto?.tipo}
+              {vehiculoEnFoto?.numeroEquipo ? ` · N° ${vehiculoEnFoto.numeroEquipo}` : ""}
+            </DialogDescription>
+          </DialogHeader>
+          {vehiculoEnFoto && (
+            <div className="space-y-3">
+              {vehiculoEnFoto.foto && (
+                <img
+                  src={resourcePhotoUrl(vehiculoEnFoto.foto)}
+                  alt={`${vehiculoEnFoto.tipo} ${vehiculoEnFoto.patente}`}
+                  className="max-h-[22rem] w-full rounded-lg border border-border/60 object-contain"
+                />
+              )}
+              <div className="grid grid-cols-2 gap-2">
+                <CifraPlan
+                  icono={<Boxes className="h-3.5 w-3.5" />}
+                  etiqueta="Capacidad"
+                  valor={
+                    vehiculoEnFoto.capacityM3 != null
+                      ? `${vehiculoEnFoto.capacityM3} m³`
+                      : "Sin declarar"
+                  }
+                />
+                <CifraPlan
+                  icono={<Users className="h-3.5 w-3.5" />}
+                  etiqueta="Dotación"
+                  valor={
+                    vehiculoEnFoto.crew && vehiculoEnFoto.crew.length > 0
+                      ? vehiculoEnFoto.crew.join(", ")
+                      : "Sin declarar"
+                  }
+                />
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={zoomPoint !== null} onOpenChange={(open) => !open && setZoomPoint(null)}>
         <DialogContent className="max-w-md">
           <DialogHeader>
