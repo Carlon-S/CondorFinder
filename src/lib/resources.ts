@@ -51,6 +51,12 @@ export interface ResourceInput {
    *  ninguna ruta todavia; es el limite que el AC4 de HDU5.1 va a contrastar
    *  contra el peso estimado de la zona. */
   capacidad_ton: number | null;
+  /** AC3 de HDU5.1: kilometros que el vehiculo recorre antes de necesitar
+   *  recarga. El ruteo descarta los ordenes de visita cuya distancia total lo
+   *  supere. **La municipalidad respondio que ese limite no existe en su
+   *  flota**, asi que en produccion queda vacio y el criterio no corta nada;
+   *  es demostrable declarando una autonomia baja. Solo familia `carga`. */
+  autonomia_km: number | null;
   /** Solo familia "maquina". */
   capacidad_balde_m3: number | null;
   conductores_requeridos: number;
@@ -400,6 +406,7 @@ export async function deleteResource(id: string): Promise<void> {
 export function camposDeFamilia(familia: ResourceFamily): {
   capacidadCarga: boolean;
   capacidadPeso: boolean;
+  autonomia: boolean;
   capacidadBalde: boolean;
   dotacion: boolean;
   motorizado: boolean;
@@ -414,6 +421,9 @@ export function camposDeFamilia(familia: ResourceFamily): {
     // sigue siendo "arrastre". La familia dice cómo se mueve, no si carga.
     capacidadCarga: familia === "carga" || familia === "arrastre",
     capacidadPeso: familia === "carga" || familia === "arrastre",
+    // Mas estricto que las capacidades: un carro remolcado no gasta
+    // combustible propio.
+    autonomia: familia === "carga",
     capacidadBalde: familia === "maquina",
     // Un carro se remolca: no lleva tripulación propia.
     dotacion: familia !== "arrastre",
@@ -436,6 +446,7 @@ export function recursoVacio(tipo: string, pointId: string): ResourceInput {
     anio: null,
     capacidad_m3: null,
     capacidad_ton: null,
+    autonomia_km: null,
     capacidad_balde_m3: null,
     conductores_requeridos: 0,
     peonetas_requeridas: 0,

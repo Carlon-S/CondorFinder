@@ -276,6 +276,62 @@ FAMILIA_POR_TIPO: dict[str, str] = {
 Familia = Literal["carga", "maquina", "arrastre", "apoyo"]
 
 
+# =============================================================================
+# COMPATIBILIDAD VEHÍCULO ↔ TIPO DE RESIDUO (AC4 de HDU5.1)
+#
+# Derivada del TIPO, igual que FAMILIA_POR_TIPO y por la misma razón: no es un
+# atributo que alguien declare por unidad, es una propiedad de la clase de
+# vehículo. Guardarla por recurso daría dos fuentes de verdad.
+#
+# Las tres reglas son citas de la Municipalidad de Maipú, no deducciones:
+#
+#   - CAMION 3/4 PLANO: "este vehículo no tiene fines de retiro de escombros,
+#     sino más bien de reciclaje (cajas y embalajes, colchones), por lo que no
+#     sería prudente incorporarlo a las rutas que estamos trabajando"
+#     (02-10-2026). Es una exclusión TOTAL de este tipo de ruta, no por clase.
+#
+#   - AMPLIROLL: "no debe llevar material muy pesado por la maniobra de
+#     descarga", con el límite en 15 toneladas. Eso NO vive acá: vive en
+#     `capacidad_ton` de cada unidad, porque es una cifra por vehículo.
+#
+#   - AMPLIROLL: lleva "preferentemente" voluminoso antes que escombros. Es una
+#     PREFERENCIA y no una prohibición, y el criterio usa esa misma distinción:
+#     "priorizará la coincidencia de tipo, y solo usará un vehículo no
+#     compatible si no existe ninguna alternativa compatible".
+# =============================================================================
+
+# Tipos que no participan de una ruta de microbasural, cualquiera sea el
+# residuo. Se evalúa aparte de la capacidad: hoy estos dos quedan fuera igual
+# porque declaran su límite en toneladas y el reparto es por m3, pero eso es una
+# coincidencia, no la regla. Si mañana declararan m3, seguirían fuera.
+TIPOS_FUERA_DE_MICROBASURAL: frozenset[str] = frozenset({"CAMION 3/4 PLANO"})
+
+# Qué clases del detector prefiere cada tipo. Ausente = sin preferencia, le da
+# igual. Las clases son las que produce el modelo (ver WASTE_CLASSES en
+# planificacion.rutas.tsx); si el modelo aprende una clase nueva, acá
+# simplemente no tiene preferencia, que es el comportamiento correcto.
+PREFERENCIA_POR_TIPO: dict[str, frozenset[str]] = {
+    "AMPLIROLL": frozenset({"Muebles", "Neumáticos"}),
+}
+
+
+def tipo_participa_en_microbasural(tipo: str) -> bool:
+    """Si un tipo de vehículo puede integrar una ruta de retiro de microbasural."""
+    return tipo not in TIPOS_FUERA_DE_MICROBASURAL
+
+
+def tipo_prefiere_clase(tipo: str, clase: str | None) -> bool:
+    """Si este tipo de vehículo es el preferido para esa clase de residuo.
+
+    Sin preferencia declarada devuelve True: un vehículo que no discrimina es
+    compatible con todo, y tratarlo como incompatible lo mandaría a la segunda
+    vuelta de la selección sin motivo."""
+    preferidas = PREFERENCIA_POR_TIPO.get(tipo)
+    if preferidas is None or clase is None:
+        return True
+    return clase in preferidas
+
+
 class ResourceIn(BaseModel):
     """Un recurso individual.
 
@@ -302,6 +358,15 @@ class ResourceIn(BaseModel):
     # ya produce `weight_kg` por detección, así que el peso de una zona es un
     # dato que el sistema tiene y hasta ahora no podía contrastar con nada.
     capacidad_ton: float | None = Field(default=None, gt=0)
+    # AC3 de HDU5.1: kilómetros que el vehículo recorre antes de necesitar
+    # recarga. Solo familia "carga": lo que no circula por sí solo no tiene
+    # autonomía propia, y una máquina no recorre una ruta.
+    #
+    # **La municipalidad respondió que ese límite NO existe en su flota**, así
+    # que en producción este campo queda vacío y el criterio no corta nada. Es
+    # un resultado válido y hay que documentarlo, no esconderlo: el criterio
+    # está implementado y es demostrable declarando una autonomía baja.
+    autonomia_km: float | None = Field(default=None, gt=0)
     capacidad_balde_m3: float | None = Field(default=None, gt=0)
     conductores_requeridos: int = Field(default=0, ge=0)
     peonetas_requeridas: int = Field(default=0, ge=0)
@@ -341,6 +406,10 @@ class ResourceIn(BaseModel):
         # lo que carga, se mueva solo o lo remolquen.
         if familia not in ("carga", "arrastre") and self.capacidad_ton is not None:
             raise ValueError(f"Un recurso de tipo {self.tipo} no lleva capacidad en toneladas")
+        # La autonomía es más estricta que las capacidades: solo "carga". Un
+        # carro remolcado no gasta combustible propio.
+        if familia != "carga" and self.autonomia_km is not None:
+            raise ValueError(f"Un recurso de tipo {self.tipo} no tiene autonomía propia")
         if familia != "maquina" and self.capacidad_balde_m3 is not None:
             raise ValueError(f"Un recurso de tipo {self.tipo} no lleva capacidad de balde")
         if familia == "arrastre" and (
@@ -374,6 +443,7 @@ def _resource_to_out(doc: dict) -> ResourceOut:
         anio=doc.get("anio"),
         capacidad_m3=doc.get("capacidad_m3"),
         capacidad_ton=doc.get("capacidad_ton"),
+        autonomia_km=doc.get("autonomia_km"),
         capacidad_balde_m3=doc.get("capacidad_balde_m3"),
         conductores_requeridos=doc.get("conductores_requeridos", 0),
         peonetas_requeridas=doc.get("peonetas_requeridas", 0),
@@ -635,6 +705,7 @@ async def capacidad_de_carga_por_punto(point_ids: list[str]) -> dict[str, list[d
             "disponible": 1,
             "capacidad_m3": 1,
             "capacidad_ton": 1,
+            "autonomia_km": 1,
             "numero_equipo": 1,
             "patente": 1,
             "conductores_requeridos": 1,
@@ -663,6 +734,10 @@ async def capacidad_de_carga_por_punto(point_ids: list[str]) -> dict[str, list[d
             # Viaja aunque hoy el ruteo no lo use: es el límite que el AC4 de
             # HDU5.1 va a contrastar contra el peso de la zona.
             "capacity_ton": d.get("capacidad_ton"),
+            # AC3: el ruteo descarta los órdenes de visita que superen este
+            # rango. None significa sin límite declarado, que es el caso de
+            # toda la flota real.
+            "autonomia_km": d.get("autonomia_km"),
             "resourceId": str(d["_id"]),
             "numeroEquipo": d.get("numero_equipo", ""),
             "patente": d.get("patente", ""),

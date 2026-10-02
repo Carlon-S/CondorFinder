@@ -452,15 +452,80 @@ Historias comprometidas: HDU5.1 (13), HDU8 (5), HDU9 (5), HDU10 (5) y SP2 (13). 
 >
 > **Dos cosas quedan anotadas y sin resolver, y no se puede repreguntar.** Primero, una contradicción: el 30-09 dieron 30 m³ para los CARRO RECICLAJE `659` y `660`, y el 02-10 respondieron que *"no existen carros de reciclaje, los camiones PLANOS ¾ son los de reciclaje"*. Las dos unidades están en la planilla oficial, así que se dejan registradas; no afectan ninguna ruta porque son familia `arrastre`. Segundo, el **convoy**: que el AMPLIROLL remolque los carros, que el minicargador necesite uno y que la retroexcavadora y el frontal se trasladen por su cuenta. Nada de eso está en ningún criterio de ninguna historia, así que es alcance a acordar con el equipo y no algo que HDU8 pueda cerrar.
 
+### HDU5.1: qué falta en cada criterio, y con qué API
+
+Mapa de los siete criterios contra lo que hay que escribir y lo que cuesta. **Seis de los siete no necesitan ninguna API externa**, y el único que sí es el de tráfico.
+
+**Estado: 4 de 7 implementados** (AC3, AC4, AC6 y AC7). De los tres que faltan, solo AC5 necesita una API.
+
+| # | Criterio | Estado | Qué falta implementar | API | Costo |
+|---|---|---|---|---|---|
+| AC1 | Personal completo | 🔲 | Contadores por perfil disponibles en el punto; el plan compara la dotación requerida de cada vehículo contra ese pool antes de despacharlo | Ninguna | $0 |
+| AC2 | Un perfil no cubre dos vehículos a la vez | 🔲 | El mismo pool de AC1, **consumido** en vez de consultado. El pool es global al plan, no por sub-ruta, porque las sub-rutas de puntos distintos corren en paralelo | Ninguna | $0 |
+| AC3 | Autonomía | ✅ | — | Ninguna | $0 |
+| AC4 | Tipo de residuo | ✅ | — | Ninguna | $0 |
+| AC5 | Tráfico vigente | 🔲 | Cliente espejo de `osrm_client.py`, elegido por variable de entorno. Solo la geometría va a Google; **la matriz se queda en OSRM** | **Routes API** (`Compute Routes Pro`) | $0 con cuota |
+| AC6 | Zonas sin asignar con motivo | ✅ | — | OSRM (ya en uso) | $0 |
+| AC7 | Vehículo y personal por tramo | ✅ | — | Ninguna | $0 |
+
+**Por qué solo el AC5 necesita una API.** La pregunta que lo decide es dónde vive el dato que falta. El rango de un camión es un dato de la flota municipal y la distancia del recorrido ya la devuelve OSRM; el residuo de una zona lo produce el propio detector y lo que puede llevar cada vehículo lo respondió la municipalidad por escrito. En cambio, **a qué velocidad se avanza por una avenida ahora mismo** no lo tiene el sistema ni la municipalidad, y no se deduce de nada: solo puede medirlo quien tiene millones de dispositivos reportando posición. OSRM calcula a flujo libre, asume la calle vacía siempre. Se paga una API cuando el dato está afuera y no se puede producir.
+
+**Las APIs que el sistema ya usa**: OSRM (`osrm_client.py`, matriz de tiempos y geometría de calles) y Nominatim (`geocoding.ts`, dirección ↔ coordenada). Las dos gratuitas y sin clave.
+
+#### Por qué el AC5 no puede resolverse con lo que hay
+
+OSRM calcula a **flujo libre**: no sabe que hay taco. Ningún ajuste local lo arregla.
+
+Los números verificados contra la documentación de Google (02-10-2026):
+
+| SKU | Gratis/mes | Tras el tope | Unidad |
+|---|---|---|---|
+| Compute Routes Essentials | 10.000 | $5,00 / 1.000 | por llamada |
+| **Compute Routes Pro** | **5.000** | $10,00 / 1.000 | por llamada |
+| Compute Route Matrix Pro | 5.000 | $10,00 / 1.000 | **por elemento** |
+| RouteOptimization FleetRouting | 1.000 | $30,00 / 1.000 | por solicitud |
+
+`TRAFFIC_AWARE` y `TRAFFIC_AWARE_OPTIMAL` suben la petición a **Pro**, así que el techo gratis del AC5 es 5.000 y no 10.000. El antiguo crédito recurrente de 200 USD/mes **ya no existe**: lo reemplazaron por estos topes por SKU.
+
+**La decisión que define el costo es dónde queda la matriz.** Cada generación de ruta hace 3 llamadas de geometría (ida, descarga, regreso) y 1 de matriz:
+
+| Reparto | Consumo por generación | Generaciones gratis/mes |
+|---|---|---|
+| Geometría en Google, matriz en OSRM | 3 llamadas | **1.666** |
+| Todo en Google, 2 zonas cargadas | 3 llamadas + 16 elementos | 312 |
+| Todo en Google, 5 zonas cargadas | 3 llamadas + 49 elementos | **102** |
+
+Route Matrix se cobra **por elemento** (orígenes × destinos), así que crece al cuadrado con las zonas. Por eso la matriz se queda en OSRM, y por eso `osrm_client.py` mantiene `table_matrix()` y `route_geometry()` separadas: permite migrar una mitad sin la otra.
+
+#### Qué protege el tramo gratuito
+
+El crédito de prueba de Google Cloud **sí se puede gastar en Maps Platform**, así que pasarse del tramo gratuito no sale de un bolsillo aparte: sale del mismo crédito que sostiene la VM. Por eso el objetivo es no pasarse nunca, y eso se garantiza así:
+
+1. **Cuota diaria de 160 solicitudes** en la Routes API (GCP → APIs y servicios → Cuotas). 160 × 31 = 4.960 < 5.000: es una garantía aritmética, no un cuidado. Equivale a 53 generaciones por día.
+2. **Clave restringida por IP de la VM**, no por referente HTTP: las llamadas salen del backend, no del navegador.
+3. **Alerta de presupuesto** en la cuenta de facturación, como red de respaldo.
+
+#### Route Optimization (FleetRouting), evaluado y descartado
+
+`RouteOptimization FleetRouting` resuelve con **una sola llamada** lo que acá son criterios separados, y cubre nativamente **AC3** (límites de distancia por vehículo), **AC4** (capacidades de carga y compatibilidad vehículo-envío) y **AC5** (`considerRoadTraffic`, que es exactamente el ajuste por tráfico que pide el criterio).
+
+**El costo no es el argumento.** Son 1.000 solicitudes gratis al mes contra 5.000 de Routes Pro, pero no son unidades comparables: FleetRouting gasta **1 llamada por generación** y el enfoque con Routes Pro gasta 3. Eso deja 1.000 generaciones mensuales contra 1.666, o sea 33 por día, de sobra para una herramienta municipal.
+
+**Lo que lo descarta es el AC6.** El objeto `SkippedShipment` que devuelve trae `index` y `label`: dice **cuál** zona quedó fuera, no **por qué**. Y la descripción de la historia subraya justamente eso: *"un vehículo puede quedar descartado por falta de personal, por autonomía insuficiente, o por no transportar el tipo de residuo de la zona, y el sistema debe poder distinguir cuál fue el motivo en cada caso"*. Un optimizador devuelve un óptimo, no una explicación; el código actual puede decir *"La capacidad disponible (4 m³) no alcanza para esta zona"* porque aplica cada restricción él mismo.
+
+Se suman dos cosas más: **AC1 y AC2 seguirían siendo nuestros igual** (que dos vehículos compartan un peoneta no es un concepto de FleetRouting, hay que filtrar antes qué vehículos se le mandan), y habría que rearmar AC7 sobre otra respuesta. El balance es ganar tres criterios, perder el único ya verificado y reescribir el algoritmo completo.
+
+**La forma en que sí serviría** es híbrida: aplicar nuestras restricciones primero, con sus motivos, y mandarle solo el subconjunto factible para que resuelva el orden y el tráfico. Conserva AC6 intacto, pero es **más** trabajo y no menos: hay que implementar AC1 a AC4 igual, y además integrar la API. Queda registrado como la evolución identificada para después de este sprint.
+
 | Historia | Criterio de aceptación | Estado |
 |---|---|---|
 | HDU5.1 | Solo se consideran vehículos cuyo personal requerido esté completo con perfiles disponibles | 🔲 Pendiente |
 | HDU5.1 | Un mismo perfil de trabajador no puede cubrir dos vehículos que operan a la vez | 🔲 Pendiente |
-| HDU5.1 | Se descarta toda subruta cuya distancia total supere la autonomía del vehículo | 🔲 Pendiente |
-| HDU5.1 | Se prioriza la coincidencia de tipo de residuo, y solo se usa un vehículo no compatible si no hay alternativa | 🔲 Pendiente |
+| HDU5.1 | Se descarta toda subruta cuya distancia total supere la autonomía del vehículo | ✅ Cumplido |
+| HDU5.1 | Se prioriza la coincidencia de tipo de residuo, y solo se usa un vehículo no compatible si no hay alternativa | ✅ Cumplido |
 | HDU5.1 | Los tiempos de cada tramo se ajustan por las condiciones de tráfico vigentes, sin intervención del trabajador | 🔲 Pendiente |
-| HDU5.1 | Las zonas sin vehículo posible quedan marcadas "sin asignar" con el motivo, sin invalidar el resto del plan | 🔲 Pendiente |
-| HDU5.1 | Cada tramo del plan muestra qué vehículo lo recorre, por patente y tipo, y su personal asociado | 🔲 Pendiente |
+| HDU5.1 | Las zonas sin vehículo posible quedan marcadas "sin asignar" con el motivo, sin invalidar el resto del plan | ✅ Cumplido |
+| HDU5.1 | Cada tramo del plan muestra qué vehículo lo recorre, por patente y tipo, y su personal asociado | ✅ Cumplido |
 | HDU8 | "Agregar recurso" pide el tipo de recurso a añadir | ✅ Cumplido |
 | HDU8 | Al elegir el tipo, el sistema pide los detalles relevantes de ese tipo | ✅ Cumplido |
 | HDU8 | "Editar" sobre un recurso registrado permite modificar su registro | ✅ Cumplido |

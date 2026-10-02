@@ -84,6 +84,9 @@ def _campos_del_recurso(r, point_id, familia):
         "capacidad_m3": r.get("capacidadM3") if familia in ("carga", "arrastre") else None,
         # Peso maximo, misma regla de familia que el volumen.
         "capacidad_ton": r.get("capacidadTon") if familia in ("carga", "arrastre") else None,
+        # AC3: autonomia solo para "carga". Hoy llega None en las 21 unidades,
+        # porque la municipalidad respondio que ese limite no existe.
+        "autonomia_km": r.get("autonomiaKm") if familia == "carga" else None,
         "capacidad_balde_m3": r.get("capacidadBaldeM3") if familia == "maquina" else None,
         "conductores_requeridos": 0 if familia == "arrastre" else r.get("conductoresRequeridos", 0),
         "peonetas_requeridas": 0 if familia == "arrastre" else r.get("peonetasRequeridas", 0),

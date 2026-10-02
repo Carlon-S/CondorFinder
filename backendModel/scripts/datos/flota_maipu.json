@@ -24,7 +24,8 @@
       "observaciones": "Capacidad 10 M3",
       "foto": "1143.jpeg",
       "disponible": true,
-      "capacidadTon": null
+      "capacidadTon": null,
+      "autonomiaKm": null
     },
     {
       "numeroEquipo": "2224",
@@ -42,7 +43,8 @@
       "observaciones": "Capacidad 10 M3",
       "foto": "2224.jpeg",
       "disponible": true,
-      "capacidadTon": null
+      "capacidadTon": null,
+      "autonomiaKm": null
     },
     {
       "numeroEquipo": "1156",
@@ -60,7 +62,8 @@
       "observaciones": "Capacidad 10 M3",
       "foto": "1156.jpeg",
       "disponible": true,
-      "capacidadTon": null
+      "capacidadTon": null,
+      "autonomiaKm": null
     },
     {
       "numeroEquipo": "1157",
@@ -78,7 +81,8 @@
       "observaciones": "Capacidad 10 M3",
       "foto": "1157.jpeg",
       "disponible": true,
-      "capacidadTon": null
+      "capacidadTon": null,
+      "autonomiaKm": null
     },
     {
       "numeroEquipo": "2184",
@@ -96,7 +100,8 @@
       "observaciones": "Capacidad 10 M3",
       "foto": "2184.jpeg",
       "disponible": true,
-      "capacidadTon": null
+      "capacidadTon": null,
+      "autonomiaKm": null
     },
     {
       "numeroEquipo": "2183",
@@ -114,7 +119,8 @@
       "observaciones": "Capacidad 10 M3",
       "foto": "2183.jpeg",
       "disponible": true,
-      "capacidadTon": null
+      "capacidadTon": null,
+      "autonomiaKm": null
     },
     {
       "numeroEquipo": "1885",
@@ -132,7 +138,8 @@
       "observaciones": "Traslado minicargador",
       "foto": null,
       "disponible": true,
-      "capacidadTon": null
+      "capacidadTon": null,
+      "autonomiaKm": null
     },
     {
       "numeroEquipo": "1876",
@@ -150,7 +157,8 @@
       "observaciones": "Traslado minicargador",
       "foto": null,
       "disponible": true,
-      "capacidadTon": null
+      "capacidadTon": null,
+      "autonomiaKm": null
     },
     {
       "numeroEquipo": "1151",
@@ -168,7 +176,8 @@
       "observaciones": "Máximo 15 toneladas: no debe llevar material muy pesado por la maniobra de descarga.",
       "foto": "1151.jpeg",
       "disponible": true,
-      "capacidadTon": 15.0
+      "capacidadTon": 15.0,
+      "autonomiaKm": null
     },
     {
       "numeroEquipo": "1179",
@@ -186,7 +195,8 @@
       "observaciones": "Máximo 15 toneladas: no debe llevar material muy pesado por la maniobra de descarga.",
       "foto": "1179.jpeg",
       "disponible": true,
-      "capacidadTon": 15.0
+      "capacidadTon": 15.0,
+      "autonomiaKm": null
     },
     {
       "numeroEquipo": "1163",
@@ -204,7 +214,8 @@
       "observaciones": "Capacidad máxima 1 tonelada. Hace retiro de reciclaje (cajas, embalajes, colchones), no escombros.",
       "foto": null,
       "disponible": true,
-      "capacidadTon": 1.0
+      "capacidadTon": 1.0,
+      "autonomiaKm": null
     },
     {
       "numeroEquipo": "659",
@@ -222,7 +233,8 @@
       "observaciones": null,
       "foto": null,
       "disponible": true,
-      "capacidadTon": null
+      "capacidadTon": null,
+      "autonomiaKm": null
     },
     {
       "numeroEquipo": "1429",
@@ -240,7 +252,8 @@
       "observaciones": "Capacidad máxima 1 tonelada. Hace retiro de reciclaje (cajas, embalajes, colchones), no escombros.",
       "foto": null,
       "disponible": true,
-      "capacidadTon": 1.0
+      "capacidadTon": 1.0,
+      "autonomiaKm": null
     },
     {
       "numeroEquipo": "660",
@@ -258,7 +271,8 @@
       "observaciones": null,
       "foto": null,
       "disponible": true,
-      "capacidadTon": null
+      "capacidadTon": null,
+      "autonomiaKm": null
     },
     {
       "numeroEquipo": "1861",
@@ -276,7 +290,8 @@
       "observaciones": null,
       "foto": "1861.jpeg",
       "disponible": true,
-      "capacidadTon": null
+      "capacidadTon": null,
+      "autonomiaKm": null
     },
     {
       "numeroEquipo": "1865",
@@ -294,7 +309,8 @@
       "observaciones": null,
       "foto": "1865.jpeg",
       "disponible": true,
-      "capacidadTon": null
+      "capacidadTon": null,
+      "autonomiaKm": null
     },
     {
       "numeroEquipo": "1606",
@@ -312,7 +328,8 @@
       "observaciones": "Uso de supervisor",
       "foto": null,
       "disponible": true,
-      "capacidadTon": null
+      "capacidadTon": null,
+      "autonomiaKm": null
     },
     {
       "numeroEquipo": "1866",
@@ -330,7 +347,8 @@
       "observaciones": "Con balde de cap. 3M3",
       "foto": "1866.jpeg",
       "disponible": true,
-      "capacidadTon": null
+      "capacidadTon": null,
+      "autonomiaKm": null
     },
     {
       "numeroEquipo": "1864",
@@ -348,7 +366,8 @@
       "observaciones": "Con balde de cap. 1M3",
       "foto": "1864.jpeg",
       "disponible": true,
-      "capacidadTon": null
+      "capacidadTon": null,
+      "autonomiaKm": null
     },
     {
       "numeroEquipo": "1863",
@@ -366,7 +385,8 @@
       "observaciones": "Con balde de cap. 1M3",
       "foto": "1863.jpeg",
       "disponible": true,
-      "capacidadTon": null
+      "capacidadTon": null,
+      "autonomiaKm": null
     },
     {
       "numeroEquipo": "1993",
@@ -384,7 +404,8 @@
       "observaciones": null,
       "foto": null,
       "disponible": true,
-      "capacidadTon": null
+      "capacidadTon": null,
+      "autonomiaKm": null
     }
   ]
 }

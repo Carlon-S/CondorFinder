@@ -1005,13 +1005,24 @@ function RecursosDelPuntoPage() {
                     }
                     alerta={capacidadDeFila(enDetalle).falta}
                   />
-                  {/* El peso máximo, en su propia fila y solo si existe. El
-                      AMPLIROLL declara 20 m³ Y 15 t: la celda de la tabla
-                      muestra el volumen, que es lo que el ruteo usa, así que
-                      sin esta fila el límite de peso no se vería en ninguna
-                      parte. */}
-                  {enDetalle.capacidad_ton != null && (
+                  {/* El peso máximo, solo cuando la fila de arriba está
+                      mostrando OTRA cosa. El AMPLIROLL declara 20 m³ y 15 t: la
+                      celda de la tabla y la fila Capacidad muestran el volumen,
+                      que es lo que el ruteo usa, así que sin esta fila su
+                      límite de peso no se vería en ninguna parte.
+
+                      El CAMION 3/4 PLANO, en cambio, declara SOLO toneladas, y
+                      entonces la fila Capacidad ya dice "1 t de carga":
+                      repetirlo acá imprimiría la misma cifra dos veces con dos
+                      nombres distintos, que se lee como si fueran dos límites. */}
+                  {enDetalle.capacidad_ton != null && enDetalle.capacidad_m3 != null && (
                     <Dato etiqueta="Peso máximo" valor={`${enDetalle.capacidad_ton} t`} />
+                  )}
+                  {/* AC3. Solo si está declarada: "sin límite" es el estado
+                      normal de esta flota, y una fila que lo repita en las 21
+                      unidades es ruido. */}
+                  {enDetalle.autonomia_km != null && (
+                    <Dato etiqueta="Autonomía" valor={`${enDetalle.autonomia_km} km`} />
                   )}
                   <Dato etiqueta="Dotación requerida" valor={dotacionTexto(enDetalle)} />
                   <Dato etiqueta="Punto" valor={punto?.name ?? "-"} />

@@ -62,10 +62,13 @@ import resources as resources_module
 #     PARALELO (cuadrillas distintas saliendo a la vez), así que se usa el
 #     máximo entre sub-rutas, no la suma.
 #
-# `priorityWasteType` queda en el contrato (AC1 lo pide en la confirmación)
-# pero no cambia el orden de paradas hoy: el algoritmo visita TODAS las
-# zonas cargadas siempre (no hay modo "parcial" que priorizar entre ellas)
-# — se deja reservado para cuando eso exista.
+# `priorityWasteType` **sí hace algo desde el AC4**: es el desempate de la
+# elección de vehículo. Durante mucho tiempo estuvo en el contrato sin tocar
+# ninguna lógica, o sea era un control que mentía, lo que es peor que no
+# tenerlo. Ahora, cuando el trabajador elige un tipo en el diálogo, esa clase
+# reemplaza a la dominante calculada para decidir qué vehículos se prefieren.
+# No cambia el ORDEN de las paradas: el algoritmo sigue visitando todas las
+# zonas que entraron al plan.
 #
 # Los modelos de acá abajo usan nombres de campo en camelCase (no el
 # snake_case habitual en Python) A PROPÓSITO: src/lib/routePlan.ts interpreta
@@ -324,7 +327,12 @@ def _point_truck_capacity(point: dict) -> float:
 _MAX_UNIDADES_FUERZA_BRUTA = 14  # 2^14 = 16384 subconjuntos, instantáneo
 
 
-def _trucks_used(point: dict, assigned_volume: float) -> list[dict]:
+def _trucks_used(
+    point: dict,
+    assigned_volume: float,
+    assigned_weight_ton: float = 0.0,
+    clase_dominante: str | None = None,
+) -> list[dict]:
     """QUÉ camiones de `point` hacen falta para cubrir `assigned_volume`.
 
     Devuelve las UNIDADES, no su cantidad. Antes se llamaba _min_trucks_used y
@@ -351,41 +359,93 @@ def _trucks_used(point: dict, assigned_volume: float) -> list[dict]:
     dando una respuesta válida aunque no la mejor.
 
     Con al menos un camión se despacha uno aunque el volumen asignado sea 0:
-    igual hay que hacer el viaje, y se manda el más chico."""
+    igual hay que hacer el viaje, y se manda el más chico.
+
+    ── AC4 de HDU5.1 ──
+    Con `assigned_weight_ton` y `clase_dominante` se aplican las reglas de tipo
+    de residuo, y la estructura refleja la del criterio: "priorizará la
+    coincidencia de tipo, y solo usará un vehículo no compatible si no existe
+    ninguna alternativa compatible con capacidad suficiente".
+
+      1. Reglas DURAS, que descartan candidatos: el tipo que no participa de una
+         ruta de microbasural, y el que no aguanta el peso de la zona.
+      2. Dos vueltas de la MISMA enumeración: primero sobre los preferidos para
+         esa clase, y solo si ninguna combinación alcanza, sobre todos. El "con
+         capacidad suficiente" del criterio es lo que ya hacía el enumerador, no
+         hubo que agregarlo.
+
+    Devuelve [] cuando ninguna regla dura deja candidatos. El llamador lo
+    traduce en una zona sin asignar con su motivo (AC6)."""
     camiones = [c for c in point.get("trucks", []) if c.get("capacity_m3", 0) > 0]
+
+    # ── Reglas duras ──
+    camiones = [
+        c
+        for c in camiones
+        if resources_module.tipo_participa_en_microbasural(c.get("tipo", ""))
+    ]
+    if assigned_weight_ton > 0:
+        # Un límite de peso ausente no descarta: significa no declarado, no
+        # ilimitado-pero-cero. Toda la flota de transporte declara m3; solo el
+        # AMPLIROLL declara además sus 15 t.
+        camiones = [
+            c
+            for c in camiones
+            if c.get("capacity_ton") is None or c["capacity_ton"] >= assigned_weight_ton
+        ]
+
     if not camiones:
         return []
 
-    por_capacidad = sorted(camiones, key=lambda t: t.get("capacity_m3", 0))
-    if assigned_volume <= 0:
-        return por_capacidad[:1]
+    def enumerar(candidatos: list[dict]) -> list[dict]:
+        por_capacidad = sorted(candidatos, key=lambda t: t.get("capacity_m3", 0))
+        if assigned_volume <= 0:
+            return por_capacidad[:1]
 
-    if len(camiones) <= _MAX_UNIDADES_FUERZA_BRUTA:
-        for tamano in range(1, len(camiones) + 1):
-            mejor: tuple[float, list[dict]] | None = None
-            for combo in itertools.combinations(por_capacidad, tamano):
-                capacidad = sum(c.get("capacity_m3", 0) for c in combo)
-                if capacidad < assigned_volume:
-                    continue
-                if mejor is None or capacidad < mejor[0]:
-                    mejor = (capacidad, list(combo))
-            # El primer tamaño con solución es el mínimo de vehículos, y dentro
-            # de él ya se eligió la capacidad más baja que alcanza.
-            if mejor is not None:
-                return mejor[1]
+        if len(candidatos) <= _MAX_UNIDADES_FUERZA_BRUTA:
+            for tamano in range(1, len(candidatos) + 1):
+                mejor: tuple[float, list[dict]] | None = None
+                for combo in itertools.combinations(por_capacidad, tamano):
+                    capacidad = sum(c.get("capacity_m3", 0) for c in combo)
+                    if capacidad < assigned_volume:
+                        continue
+                    if mejor is None or capacidad < mejor[0]:
+                        mejor = (capacidad, list(combo))
+                # El primer tamaño con solución es el mínimo de vehículos, y
+                # dentro de él ya se eligió la capacidad más baja que alcanza.
+                if mejor is not None:
+                    return mejor[1]
+            return []
 
-    # Respaldo: voraz por capacidad descendente. Se llega acá con una flota
-    # grande, o cuando ningún subconjunto alcanza (no debería pasar, porque el
-    # handler recorta la carga antes, pero devolver la flota entera es más útil
-    # que devolver nada).
-    total = 0.0
-    elegidos: list[dict] = []
-    for c in reversed(por_capacidad):
-        elegidos.append(c)
-        total += c.get("capacity_m3", 0)
-        if total >= assigned_volume:
-            break
-    return elegidos
+        # Respaldo: voraz por capacidad descendente, para una flota grande.
+        total = 0.0
+        elegidos: list[dict] = []
+        for c in reversed(por_capacidad):
+            elegidos.append(c)
+            total += c.get("capacity_m3", 0)
+            if total >= assigned_volume:
+                break
+        return elegidos if total >= assigned_volume else []
+
+    # ── Primera vuelta: solo los preferidos para esta clase ──
+    preferidos = [
+        c
+        for c in camiones
+        if resources_module.tipo_prefiere_clase(c.get("tipo", ""), clase_dominante)
+    ]
+    if preferidos and len(preferidos) < len(camiones):
+        elegidos = enumerar(preferidos)
+        if elegidos:
+            return elegidos
+
+    # ── Segunda vuelta: "si no existe ninguna alternativa compatible" ──
+    elegidos = enumerar(camiones)
+    if elegidos:
+        return elegidos
+
+    # Ningún subconjunto cubre el volumen. No debería pasar (el handler recorta
+    # la carga antes), pero devolver la flota entera es más útil que nada.
+    return sorted(camiones, key=lambda t: t.get("capacity_m3", 0), reverse=True)
 
 
 def _dotacion_de(camion: dict) -> list[str]:
@@ -447,17 +507,44 @@ async def _load_route_stops(analysis_ids: list[str]) -> list[dict]:
         # qué cabe y qué no, una zona podía quedar fuera de la ruta por un
         # volumen que el trabajador ya había descartado. Mismo criterio que
         # computeSummary() en el frontend: ausente significa activa.
-        total_volume = sum(
-            (d.get("volume_m3") or 0)
-            for d in doc.get("detections", [])
-            if d.get("enabled", True)
-        )
+        activas = [d for d in doc.get("detections", []) if d.get("enabled", True)]
+        total_volume = sum((d.get("volume_m3") or 0) for d in activas)
+        # AC4 de HDU5.1. Dos datos que ya estaban guardados en cada análisis y
+        # que el ruteo no leía: el peso (lo calcula volumeCalc.py por detección,
+        # densidad x volumen) y la clase de residuo. Sin ellos no hay contra qué
+        # comparar ni el límite en toneladas del AMPLIROLL ni la compatibilidad
+        # por tipo.
+        total_weight_kg = sum((d.get("weight_kg") or 0) for d in activas)
+        clases: dict[str, float] = {}
+        for d in activas:
+            vol = d.get("volume_m3") or 0
+            desglose = d.get("breakdown")
+            if desglose:
+                # Detección fusionada ("Varios tipos"): su volumen es el del
+                # GRUPO, no la suma de sus partes, así que se reparte entre las
+                # clases en proporción, igual que volumeByWasteType() en el
+                # frontend. Sumar el desglose haría que el detalle por tipo
+                # superara el total de la zona.
+                peso_total = sum((p.get("volume_m3") or 0) for p in desglose) or 1
+                for parte in desglose:
+                    clase = parte.get("class") or "Sin clasificar"
+                    proporcion = (parte.get("volume_m3") or 0) / peso_total
+                    clases[clase] = clases.get(clase, 0) + vol * proporcion
+            else:
+                clase = d.get("class") or "Sin clasificar"
+                clases[clase] = clases.get(clase, 0) + vol
         stops.append({
             "analysisId": str(doc["_id"]),
             "name": doc.get("name") or "Zona sin nombre",
             "lat": lat,
             "lng": lng,
             "volumeM3": total_volume,
+            "weightTon": total_weight_kg / 1000,
+            "clasesPorVolumen": clases,
+            # El "tipo de residuo predominante" del que habla el criterio: la
+            # clase que más volumen aporta. None si la zona no tiene ninguna
+            # detección activa.
+            "claseDominante": max(clases, key=clases.get) if clases else None,
         })
     return stops
 
@@ -567,8 +654,10 @@ RELLENO_SANITARIO = (-33.521018456153946, -70.86714285793538)
 
 
 async def _best_stop_order(
-    origin: tuple[float, float], stop_coords: list[tuple[float, float]]
-) -> tuple[list[int], float, float, float] | None:
+    origin: tuple[float, float],
+    stop_coords: list[tuple[float, float]],
+    autonomia_km: float | None = None,
+) -> tuple[list[int], float, float, float] | None | str:
     """Evalúa todas las permutaciones de `stop_coords` (fuerza bruta hasta
     _MAX_STOPS_BRUTE_FORCE, vecino-más-cercano por encima de eso) usando la
     matriz real de OSRM, y devuelve el mejor orden con los tres tiempos del
@@ -579,12 +668,27 @@ async def _best_stop_order(
     ya tiene en cuenta dónde termina el recorrido: con la base y el relleno en
     extremos distintos de la comuna, el mejor orden sin contar la descarga puede
     no ser el mejor contándola. Sigue siendo UNA sola llamada a OSRM, porque la
-    matriz se pide completa de una vez y la búsqueda es aritmética sobre ella."""
+    matriz se pide completa de una vez y la búsqueda es aritmética sobre ella.
+
+    **AC3 de HDU5.1**: con `autonomia_km`, se descartan las permutaciones cuya
+    distancia total supere ese rango. El criterio lo pide con esas palabras,
+    "descartará cualquier ORDEN cuya distancia total (ida y vuelta) supere ese
+    rango", y por eso el filtro vive acá y no afuera: sacar zonas sería
+    responder una pregunta distinta. Solo cuando NINGÚN orden cabe se devuelve
+    "sin_autonomia" y el handler recién entonces saca una zona (AC6).
+
+    Devuelve "sin_autonomia" (str) en ese caso, para distinguirlo de None, que
+    significa que OSRM no respondió. Son dos problemas distintos: uno es una
+    restricción que se cumplió y el otro es un servicio caído."""
     all_points = [origin] + stop_coords + [RELLENO_SANITARIO]
     matrix = await asyncio.to_thread(osrm_client.table_matrix, all_points)
     if matrix is None:
         return None
     durations = matrix["durations"]
+    # Ya venían en la misma respuesta (table_matrix pide
+    # annotations=duration,distance), solo que nadie las usaba. El AC3 no
+    # agrega ni una llamada.
+    distances = matrix["distances"]
 
     n = len(stop_coords)
     indices = list(range(1, n + 1))
@@ -609,44 +713,112 @@ async def _best_stop_order(
     # El regreso sale del relleno y es el mismo para toda permutación, pero se
     # suma igual al total: si no, se compararían recorridos incompletos.
     regreso = durations[relleno][0]
+    regreso_m = distances[relleno][0]
+    limite_m = autonomia_km * 1000 if autonomia_km else None
 
     best_order: tuple[int, ...] | None = None
     best_total = None
     best_ida = best_descarga = 0.0
+    hubo_candidatos = False
     for order in orders_to_try():
         ida = 0.0
+        ida_m = 0.0
         prev = 0
         for idx in order:
             ida += durations[prev][idx]
+            ida_m += distances[prev][idx]
             prev = idx
         # Cargado desde la última zona hasta el relleno. La ida va a velocidad
         # normal porque el camión se va llenando recién en el camino, y el
         # regreso también, porque vuelve vacío.
         descarga = durations[prev][relleno] / _LOADED_SPEED_FACTOR
+        # AC3: el recorrido COMPLETO, que con el relleno son tres tramos. El
+        # criterio dice "ida y vuelta", o sea todo lo que el camión maneja antes
+        # de volver al patio.
+        if limite_m is not None and ida_m + distances[prev][relleno] + regreso_m > limite_m:
+            continue
+        hubo_candidatos = True
         total = ida + descarga + regreso
         if best_total is None or total < best_total:
             best_total, best_order, best_ida, best_descarga = total, order, ida, descarga
+
+    if not hubo_candidatos:
+        return "sin_autonomia"
 
     assert best_order is not None
     return list(best_order), best_ida, best_descarga, regreso
 
 
-async def _build_subroute(point: dict, point_stops: list[dict], available_hours: float) -> dict | None:
+async def _build_subroute(
+    point: dict,
+    point_stops: list[dict],
+    available_hours: float,
+    clase_preferida: str | None = None,
+) -> dict | None:
     """Arma la ida+vuelta completa desde `point` por `point_stops` — orden
     óptimo, geometría real (calles) de cada tramo, y chequeo de
     availableHours.
 
-    Devuelve None cuando OSRM falla, y `{"excedeHoras": True, ...}` cuando el
-    recorrido se armó pero no cabe en el tiempo disponible. **Antes las dos
-    cosas devolvían None**, y el handler no podía distinguirlas: un servicio
-    caído y un recorrido demasiado largo son problemas distintos, el primero es
-    un error y el segundo es una zona que hay que dejar fuera (AC6)."""
+    Devuelve None cuando OSRM falla, y un dict con una bandera cuando el
+    recorrido se armó pero no cumple una restricción: `excedeHoras` (no cabe en
+    la jornada) o `excedeAutonomia` (AC3, ningún orden cabe en el rango del
+    vehículo). **Antes todo eso devolvía None**, y el handler no podía
+    distinguirlo: un servicio caído y una restricción que se cumplió son
+    problemas distintos, el primero es un error y el segundo es una zona que hay
+    que dejar fuera con su motivo (AC6)."""
     origin = (point["lat"], point["lng"])
     stop_coords = [(s["lat"], s["lng"]) for s in point_stops]
 
-    order_result = await _best_stop_order(origin, stop_coords)
+    # Qué camiones van se decide ANTES de evaluar el recorrido, y no al final
+    # como estaba. No es una optimización: la autonomía que limita (AC3) es la
+    # de estos camiones, así que hay que conocerlos para poder filtrar órdenes.
+    # El conjunto depende solo del volumen asignado, que ya se conoce acá.
+    # AC4: el peso y la clase dominante del conjunto. La clase que manda es la
+    # que más volumen aporta SUMANDO todas las paradas de esta sub-ruta, no la
+    # de una zona suelta: los camiones se despachan por recorrido, así que la
+    # pregunta "qué residuo lleva este camión" se responde sobre todo lo que va
+    # a cargar.
+    clases_sub: dict[str, float] = {}
+    for z in point_stops:
+        for clase, vol in (z.get("clasesPorVolumen") or {}).items():
+            clases_sub[clase] = clases_sub.get(clase, 0) + vol
+    clase_dominante = max(clases_sub, key=clases_sub.get) if clases_sub else None
+    # El trabajador manda sobre el cálculo: si eligió un tipo prioritario en el
+    # diálogo, esa es la clase contra la que se busca vehículo compatible. Es
+    # una decisión suya sobre qué residuo importa hoy, y el sistema no tiene
+    # cómo saberla.
+    if clase_preferida:
+        clase_dominante = clase_preferida
+
+    camiones = _trucks_used(
+        point,
+        sum(s["volumeM3"] for s in point_stops),
+        sum(s.get("weightTon", 0) for s in point_stops),
+        clase_dominante,
+    )
+    if not camiones:
+        # Ninguna regla dura dejó candidatos. No es un fallo del servicio ni un
+        # problema de capacidad: es el AC4 diciendo que esta carga no la puede
+        # llevar ningún vehículo del punto.
+        return {
+            "sinVehiculoCompatible": True,
+            "clase": clase_dominante,
+            "pesoTon": sum(s.get("weightTon", 0) for s in point_stops),
+        }
+
+    # El rango que manda es el MÍNIMO de los despachados: si uno se queda sin
+    # combustible, el recorrido no se completa. Los que no la declaran (None) no
+    # limitan, y si ninguno la declara no hay filtro, que es el caso de
+    # producción: la municipalidad respondió que esa restricción no existe en su
+    # flota.
+    autonomias = [c["autonomia_km"] for c in camiones if c.get("autonomia_km")]
+    autonomia_km = min(autonomias) if autonomias else None
+
+    order_result = await _best_stop_order(origin, stop_coords, autonomia_km)
     if order_result is None:
         return None
+    if order_result == "sin_autonomia":
+        return {"excedeAutonomia": True, "autonomiaKm": autonomia_km}
     order, ida_seconds, descarga_seconds, regreso_seconds = order_result
 
     total_hours = (ida_seconds + descarga_seconds + regreso_seconds) / 3600
@@ -684,8 +856,9 @@ async def _build_subroute(point: dict, point_stops: list[dict], available_hours:
     return {
         "originName": point.get("name", ""),
         # Los camiones elegidos viajan enteros, no solo su cantidad: el handler
-        # necesita la patente y la dotación para el AC7.
-        "trucks": _trucks_used(point, sum(s["volumeM3"] for s in point_stops)),
+        # necesita la patente y la dotación para el AC7. Se eligieron arriba,
+        # antes de evaluar el recorrido.
+        "trucks": camiones,
         "stops": ordered_stops,
         "outboundPath": outbound_geo["path"],
         "disposalPath": disposal_geo["path"],
@@ -851,11 +1024,18 @@ async def generate_route(
         if not point_stops:
             continue
 
-        # Paso 3, las horas. Se saca la parada más lejana del punto y se
-        # reintenta, hasta que el recorrido quepa o no queden paradas. Es la
-        # relajación que convierte "no se pudo" en "esto sí, esto no".
+        # Paso 3, las horas y la autonomía. Se saca la parada más lejana del
+        # punto y se reintenta, hasta que el recorrido quepa o no queden
+        # paradas. Es la relajación que convierte "no se pudo" en "esto sí,
+        # esto no".
+        #
+        # Las dos restricciones comparten el bucle pero NO el motivo: la
+        # descripción de HDU5.1 pide que el sistema "pueda distinguir cuál fue
+        # el motivo en cada caso", así que cada una escribe el suyo.
         while point_stops:
-            result = await _build_subroute(point, point_stops, payload.availableHours)
+            result = await _build_subroute(
+                point, point_stops, payload.availableHours, payload.priorityWasteType
+            )
             if result is None:
                 # OSRM no respondió. Esto NO es una zona sin asignar: es un
                 # servicio caído, y fingir un plan parcial escondería la causa.
@@ -865,7 +1045,11 @@ async def generate_route(
                         f'"{point.get("name", "un punto")}". Intenta nuevamente en unos minutos.'
                     )
                 )
-            if not result.get("excedeHoras"):
+            if (
+                not result.get("excedeHoras")
+                and not result.get("excedeAutonomia")
+                and not result.get("sinVehiculoCompatible")
+            ):
                 sub_routes.append(result)
                 break
             # Misma precedencia que en el recorte por capacidad: se saca la más
@@ -879,11 +1063,34 @@ async def generate_route(
                 ),
             )
             point_stops.remove(lejana)
-            descartar(
-                lejana,
-                f"No alcanza dentro de las {_format_number(payload.availableHours)} horas "
-                f"disponibles.",
-            )
+            if result.get("sinVehiculoCompatible"):
+                # AC4. Dos motivos distintos bajo la misma bandera, y se
+                # distinguen: que ningún vehículo aguante el peso no es lo mismo
+                # que no haber ninguno habilitado para esta ruta.
+                peso = result.get("pesoTon") or 0
+                if peso > 0:
+                    motivo = (
+                        f"Ningún vehículo disponible puede llevar las "
+                        f"{_format_number(round(peso, 2))} toneladas de esta carga."
+                    )
+                else:
+                    motivo = "Ningún vehículo disponible puede transportar este residuo."
+                descartar(lejana, motivo)
+            elif result.get("excedeAutonomia"):
+                # AC3. Ningún ORDEN de visita cabía en el rango del vehículo, que
+                # es lo que el criterio pide evaluar; recién cuando se agotaron
+                # todos los órdenes se saca una zona.
+                descartar(
+                    lejana,
+                    f"Ningún orden de visita cabe en la autonomía del vehículo "
+                    f"({_format_number(result['autonomiaKm'])} km).",
+                )
+            else:
+                descartar(
+                    lejana,
+                    f"No alcanza dentro de las {_format_number(payload.availableHours)} horas "
+                    f"disponibles.",
+                )
 
     if not sub_routes:
         return RoutePlanInfeasibleOut(

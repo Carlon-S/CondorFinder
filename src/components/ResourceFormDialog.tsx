@@ -99,6 +99,7 @@ export function ResourceFormDialog({
         anio: recurso.anio,
         capacidad_m3: recurso.capacidad_m3,
         capacidad_ton: recurso.capacidad_ton,
+        autonomia_km: recurso.autonomia_km,
         capacidad_balde_m3: recurso.capacidad_balde_m3,
         conductores_requeridos: recurso.conductores_requeridos,
         peonetas_requeridas: recurso.peonetas_requeridas,
@@ -448,6 +449,30 @@ export function ResourceFormDialog({
                       {/* Sin aviso cuando está vacío, a diferencia del de m³:
                           que falte no deja al vehículo fuera de ninguna ruta,
                           así que advertirlo sería inventar una consecuencia. */}
+                    </Campo>
+                  )}
+
+                  {/* AC3 de HDU5.1: el rango antes de necesitar recarga. El
+                      ruteo lo usa para descartar órdenes de visita, no zonas:
+                      solo cuando ningún orden cabe se saca una zona.
+
+                      Vacío es lo NORMAL acá, no un dato pendiente: la
+                      municipalidad respondió que esa restricción no existe en
+                      su flota. Por eso tampoco lleva aviso. */}
+                  {campos.autonomia && (
+                    <Campo etiqueta="Autonomía">
+                      <ConUnidad unidad="km">
+                        <Input
+                          type="number"
+                          step="1"
+                          value={form.autonomia_km ?? ""}
+                          onChange={(e) =>
+                            setForm({ ...form, autonomia_km: Number(e.target.value) || null })
+                          }
+                          placeholder="sin límite"
+                          className="border-0 shadow-none focus-visible:ring-0"
+                        />
+                      </ConUnidad>
                     </Campo>
                   )}
 
