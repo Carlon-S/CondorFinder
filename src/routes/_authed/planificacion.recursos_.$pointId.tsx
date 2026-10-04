@@ -131,34 +131,35 @@ const ANCHOS = {
 function capacidadDe(
   r: Resource,
   declaradoEnSuTipo: { carga: boolean; balde: boolean },
-): { valor: number | null; nota: string; falta: boolean } {
+): { valor: number | null; unidad: "m³" | "t"; nota: string; falta: boolean } {
   if (r.familia === "carga") {
-    if (r.capacidad_m3 != null) return { valor: r.capacidad_m3, nota: "m³ de carga", falta: false };
+    if (r.capacidad_m3 != null)
+      return { valor: r.capacidad_m3, unidad: "m³", nota: "carga", falta: false };
     // Declara su límite en TONELADAS y no en volumen: es el CAMION 3/4 PLANO.
     // No es un hueco, es otra magnitud, y marcarlo en ámbar como si faltara el
     // dato sería falso ahora que la municipalidad lo entregó.
     if (r.capacidad_ton != null)
-      return { valor: r.capacidad_ton, nota: "t de carga", falta: false };
+      return { valor: r.capacidad_ton, unidad: "t", nota: "carga", falta: false };
     return declaradoEnSuTipo.carga
-      ? { valor: null, nota: "sin declarar", falta: true }
-      : { valor: null, nota: "sin dato", falta: false };
+      ? { valor: null, unidad: "m³", nota: "sin declarar", falta: true }
+      : { valor: null, unidad: "m³", nota: "sin dato", falta: false };
   }
   if (r.familia === "maquina") {
     if (r.capacidad_balde_m3 != null)
-      return { valor: r.capacidad_balde_m3, nota: "m³ de balde", falta: false };
+      return { valor: r.capacidad_balde_m3, unidad: "m³", nota: "balde", falta: false };
     return declaradoEnSuTipo.balde
-      ? { valor: null, nota: "balde sin declarar", falta: true }
-      : { valor: null, nota: "sin dato", falta: false };
+      ? { valor: null, unidad: "m³", nota: "balde sin declarar", falta: true }
+      : { valor: null, unidad: "m³", nota: "sin dato", falta: false };
   }
   if (r.familia === "arrastre") {
     // Un carro que declara su capacidad la muestra como cualquier otro. La
     // nota sigue diciendo "se remolca" porque es lo que lo distingue: carga,
     // pero alguien tiene que tirarlo.
     if (r.capacidad_m3 != null)
-      return { valor: r.capacidad_m3, nota: "m³, se remolca", falta: false };
-    return { valor: null, nota: "se remolca", falta: false };
+      return { valor: r.capacidad_m3, unidad: "m³", nota: "se remolca", falta: false };
+    return { valor: null, unidad: "m³", nota: "se remolca", falta: false };
   }
-  return { valor: null, nota: "sin dato", falta: false };
+  return { valor: null, unidad: "m³", nota: "sin dato", falta: false };
 }
 
 function dotacionTexto(r: Resource): string {
@@ -693,19 +694,21 @@ function RecursosDelPuntoPage() {
                       sortDir={sortDir}
                       onSort={alternarOrden}
                     />
-                    {/* Sin unidad en la cabecera, a diferencia del resto de
-                        las tablas del sistema. La regla (la unidad va en el
-                        encabezado y nunca en las celdas) existe para no repetir
-                        el mismo sufijo fila por fila y descolocar las cifras,
-                        y supone UNA unidad por columna. Acá ya no la hay: casi
-                        todas las unidades declaran m³ y el CAMION 3/4 PLANO
-                        declara toneladas. La unidad se fue a la segunda línea
-                        de cada celda, que ya existía para calificar la cifra
-                        ("de carga", "de balde"), así que no se agregó ningún
-                        elemento ni se movió la alineación de los números. */}
+                    {/* La unidad va en la cabecera, como en el resto de las
+                        tablas del sistema: repetida fila por fila descoloca las
+                        cifras, que es la razón por la que una tabla gana a una
+                        lista acá.
+
+                        La columna tiene UNA excepción, los dos CAMION 3/4
+                        PLANO, que declaran toneladas. No se resuelve poniéndole
+                        la unidad a las 21 filas: esas dos la dicen en su propia
+                        segunda línea ("t · carga"), que ya existía para
+                        calificar la cifra. Una excepción se marca donde ocurre,
+                        no en el encabezado de todas. */}
                     <SortableHead
                       field="capacidad"
                       label="Capacidad"
+                      unit="m³"
                       className={ANCHOS.capacidad}
                       sortBy={sortBy}
                       sortDir={sortDir}
@@ -821,7 +824,9 @@ function RecursosDelPuntoPage() {
                               <p className="mono text-xs font-semibold tabular-nums text-foreground">
                                 {cap.valor}
                               </p>
-                              <p className="text-xs text-muted-foreground">{cap.nota}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {cap.unidad === "m³" ? cap.nota : `${cap.unidad} · ${cap.nota}`}
+                              </p>
                             </>
                           ) : (
                             <p
@@ -1097,7 +1102,7 @@ function RecursosDelPuntoPage() {
                     etiqueta="Capacidad"
                     valor={
                       capacidadDeFila(enDetalle).valor !== null
-                        ? `${capacidadDeFila(enDetalle).valor} ${capacidadDeFila(enDetalle).nota}`
+                        ? `${capacidadDeFila(enDetalle).valor} ${capacidadDeFila(enDetalle).unidad} de ${capacidadDeFila(enDetalle).nota}`
                         : capacidadDeFila(enDetalle).nota
                     }
                     alerta={capacidadDeFila(enDetalle).falta}
