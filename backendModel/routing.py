@@ -136,6 +136,11 @@ class RoutePlanVehicleOut(BaseModel):
     resourceId: str | None = None
     numeroEquipo: str | None = None
     capacityM3: float | None = None
+    # Los otros dos límites del vehículo, que las reglas del AC4 y el AC3 usan
+    # para decidir. Si el plan descarta una zona por peso o por autonomía, el
+    # trabajador tiene que poder ver contra qué cifra se decidió.
+    capacityTon: float | None = None
+    autonomiaKm: float | None = None
     # Nombre del archivo, no la URL: la sirve GET /resources/photo/{filename} y
     # el frontend la arma, igual que en la lista de recursos. None en 8 de las 21
     # unidades de la flota real.
@@ -1136,6 +1141,8 @@ async def generate_route(
                 resourceId=c.get("resourceId"),
                 numeroEquipo=c.get("numeroEquipo"),
                 capacityM3=c.get("capacity_m3"),
+                capacityTon=c.get("capacity_ton"),
+                autonomiaKm=c.get("autonomia_km"),
                 foto=c.get("foto"),
                 crew=_dotacion_de(c),
             )
@@ -1159,7 +1166,14 @@ async def generate_route(
         # se eligieron por capacidad: la relajación por horas saca paradas
         # después de ese reparto, y sumar antes daría un volumen que el plan no
         # mueve.
-        total_volume_planificado += sum(s["volumeM3"] for s in sub["stops"])
+        # Se redondea CADA zona antes de sumar, no la suma al final. Parece lo
+        # mismo y no lo es: la interfaz imprime cada zona con dos decimales, así
+        # que sumar los valores crudos y redondear después da un total que no
+        # coincide con la suma de lo que se ve. Con 3,3349 y 3,6149 el panel
+        # mostraba "6,95 m³ de 6,94 cargados", o sea el plan parecía mover más
+        # volumen del que se había cargado. Mismo criterio que volumenCargado()
+        # en planificacion.rutas.tsx, que ya lo hacía así.
+        total_volume_planificado += sum(round(s["volumeM3"], 2) for s in sub["stops"])
         max_duration = max(max_duration, sub["durationHours"])
 
     return RoutePlanSuccessOut(

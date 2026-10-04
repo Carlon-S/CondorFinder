@@ -82,6 +82,12 @@ export interface RoutePlanVehicle {
    *  también lo que viaja en `patente` cuando la unidad no la trae cargada. */
   numeroEquipo?: string;
   capacityM3?: number;
+  /** Limite de peso. Si el plan descarta una zona por peso, es contra esta
+   *  cifra que se decidio. */
+  capacityTon?: number;
+  /** Rango antes de necesitar recarga. Ausente en toda la flota real: la
+   *  municipalidad respondio que ese limite no existe. */
+  autonomiaKm?: number;
   /** Nombre del archivo, no la URL: la sirve GET /resources/photo/{filename}.
    *  Ausente en 8 de las 21 unidades de la flota real. */
   foto?: string;

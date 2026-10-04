@@ -893,11 +893,11 @@ function RutasPage() {
       if (porNombre.length === 1) zona = porNombre[0];
     }
     if (!zona) return undefined;
-    const tipos = tiposDeZona(zona);
     return {
       volumeM3: zona.summary.totalVolumeM3,
-      wasteLabel: tipos[0]?.[0],
-      wasteColor: tipos[0] ? classColor(tipos[0][0]) : undefined,
+      weightKg: zona.summary.totalWeightKg,
+      wasteTypes: tiposDeZona(zona),
+      wasteColor: classColor,
       direccion: direcciones[zona.id] || undefined,
     };
   };
@@ -910,7 +910,10 @@ function RutasPage() {
       ? `${routeTotals.distanceKm.toFixed(1)} km`
       : routeSegments
         ? `${routeSegments
-            .reduce((t, x) => t + x.outboundDistanceKm + x.returnDistanceKm, 0)
+            .reduce(
+              (t, x) => t + x.outboundDistanceKm + (x.disposalDistanceKm ?? 0) + x.returnDistanceKm,
+              0,
+            )
             .toFixed(1)} km`
         : "sin dato";
 
@@ -919,7 +922,14 @@ function RutasPage() {
       ? formatDuration(routeTotals.durationHours)
       : routeSegments
         ? formatDuration(
-            routeSegments.reduce((t, x) => t + x.outboundDurationHours + x.returnDurationHours, 0),
+            routeSegments.reduce(
+              (t, x) =>
+                t +
+                x.outboundDurationHours +
+                (x.disposalDurationHours ?? 0) +
+                x.returnDurationHours,
+              0,
+            ),
           )
         : "sin dato";
 
@@ -1524,18 +1534,27 @@ function RutasPage() {
                                   <ArrowRightCircle className="mt-0.5 mr-7 h-4 w-4 flex-shrink-0 text-muted-foreground" />
                                 </span>
                                 <span className="mt-2 grid grid-cols-3 gap-2 border-t border-border/50 px-3 py-2">
+                                  {/* Los TRES tramos: ida, descarga en el relleno
+                                      y regreso. Sumando dos, esta tarjeta mostraba
+                                      110,7 km mientras la cabecera del plan decía
+                                      220,8: la misma ruta con dos cifras distintas
+                                      en la misma pantalla. */}
                                   <Medida
                                     etiqueta="Distancia"
-                                    valor={(seg.outboundDistanceKm + seg.returnDistanceKm).toFixed(
-                                      1,
-                                    )}
+                                    valor={(
+                                      seg.outboundDistanceKm +
+                                      (seg.disposalDistanceKm ?? 0) +
+                                      seg.returnDistanceKm
+                                    ).toFixed(1)}
                                     unidad="km"
                                     destacada
                                   />
                                   <Medida
                                     etiqueta="Duración"
                                     valor={formatDuration(
-                                      seg.outboundDurationHours + seg.returnDurationHours,
+                                      seg.outboundDurationHours +
+                                        (seg.disposalDurationHours ?? 0) +
+                                        seg.returnDurationHours,
                                     )}
                                     unidad=""
                                   />
@@ -2022,6 +2041,12 @@ function RutasPage() {
                   className="max-h-[22rem] w-full rounded-lg border border-border/60 object-contain"
                 />
               )}
+              {/* Los tres límites del vehículo juntos, más su dotación. El de
+                  volumen decide el reparto, el de peso y la autonomía deciden
+                  si queda descartado (AC4 y AC3): si el plan deja una zona sin
+                  asignar por alguna de esas razones, acá está la cifra contra
+                  la que se comparó. "Sin límite" y "sin declarar" dicen cosas
+                  distintas y por eso no comparten texto. */}
               <div className="grid grid-cols-2 gap-2">
                 <CifraPlan
                   icono={<Boxes className="h-3.5 w-3.5" />}
@@ -2030,6 +2055,24 @@ function RutasPage() {
                     vehiculoEnFoto.capacityM3 != null
                       ? `${vehiculoEnFoto.capacityM3} m³`
                       : "Sin declarar"
+                  }
+                />
+                <CifraPlan
+                  icono={<Scale className="h-3.5 w-3.5" />}
+                  etiqueta="Peso máximo"
+                  valor={
+                    vehiculoEnFoto.capacityTon != null
+                      ? `${vehiculoEnFoto.capacityTon} t`
+                      : "Sin límite"
+                  }
+                />
+                <CifraPlan
+                  icono={<RouteIcon className="h-3.5 w-3.5" />}
+                  etiqueta="Autonomía"
+                  valor={
+                    vehiculoEnFoto.autonomiaKm != null
+                      ? `${vehiculoEnFoto.autonomiaKm} km`
+                      : "Sin límite"
                   }
                 />
                 <CifraPlan

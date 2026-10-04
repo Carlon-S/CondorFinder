@@ -47,8 +47,16 @@ import type {
  *  hay y de qué es. */
 export interface DatosDeParada {
   volumeM3: number;
-  wasteLabel?: string;
-  wasteColor?: string;
+  /** Lo que el camión va a cargar de verdad. El volumen dice si entra en la
+   *  tolva; el peso dice si el vehículo lo aguanta, que es otra restricción
+   *  (AC4) y hasta ahora no se veía en el plan. */
+  weightKg?: number;
+  /** TODOS los tipos presentes en la zona, con su volumen, de mayor a menor.
+   *  Antes viajaba solo el dominante, y una zona con cuatro tipos se anunciaba
+   *  como si tuviera uno: el trabajador que va a cargar necesita saber con qué
+   *  se va a encontrar, no cuál predomina. */
+  wasteTypes?: [string, number][];
+  wasteColor?: (clase: string) => string | undefined;
   direccion?: string;
 }
 
@@ -333,22 +341,49 @@ export function RouteTimeline({
           </span>
         )}
         {datos && (
-          <span className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.6875rem]">
-            <span className="mono font-semibold tabular-nums text-foreground">
-              {datos.volumeM3.toFixed(2)} m³
-            </span>
-            {datos.wasteLabel && (
-              <span className="flex min-w-0 items-center gap-1.5 rounded-full bg-muted/70 py-0.5 pl-1.5 pr-2">
-                <span
-                  className="h-2 w-2 flex-shrink-0 rounded-full"
-                  style={{ background: datos.wasteColor ?? "var(--muted-foreground)" }}
-                />
-                <span className="min-w-0 truncate text-[0.625rem] text-foreground/80">
-                  {datos.wasteLabel}
+          <>
+            <span className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.6875rem]">
+              <span className="mono font-semibold tabular-nums text-foreground">
+                {datos.volumeM3.toFixed(2)} m³
+              </span>
+              {/* El peso al lado del volumen, en muted: son dos magnitudes de la
+                  misma carga y dos restricciones distintas del vehículo. */}
+              {datos.weightKg != null && (
+                <span className="mono tabular-nums text-muted-foreground">
+                  {datos.weightKg >= 1000
+                    ? `${(datos.weightKg / 1000).toFixed(2)} t`
+                    : `${Math.round(datos.weightKg)} kg`}
                 </span>
+              )}
+            </span>
+            {/* Todos los tipos, no solo el dominante. Cada uno con su volumen,
+                porque "tiene plástico" y "tiene 3 m³ de plástico" no dicen lo
+                mismo a quien va a cargar. */}
+            {datos.wasteTypes && datos.wasteTypes.length > 0 && (
+              <span className="mt-1 flex flex-wrap items-center gap-1">
+                {datos.wasteTypes.map(([clase, vol]) => (
+                  <span
+                    key={clase}
+                    className="flex min-w-0 items-center gap-1.5 rounded-full bg-muted/70 py-0.5 pl-1.5 pr-2"
+                    title={`${clase}: ${vol.toFixed(2)} m³`}
+                  >
+                    <span
+                      className="h-2 w-2 flex-shrink-0 rounded-full"
+                      style={{
+                        background: datos.wasteColor?.(clase) ?? "var(--muted-foreground)",
+                      }}
+                    />
+                    <span className="min-w-0 truncate text-[0.625rem] text-foreground/80">
+                      {clase}
+                    </span>
+                    <span className="mono flex-shrink-0 text-[0.5625rem] tabular-nums text-muted-foreground">
+                      {vol.toFixed(1)}
+                    </span>
+                  </span>
+                ))}
               </span>
             )}
-          </span>
+          </>
         )}
       </>
     );

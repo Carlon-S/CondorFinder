@@ -181,6 +181,7 @@ function RecursosDelPuntoPage() {
   const [tipos, setTipos] = useState<ResourceType[]>([]);
   const [cargando, setCargando] = useState(true);
   const [alternando, setAlternando] = useState<string | null>(null);
+  const [cambiandoTodos, setCambiandoTodos] = useState(false);
   const [eligiendoTipo, setEligiendoTipo] = useState(agregar === true);
   const [aEliminar, setAEliminar] = useState<Resource | null>(null);
   const [eliminando, setEliminando] = useState(false);
@@ -387,6 +388,52 @@ function RecursosDelPuntoPage() {
     }
   };
 
+  /** Pone TODAS las unidades del punto en el mismo estado.
+   *
+   *  No es solo comodidad de prueba: la municipalidad trabaja por jornada y hay
+   *  días en que el patio entero sale o no sale, y hacerlo de a una en 21 filas
+   *  es donde se cuelan los olvidos. El que ya está en el estado pedido no se
+   *  toca, así que son tantas peticiones como unidades haya que cambiar y no 21
+   *  siempre.
+   *
+   *  Las peticiones van EN SERIE y no con Promise.all: 21 PATCH simultáneos
+   *  contra la misma colección es la clase de ráfaga que hace que el punto
+   *  devuelva una capacidad calculada a mitad de camino. */
+  const alternarTodos = async (disponible: boolean) => {
+    const aCambiar = recursos.filter((r) => r.disponible !== disponible);
+    if (aCambiar.length === 0) {
+      notify.success(disponible ? "Ya están todos disponibles" : "Ya están todos no disponibles");
+      return;
+    }
+    setCambiandoTodos(true);
+    const actualizados: Resource[] = [];
+    try {
+      for (const r of aCambiar) {
+        actualizados.push(await setResourceAvailability(r.id, disponible));
+      }
+      const porId = new Map(actualizados.map((r) => [r.id, r]));
+      setRecursos((prev) => prev.map((x) => porId.get(x.id) ?? x));
+      notify.success(
+        disponible ? "Todos disponibles" : "Todos no disponibles",
+        `${aCambiar.length} ${aCambiar.length === 1 ? "unidad cambiada" : "unidades cambiadas"}.`,
+      );
+    } catch (err) {
+      // Lo que alcanzó a cambiar se refleja igual: dejar la tabla mostrando el
+      // estado anterior después de 12 cambios aplicados sería mentir.
+      const porId = new Map(actualizados.map((r) => [r.id, r]));
+      setRecursos((prev) => prev.map((x) => porId.get(x.id) ?? x));
+      notify.error(
+        "No se pudieron cambiar todas",
+        err instanceof Error ? err.message : "Intenta nuevamente.",
+      );
+    } finally {
+      setCambiandoTodos(false);
+      getResourcePoint(pointId)
+        .then(setPunto)
+        .catch(() => {});
+    }
+  };
+
   const confirmarEliminar = async () => {
     if (!aEliminar) return;
     setEliminando(true);
@@ -540,6 +587,32 @@ function RecursosDelPuntoPage() {
                   {etiqueta}
                 </button>
               ))}
+            </div>
+
+            {/* Disponibilidad de toda la flota de una vez. Dos botones y no un
+                interruptor por el mismo motivo que el filtro de al lado: son dos
+                acciones distintas, y con un interruptor el estado intermedio
+                (algunas sí y otras no) no sabría qué mostrar. */}
+            <div className="flex items-center gap-1">
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={cambiandoTodos || recursos.length === 0}
+                onClick={() => alternarTodos(true)}
+                className="h-8 text-xs"
+              >
+                {cambiandoTodos && <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />}
+                Todos disponibles
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={cambiandoTodos || recursos.length === 0}
+                onClick={() => alternarTodos(false)}
+                className="h-8 text-xs"
+              >
+                Ninguno
+              </Button>
             </div>
           </div>
 
@@ -749,6 +822,22 @@ function RecursosDelPuntoPage() {
                               }`}
                             >
                               {cap.nota}
+                            </p>
+                          )}
+                        </TableCell>
+
+                        {/* AC3. "sin límite" solo para los que podrían tenerla:
+                            un carro remolcado o una retro no declaran autonomía
+                            propia, y decirles "sin límite" sugeriría que es un
+                            dato que falta en vez de uno que no aplica. */}
+                        <TableCell className="text-center">
+                          {r.autonomia_km != null ? (
+                            <p className="mono text-xs font-semibold tabular-nums text-foreground">
+                              {r.autonomia_km}
+                            </p>
+                          ) : (
+                            <p className="text-xs text-muted-foreground">
+                              {r.familia === "carga" ? "sin límite" : "—"}
                             </p>
                           )}
                         </TableCell>
