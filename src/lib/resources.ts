@@ -370,6 +370,31 @@ export async function updateResource(id: string, resource: ResourceInput): Promi
   return res.json();
 }
 
+/** Pone TODAS las unidades de un punto en el mismo estado, en UNA peticion.
+ *
+ *  Un bucle de 21 PATCH desde el cliente se siente lento, y en paralelo son 21
+ *  escrituras compitiendo contra la misma coleccion. El backend lo resuelve con
+ *  un update_many y devuelve la lista ya actualizada, asi la vista la reemplaza
+ *  sin volver a pedirla. */
+export async function setPointResourcesAvailability(
+  pointId: string,
+  disponible: boolean,
+): Promise<Resource[]> {
+  const res = await fetch(
+    `${BACKEND_URL}/resources/points/${encodeURIComponent(pointId)}/disponibilidad`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ disponible }),
+    },
+  );
+  if (!res.ok) {
+    throw new Error(await parseErrorMessage(res, "No se pudo cambiar la disponibilidad."));
+  }
+  return res.json();
+}
+
 /** AC4 de HDU8. Endpoint propio y no un PUT completo: es la acción más
  *  frecuente de la vista (un camión entra y sale de taller), y con PUT habría
  *  que reenviar el recurso entero, con riesgo de pisar un campo que alguien más

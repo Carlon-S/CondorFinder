@@ -650,6 +650,33 @@ async def set_disponibilidad(
     return _resource_to_out(actualizado)
 
 
+@router.patch("/points/{point_id}/disponibilidad", response_model=list[ResourceOut])
+async def set_disponibilidad_del_punto(
+    point_id: str,
+    payload: DisponibilidadIn,
+    current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
+):
+    """Pone TODAS las unidades de un punto en el mismo estado, de una vez.
+
+    No es solo comodidad: la municipalidad trabaja por jornada y hay días en que
+    el patio entero sale o no sale, y hacerlo de a una en 21 filas es donde se
+    cuelan los olvidos.
+
+    Existe como endpoint y no como un bucle en el cliente porque 21 PATCH en
+    serie se sentían lentos de verdad, y en paralelo son 21 peticiones
+    compitiendo contra la misma colección, con el punto devolviendo una capacidad
+    calculada a mitad de camino. Un `update_many` es una sola escritura.
+
+    Devuelve los recursos del punto ya actualizados, así el cliente reemplaza su
+    lista sin volver a pedirla."""
+    await get_db().resources.update_many(
+        {"pointId": point_id},
+        {"$set": {"disponible": payload.disponible}},
+    )
+    docs = await get_db().resources.find({"pointId": point_id}).to_list(length=None)
+    return [_resource_to_out(d) for d in docs]
+
+
 @router.delete("/units/{resource_id}")
 async def delete_resource(
     resource_id: str,

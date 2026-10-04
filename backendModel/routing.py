@@ -372,40 +372,55 @@ def _trucks_used(
     coincidencia de tipo, y solo usará un vehículo no compatible si no existe
     ninguna alternativa compatible con capacidad suficiente".
 
-      1. Reglas DURAS, que descartan candidatos: el tipo que no participa de una
-         ruta de microbasural, y el que no aguanta el peso de la zona.
+      1. Una regla DURA que descarta candidatos: el tipo que no participa de una
+         ruta de microbasural.
       2. Dos vueltas de la MISMA enumeración: primero sobre los preferidos para
          esa clase, y solo si ninguna combinación alcanza, sobre todos. El "con
          capacidad suficiente" del criterio es lo que ya hacía el enumerador, no
          hubo que agregarlo.
 
-    Devuelve [] cuando ninguna regla dura deja candidatos. El llamador lo
-    traduce en una zona sin asignar con su motivo (AC6)."""
+    **El peso es una restricción del CONJUNTO, no de cada vehículo.** Al
+    principio se filtraba unidad por unidad (descartar al que no aguantara solo
+    todo el peso), y estaba mal por lo mismo que lo estaría para el volumen: la
+    carga se reparte entre los vehículos despachados. Dos amplirolls de 15 t
+    mueven 30 t entre los dos, y filtrando de a uno ninguno calificaba para 18 t.
+    Ahora el límite se suma sobre el subconjunto, igual que los m³.
+
+    Una unidad sin `capacity_ton` no significa "aguanta cero", significa que
+    nadie declaró su límite, así que un conjunto que incluya alguna así no se
+    restringe por peso. Hoy solo el AMPLIROLL lo declara.
+
+    Devuelve [] cuando ninguna combinación alcanza, por tipo, por volumen o por
+    peso. El llamador lo traduce en una zona sin asignar con su motivo (AC6)."""
     camiones = [c for c in point.get("trucks", []) if c.get("capacity_m3", 0) > 0]
 
-    # ── Reglas duras ──
+    # ── Regla dura: el tipo ──
     camiones = [
         c
         for c in camiones
         if resources_module.tipo_participa_en_microbasural(c.get("tipo", ""))
     ]
-    if assigned_weight_ton > 0:
-        # Un límite de peso ausente no descarta: significa no declarado, no
-        # ilimitado-pero-cero. Toda la flota de transporte declara m3; solo el
-        # AMPLIROLL declara además sus 15 t.
-        camiones = [
-            c
-            for c in camiones
-            if c.get("capacity_ton") is None or c["capacity_ton"] >= assigned_weight_ton
-        ]
 
     if not camiones:
         return []
 
+    def aguanta_el_peso(combo) -> bool:
+        """Si el CONJUNTO puede con el peso asignado.
+
+        Basta que una unidad no declare su límite para que el conjunto quede sin
+        restricción: no se puede afirmar que un camión no aguanta un peso que
+        nadie midió."""
+        if assigned_weight_ton <= 0:
+            return True
+        limites = [c.get("capacity_ton") for c in combo]
+        if any(l is None for l in limites):
+            return True
+        return sum(limites) >= assigned_weight_ton
+
     def enumerar(candidatos: list[dict]) -> list[dict]:
         por_capacidad = sorted(candidatos, key=lambda t: t.get("capacity_m3", 0))
         if assigned_volume <= 0:
-            return por_capacidad[:1]
+            return por_capacidad[:1] if aguanta_el_peso(por_capacidad[:1]) else []
 
         if len(candidatos) <= _MAX_UNIDADES_FUERZA_BRUTA:
             for tamano in range(1, len(candidatos) + 1):
@@ -413,6 +428,8 @@ def _trucks_used(
                 for combo in itertools.combinations(por_capacidad, tamano):
                     capacidad = sum(c.get("capacity_m3", 0) for c in combo)
                     if capacidad < assigned_volume:
+                        continue
+                    if not aguanta_el_peso(combo):
                         continue
                     if mejor is None or capacidad < mejor[0]:
                         mejor = (capacidad, list(combo))
@@ -428,9 +445,9 @@ def _trucks_used(
         for c in reversed(por_capacidad):
             elegidos.append(c)
             total += c.get("capacity_m3", 0)
-            if total >= assigned_volume:
+            if total >= assigned_volume and aguanta_el_peso(elegidos):
                 break
-        return elegidos if total >= assigned_volume else []
+        return elegidos if total >= assigned_volume and aguanta_el_peso(elegidos) else []
 
     # ── Primera vuelta: solo los preferidos para esta clase ──
     preferidos = [
@@ -448,9 +465,16 @@ def _trucks_used(
     if elegidos:
         return elegidos
 
-    # Ningún subconjunto cubre el volumen. No debería pasar (el handler recorta
-    # la carga antes), pero devolver la flota entera es más útil que nada.
-    return sorted(camiones, key=lambda t: t.get("capacity_m3", 0), reverse=True)
+    # Ninguna combinación alcanza. **Devolver [] y no la flota entera**: el
+    # respaldo anterior despachaba todos los camiones aunque no cubrieran la
+    # carga, y el plan salía adelante con capacidad insuficiente. Se veía así:
+    # con los dos amplirolls descartados por peso y seis tolvas de 1 m³, el plan
+    # armaba el recorrido completo para 6,94 m³ con 6 m³ de camiones.
+    #
+    # El handler no puede prevenirlo por su cuenta: su chequeo de capacidad suma
+    # `_point_truck_capacity`, que ignora las reglas de AC4, así que cree que hay
+    # capacidad de sobra. Esta función es la única que sabe qué quedó afuera.
+    return []
 
 
 def _dotacion_de(camion: dict) -> list[str]:
@@ -809,6 +833,7 @@ async def _build_subroute(
             "sinVehiculoCompatible": True,
             "clase": clase_dominante,
             "pesoTon": sum(s.get("weightTon", 0) for s in point_stops),
+            "volumenM3": sum(s["volumeM3"] for s in point_stops),
         }
 
     # El rango que manda es el MÍNIMO de los despachados: si uno se queda sin
@@ -1073,10 +1098,17 @@ async def generate_route(
                 # distinguen: que ningún vehículo aguante el peso no es lo mismo
                 # que no haber ninguno habilitado para esta ruta.
                 peso = result.get("pesoTon") or 0
+                volumen = result.get("volumenM3") or 0
                 if peso > 0:
+                    # Las dos magnitudes juntas, porque desde que el peso es una
+                    # restricción del conjunto ya no se sabe cuál de las dos
+                    # falló mirando una sola. Decir "no puede con 1,1 t" cuando
+                    # lo que no alcanzaba era el volumen manda a revisar el dato
+                    # equivocado.
                     motivo = (
-                        f"Ningún vehículo disponible puede llevar las "
-                        f"{_format_number(round(peso, 2))} toneladas de esta carga."
+                        f"Ninguna combinación de vehículos disponibles cubre los "
+                        f"{_format_number(round(volumen, 2))} m³ y las "
+                        f"{_format_number(round(peso, 2))} t de esta carga."
                     )
                 else:
                     motivo = "Ningún vehículo disponible puede transportar este residuo."

@@ -407,7 +407,7 @@ export function ResourceFormDialog({
                           // manda 0, y el backend exige > 0 porque una capacidad de
                           // cero no es un dato, es la ausencia de uno.
                           onChange={(e) =>
-                            setForm({ ...form, capacidad_m3: Number(e.target.value) || null })
+                            setForm({ ...form, capacidad_m3: aNumero(e.target.value) })
                           }
                           placeholder="10"
                           className="border-0 shadow-none focus-visible:ring-0"
@@ -434,18 +434,10 @@ export function ResourceFormDialog({
                       la zona, que volumeCalc.py ya calcula. */}
                   {campos.capacidadPeso && (
                     <Campo etiqueta="Peso máximo">
-                      <ConUnidad unidad="t">
-                        <Input
-                          type="number"
-                          step="0.1"
-                          value={form.capacidad_ton ?? ""}
-                          onChange={(e) =>
-                            setForm({ ...form, capacidad_ton: Number(e.target.value) || null })
-                          }
-                          placeholder="15"
-                          className="border-0 shadow-none focus-visible:ring-0"
-                        />
-                      </ConUnidad>
+                      <PesoEnUnidad
+                        valorTon={form.capacidad_ton}
+                        onChange={(ton) => setForm({ ...form, capacidad_ton: ton })}
+                      />
                       {/* Sin aviso cuando está vacío, a diferencia del de m³:
                           que falte no deja al vehículo fuera de ninguna ruta,
                           así que advertirlo sería inventar una consecuencia. */}
@@ -467,7 +459,7 @@ export function ResourceFormDialog({
                           step="1"
                           value={form.autonomia_km ?? ""}
                           onChange={(e) =>
-                            setForm({ ...form, autonomia_km: Number(e.target.value) || null })
+                            setForm({ ...form, autonomia_km: aNumero(e.target.value) })
                           }
                           placeholder="sin límite"
                           className="border-0 shadow-none focus-visible:ring-0"
@@ -484,7 +476,7 @@ export function ResourceFormDialog({
                           step="0.1"
                           value={form.capacidad_balde_m3 ?? ""}
                           onChange={(e) =>
-                            setForm({ ...form, capacidad_balde_m3: Number(e.target.value) || null })
+                            setForm({ ...form, capacidad_balde_m3: aNumero(e.target.value) })
                           }
                           placeholder="1"
                           className="border-0 shadow-none focus-visible:ring-0"
@@ -608,6 +600,70 @@ function Campo({
 /** Campo numérico con la unidad pegada a la izquierda. La unidad deja de ser
  *  parte de la etiqueta y pasa a estar donde se escribe el número, que es donde
  *  importa saber en qué se está midiendo. */
+/** Lo que escribe el usuario, convertido a número o a null.
+ *
+ *  Reemplaza al `Number(v) || null` que había en cada campo, y la diferencia no
+ *  es cosmética: `|| null` convierte el 0 en null, así que **escribir "0.5" era
+ *  imposible**. Al teclear el "0" el campo se vaciaba solo y nunca se llegaba al
+ *  ".5". Con esto el 0 sobrevive como valor intermedio y la validación del
+ *  backend (que exige > 0) lo rechaza al guardar, que es donde corresponde
+ *  decirlo. */
+function aNumero(v: string): number | null {
+  return v.trim() === "" ? null : Number(v);
+}
+
+/** Campo numérico que se escribe en kg o en t, guardando SIEMPRE toneladas.
+ *
+ *  La municipalidad entregó sus límites en toneladas y así se guardan, pero un
+ *  camión de media tonelada se piensa como "500 kilos", no como "0,5". Obligar a
+ *  traducir mentalmente a una unidad en la que casi todos los valores son
+ *  decimales menores que uno es pedirle al usuario que haga la conversión que
+ *  debería hacer el formulario.
+ *
+ *  La base de datos no se entera: el selector solo cambia cómo se escribe. */
+function PesoEnUnidad({
+  valorTon,
+  onChange,
+}: {
+  valorTon: number | null;
+  onChange: (ton: number | null) => void;
+}) {
+  // Arranca en kg cuando el valor guardado es menor a una tonelada, que es
+  // justo el caso donde las toneladas se leen mal.
+  const [unidad, setUnidad] = useState<"t" | "kg">(valorTon != null && valorTon < 1 ? "kg" : "t");
+  const mostrado =
+    valorTon == null ? "" : unidad === "kg" ? String(valorTon * 1000) : String(valorTon);
+
+  return (
+    <div className="flex items-center overflow-hidden rounded-md border border-input bg-background focus-within:ring-2 focus-within:ring-ring/30">
+      {/* El selector ocupa el lugar donde los otros campos ponen su unidad fija,
+          así que la fila mide igual y los campos siguen alineados. */}
+      <select
+        value={unidad}
+        onChange={(e) => setUnidad(e.target.value as "t" | "kg")}
+        aria-label="Unidad del peso máximo"
+        className="mono h-9 cursor-pointer border-r border-input bg-transparent px-2 text-xs text-muted-foreground focus:outline-none"
+      >
+        <option value="t">t</option>
+        <option value="kg">kg</option>
+      </select>
+      <div className="flex-1">
+        <Input
+          type="number"
+          step={unidad === "kg" ? "50" : "0.1"}
+          value={mostrado}
+          onChange={(e) => {
+            const n = aNumero(e.target.value);
+            onChange(n == null ? null : unidad === "kg" ? n / 1000 : n);
+          }}
+          placeholder={unidad === "kg" ? "15000" : "15"}
+          className="border-0 shadow-none focus-visible:ring-0"
+        />
+      </div>
+    </div>
+  );
+}
+
 function ConUnidad({ unidad, children }: { unidad: string; children: React.ReactNode }) {
   return (
     <div className="flex items-center overflow-hidden rounded-md border border-input bg-background focus-within:ring-2 focus-within:ring-ring/30">

@@ -69,6 +69,7 @@ import {
   listResources,
   motivoFueraDeRuta,
   resourcePhotoUrl,
+  setPointResourcesAvailability,
   setResourceAvailability,
   TEXTO_FUERA_DE_RUTA,
   type Resource,
@@ -90,7 +91,7 @@ export const Route = createFileRoute("/_authed/planificacion/recursos_/$pointId"
       : {},
 });
 
-type Campo = "estado" | "equipo" | "tipo" | "capacidad" | "vehiculo";
+type Campo = "estado" | "equipo" | "tipo" | "capacidad" | "autonomia" | "vehiculo";
 
 /** Anchos de columna, en porcentaje y en un solo lugar, para usarlos con
  *  `table-fixed`. Con el ancho automático del navegador cada columna mide lo
@@ -98,13 +99,14 @@ type Campo = "estado" | "equipo" | "tipo" | "capacidad" | "vehiculo";
  *  un "CATERPILLAR 416F2 2018" y el encabezado de capacidad se partía en dos
  *  líneas. */
 const ANCHOS = {
-  estado: "w-[16%]",
-  foto: "w-[9%]",
-  equipo: "w-[17%]",
-  tipo: "w-[12%]",
-  capacidad: "w-[15%]",
-  vehiculo: "w-[16%]",
-  acciones: "w-[15%]",
+  estado: "w-[14%]",
+  foto: "w-[8%]",
+  equipo: "w-[16%]",
+  tipo: "w-[11%]",
+  capacidad: "w-[13%]",
+  autonomia: "w-[11%]",
+  vehiculo: "w-[14%]",
+  acciones: "w-[13%]",
 } as const;
 
 /** La cifra de capacidad separada de qué mide. Antes la celda decía "balde 3"
@@ -316,6 +318,14 @@ function RecursosDelPuntoPage() {
           const cb = capacidadDeFila(b).valor ?? -1;
           return (ca - cb) * signo;
         }
+        case "autonomia": {
+          // Sin declarar va al fondo con -1, igual que la capacidad: en una
+          // flota donde ninguna la declara el orden queda estable y no parece
+          // aleatorio.
+          const aa = a.autonomia_km ?? -1;
+          const ab = b.autonomia_km ?? -1;
+          return (aa - ab) * signo;
+        }
         case "vehiculo":
           return `${a.marca} ${a.modelo}`.localeCompare(`${b.marca} ${b.modelo}`) * signo;
         case "tipo":
@@ -388,44 +398,34 @@ function RecursosDelPuntoPage() {
     }
   };
 
-  /** Pone TODAS las unidades del punto en el mismo estado.
+  /** Pone TODAS las unidades del punto en el mismo estado, en UNA petición.
    *
-   *  No es solo comodidad de prueba: la municipalidad trabaja por jornada y hay
-   *  días en que el patio entero sale o no sale, y hacerlo de a una en 21 filas
-   *  es donde se cuelan los olvidos. El que ya está en el estado pedido no se
-   *  toca, así que son tantas peticiones como unidades haya que cambiar y no 21
-   *  siempre.
+   *  No es solo comodidad: la municipalidad trabaja por jornada y hay días en
+   *  que el patio entero sale o no sale, y hacerlo de a una en 21 filas es donde
+   *  se cuelan los olvidos.
    *
-   *  Las peticiones van EN SERIE y no con Promise.all: 21 PATCH simultáneos
-   *  contra la misma colección es la clase de ráfaga que hace que el punto
-   *  devuelva una capacidad calculada a mitad de camino. */
+   *  La primera versión recorría las 21 con un PATCH cada una y se sentía lenta
+   *  de verdad; en paralelo habrían sido 21 escrituras compitiendo contra la
+   *  misma colección, con el punto devolviendo una capacidad calculada a mitad
+   *  de camino. El backend lo resuelve con un `update_many` y devuelve la lista
+   *  ya actualizada. */
   const alternarTodos = async (disponible: boolean) => {
-    const aCambiar = recursos.filter((r) => r.disponible !== disponible);
-    if (aCambiar.length === 0) {
-      notify.success(disponible ? "Ya están todos disponibles" : "Ya están todos no disponibles");
-      return;
-    }
     setCambiandoTodos(true);
-    const actualizados: Resource[] = [];
     try {
-      for (const r of aCambiar) {
-        actualizados.push(await setResourceAvailability(r.id, disponible));
-      }
-      const porId = new Map(actualizados.map((r) => [r.id, r]));
-      setRecursos((prev) => prev.map((x) => porId.get(x.id) ?? x));
-      notify.success(
-        disponible ? "Todos disponibles" : "Todos no disponibles",
-        `${aCambiar.length} ${aCambiar.length === 1 ? "unidad cambiada" : "unidades cambiadas"}.`,
-      );
+      const actualizados = await setPointResourcesAvailability(pointId, disponible);
+      setRecursos(actualizados);
+      notify.success(disponible ? "Todos disponibles" : "Ninguno disponible");
     } catch (err) {
-      // Lo que alcanzó a cambiar se refleja igual: dejar la tabla mostrando el
-      // estado anterior después de 12 cambios aplicados sería mentir.
-      const porId = new Map(actualizados.map((r) => [r.id, r]));
-      setRecursos((prev) => prev.map((x) => porId.get(x.id) ?? x));
       notify.error(
-        "No se pudieron cambiar todas",
+        "No se pudo cambiar la disponibilidad",
         err instanceof Error ? err.message : "Intenta nuevamente.",
       );
+      // La lista se vuelve a pedir: el update_many es atómico, así que o cambió
+      // todo o no cambió nada, pero el error puede haber sido de red después de
+      // la escritura y la tabla no debe quedar adivinando.
+      listResources(pointId)
+        .then(setRecursos)
+        .catch(() => {});
     } finally {
       setCambiandoTodos(false);
       getResourcePoint(pointId)
@@ -553,6 +553,24 @@ function RecursosDelPuntoPage() {
 
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-card">
           <div className="flex flex-wrap items-center gap-2 border-b border-border px-5 py-3">
+            {/* Disponibilidad de toda la flota, a la izquierda del buscador y
+                con el MISMO interruptor que cada fila usa en su columna Estado:
+                es la misma acción sobre todas en vez de sobre una, así que
+                repetir el gesto es lo que la vuelve evidente sin explicarla.
+                Dos botones hacían el mismo trabajo pero obligaban a leer cuál de
+                los dos correspondía apretar. */}
+            <div className="flex flex-shrink-0 items-center gap-2 rounded-md border border-border bg-background/60 py-1.5 pr-3 pl-2.5">
+              <Switch
+                checked={noDisponibles === 0}
+                disabled={cambiandoTodos || recursos.length === 0}
+                onCheckedChange={alternarTodos}
+                aria-label="Disponibilidad de toda la flota"
+              />
+              <span className="text-xs font-medium whitespace-nowrap text-muted-foreground">
+                {cambiandoTodos ? "Cambiando…" : noDisponibles === 0 ? "Todos" : "Ninguno"}
+              </span>
+            </div>
+
             <div className="relative min-w-[14rem] flex-1">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -587,32 +605,6 @@ function RecursosDelPuntoPage() {
                   {etiqueta}
                 </button>
               ))}
-            </div>
-
-            {/* Disponibilidad de toda la flota de una vez. Dos botones y no un
-                interruptor por el mismo motivo que el filtro de al lado: son dos
-                acciones distintas, y con un interruptor el estado intermedio
-                (algunas sí y otras no) no sabría qué mostrar. */}
-            <div className="flex items-center gap-1">
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={cambiandoTodos || recursos.length === 0}
-                onClick={() => alternarTodos(true)}
-                className="h-8 text-xs"
-              >
-                {cambiandoTodos && <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />}
-                Todos disponibles
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={cambiandoTodos || recursos.length === 0}
-                onClick={() => alternarTodos(false)}
-                className="h-8 text-xs"
-              >
-                Ninguno
-              </Button>
             </div>
           </div>
 
@@ -715,6 +707,22 @@ function RecursosDelPuntoPage() {
                       field="capacidad"
                       label="Capacidad"
                       className={ANCHOS.capacidad}
+                      sortBy={sortBy}
+                      sortDir={sortDir}
+                      onSort={alternarOrden}
+                      align="center"
+                    />
+                    {/* AC3 de HDU5.1. Hoy toda la flota la tiene vacía, porque
+                        la municipalidad respondió que ese límite no existe, así
+                        que la columna muestra "sin límite" en las 21 filas. Se
+                        incluye igual: es el único lugar donde se ve de un
+                        vistazo cuáles declaran rango sin abrir la ficha de cada
+                        unidad. */}
+                    <SortableHead
+                      field="autonomia"
+                      label="Autonomía"
+                      unit="km"
+                      className={ANCHOS.autonomia}
                       sortBy={sortBy}
                       sortDir={sortDir}
                       onSort={alternarOrden}

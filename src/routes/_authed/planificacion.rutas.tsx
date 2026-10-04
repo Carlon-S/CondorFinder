@@ -2226,7 +2226,14 @@ function RutasPage() {
           if (!open) handleCancelConfirm();
         }}
       >
-        <DialogContent>
+        {/* Sin foco automático al abrir. Radix enfoca el primer elemento
+            enfocable del diálogo, que acá es el campo de horas, y abría con el
+            "8" seleccionado en azul: parece que el valor está por reemplazarse,
+            y de hecho basta teclear cualquier cosa para perderlo. El diálogo es
+            de CONFIRMACIÓN, así que lo primero que hay que hacer es leerlo, no
+            escribir. El teclado no queda afuera: el Tab entra igual, y Escape
+            sigue cerrando porque eso lo maneja el diálogo y no el foco. */}
+        <DialogContent onOpenAutoFocus={(e) => e.preventDefault()}>
           <DialogHeader>
             <DialogTitle>Generar ruta óptima</DialogTitle>
             <DialogDescription>Confirma los datos antes de generar la ruta.</DialogDescription>
