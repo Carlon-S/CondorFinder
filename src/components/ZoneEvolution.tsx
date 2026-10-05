@@ -71,15 +71,27 @@ export function ZoneEvolution({
     );
   }
 
-  // Cuando TODAS las capturas son del mismo día, el eje muestra solo la hora:
-  // repetir la fecha en cada marca es ruido, porque ya está en la cabecera, y
-  // una etiqueta larga en el primer punto se recorta contra el borde del
-  // gráfico. Con días distintos la fecha vuelve, porque entonces es lo que
-  // distingue a una captura de otra.
-  const mismoDia = new Set(points.map((p) => versionDay(p.date))).size === 1;
+  // ── Qué dice cada marca del eje ──
+  //
+  // La hora SIEMPRE, porque es lo único que distingue dos capturas del mismo
+  // set de imágenes. La fecha solo cuando aporta:
+  //
+  //   - Todas del mismo día  -> nunca, la fecha ya está en la cabecera
+  //   - Días distintos       -> en la primera y cada vez que CAMBIA el día
+  //
+  // Esa segunda regla es la que usan los gráficos financieros, y acá es
+  // necesaria y no cosmética: con tres capturas y la fecha repetida en todas,
+  // las etiquetas miden 18 caracteres y se enciman, porque `interval={0}` las
+  // dibuja todas. Repetir "14-07-2026" en dos marcas contiguas ocupa el ancho
+  // sin agregar información.
+  const dias = points.map((p) => versionDay(p.date));
+  const unSoloDia = new Set(dias).size === 1;
 
-  const chartData = points.map((p) => ({
-    fecha: mismoDia ? versionTime(p.uploadedAt) : versionLabel(p.date, p.uploadedAt),
+  const chartData = points.map((p, i) => ({
+    fecha:
+      unSoloDia || dias[i] === dias[i - 1]
+        ? versionTime(p.uploadedAt)
+        : versionLabel(p.date, p.uploadedAt),
     volumeM3: p.volumeM3,
     analysisId: p.analysisId,
   }));
