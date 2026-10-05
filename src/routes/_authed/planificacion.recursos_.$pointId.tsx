@@ -91,7 +91,7 @@ export const Route = createFileRoute("/_authed/planificacion/recursos_/$pointId"
       : {},
 });
 
-type Campo = "estado" | "equipo" | "tipo" | "capacidad" | "autonomia" | "vehiculo";
+type Campo = "estado" | "equipo" | "tipo" | "capacidad" | "peso" | "autonomia" | "vehiculo";
 
 /** Anchos de columna, en porcentaje y en un solo lugar, para usarlos con
  *  `table-fixed`. Con el ancho automático del navegador cada columna mide lo
@@ -99,14 +99,15 @@ type Campo = "estado" | "equipo" | "tipo" | "capacidad" | "autonomia" | "vehicul
  *  un "CATERPILLAR 416F2 2018" y el encabezado de capacidad se partía en dos
  *  líneas. */
 const ANCHOS = {
-  estado: "w-[14%]",
-  foto: "w-[8%]",
-  equipo: "w-[16%]",
-  tipo: "w-[11%]",
-  capacidad: "w-[13%]",
-  autonomia: "w-[11%]",
-  vehiculo: "w-[14%]",
-  acciones: "w-[13%]",
+  estado: "w-[13%]",
+  foto: "w-[7%]",
+  equipo: "w-[15%]",
+  tipo: "w-[10%]",
+  capacidad: "w-[11%]",
+  peso: "w-[10%]",
+  autonomia: "w-[10%]",
+  vehiculo: "w-[12%]",
+  acciones: "w-[12%]",
 } as const;
 
 /** La cifra de capacidad separada de qué mide. Antes la celda decía "balde 3"
@@ -318,6 +319,11 @@ function RecursosDelPuntoPage() {
           const ca = capacidadDeFila(a).valor ?? -1;
           const cb = capacidadDeFila(b).valor ?? -1;
           return (ca - cb) * signo;
+        }
+        case "peso": {
+          const pa = a.capacidad_ton ?? -1;
+          const pb = b.capacidad_ton ?? -1;
+          return (pa - pb) * signo;
         }
         case "autonomia": {
           // Sin declarar va al fondo con -1, igual que la capacidad: en una
@@ -715,6 +721,22 @@ function RecursosDelPuntoPage() {
                       onSort={alternarOrden}
                       align="center"
                     />
+                    {/* El límite de PESO, en su propia columna y no dentro de
+                        la de capacidad: son dos magnitudes distintas del mismo
+                        vehículo, y el AMPLIROLL declara las dos (20 m³ y 15 t).
+                        Metidas en una sola celda, la de 15 t no se veía en
+                        ninguna parte de la tabla y había que abrir la ficha de
+                        cada unidad para encontrarla. */}
+                    <SortableHead
+                      field="peso"
+                      label="Peso máx."
+                      unit="t"
+                      className={ANCHOS.peso}
+                      sortBy={sortBy}
+                      sortDir={sortDir}
+                      onSort={alternarOrden}
+                      align="center"
+                    />
                     {/* AC3 de HDU5.1. Hoy toda la flota la tiene vacía, porque
                         la municipalidad respondió que ese límite no existe, así
                         que la columna muestra "sin límite" en las 21 filas. Se
@@ -835,6 +857,24 @@ function RecursosDelPuntoPage() {
                               }`}
                             >
                               {cap.nota}
+                            </p>
+                          )}
+                        </TableCell>
+
+                        {/* Mismo criterio que la autonomía: "sin límite" solo
+                            para las familias que pueden declararlo (carga y
+                            arrastre), y `—` para las que no, que sugeriría un
+                            dato faltante en vez de uno que no aplica. */}
+                        <TableCell className="text-center">
+                          {r.capacidad_ton != null ? (
+                            <p className="mono text-xs font-semibold tabular-nums text-foreground">
+                              {r.capacidad_ton}
+                            </p>
+                          ) : (
+                            <p className="text-xs text-muted-foreground">
+                              {r.familia === "carga" || r.familia === "arrastre"
+                                ? "sin límite"
+                                : "—"}
                             </p>
                           )}
                         </TableCell>

@@ -833,7 +833,10 @@ async def _build_subroute(
             "sinVehiculoCompatible": True,
             "clase": clase_dominante,
             "pesoTon": sum(s.get("weightTon", 0) for s in point_stops),
-            "volumenM3": sum(s["volumeM3"] for s in point_stops),
+            # Redondeo por zona antes de sumar, igual que la vista y que
+            # totalVolumeM3: sumando crudo el mensaje decía 6,95 donde la
+            # interfaz mostraba 6,94.
+            "volumenM3": sum(round(s["volumeM3"], 2) for s in point_stops),
         }
 
     # El rango que manda es el MÍNIMO de los despachados: si uno se queda sin
@@ -1105,10 +1108,14 @@ async def generate_route(
                     # falló mirando una sola. Decir "no puede con 1,1 t" cuando
                     # lo que no alcanzaba era el volumen manda a revisar el dato
                     # equivocado.
+                    # "de este recorrido" y no "de esta carga": el motivo se
+                    # adjunta a UNA zona, pero las cifras son las del conjunto
+                    # que no se pudo cubrir, que es lo que falló.
                     motivo = (
                         f"Ninguna combinación de vehículos disponibles cubre los "
                         f"{_format_number(round(volumen, 2))} m³ y las "
-                        f"{_format_number(round(peso, 2))} t de esta carga."
+                        f"{_format_number(round(peso, 2))} t que suman las zonas "
+                        f"de este recorrido."
                     )
                 else:
                     motivo = "Ningún vehículo disponible puede transportar este residuo."
@@ -1130,6 +1137,21 @@ async def generate_route(
                 )
 
     if not sub_routes:
+        # Ninguna zona sobrevivió. No hay plan parcial que mostrar, así que esto
+        # sigue siendo un infeasible, pero **los motivos no se tiran**: el bucle
+        # de arriba ya calculó por qué cayó cada una, y devolver solo "no fue
+        # posible asignar ninguna zona" descartaba justo la información que la
+        # historia pide dar ("el sistema debe poder distinguir cuál fue el
+        # motivo en cada caso"). El síntoma era claro: con una autonomía de 5 km
+        # el plan decía "no fue posible" en vez de nombrar la autonomía.
+        if sin_asignar:
+            detalle = " ".join(f"{z.name}: {z.reason}" for z in sin_asignar[:4])
+            resto = len(sin_asignar) - 4
+            if resto > 0:
+                detalle += f" Y {resto} zona{'s' if resto > 1 else ''} más."
+            return RoutePlanInfeasibleOut(
+                message=f"Ninguna zona pudo asignarse. {detalle}"
+            )
         return RoutePlanInfeasibleOut(
             message="No fue posible asignar ninguna zona cargada a un punto activo."
         )
