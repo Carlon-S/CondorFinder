@@ -105,6 +105,15 @@ export interface ResourcePoint extends ResourcePointInput {
   /** Capacidad de transporte disponible, en m³. Cuenta exactamente lo mismo que
    *  cuenta el ruteo: familia "carga", disponible y con capacidad declarada. */
   capacity_m3: number;
+  /** Nombre del archivo de la foto de Street View del lugar, servible con
+   *  `resourcePhotoUrl()`.
+   *
+   *  El backend la pide UNA vez, al crear el punto o al moverlo, y la guarda en
+   *  disco: la vista nunca llama a Google. Viene `null` cuando no hay cobertura
+   *  en esa coordenada, cuando el backend no tiene clave, o en los puntos
+   *  creados antes de que esto existiera; en los tres casos la vista cae al
+   *  mapa estático de siempre. */
+  street_view?: string | null;
 }
 
 /** Por qué un recurso entra o no entra en el cálculo de una ruta.

@@ -1,3 +1,4 @@
+import asyncio
 import io
 import os
 import uuid
@@ -13,6 +14,7 @@ from pymongo import ReturnDocument
 from pymongo.asynchronous.database import AsyncDatabase
 
 import auth as auth_module
+import street_view
 
 # =============================================================================
 # CONDORFINDER — RECURSOS DISPONIBLES (HDU6)
@@ -94,6 +96,12 @@ class ResourcePointOut(ResourcePointIn):
     resource_count: int = 0
     available_count: int = 0
     capacity_m3: float = 0.0
+    # Nombre del archivo de la foto de Street View, servible por
+    # GET /resources/photo/{filename}. None cuando no hay cobertura en esa
+    # coordenada, cuando no hay clave configurada, o en los puntos creados antes
+    # de que esto existiera: en los tres casos la vista cae al marcador
+    # genérico, que es lo que mostraba siempre.
+    street_view: str | None = None
 
 
 def _to_out(doc: dict, resumen: dict | None = None) -> ResourcePointOut:
@@ -112,7 +120,49 @@ def _to_out(doc: dict, resumen: dict | None = None) -> ResourcePointOut:
         resource_count=resumen.get("total", 0),
         available_count=resumen.get("disponibles", 0),
         capacity_m3=resumen.get("capacidad", 0.0),
+        street_view=doc.get("street_view"),
     )
+
+
+# Fotos de la flota, versionadas en el repositorio (ver el comentario de
+# _copiar_fotos en scripts/parsear_flota.py para por qué acá y no en GCS), y
+# también las de Street View de cada punto. Se define acá arriba, antes de los
+# ayudantes que la usan, aunque el endpoint que la sirve esté más abajo.
+FOTOS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "recursos")
+
+
+def _guardar_street_view(lat: float, lng: float) -> str | None:
+    """Pide la foto de Street View del lugar y la deja en disco. Devuelve el
+    nombre del archivo, o None si no se pudo.
+
+    Sincrónica porque los dos pasos son HTTP; el llamador la corre en un hilo
+    para no bloquear el event loop de FastAPI, igual que osrm_client."""
+    contenido = street_view.foto_de(lat, lng)
+    if not contenido:
+        return None
+    nombre = f"sv_{uuid.uuid4().hex}.jpg"
+    os.makedirs(FOTOS_DIR, exist_ok=True)
+    try:
+        with open(os.path.join(FOTOS_DIR, nombre), "wb") as f:
+            f.write(contenido)
+    except OSError:
+        return None
+    return nombre
+
+
+def _borrar_foto(nombre: str | None) -> None:
+    """Borra una foto de disco sin que su ausencia importe. Se usa cuando un
+    punto se mueve y su foto anterior ya no corresponde al lugar: sin esto
+    quedarían acumulándose fotos de direcciones viejas que nada referencia."""
+    if not nombre:
+        return
+    ruta = os.path.realpath(os.path.join(FOTOS_DIR, nombre))
+    if not ruta.startswith(os.path.realpath(FOTOS_DIR) + os.sep):
+        return
+    try:
+        os.remove(ruta)
+    except OSError:
+        pass
 
 
 async def _resumen_por_punto(point_ids: list[str]) -> dict[str, dict]:
@@ -169,6 +219,10 @@ async def create_point(
         **point.model_dump(),
         "owner": current_user.username,
         "created_at": datetime.now(timezone.utc),
+        # Una sola solicitud a Google, acá, y nunca más: la foto queda en disco
+        # y la lista la sirve desde ahí. En un hilo para no bloquear el event
+        # loop, igual que las llamadas a OSRM.
+        "street_view": await asyncio.to_thread(_guardar_street_view, point.lat, point.lng),
     }
     result = await get_db().resource_points.insert_one(doc)
     doc["_id"] = result.inserted_id
@@ -203,13 +257,43 @@ async def update_point(
     current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
 ):
     oid = _object_id(point_id)
+    previo = await get_db().resource_points.find_one({"_id": oid})
+    if not previo:
+        raise HTTPException(status_code=404, detail="Punto no encontrado")
+
+    cambios = point.model_dump()
+
+    # La foto solo se vuelve a pedir si el punto se MOVIÓ. Renombrarlo o
+    # desactivarlo no cambia el lugar, y pedirla en cada guardado convertiría
+    # "una solicitud por punto" en "una por edición", que es justo lo que este
+    # diseño evita. El umbral son ~1,1 m, la precisión a la que Street View
+    # devuelve la misma panorámica de todos modos.
+    se_movio = (
+        abs(previo.get("lat", 0) - point.lat) > 1e-5
+        or abs(previo.get("lng", 0) - point.lng) > 1e-5
+    )
+    if se_movio:
+        cambios["street_view"] = await asyncio.to_thread(
+            _guardar_street_view, point.lat, point.lng
+        )
+    else:
+        # model_dump() no trae street_view (no está en ResourcePointIn), así que
+        # sin esto el $set lo dejaría intacto igual; se conserva explícito para
+        # que no dependa de qué campos tenga el modelo de entrada.
+        cambios["street_view"] = previo.get("street_view")
+
     result = await get_db().resource_points.find_one_and_update(
         {"_id": oid},
-        {"$set": point.model_dump()},
+        {"$set": cambios},
         return_document=ReturnDocument.AFTER,
     )
     if not result:
         raise HTTPException(status_code=404, detail="Punto no encontrado")
+
+    # Recién cuando la escritura salió bien: si se borrara antes y el update
+    # fallara, el punto quedaría apuntando a un archivo que ya no existe.
+    if se_movio and previo.get("street_view") != cambios["street_view"]:
+        _borrar_foto(previo.get("street_view"))
     resumenes = await _resumen_por_punto([point_id])
     return _to_out(result, resumenes.get(point_id))
 
@@ -219,9 +303,15 @@ async def delete_point(
     point_id: str,
     current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
 ):
-    result = await get_db().resource_points.delete_one({"_id": _object_id(point_id)})
+    oid = _object_id(point_id)
+    previo = await get_db().resource_points.find_one({"_id": oid})
+    result = await get_db().resource_points.delete_one({"_id": oid})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Punto no encontrado")
+    # La foto se va con el punto: nada más la referencia, y quedaría ocupando
+    # disco sin forma de saber de qué lugar era.
+    if previo:
+        _borrar_foto(previo.get("street_view"))
     # Los recursos de ese punto se van con él: un vehículo cuyo punto de salida
     # ya no existe no tiene desde dónde salir, y quedaría invisible en todas las
     # vistas, que listan por punto.
@@ -457,11 +547,6 @@ def _resource_to_out(doc: dict) -> ResourceOut:
 
 class DisponibilidadIn(BaseModel):
     disponible: bool
-
-
-# Fotos de la flota, versionadas en el repositorio (ver el comentario de
-# _copiar_fotos en scripts/parsear_flota.py para por qué acá y no en GCS).
-FOTOS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "recursos")
 
 
 @router.get("/photo/{filename}")

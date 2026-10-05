@@ -67,9 +67,17 @@ import { notify } from "@/lib/notify";
 import {
   deleteResourcePoint,
   listResourcePoints,
+  resourcePhotoUrl,
   setPointActive,
   type ResourcePoint,
 } from "@/lib/resources";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 export const Route = createFileRoute("/_authed/planificacion/recursos")({
   component: RecursosPage,
@@ -116,6 +124,8 @@ function RecursosPage() {
   const [puntoAEditar, setPuntoAEditar] = useState<string | null>(null);
   const [alternando, setAlternando] = useState<string | null>(null);
   const [aEliminar, setAEliminar] = useState<ResourcePoint | null>(null);
+  /** El punto cuya foto de calle se está mirando en grande. null = ninguna. */
+  const [fotoAmpliada, setFotoAmpliada] = useState<ResourcePoint | null>(null);
   const [eliminando, setEliminando] = useState(false);
 
   const [busqueda, setBusqueda] = useState("");
@@ -518,12 +528,42 @@ function RecursosPage() {
                           de la foto y no se mueve ninguna columna: el ancho ya
                           está fijado en ANCHOS.lugar. */}
                       <TableCell>
-                        <MapThumb
-                          lat={p.lat}
-                          lng={p.lng}
-                          muted={!p.active}
-                          className="h-11 w-16 rounded-md border border-border/60"
-                        />
+                        {p.street_view ? (
+                          // La foto real de la calle. Es un <button> porque se
+                          // amplía al apretarla: a 16x11 se reconoce que hay un
+                          // lugar, pero no si ES el patio que uno busca.
+                          //
+                          // El diálogo usa EL MISMO archivo, escalado con CSS.
+                          // Pedir una versión grande sería otra URL y por lo
+                          // tanto otra solicitud cobrada, así que se guarda al
+                          // tamaño máximo una sola vez y se muestra chica acá.
+                          <button
+                            type="button"
+                            onClick={() => setFotoAmpliada(p)}
+                            title={`Ver el lugar de ${p.name}`}
+                            className="group relative block h-11 w-16 cursor-pointer overflow-hidden rounded-md border border-border/60"
+                          >
+                            <img
+                              src={resourcePhotoUrl(p.street_view)}
+                              alt={`Vista de calle de ${p.name}`}
+                              loading="lazy"
+                              className={`h-full w-full object-cover transition-opacity group-hover:opacity-80 ${
+                                p.active ? "" : "opacity-50 grayscale"
+                              }`}
+                            />
+                          </button>
+                        ) : (
+                          // Sin cobertura de Street View, sin clave, o un punto
+                          // creado antes de que esto existiera: el mapa estático
+                          // de siempre. Mismo tamaño, así que la columna no se
+                          // mueve según haya foto o no.
+                          <MapThumb
+                            lat={p.lat}
+                            lng={p.lng}
+                            muted={!p.active}
+                            className="h-11 w-16 rounded-md border border-border/60"
+                          />
+                        )}
                       </TableCell>
 
                       <TableCell className="truncate text-xs font-medium text-foreground">
@@ -692,6 +732,44 @@ function RecursosPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* La foto de calle en grande. Es el MISMO archivo que la miniatura: se
+          guarda al tamaño máximo (640x640 con scale=2) una sola vez y acá se
+          muestra sin reducir. Pedirle a Google una versión grande sería otra
+          URL y por lo tanto otra solicitud cobrada.
+
+          Repite dirección y comuna debajo porque quien abre esto está
+          confirmando que ESE es el patio, y volver a la tabla a cotejar la
+          dirección anularía el propósito. */}
+      <Dialog open={fotoAmpliada !== null} onOpenChange={(open) => !open && setFotoAmpliada(null)}>
+        <DialogContent className="max-w-2xl">
+          {fotoAmpliada && (
+            <>
+              <DialogHeader>
+                <DialogTitle>{fotoAmpliada.name}</DialogTitle>
+                <DialogDescription>
+                  {[
+                    fotoAmpliada.address === fotoAmpliada.name ? null : fotoAmpliada.address,
+                    fotoAmpliada.comuna,
+                  ]
+                    .filter(Boolean)
+                    .join(", ") || "Sin dirección registrada"}
+                </DialogDescription>
+              </DialogHeader>
+              {fotoAmpliada.street_view && (
+                <img
+                  src={resourcePhotoUrl(fotoAmpliada.street_view)}
+                  alt={`Vista de calle de ${fotoAmpliada.name}`}
+                  className="w-full rounded-lg border border-border/60"
+                />
+              )}
+              {/* La atribución la exige Google al mostrar sus imágenes, y acá
+                  no la pone el visor porque la foto se sirve desde disco. */}
+              <p className="text-[0.625rem] text-muted-foreground">Imagen de Google Street View</p>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
