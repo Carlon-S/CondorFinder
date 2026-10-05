@@ -2547,6 +2547,11 @@ function RutasPage() {
                   {cuadrillaFiltrada.map((persona) => {
                     const repetido =
                       persona.disponible && repetidos.has(persona.nombre.trim().toLowerCase());
+                    // Marcada pero sin nombre: no entra al plan, y callarlo
+                    // dejaría al trabajador contando a alguien que el sistema
+                    // no cuenta. Ámbar y no rojo, porque es un dato que falta y
+                    // no un error, mismo criterio que una capacidad sin declarar.
+                    const incompleta = persona.disponible && !persona.nombre.trim();
                     return (
                       <li key={persona.id} className="flex items-center gap-1.5">
                         <Checkbox
@@ -2571,7 +2576,11 @@ function RutasPage() {
                           onBlur={() => cambiarPersona(persona, {})}
                           placeholder="Nombre"
                           className={`h-8 flex-1 text-xs ${
-                            repetido ? "border-destructive focus-visible:ring-destructive" : ""
+                            repetido
+                              ? "border-destructive focus-visible:ring-destructive"
+                              : incompleta
+                                ? "border-warning-strong/60"
+                                : ""
                           }`}
                         />
                         <Select
@@ -2602,6 +2611,14 @@ function RutasPage() {
                     );
                   })}
                 </ul>
+              )}
+
+              {cuadrilla.some((p) => p.disponible && !p.nombre.trim()) && (
+                <p className="text-[0.625rem] leading-relaxed text-warning-strong">
+                  Hay personas marcadas sin nombre. No entran en el plan hasta que lo tengan: el
+                  plan identifica a cada una por su nombre para poder comprobar que nadie esté en
+                  dos vehículos.
+                </p>
               )}
 
               {repetidos.size > 0 && (

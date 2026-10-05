@@ -671,7 +671,15 @@ Rol = Literal["conductor", "peoneta", "operador"]
 
 
 class WorkerIn(BaseModel):
-    nombre: str = Field(min_length=1, max_length=120)
+    # Sin mínimo: la fila se crea vacía y el trabajador la llena escribiendo,
+    # así que el nombre en blanco es un estado INTERMEDIO legítimo y no un dato
+    # inválido. Exigir un carácter hacía fallar el alta antes de que hubiera
+    # nada que escribir.
+    #
+    # Una persona sin nombre no entra al plan: la vista la excluye de la
+    # cuadrilla del día (filtra por `nombre.trim()`) y la marca como incompleta,
+    # mismo criterio que un recurso que se guarda sin capacidad declarada.
+    nombre: str = Field(default="", max_length=120)
     rol: Rol
     # Si entra en el plan del día. Es el equivalente del interruptor de los
     # vehículos, y es lo que cubre "se flexibiliza por inasistencias": quien
