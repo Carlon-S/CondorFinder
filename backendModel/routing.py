@@ -2,6 +2,7 @@ import asyncio
 import itertools
 import re
 from math import asin, cos, radians, sin, sqrt
+from typing import Literal
 
 from bson import ObjectId
 from fastapi import APIRouter, Depends
@@ -114,6 +115,30 @@ class RoutePlanRequestIn(BaseModel):
     # `analysisIds` se ignoran solos, porque la marca se cruza contra las zonas
     # efectivamente cargadas.
     priorityAnalysisIds: list[str] = []
+    # AC1 y AC2 de HDU5.1: quiénes están disponibles HOY, declarados al generar.
+    #
+    # No hay padrón de trabajadores en la base, y es deliberado. La municipalidad
+    # describió su operación como "se designa personal según requerimiento" y "se
+    # flexibiliza por inasistencias": el personal es del PLAN, no del vehículo ni
+    # del punto. Guardar una nómina además significaría almacenar datos
+    # personales que nadie nos entregó.
+    #
+    # **Lista vacía = sin restricción**, igual que `autonomia_km` y
+    # `capacidad_ton`. Un plan generado sin declarar personal se comporta como
+    # antes de que este criterio existiera, que es lo que evita que el despliegue
+    # rompa todas las rutas antes de que alguien haya cargado nada.
+    personal: list[RoutePlanWorkerIn] = []
+
+
+class RoutePlanWorkerIn(BaseModel):
+    """Una persona disponible para la jornada. AC1 y AC2 de HDU5.1.
+
+    El nombre lo escribe el trabajador municipal sobre su propia cuadrilla y
+    viaja solo en la petición: no se persiste acá ni se devuelve en ninguna
+    lectura. Es lo que permite verificar el AC2 leyendo el plan, porque un mismo
+    nombre no puede aparecer en dos vehículos."""
+    nombre: str
+    rol: Literal["conductor", "peoneta", "operador"]
 
 
 class RoutePlanStopOut(BaseModel):
@@ -261,6 +286,51 @@ def _format_number(value: float) -> str:
     return f"{round(value, 2):g}"
 
 
+def _mensaje_sin_plan(sin_asignar: list["RoutePlanUnassignedOut"]) -> str:
+    """El mensaje cuando NINGUNA zona sobrevivió, agrupando por motivo.
+
+    No hay plan parcial que mostrar, así que esto sigue siendo un infeasible,
+    pero los motivos no se tiran: el bucle ya calculó por qué cayó cada zona, y
+    devolver solo "no fue posible asignar ninguna zona" descartaba justo la
+    información que la historia pide dar.
+
+    **Se agrupa por motivo y no se enumera zona por zona.** Casi siempre todas
+    caen por lo mismo (una autonomía corta deja fuera a todas por igual), así que
+    listarlas una a una repetía la misma frase tantas veces como zonas hubiera y
+    el mensaje crecía sin agregar nada. Un motivo que afecta a cinco zonas se
+    lee una vez, con las cinco nombradas al lado.
+
+    Los dos recortes (3 motivos, 3 nombres por motivo) existen porque esto va a
+    un cuadro de texto en pantalla: más allá de eso deja de leerse."""
+    por_motivo: dict[str, list[str]] = {}
+    for z in sin_asignar:
+        por_motivo.setdefault(z.reason, []).append(z.name)
+
+    total = len(sin_asignar)
+    cabecera = (
+        "Ninguna zona pudo asignarse."
+        if total == 1
+        else f"Ninguna de las {total} zonas cargadas pudo asignarse."
+    )
+
+    # Un solo motivo, que es el caso normal: se dice una vez y sin nombres. Las
+    # zonas son todas las cargadas, y repetirlas no agrega nada.
+    if len(por_motivo) == 1:
+        return f"{cabecera} {next(iter(por_motivo))}"
+
+    partes: list[str] = []
+    for motivo, nombres in list(por_motivo.items())[:3]:
+        visibles = ", ".join(nombres[:3])
+        ocultos = len(nombres) - 3
+        if ocultos > 0:
+            visibles += f" y {ocultos} más"
+        partes.append(f"{motivo} ({visibles})")
+    resto = len(por_motivo) - 3
+    if resto > 0:
+        partes.append(f"Y {resto} motivo{'s' if resto > 1 else ''} más.")
+    return f"{cabecera} " + " ".join(partes)
+
+
 def _haversine(a: tuple[float, float], b: tuple[float, float]) -> float:
     """Distancia en línea recta (metros) — SOLO para heurísticas baratas
     (ordenar candidatos, repartir zonas entre puntos) antes de pedirle a
@@ -331,12 +401,70 @@ def _point_truck_capacity(point: dict) -> float:
 
 _MAX_UNIDADES_FUERZA_BRUTA = 14  # 2^14 = 16384 subconjuntos, instantáneo
 
+# Qué campo del vehículo pide cada rol. El vehículo declara su dotación
+# REQUERIDA en la planilla (estable); el plan declara la DISPONIBLE (del día).
+_CAMPO_POR_ROL = {
+    "conductor": "conductores",
+    "peoneta": "peonetas",
+    "operador": "operadores",
+}
+
+
+def _asignar_dotacion(
+    combo, personal: dict[str, list[str]] | None
+) -> list[list[dict]] | None:
+    """Reparte personas concretas a cada vehículo del conjunto. AC1 y AC2.
+
+    Devuelve una lista paralela a `combo` con los nombres asignados a cada
+    vehículo, o **None si el personal no alcanza**, que es lo que convierte al
+    conjunto en inviable.
+
+    `personal=None` significa que nadie declaró personal, y entonces no hay
+    restricción: se devuelve una asignación vacía por vehículo. Mismo criterio
+    que `autonomia_km` y `capacidad_ton`, donde un dato ausente no limita.
+
+    **Cada persona se asigna a lo sumo una vez**, y eso es literalmente el AC2:
+    "no podrá seleccionar dos vehículos distintos que dependan del mismo perfil".
+    Trabaja sobre una copia, así que llamarla para evaluar un conjunto que
+    después se descarta no consume a nadie: el consumo real lo confirma el
+    handler cuando acepta la sub-ruta."""
+    if personal is None:
+        return [[] for _ in combo]
+
+    restante = {rol: list(nombres) for rol, nombres in personal.items()}
+    asignacion: list[list[dict]] = []
+    for c in combo:
+        # El rol viaja junto al nombre: el handler consume por nombre y el AC7
+        # imprime los dos, y separarlos obligaría a recomponer el par después.
+        equipo: list[dict] = []
+        for rol, campo in _CAMPO_POR_ROL.items():
+            for _ in range(c.get(campo, 0) or 0):
+                disponibles = restante.get(rol)
+                if not disponibles:
+                    return None
+                equipo.append({"nombre": disponibles.pop(0), "rol": rol})
+        asignacion.append(equipo)
+    return asignacion
+
+
+def _rol_que_falta(combo, personal: dict[str, list[str]]) -> str | None:
+    """Qué rol impide despachar este conjunto, para poder nombrarlo en el motivo.
+
+    "Sin personal" a secas no dice si faltan conductores o peonetas, que es lo
+    único que el trabajador puede hacer algo al respecto."""
+    for rol, campo in _CAMPO_POR_ROL.items():
+        necesita = sum(c.get(campo, 0) or 0 for c in combo)
+        if necesita > len(personal.get(rol, [])):
+            return rol
+    return None
+
 
 def _trucks_used(
     point: dict,
     assigned_volume: float,
     assigned_weight_ton: float = 0.0,
     clase_dominante: str | None = None,
+    personal: dict[str, list[str]] | None = None,
 ) -> list[dict]:
     """QUÉ camiones de `point` hacen falta para cubrir `assigned_volume`.
 
@@ -390,8 +518,17 @@ def _trucks_used(
     nadie declaró su límite, así que un conjunto que incluya alguna así no se
     restringe por peso. Hoy solo el AMPLIROLL lo declara.
 
-    Devuelve [] cuando ninguna combinación alcanza, por tipo, por volumen o por
-    peso. El llamador lo traduce en una zona sin asignar con su motivo (AC6)."""
+    ── AC1 y AC2 de HDU5.1 ──
+    Con `personal` (los disponibles del día, por rol) un conjunto solo es viable
+    si además hay gente para tripularlo entero, y **cada persona se usa una sola
+    vez**. Los camiones vuelven con su tripulación concreta en `crew_asignada`,
+    que es lo que el AC7 necesita para decir quién va en cada uno.
+
+    `personal=None` significa que nadie lo declaró y no restringe nada.
+
+    Devuelve [] cuando ninguna combinación alcanza, por tipo, por volumen, por
+    peso o por dotación. El llamador lo traduce en una zona sin asignar con su
+    motivo (AC6)."""
     camiones = [c for c in point.get("trucks", []) if c.get("capacity_m3", 0) > 0]
 
     # ── Regla dura: el tipo ──
@@ -417,10 +554,23 @@ def _trucks_used(
             return True
         return sum(limites) >= assigned_weight_ton
 
+    def con_tripulacion(combo: list[dict]) -> list[dict] | None:
+        """El conjunto con su dotación pegada, o None si el personal no alcanza.
+
+        Devuelve COPIAS: los dicts vienen de `point["trucks"]`, que se comparte
+        entre llamadas, y escribirles la tripulación encima filtraría la
+        asignación de una sub-ruta a la siguiente."""
+        equipos = _asignar_dotacion(combo, personal)
+        if equipos is None:
+            return None
+        return [{**c, "crew_asignada": equipo} for c, equipo in zip(combo, equipos)]
+
     def enumerar(candidatos: list[dict]) -> list[dict]:
         por_capacidad = sorted(candidatos, key=lambda t: t.get("capacity_m3", 0))
         if assigned_volume <= 0:
-            return por_capacidad[:1] if aguanta_el_peso(por_capacidad[:1]) else []
+            return con_tripulacion(por_capacidad[:1]) or [] if aguanta_el_peso(
+                por_capacidad[:1]
+            ) else []
 
         if len(candidatos) <= _MAX_UNIDADES_FUERZA_BRUTA:
             for tamano in range(1, len(candidatos) + 1):
@@ -431,8 +581,15 @@ def _trucks_used(
                         continue
                     if not aguanta_el_peso(combo):
                         continue
+                    # La dotación se evalúa al final de los tres filtros porque
+                    # es el único que reparte personas, y hacerlo sobre un
+                    # conjunto que ya se descartó por volumen sería trabajo
+                    # tirado.
+                    tripulado = con_tripulacion(list(combo))
+                    if tripulado is None:
+                        continue
                     if mejor is None or capacidad < mejor[0]:
-                        mejor = (capacidad, list(combo))
+                        mejor = (capacidad, tripulado)
                 # El primer tamaño con solución es el mínimo de vehículos, y
                 # dentro de él ya se eligió la capacidad más baja que alcanza.
                 if mejor is not None:
@@ -447,7 +604,9 @@ def _trucks_used(
             total += c.get("capacity_m3", 0)
             if total >= assigned_volume and aguanta_el_peso(elegidos):
                 break
-        return elegidos if total >= assigned_volume and aguanta_el_peso(elegidos) else []
+        if total < assigned_volume or not aguanta_el_peso(elegidos):
+            return []
+        return con_tripulacion(elegidos) or []
 
     # ── Primera vuelta: solo los preferidos para esta clase ──
     preferidos = [
@@ -475,6 +634,24 @@ def _trucks_used(
     # `_point_truck_capacity`, que ignora las reglas de AC4, así que cree que hay
     # capacidad de sobra. Esta función es la única que sabe qué quedó afuera.
     return []
+
+
+def _dotacion_asignada(camion: dict) -> list[str]:
+    """La tripulación de este vehículo para el AC7.
+
+    Con personal declarado son las PERSONAS que el plan le asignó, cada una con
+    su rol entre paréntesis. Sin personal declarado cae a los roles requeridos,
+    que es lo que el plan sabía decir antes de AC1: el criterio pide "su personal
+    asociado", y mientras nadie declare quién trabaja hoy lo honesto es decir
+    cuánta gente necesita en vez de inventar nombres.
+
+    Que acá aparezcan nombres es lo que vuelve VERIFICABLE el AC2: un mismo
+    nombre no puede figurar en dos vehículos del plan, y eso se comprueba
+    leyendo."""
+    asignada = camion.get("crew_asignada")
+    if asignada:
+        return [f"{p['nombre']} ({p['rol']})" for p in asignada]
+    return _dotacion_de(camion)
 
 
 def _dotacion_de(camion: dict) -> list[str]:
@@ -783,6 +960,7 @@ async def _build_subroute(
     point_stops: list[dict],
     available_hours: float,
     clase_preferida: str | None = None,
+    personal: dict[str, list[str]] | None = None,
 ) -> dict | None:
     """Arma la ida+vuelta completa desde `point` por `point_stops` — orden
     óptimo, geometría real (calles) de cada tramo, y chequeo de
@@ -819,12 +997,23 @@ async def _build_subroute(
     if clase_preferida:
         clase_dominante = clase_preferida
 
-    camiones = _trucks_used(
-        point,
-        sum(s["volumeM3"] for s in point_stops),
-        sum(s.get("weightTon", 0) for s in point_stops),
-        clase_dominante,
-    )
+    volumen_sub = sum(s["volumeM3"] for s in point_stops)
+    peso_sub = sum(s.get("weightTon", 0) for s in point_stops)
+    camiones = _trucks_used(point, volumen_sub, peso_sub, clase_dominante, personal)
+
+    if not camiones and personal is not None:
+        # ¿Fue el personal el que faltó? Se repite la selección ignorándolo: si
+        # así SÍ hay conjunto, la dotación es la causa. Es un diagnóstico, no una
+        # segunda oportunidad, y cuesta nada porque la enumeración es sobre ocho
+        # unidades. Sin esto el motivo diría "no hay vehículo" cuando el camión
+        # estaba ahí y lo que faltaba era un peoneta.
+        sin_personal = _trucks_used(point, volumen_sub, peso_sub, clase_dominante)
+        if sin_personal:
+            return {
+                "sinDotacion": True,
+                "rol": _rol_que_falta(sin_personal, personal),
+            }
+
     if not camiones:
         # Ninguna regla dura dejó candidatos. No es un fallo del servicio ni un
         # problema de capacidad: es el AC4 diciendo que esta carga no la puede
@@ -955,6 +1144,19 @@ async def generate_route(
     # Las dos salidas por infeasible que sí se conservan están más arriba (sin
     # puntos activos y sin zonas ubicables): ahí no hay nada que armar, y
     # devolver un plan vacío sería peor que decirlo.
+    # AC1 y AC2. El pool es del PLAN y no de cada sub-ruta: las sub-rutas de
+    # puntos distintos corren EN PARALELO (el plan usa el máximo de duración y no
+    # la suma, porque son cuadrillas que salen a la vez), y eso es literalmente
+    # "operarán simultáneamente en una misma ruta". Un pool por sub-ruta pasaría
+    # todas las pruebas con un punto y fallaría con dos.
+    #
+    # None cuando nadie declaró personal, que es lo que lo deja sin restringir.
+    personal_restante: dict[str, list[str]] | None = None
+    if payload.personal:
+        personal_restante = {}
+        for persona in payload.personal:
+            personal_restante.setdefault(persona.rol, []).append(persona.nombre)
+
     sin_asignar: list[RoutePlanUnassignedOut] = []
 
     def descartar(zona: dict, motivo: str) -> None:
@@ -1067,7 +1269,11 @@ async def generate_route(
         # el motivo en cada caso", así que cada una escribe el suyo.
         while point_stops:
             result = await _build_subroute(
-                point, point_stops, payload.availableHours, payload.priorityWasteType
+                point,
+                point_stops,
+                payload.availableHours,
+                payload.priorityWasteType,
+                personal_restante,
             )
             if result is None:
                 # OSRM no respondió. Esto NO es una zona sin asignar: es un
@@ -1082,7 +1288,23 @@ async def generate_route(
                 not result.get("excedeHoras")
                 and not result.get("excedeAutonomia")
                 and not result.get("sinVehiculoCompatible")
+                and not result.get("sinDotacion")
             ):
+                # AC2: recién ACÁ se consume el personal, al aceptar la sub-ruta.
+                # `_build_subroute` se llama varias veces en este bucle (cada vez
+                # que no cabe en las horas o en la autonomía se saca una zona y
+                # se reintenta), así que descontar en cada intento agotaría la
+                # cuadrilla sin que saliera un solo camión.
+                if personal_restante is not None:
+                    usados = {
+                        persona["nombre"]
+                        for c in result.get("trucks", [])
+                        for persona in c.get("crew_asignada", [])
+                    }
+                    for rol in personal_restante:
+                        personal_restante[rol] = [
+                            n for n in personal_restante[rol] if n not in usados
+                        ]
                 sub_routes.append(result)
                 break
             # Misma precedencia que en el recorte por capacidad: se saca la más
@@ -1096,7 +1318,23 @@ async def generate_route(
                 ),
             )
             point_stops.remove(lejana)
-            if result.get("sinVehiculoCompatible"):
+            if result.get("sinDotacion"):
+                # AC1 y AC2. El rol va nombrado: "sin personal" a secas no dice
+                # si faltan conductores o peonetas, que es lo único accionable.
+                rol = result.get("rol")
+                plural = {"conductor": "conductores", "peoneta": "peonetas", "operador": "operadores"}
+                if rol:
+                    descartar(
+                        lejana,
+                        f"Ningún vehículo disponible tiene su dotación cubierta: "
+                        f"faltan {plural.get(rol, rol)}.",
+                    )
+                else:
+                    descartar(
+                        lejana,
+                        "El personal declarado ya está asignado a otros vehículos del plan.",
+                    )
+            elif result.get("sinVehiculoCompatible"):
                 # AC4. Dos motivos distintos bajo la misma bandera, y se
                 # distinguen: que ningún vehículo aguante el peso no es lo mismo
                 # que no haber ninguno habilitado para esta ruta.
@@ -1145,13 +1383,7 @@ async def generate_route(
         # motivo en cada caso"). El síntoma era claro: con una autonomía de 5 km
         # el plan decía "no fue posible" en vez de nombrar la autonomía.
         if sin_asignar:
-            detalle = " ".join(f"{z.name}: {z.reason}" for z in sin_asignar[:4])
-            resto = len(sin_asignar) - 4
-            if resto > 0:
-                detalle += f" Y {resto} zona{'s' if resto > 1 else ''} más."
-            return RoutePlanInfeasibleOut(
-                message=f"Ninguna zona pudo asignarse. {detalle}"
-            )
+            return RoutePlanInfeasibleOut(message=_mensaje_sin_plan(sin_asignar))
         return RoutePlanInfeasibleOut(
             message="No fue posible asignar ninguna zona cargada a un punto activo."
         )
@@ -1198,7 +1430,7 @@ async def generate_route(
                 capacityTon=c.get("capacity_ton"),
                 autonomiaKm=c.get("autonomia_km"),
                 foto=c.get("foto"),
-                crew=_dotacion_de(c),
+                crew=_dotacion_asignada(c),
             )
             for c in camiones
         ]

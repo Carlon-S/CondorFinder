@@ -30,6 +30,17 @@ export interface RoutePlanRequest {
   availableHours: number;
   /** null = sin prioridad ("Sin prioridad" en el selector). */
   priorityWasteType: string | null;
+  /** Quienes estan disponibles HOY, declarados al generar.
+   *
+   *  No hay padron de trabajadores en la base, y es deliberado: la municipalidad
+   *  describio su operacion como "se designa personal segun requerimiento" y "se
+   *  flexibiliza por inasistencias", asi que el personal es del PLAN. Guardar una
+   *  nomina ademas significaria almacenar datos personales que nadie entrego.
+   *
+   *  **Lista vacia o ausente = sin restriccion**, igual que `autonomia_km` y
+   *  `capacidad_ton`. La lista se recuerda en el navegador (crewState.ts) solo
+   *  para no retipearla; lo que decide el plan es lo que viaja aca. */
+  personal?: { nombre: string; rol: "conductor" | "peoneta" | "operador" }[];
   /** Subconjunto de `analysisIds` que el trabajador marcó como prioritario:
    *  entra al plan antes que el resto y es el último en salir cuando hay que
    *  recortar por capacidad o por horas.

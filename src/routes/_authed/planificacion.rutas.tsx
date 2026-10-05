@@ -36,6 +36,7 @@ import {
   ArrowRightCircle,
   Boxes,
   Pencil,
+  Plus,
   Clock,
   Construction,
   Crosshair,
@@ -98,6 +99,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  guardarCuadrilla,
+  leerCuadrilla,
+  nombresRepetidos,
+  ROLES,
+  type PersonaCuadrilla,
+  type RolPersonal,
+} from "@/lib/crewState";
 import { RELLENO_SANITARIO } from "@/lib/disposalSite";
 import { projectPolygonToWgs84 } from "@/lib/projection";
 import {
@@ -447,6 +456,24 @@ function RutasPage() {
   const [availableHours, setAvailableHours] = useState("8");
   const [priorityWasteType, setPriorityWasteType] = useState<string>("none");
 
+  /** La cuadrilla declarada para hoy (AC1 y AC2 de HDU5.1).
+   *
+   *  Se lee del navegador al montar y no en el `useState` inicial: esta vista la
+   *  renderiza el servidor (SSR en Node), donde `localStorage` no existe, y leer
+   *  ahí rompería la hidratación al no coincidir con lo que el cliente ve. */
+  const [cuadrilla, setCuadrilla] = useState<PersonaCuadrilla[]>([]);
+  useEffect(() => {
+    setCuadrilla(leerCuadrilla());
+  }, []);
+
+  const actualizarCuadrilla = (personas: PersonaCuadrilla[]) => {
+    setCuadrilla(personas);
+    guardarCuadrilla(personas);
+  };
+
+  const repetidos = nombresRepetidos(cuadrilla);
+  const cuadrillaDeHoy = cuadrilla.filter((p) => p.disponible && p.nombre.trim());
+
   // AC2/AC6.
   const [generating, setGenerating] = useState(false);
   // RoutePlanStop y no una forma propia: la parada trae ahora `analysisId`, que
@@ -753,6 +780,9 @@ function RutasPage() {
       // pero mandar un id que no está en la ruta igual sería mandar una
       // contradicción, y el contrato se lee mejor sin ella.
       priorityAnalysisIds: Array.from(prioritarias).filter((id) => loadedIds.has(id)),
+      // Solo las marcadas, y sin el id local ni la bandera, que son de la
+      // vista. Lista vacía = el backend no restringe por personal.
+      personal: cuadrillaDeHoy.map((p) => ({ nombre: p.nombre.trim(), rol: p.rol })),
     });
     setGenerating(false);
     setConfirmOpen(false);
@@ -2297,6 +2327,137 @@ function RutasPage() {
                   Ingresa un número de horas mayor a 0.
                 </p>
               )}
+            </div>
+
+            {/* ── Personal disponible (AC1 y AC2 de HDU5.1) ──
+                Se declara acá y no en una pantalla de administración porque es
+                una decisión de ESTA jornada: la municipalidad describió su
+                operación como "se designa personal según requerimiento" y "se
+                flexibiliza por inasistencias".
+
+                La lista se recuerda en el navegador (crewState.ts) solo para no
+                retipearla; lo que decide el plan es lo que se manda en la
+                petición. Nada de esto se guarda en la base, porque son datos
+                personales que nadie nos entregó.
+
+                La casilla, y no la papelera, es lo que cubre la inasistencia:
+                quien falta hoy vuelve mañana, y obligar a reescribir su nombre
+                convertiría una ausencia en un alta nueva. */}
+            <div className="space-y-1.5">
+              <div className="flex items-baseline justify-between gap-2">
+                <label className="text-xs font-medium text-muted-foreground">
+                  Personal disponible hoy
+                </label>
+                {cuadrilla.length > 0 && (
+                  <span className="mono text-[0.625rem] tabular-nums text-muted-foreground">
+                    {cuadrillaDeHoy.length} de {cuadrilla.length} marcados
+                  </span>
+                )}
+              </div>
+
+              {cuadrilla.length === 0 ? (
+                <p className="rounded-md border border-dashed border-border/60 px-3 py-3 text-center text-[0.6875rem] leading-relaxed text-muted-foreground">
+                  Sin personal declarado, el plan no restringe por dotación. Agrega a tu cuadrilla
+                  para que solo se consideren los vehículos que se pueden tripular.
+                </p>
+              ) : (
+                // Alto acotado con scroll: con veinte personas el diálogo
+                // crecería hasta sacar el botón de generar de la pantalla.
+                <ul className="max-h-40 space-y-1 overflow-y-auto pr-0.5">
+                  {cuadrilla.map((persona) => {
+                    const repetido =
+                      persona.disponible && repetidos.has(persona.nombre.trim().toLowerCase());
+                    return (
+                      <li key={persona.id} className="flex items-center gap-1.5">
+                        <Checkbox
+                          checked={persona.disponible}
+                          onCheckedChange={(v) =>
+                            actualizarCuadrilla(
+                              cuadrilla.map((x) =>
+                                x.id === persona.id ? { ...x, disponible: v === true } : x,
+                              ),
+                            )
+                          }
+                          aria-label={`${persona.nombre || "Sin nombre"} disponible hoy`}
+                        />
+                        <Input
+                          value={persona.nombre}
+                          onChange={(e) =>
+                            actualizarCuadrilla(
+                              cuadrilla.map((x) =>
+                                x.id === persona.id ? { ...x, nombre: e.target.value } : x,
+                              ),
+                            )
+                          }
+                          placeholder="Nombre"
+                          className={`h-8 flex-1 text-xs ${
+                            repetido ? "border-destructive focus-visible:ring-destructive" : ""
+                          }`}
+                        />
+                        <Select
+                          value={persona.rol}
+                          onValueChange={(v) =>
+                            actualizarCuadrilla(
+                              cuadrilla.map((x) =>
+                                x.id === persona.id ? { ...x, rol: v as RolPersonal } : x,
+                              ),
+                            )
+                          }
+                        >
+                          <SelectTrigger className="h-8 w-[7.5rem] text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {ROLES.map((r) => (
+                              <SelectItem key={r.valor} value={r.valor}>
+                                {r.etiqueta}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            actualizarCuadrilla(cuadrilla.filter((x) => x.id !== persona.id))
+                          }
+                          aria-label={`Quitar a ${persona.nombre || "esta persona"}`}
+                          title="Quitar de la cuadrilla"
+                          className="flex h-7 w-7 flex-shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive-strong"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+
+              {repetidos.size > 0 && (
+                <p className="text-[0.625rem] leading-relaxed text-destructive">
+                  Hay nombres repetidos entre las personas marcadas. El plan comprueba que nadie
+                  esté en dos vehículos a la vez, y con dos filas llamadas igual esa comprobación
+                  deja de poder hacerse.
+                </p>
+              )}
+
+              <Button
+                variant="secondary"
+                size="sm"
+                className="h-8 w-full text-xs"
+                onClick={() =>
+                  actualizarCuadrilla([
+                    ...cuadrilla,
+                    {
+                      id: crypto.randomUUID(),
+                      nombre: "",
+                      rol: "conductor",
+                      disponible: true,
+                    },
+                  ])
+                }
+              >
+                <Plus className="mr-1.5 h-3 w-3" /> Agregar persona
+              </Button>
             </div>
 
             <div className="space-y-1.5">

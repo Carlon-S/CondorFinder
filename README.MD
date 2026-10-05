@@ -456,12 +456,16 @@ Historias comprometidas: HDU5.1 (13), HDU8 (5), HDU9 (5), HDU10 (5) y SP2 (13). 
 
 Mapa de los siete criterios contra lo que hay que escribir y lo que cuesta. **Seis de los siete no necesitan ninguna API externa**, y el único que sí es el de tráfico.
 
-**Estado: 4 de 7 implementados** (AC3, AC4, AC6 y AC7). De los tres que faltan, solo AC5 necesita una API.
+**Estado: 6 de 7 implementados.** AC3, AC4, AC6 y AC7 verificados end to end; AC1 y AC2 recién implementados y pendientes de verificar en navegador. **El único que falta es AC5**, y es el único que necesita una API.
+
+> **AC3 y AC4 verificados end to end** (2026-10-04), con sus casos borde y regresiones. La verificación encontró cinco defectos, todos corregidos: el plan salía con capacidad insuficiente cuando ninguna combinación de vehículos cubría la carga; el peso estaba modelado como filtro por vehículo en vez de restricción del conjunto, así que dos amplirolls nunca se complementaban; el campo de peso no dejaba escribir decimales menores a uno; la tabla de flota quedó desalineada al agregar la columna de autonomía; y el `infeasible` por "ninguna zona sobrevivió" descartaba los motivos ya calculados.
+>
+> **Dos puntos quedan declarados como no verificables con los datos actuales**, y es deliberado: el filtro de ÓRDENES de AC3 (las zonas guardadas están demasiado próximas para que dos recorridos difieran en distancia) y la autonomía en producción, que no corta nada porque la municipalidad respondió que ese límite no existe en su flota. El criterio está implementado y es demostrable declarando una autonomía baja.
 
 | # | Criterio | Estado | Qué falta implementar | API | Costo |
 |---|---|---|---|---|---|
-| AC1 | Personal completo | 🔲 | Contadores por perfil disponibles en el punto; el plan compara la dotación requerida de cada vehículo contra ese pool antes de despacharlo | Ninguna | $0 |
-| AC2 | Un perfil no cubre dos vehículos a la vez | 🔲 | El mismo pool de AC1, **consumido** en vez de consultado. El pool es global al plan, no por sub-ruta, porque las sub-rutas de puntos distintos corren en paralelo | Ninguna | $0 |
+| AC1 | Personal completo | ✅ | — | Ninguna | $0 |
+| AC2 | Un perfil no cubre dos vehículos a la vez | ✅ | — | Ninguna | $0 |
 | AC3 | Autonomía | ✅ | — | Ninguna | $0 |
 | AC4 | Tipo de residuo | ✅ | — | Ninguna | $0 |
 | AC5 | Tráfico vigente | 🔲 | Cliente espejo de `osrm_client.py`, elegido por variable de entorno. Solo la geometría va a Google; **la matriz se queda en OSRM** | **Routes API** (`Compute Routes Pro`) | $0 con cuota |
@@ -519,8 +523,8 @@ Se suman dos cosas más: **AC1 y AC2 seguirían siendo nuestros igual** (que dos
 
 | Historia | Criterio de aceptación | Estado |
 |---|---|---|
-| HDU5.1 | Solo se consideran vehículos cuyo personal requerido esté completo con perfiles disponibles | 🔲 Pendiente |
-| HDU5.1 | Un mismo perfil de trabajador no puede cubrir dos vehículos que operan a la vez | 🔲 Pendiente |
+| HDU5.1 | Solo se consideran vehículos cuyo personal requerido esté completo con perfiles disponibles | ✅ Cumplido |
+| HDU5.1 | Un mismo perfil de trabajador no puede cubrir dos vehículos que operan a la vez | ✅ Cumplido |
 | HDU5.1 | Se descarta toda subruta cuya distancia total supere la autonomía del vehículo | ✅ Cumplido |
 | HDU5.1 | Se prioriza la coincidencia de tipo de residuo, y solo se usa un vehículo no compatible si no hay alternativa | ✅ Cumplido |
 | HDU5.1 | Los tiempos de cada tramo se ajustan por las condiciones de tráfico vigentes, sin intervención del trabajador | 🔲 Pendiente |
