@@ -16,7 +16,6 @@
 // que la cookie de sesión no se pierda por ser cross-origin. Ver config.ts.
 import { CLIENT_BACKEND_URL as BACKEND_URL } from "./config";
 
-
 // =============================================================================
 // INTERFACES DE RESPUESTA
 // =============================================================================
@@ -53,7 +52,6 @@ export interface UnifyProgress {
 
 export type UnifyResponse = UnifySuccess | UnifyError;
 
-
 // =============================================================================
 // OPCIONES
 // =============================================================================
@@ -68,13 +66,11 @@ export interface UnifyOptions {
   precise?: boolean;
 }
 
-
 // =============================================================================
 // CONSTANTE DE URL DEL BACKEND
 // =============================================================================
 
 const POLLING_INTERVAL_MS = 5000;
-
 
 // =============================================================================
 // FUNCIÓN PRINCIPAL (simulada hasta que exista /api/images/unify)
@@ -91,7 +87,6 @@ export async function unifyImages(
   ) => void,
   onTaskCreated?: (taskId: string) => void,
 ): Promise<UnifyResponse> {
-
   // Inicia el pipeline en el backend y obtiene task_id
   const startRes = await fetch(`${BACKEND_URL}/generate`, {
     method: "POST",
@@ -108,12 +103,11 @@ export async function unifyImages(
     };
   }
 
- const taskId = startData.task_id;
+  const taskId = startData.task_id;
   if (onTaskCreated) onTaskCreated(taskId);
 
   return pollTask(taskId, onProgress);
 }
-
 
 export interface RawTaskStatus {
   status: string;
@@ -272,33 +266,61 @@ export async function pollTask(
   }
 }
 
-
 // =============================================================================
 // FUNCIONES DE PERSISTENCIA EN BACKEND
 // =============================================================================
 
-/**
- * Sube las imágenes JPG al backend para persistirlas en disco.
- * Usa XMLHttpRequest en lugar de fetch para poder reportar progreso real.
+/** Cuántos bytes como máximo por petición.
  *
- * @param files      - Archivos JPG válidos a subir
- * @param onProgress - Callback opcional con porcentaje 0-100
- */
-export async function uploadImages(
-  files: File[],
-  onProgress?: (pct: number) => void,
-): Promise<void> {
+ *  **No es una optimización, es lo que hace que un vuelo real se pueda subir.**
+ *  Mandar las 84 fotos de un vuelo en un solo `FormData` son varios cientos de
+ *  MB, y `api.condorfinder.cl` pasa por Cloudflare, que corta el cuerpo de una
+ *  petición mucho antes de eso. El síntoma era un `xhr.onerror` ("Upload
+ *  error"), o sea un fallo de TRANSPORTE y no un código HTTP: la conexión se
+ *  cerraba antes de que el backend llegara a contestar nada.
+ *
+ *  20 MB y no más: el límite de Cloudflare es más alto, pero una petición
+ *  proxyeada también tiene tope de TIEMPO, y con una subida doméstica una tanda
+ *  más grande puede pasarse. Más chico tampoco conviene: cada tanda es un
+ *  viaje completo con su propia latencia. */
+const BYTES_POR_TANDA = 20 * 1024 * 1024;
+
+/** Reparte los archivos en tandas que no superen `BYTES_POR_TANDA`.
+ *
+ *  Por PESO y no por cantidad: las fotos de un vuelo no pesan todas igual, y
+ *  "20 imágenes por tanda" puede dar 60 MB o 200 MB según el vuelo. Un archivo
+ *  que por sí solo supere el tope viaja igual, en su propia tanda: no hay forma
+ *  de partirlo y rechazarlo sería peor. */
+function repartirEnTandas(files: File[]): File[][] {
+  const tandas: File[][] = [];
+  let actual: File[] = [];
+  let peso = 0;
+
+  for (const f of files) {
+    if (actual.length > 0 && peso + f.size > BYTES_POR_TANDA) {
+      tandas.push(actual);
+      actual = [];
+      peso = 0;
+    }
+    actual.push(f);
+    peso += f.size;
+  }
+  if (actual.length > 0) tandas.push(actual);
+  return tandas;
+}
+
+/** Una tanda. Sigue usando XMLHttpRequest y no fetch porque es lo único que
+ *  reporta progreso de SUBIDA; `fetch` solo informa de la descarga. */
+function subirTanda(tanda: File[], onBytes: (enviados: number) => void): Promise<void> {
   return new Promise((resolve, reject) => {
     const formData = new FormData();
-    files.forEach((f) => formData.append("images", f));
+    tanda.forEach((f) => formData.append("images", f));
 
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${BACKEND_URL}/upload`);
 
     xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable && onProgress) {
-        onProgress(Math.round((e.loaded * 100) / e.total));
-      }
+      if (e.lengthComputable) onBytes(e.loaded);
     };
 
     xhr.onload = () => {
@@ -320,9 +342,56 @@ export async function uploadImages(
       reject(new Error(message));
     };
 
-    xhr.onerror = () => reject(new Error("Upload error"));
+    xhr.onerror = () => reject(new Error("Se cortó la conexión al subir las imágenes."));
     xhr.send(formData);
   });
+}
+
+/**
+ * Sube las imágenes JPG al backend para persistirlas en disco, **en tandas**.
+ *
+ * Las tandas van EN SERIE y no en paralelo: comparten el ancho de banda de
+ * subida, así que lanzarlas juntas no acorta nada y vuelve el progreso
+ * ininteligible. Además el backend las escribe todas en el mismo directorio.
+ *
+ * `POST /upload` ACUMULA, no reemplaza, así que varias tandas dejan el mismo
+ * resultado que una sola petición. Si esa semántica cambiara alguna vez, esto
+ * se rompe en silencio: quedaría solo la última tanda.
+ *
+ * @param files      - Archivos JPG válidos a subir
+ * @param onProgress - Callback opcional con porcentaje 0-100
+ */
+export async function uploadImages(
+  files: File[],
+  onProgress?: (pct: number) => void,
+): Promise<void> {
+  const tandas = repartirEnTandas(files);
+  const total = files.reduce((s, f) => s + f.size, 0) || 1;
+  let yaEnviados = 0;
+
+  for (let i = 0; i < tandas.length; i++) {
+    try {
+      await subirTanda(tandas[i], (deLaTanda) => {
+        // El progreso se mide en BYTES y no en archivos: con fotos de pesos
+        // distintos, contar archivos haría saltar la barra de a tirones.
+        onProgress?.(Math.min(99, Math.round(((yaEnviados + deLaTanda) * 100) / total)));
+      });
+      yaEnviados += tandas[i].reduce((s, f) => s + f.size, 0);
+    } catch (e) {
+      // Las tandas anteriores YA están en el servidor, porque /upload acumula.
+      // Decirlo importa: sin eso, quien falla en la tanda 20 de 25 cree que
+      // perdió todo y vuelve a empezar de cero.
+      const subidas = tandas.slice(0, i).reduce((s, t) => s + t.length, 0);
+      const detalle = e instanceof Error ? e.message : "Error al subir";
+      throw new Error(
+        subidas > 0
+          ? `${detalle} Se alcanzaron a subir ${subidas} de ${files.length} imágenes; vuelve a intentar para completar el resto.`
+          : detalle,
+      );
+    }
+  }
+
+  onProgress?.(100);
 }
 
 /**
@@ -354,7 +423,7 @@ export async function listUploadedImages(): Promise<string[] | null> {
     const data = await res.json();
     return data.archivos ?? [];
   } catch {
-    return null;  // null = backend inalcanzable, [] = backend vacío
+    return null; // null = backend inalcanzable, [] = backend vacío
   }
 }
 
