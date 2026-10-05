@@ -69,6 +69,26 @@ const MAP_ID = import.meta.env.VITE_GOOGLE_MAPS_ID ?? "DEMO_MAP_ID";
  *  para que cambiar de motor no cambie cuánto se acerca. */
 const ZOOM_FOCO = 16;
 
+/** Hasta dónde se puede pasear con `lockToMaipu`.
+ *
+ *  El margen es del 30% de cada lado, el mismo que el `.pad(0.3)` de la
+ *  implementación de Leaflet, y no un valor fijo en grados: con un margen chico
+ *  la caja queda MÁS CHICA que el viewport al zoom mínimo, y Google entonces no
+ *  deja arrastrar nada, porque ya no hay hacia dónde moverse sin salirse. El
+ *  síntoma es un mapa que parece congelado, no uno que se resiste en el borde.
+ */
+const LIMITE_PANEO = (() => {
+  const [[sur, oeste], [norte, este]] = MAIPU_BBOX;
+  const margenLat = (norte - sur) * 0.3;
+  const margenLng = (este - oeste) * 0.3;
+  return {
+    south: sur - margenLat,
+    west: oeste - margenLng,
+    north: norte + margenLat,
+    east: este + margenLng,
+  };
+})();
+
 function aLatLng(p: [number, number]): google.maps.LatLngLiteral {
   return { lat: p[0], lng: p[1] };
 }
@@ -476,22 +496,18 @@ export function GoogleMapImpl({
           mapTypeControl={false}
           streetViewControl={false}
           fullscreenControl={false}
+          // "greedy" y no el default: Google usa "cooperative" cuando el mapa
+          // vive dentro de una página con scroll, y eso exige Ctrl+rueda para
+          // hacer zoom. Tiene sentido en un mapa incrustado en un artículo, que
+          // es lo que se quiere no secuestrar; acá el mapa ES la herramienta y
+          // ocupa su propio bloque, así que la rueda le pertenece. Leaflet se
+          // comporta así desde siempre y el cambio de motor no debería cambiar
+          // cómo se usa.
+          gestureHandling="greedy"
           // lockToMaipu: encuadra la comuna y no deja salir de ella. Es opt-in,
           // no el comportamiento por omisión: en /rutas el recorrido sale de
           // Maipú hacia el relleno y recortarlo escondería tramos.
-          restriction={
-            lockToMaipu
-              ? {
-                  latLngBounds: {
-                    south: MAIPU_BBOX[0][0] - 0.03,
-                    west: MAIPU_BBOX[0][1] - 0.03,
-                    north: MAIPU_BBOX[1][0] + 0.03,
-                    east: MAIPU_BBOX[1][1] + 0.03,
-                  },
-                  strictBounds: false,
-                }
-              : undefined
-          }
+          restriction={lockToMaipu ? { latLngBounds: LIMITE_PANEO } : undefined}
           minZoom={lockToMaipu ? 12 : undefined}
           onClick={
             onMapClick

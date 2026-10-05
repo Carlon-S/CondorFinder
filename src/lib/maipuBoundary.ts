@@ -281,22 +281,29 @@ export const MAIPU_VIEW_BBOX: [[number, number], [number, number]] = [
 ];
 
 /**
- * Anillo que cubre el mundo entero, para usar como contorno EXTERIOR de la
- * mascara que atenua todo lo que no es Maipu (ver MAIPU_MASK).
+ * Anillo exterior de la mascara que atenua todo lo que no es Maipu (ver
+ * MAIPU_MASK). Cubre el cono sur entero y bastante mas.
  *
- * Mundial y no una caja generosa alrededor de la comuna porque el paneo es
- * libre cuando lockToMaipu esta apagado: con una caja chica, alejandose lo
- * suficiente se veria el borde de la propia mascara, que es justo el tipo de
- * costura que delata un truco de dibujo.
+ * **NO puede abarcar el mundo completo, y ese fue un error que llego a
+ * produccion.** La primera version iba de longitud -180 a +180, con la idea de
+ * que nunca se viera su borde por mas que uno se alejara. Pero una arista entre
+ * dos longitudes toma siempre el CAMINO MAS CORTO sobre la esfera, y de -180 a
+ * +180 el camino corto son 2 grados cruzando el antimeridiano, no 358. El
+ * anillo quedaba reducido a una tira finisima, no tapaba nada, y lo unico que
+ * se pintaba era el anillo de Maipu: la mascara se veia EXACTAMENTE AL REVES,
+ * oscureciendo la comuna en vez de su entorno. Pasa igual en Leaflet y en
+ * Google, porque es una regla de la geometria esferica y no de la libreria.
  *
- * +-85 y no +-90: Web Mercator no proyecta los polos, la latitud se va a
- * infinito. 85.05 es el limite practico de la proyeccion y 85 deja margen.
+ * Cada arista de esta caja abarca menos de 180 grados, asi que no hay
+ * ambiguedad. Mide unos 110 grados de ancho por 85 de alto: para alcanzar a ver
+ * su borde habria que alejarse hasta tener Sudamerica entera en pantalla, y a
+ * esa escala Maipu es un punto.
  */
-const ANILLO_MUNDIAL: [number, number][] = [
-  [-85, -180],
-  [-85, 180],
-  [85, 180],
-  [85, -180],
+const ANILLO_EXTERIOR: [number, number][] = [
+  [-75, -130],
+  [-75, -20],
+  [10, -20],
+  [10, -130],
 ];
 
 /**
@@ -316,4 +323,4 @@ const ANILLO_MUNDIAL: [number, number][] = [
  * El contorno sigue dibujandose aparte, ahora SOLIDO y fino, porque la mascara
  * da la region pero no el limite exacto.
  */
-export const MAIPU_MASK: [number, number][][] = [ANILLO_MUNDIAL, MAIPU_BOUNDARY];
+export const MAIPU_MASK: [number, number][][] = [ANILLO_EXTERIOR, MAIPU_BOUNDARY];
