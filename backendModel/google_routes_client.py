@@ -95,16 +95,34 @@ def _decodificar_polilinea(encoded: str) -> list[list[float]]:
 
 def _tramo(leg: dict) -> dict | None:
     """Un `leg` de la respuesta al mismo dict que devuelve osrm_client.route_geometry,
-    para que routing.py no sepa de dónde vino la geometría."""
+    para que routing.py no sepa de dónde vino la geometría.
+
+    **Un tramo de longitud CERO llega con los campos AUSENTES, no en cero.** La
+    respuesta es protobuf serializado a JSON y proto3 omite los valores por
+    omisión, así que `{"distanceMeters": 0}` viaja como nada. Pasa de verdad:
+    dos zonas capturadas sobre el mismo terreno quedan en la misma coordenada y
+    el salto entre ellas mide cero.
+
+    Leerlo con `leg["distanceMeters"]` levantaba KeyError, esta función devolvía
+    None y el llamador descartaba la respuesta ENTERA de Google, cayendo a OSRM.
+    El síntoma era desconcertante: el plan salía bien pero con tiempos sin
+    tráfico, idénticos a los de OSRM, sin ningún error a la vista."""
     try:
         # La duración llega como un Duration de protobuf serializado: "1234s".
-        segundos = float(str(leg["duration"]).rstrip("s"))
-        metros = float(leg["distanceMeters"])
-        path = _decodificar_polilinea(leg["polyline"]["encodedPolyline"])
-    except (KeyError, TypeError, ValueError):
+        segundos = float(str(leg.get("duration") or "0s").rstrip("s"))
+        metros = float(leg.get("distanceMeters") or 0)
+    except (TypeError, ValueError):
         return None
-    if not path:
+
+    encoded = (leg.get("polyline") or {}).get("encodedPolyline") or ""
+    path = _decodificar_polilinea(encoded) if encoded else []
+
+    # Sin geometría pero CON cifras es una respuesta rota y hay que rechazarla.
+    # Sin geometría y sin cifras es un salto nulo, que es legítimo: aporta cero
+    # al trazo y mantiene una fila por parada en la línea de tiempo.
+    if not path and (metros > 0 or segundos > 0):
         return None
+
     return {
         "path": path,
         "distanceKm": metros / 1000,
@@ -118,8 +136,12 @@ def _unir(tramos: list[dict]) -> dict:
     suman las cifras. El primer punto de cada leg repite el último del anterior,
     y se descarta para no dejar vértices duplicados en la línea."""
     path: list[list[float]] = []
-    for i, t in enumerate(tramos):
-        path.extend(t["path"] if i == 0 else t["path"][1:])
+    for t in tramos:
+        # El corte del primer vértice depende de si YA hay trazo acumulado, no
+        # de la posición del tramo en la lista: un salto nulo al principio deja
+        # el acumulado vacío, y ahí cortarle el primer punto al siguiente
+        # perdería el vértice donde empieza el recorrido.
+        path.extend(t["path"] if not path else t["path"][1:])
     return {
         "path": path,
         "distanceKm": sum(t["distanceKm"] for t in tramos),
