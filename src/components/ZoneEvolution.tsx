@@ -13,7 +13,12 @@
 
 import { useMemo } from "react";
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
-import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from "@/components/ui/chart";
 import { Button } from "@/components/ui/button";
 import type { SavedAnalysisRecord, ZoneRecord } from "@/lib/analysisStore";
 import {
@@ -22,17 +27,16 @@ import {
   zoneHistory,
   zoneTotals,
   type ZoneVersion,
+  versionLabel,
 } from "@/lib/volumeReport";
 
 const chartConfig = {
   volumeM3: { label: "Volumen m³", color: "var(--chart-1)" },
 } satisfies ChartConfig;
 
-function formatDate(iso: string | null | undefined): string {
-  if (!iso) return "sin fecha";
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "sin fecha" : d.toLocaleDateString("es-CL");
-}
+// La etiqueta de una captura la arma versionLabel() en volumeReport.ts, igual
+// que las cifras: la barra de capturas, este grafico y el informe tienen que
+// nombrar la misma captura igual, o pareceran tres cosas distintas.
 
 export function ZoneEvolution({
   zone,
@@ -58,15 +62,15 @@ export function ZoneEvolution({
       <div className="rounded-lg border border-border/60 bg-muted/30 p-6 text-center">
         <p className="text-sm font-medium text-foreground">Sin versiones anteriores</p>
         <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
-          Esta zona tiene una sola captura, así que todavía no hay evolución que comparar.
-          Cuando se cargue un vuelo nuevo del mismo terreno, aquí aparecerá cómo cambió su volumen.
+          Esta zona tiene una sola captura, así que todavía no hay evolución que comparar. Cuando se
+          cargue un vuelo nuevo del mismo terreno, aquí aparecerá cómo cambió su volumen.
         </p>
       </div>
     );
   }
 
   const chartData = points.map((p) => ({
-    fecha: formatDate(p.date),
+    fecha: versionLabel(p.date, p.uploadedAt),
     volumeM3: p.volumeM3,
     analysisId: p.analysisId,
   }));
@@ -93,7 +97,10 @@ export function ZoneEvolution({
       )}
 
       <div className="grid grid-cols-3 gap-2">
-        <ResumenEvolucion etiqueta="Volumen actual" valor={`${volumenActual.toLocaleString("es-CL")} m³`} />
+        <ResumenEvolucion
+          etiqueta="Volumen actual"
+          valor={`${volumenActual.toLocaleString("es-CL")} m³`}
+        />
         <ResumenEvolucion
           etiqueta="Cambio total"
           valor={`${delta >= 0 ? "+" : ""}${delta.toFixed(2)} m³`}
@@ -101,12 +108,14 @@ export function ZoneEvolution({
           // aumento y el verde con la disminución, al revés de lo que haría
           // una métrica de negocio.
           tono={delta > 0 ? "malo" : delta < 0 ? "bueno" : "neutro"}
-          nota={deltaPct != null ? `${deltaPct >= 0 ? "+" : ""}${deltaPct.toFixed(0)} %` : undefined}
+          nota={
+            deltaPct != null ? `${deltaPct >= 0 ? "+" : ""}${deltaPct.toFixed(0)} %` : undefined
+          }
         />
         <ResumenEvolucion
           etiqueta="Capturas"
           valor={String(versions.length)}
-          nota={`desde ${formatDate(versions[0].captureDate)}`}
+          nota={`desde ${versionLabel(versions[0].captureDate, versions[0].uploadedAt)}`}
         />
       </div>
 
@@ -146,7 +155,7 @@ export function ZoneEvolution({
                 <span className="detect-corners" aria-hidden="true" />
                 <img
                   src={version.thumbnailUrl ?? version.mapUrl}
-                  alt={`Mapa de la captura del ${formatDate(version.captureDate)}`}
+                  alt={`Mapa de la captura del ${versionLabel(version.captureDate, version.uploadedAt)}`}
                   className="h-full w-full object-cover"
                   loading="lazy"
                 />
@@ -155,19 +164,20 @@ export function ZoneEvolution({
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <p className="text-sm font-semibold text-foreground">
-                    {formatDate(version.captureDate)}
+                    {versionLabel(version.captureDate, version.uploadedAt)}
                   </p>
                   {/* Misma regla tipográfica que el resto de la vista de
                       Análisis: .mono queda para las cifras, las palabras van en
                       la letra del cuerpo. */}
                   {version.captureDateEstimated && (
-                    <span className="text-[0.63rem] text-muted-foreground" title="Ninguna foto traía fecha de captura; se usó la de carga">
+                    <span
+                      className="text-[0.63rem] text-muted-foreground"
+                      title="Ninguna foto traía fecha de captura; se usó la de carga"
+                    >
                       fecha estimada
                     </span>
                   )}
-                  {esVigente && (
-                    <span className="text-[0.63rem] text-success-strong">vigente</span>
-                  )}
+                  {esVigente && <span className="text-[0.63rem] text-success-strong">vigente</span>}
                 </div>
                 <p className="text-[0.63rem] text-muted-foreground">
                   <span className="mono tabular-nums">

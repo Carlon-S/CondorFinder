@@ -121,8 +121,45 @@ export interface ZoneVersion {
   thumbnailUrl?: string | null;
   captureDate: string | null;
   captureDateEstimated: boolean;
+  /** Cuándo entró este vuelo al sistema. Es lo que desempata dos versiones con
+   *  la misma fecha de captura, y por eso además se MUESTRA: volver a subir el
+   *  mismo set de imágenes produce dos versiones con idéntica `captureDate`, y
+   *  sin la hora son indistinguibles en pantalla aunque el sistema las ordene
+   *  bien. */
+  uploadedAt: string | null;
   /** Análisis de esta versión, del más antiguo al más reciente. */
   analyses: SavedAnalysisRecord[];
+}
+
+/** Cómo se nombra una captura en pantalla: fecha y, cuando se sabe, la hora en
+ *  que entró al sistema.
+ *
+ *  Vive acá y no en cada vista por la misma razón que el resto de este archivo:
+ *  la barra de capturas, el gráfico de evolución y el informe tienen que
+ *  nombrar la misma captura igual, o parecerían tres cosas distintas.
+ *
+ *  La zona horaria va EXPLÍCITA, igual que en la línea de tiempo de las rutas:
+ *  las capturas son de vuelos sobre Maipú y la hora tiene que ser la de Maipú
+ *  aunque el equipo que mira esté configurado en otra. */
+export function versionLabel(
+  captureDate: string | null | undefined,
+  uploadedAt?: string | null,
+): string {
+  const d = captureDate ? new Date(captureDate) : null;
+  const fecha =
+    d && !Number.isNaN(d.getTime())
+      ? d.toLocaleDateString("es-CL", { timeZone: "America/Santiago" })
+      : "sin fecha";
+
+  const u = uploadedAt ? new Date(uploadedAt) : null;
+  if (!u || Number.isNaN(u.getTime())) return fecha;
+
+  const hora = u.toLocaleTimeString("es-CL", {
+    timeZone: "America/Santiago",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return `${fecha} · ${hora}`;
 }
 
 /** Fecha con la que se ordena una versión. Prioriza la captura; si falta, cae
@@ -168,6 +205,10 @@ export function buildVersions(analyses: SavedAnalysisRecord[]): ZoneVersion[] {
       thumbnailUrl: referencia.thumbnailUrl,
       captureDate: referencia.captureDate ?? null,
       captureDateEstimated: referencia.captureDateEstimated ?? true,
+      // Si el registro no la trae (los anteriores a este campo), se cae a
+      // cuándo se guardó el análisis: es lo mismo que usa tieKey() para
+      // ordenar, así que lo que se muestra y lo que decide el orden coinciden.
+      uploadedAt: referencia.uploadedAt ?? referencia.savedAt ?? null,
       analyses: ordenados,
     });
   }
@@ -193,6 +234,10 @@ export function zoneHistory(zone: ZoneRecord, analyses: SavedAnalysisRecord[]): 
  */
 export interface EvolutionPoint {
   date: string;
+  /** Hora de subida de la versión a la que pertenece. Se arrastra hasta acá
+   *  para que el eje del gráfico pueda distinguir dos capturas del mismo set de
+   *  imágenes, que comparten `date` exacta. */
+  uploadedAt: string | null;
   volumeM3: number;
   analysisId: string;
   sourceTaskId: string;
@@ -212,6 +257,10 @@ export function evolutionSeries(versions: ZoneVersion[]): EvolutionPoint[] {
       }
       puntos.push({
         date: analysis.captureDate ?? analysis.savedAt,
+        // La hora de la VERSIÓN, no la del análisis: el eje del gráfico nombra
+        // capturas, y dos análisis del mismo vuelo son el mismo punto en el
+        // tiempo aunque se hayan calculado en momentos distintos.
+        uploadedAt: version.uploadedAt,
         volumeM3: zoneTotals(analysis).volumeM3,
         analysisId: analysis.id,
         sourceTaskId: version.sourceTaskId,

@@ -16,7 +16,7 @@
 // =============================================================================
 
 import type { SavedAnalysisRecord, ZoneRecord } from "@/lib/analysisStore";
-import { buildVersions, volumeByWasteType, zoneTotals } from "@/lib/volumeReport";
+import { buildVersions, versionLabel, volumeByWasteType, zoneTotals } from "@/lib/volumeReport";
 
 /** Un análisis elegido para el informe, junto a la zona a la que pertenece. */
 export interface ReportSelection {
@@ -256,7 +256,7 @@ async function renderReport(selections: ReportSelection[]) {
         const t = zoneTotals(analysis);
         filas.push([
           sel.zone.name,
-          formatDate(version.captureDate),
+          versionLabel(version.captureDate, version.uploadedAt),
           formatDate(analysis.savedAt),
           num(t.volumeM3),
           t.weightKg.toLocaleString("es-CL"),
@@ -360,7 +360,10 @@ async function renderReport(selections: ReportSelection[]) {
       const ultimo = version.analyses[version.analyses.length - 1];
       const volumen = zoneTotals(ultimo).volumeM3;
       algoritmos.add(ultimo.algorithmVersion ?? null);
-      puntos.push({ etiqueta: formatDate(version.captureDate), valor: volumen });
+      puntos.push({
+        etiqueta: versionLabel(version.captureDate, version.uploadedAt),
+        valor: volumen,
+      });
 
       const variacion =
         anterior === null
@@ -370,7 +373,7 @@ async function renderReport(selections: ReportSelection[]) {
             : `${(((volumen - anterior) / anterior) * 100).toFixed(1)} %`;
 
       filasComparacion.push([
-        formatDate(version.captureDate),
+        versionLabel(version.captureDate, version.uploadedAt),
         String(version.analyses.length),
         num(volumen),
         variacion,

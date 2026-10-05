@@ -25,13 +25,10 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 import { Loader2, Trash2 } from "@/components/icons/Icons";
 import type { ZoneVersion } from "@/lib/volumeReport";
-import { zoneTotals } from "@/lib/volumeReport";
+import { versionLabel, zoneTotals } from "@/lib/volumeReport";
 
-function formatDate(iso: string | null | undefined): string {
-  if (!iso) return "sin fecha";
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "sin fecha" : d.toLocaleDateString("es-CL");
-}
+// Ver versionLabel() en volumeReport.ts: la etiqueta de una captura se arma en
+// un solo lugar, compartida con el grafico de evolucion y el informe.
 
 export function VersionBar({
   versions,
@@ -163,7 +160,7 @@ export function VersionBar({
                         <span className="detect-corners" aria-hidden="true" />
                         <img
                           src={version.thumbnailUrl ?? version.mapUrl}
-                          alt={`Captura del ${formatDate(version.captureDate)}`}
+                          alt={`Captura del ${versionLabel(version.captureDate, version.uploadedAt)}`}
                           className="h-full w-full object-cover"
                           loading="lazy"
                         />
@@ -171,7 +168,7 @@ export function VersionBar({
 
                       <div className="flex items-center justify-between gap-1">
                         <span className="text-[0.69rem] font-semibold text-foreground">
-                          {formatDate(version.captureDate)}
+                          {versionLabel(version.captureDate, version.uploadedAt)}
                         </span>
                         {vigente ? (
                           <span className="text-[0.63rem] text-success-strong">vigente</span>
@@ -206,7 +203,7 @@ export function VersionBar({
                         type="button"
                         onClick={() => onDelete(version)}
                         title="Eliminar esta captura"
-                        aria-label={`Eliminar la captura del ${formatDate(version.captureDate)}`}
+                        aria-label={`Eliminar la captura del ${versionLabel(version.captureDate, version.uploadedAt)}`}
                         className="absolute right-1 top-1 flex h-6 w-6 cursor-pointer items-center justify-center rounded-md bg-card/90 text-muted-foreground opacity-0 shadow-sm backdrop-blur transition-all duration-150 hover:bg-destructive/15 hover:text-destructive-strong focus-visible:opacity-100 group-hover:opacity-100"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
