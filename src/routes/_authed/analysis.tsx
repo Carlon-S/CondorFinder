@@ -1493,26 +1493,36 @@ function AnalysisPage() {
                       amarillas de .detect-frame por fuera de la imagen en vez de
                       encima. */}
                   <div className="absolute inset-8 flex items-center justify-center">
-                    {/* Imagen y capa de detecciones apiladas en LA MISMA celda
-                        de grid, no una encima de otra con position: absolute.
+                    {/* La imagen llena esta caja y el SVG se superpone sobre LA
+                        MISMA caja con position: absolute. Las dos letterboxean
+                        igual (object-contain y xMidYMid meet hacen la misma
+                        cuenta), así que los rectángulos caen sobre la foto se
+                        amplíe o no.
 
-                        El motivo es que la caja del <img> tiene que medir
-                        exactamente la foto, y eso se logra con max-h/max-w en
-                        vez de h-full/w-full. Pero entonces la caja de la imagen deja
-                        de ser la del contenedor, y el SVG, que antes se estiraba
-                        sobre el contenedor completo, quedaría más grande que la
-                        foto: los rectángulos del modelo caerían corridos en
-                        cuanto la imagen fuera más chica que el visor.
+                        **Esto estuvo como una celda de grid y hay que no
+                        volver a hacerlo.** La idea era que el <img> midiera
+                        exactamente la foto (max-h/max-w en vez de h-full/w-full)
+                        y que el SVG heredara esa caja; pero con
+                        place-items-center los ítems NO se estiran, así que el
+                        h-full/w-full del SVG no tenía contra qué resolverse y el
+                        <svg> caía a su tamaño por omisión de 300px. Con un
+                        ortomosaico de miles de píxeles en el viewBox eso dibuja
+                        todo a un 7% de escala: el stroke de 1.5 queda en una
+                        décima de píxel y las detecciones desaparecen de la
+                        vista. El mapa se veía bien y los polígonos no.
 
-                        Apiladas en una celda, la celda la dimensiona la imagen
-                        (es el único hijo con tamaño propio) y el SVG hereda esa
-                        misma caja con h-full/w-full. Calzan siempre, se amplíe
-                        la imagen o no. place-items-center las centra a las dos. */}
-                    <div className="grid h-full w-full place-items-center">
+                        Y la razón que justificaba esa celda ya no existe: era
+                        .map-plate, que dibujaba un filete en el borde y
+                        necesitaba que la caja fuera la foto. Hoy es .map-float,
+                        que es filter: drop-shadow, y **drop-shadow sigue el
+                        canal alfa, no la caja**, así que el aire transparente de
+                        object-contain no aporta sombra. La sombra sigue el
+                        contorno real del vuelo igual que antes. */}
+                    <div className="relative h-full w-full">
                       <img
                         src={mapUrl!}
                         alt="Mapa unificado para analisis de volumen"
-                        className="map-float col-start-1 row-start-1 max-h-full max-w-full object-contain pointer-events-none"
+                        className="map-float h-full w-full object-contain pointer-events-none"
                         draggable={false}
                         onDragStart={e => e.preventDefault()}
                         onLoad={e => {
@@ -1529,7 +1539,7 @@ function AnalysisPage() {
                         return (
                           <svg
                             viewBox={`0 0 ${imgNaturalSize.w} ${imgNaturalSize.h}`}
-                            className="col-start-1 row-start-1 h-full w-full pointer-events-none"
+                            className="absolute inset-0 h-full w-full pointer-events-none"
                             preserveAspectRatio="xMidYMid meet"
                           >
                             {enabledDets.map(d => {
