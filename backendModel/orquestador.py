@@ -69,6 +69,9 @@ async def lifespan(app: FastAPI):
     # HDU8: los recursos se listan siempre por punto, y el ruteo los pide por
     # punto MÁS disponibilidad en cada generación de ruta.
     await db.resources.create_index([("pointId", 1), ("disponible", 1)])
+    # Personal (AC1 y AC2 de HDU5.1): el diálogo de generación lee la cuadrilla
+    # del punto en cada apertura, y el ruteo la vuelve a leer al generar.
+    await db.perfiles.create_index([("pointId", 1), ("disponible", 1)])
     # El N° de equipo es el identificador con el que la municipalidad nombra sus
     # vehículos en sus propias planillas, así que dos recursos del mismo punto no
     # pueden compartirlo: sería imposible saber a cuál se refiere una

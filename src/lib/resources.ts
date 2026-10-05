@@ -370,6 +370,95 @@ export async function updateResource(id: string, resource: ResourceInput): Promi
   return res.json();
 }
 
+// =============================================================================
+// PERSONAL (AC1 y AC2 de HDU5.1)
+//
+// La cuadrilla de un punto. Empezo guardada en el navegador para no almacenar
+// datos personales, y se movio al servidor a pedido del equipo: una lista que no
+// se comparte entre equipos ni sobrevive a un cambio de navegador obliga a
+// reescribirla en cada maquina, y el criterio terminaba cumplido en el papel y
+// abandonado en la practica.
+// =============================================================================
+
+export type RolPersonal = "conductor" | "peoneta" | "operador";
+
+export interface Persona {
+  id: string;
+  nombre: string;
+  rol: RolPersonal;
+  /** Si entra en el plan de hoy. Es el equivalente del interruptor de los
+   *  vehiculos y lo que cubre "se flexibiliza por inasistencias": quien falta
+   *  hoy vuelve manana, y borrarlo convertiria una ausencia en una baja. */
+  disponible: boolean;
+  point_id: string;
+}
+
+export type PersonaInput = Omit<Persona, "id">;
+
+export const ROLES: { valor: RolPersonal; etiqueta: string; plural: string }[] = [
+  { valor: "conductor", etiqueta: "Conductor", plural: "conductores" },
+  { valor: "peoneta", etiqueta: "Peoneta", plural: "peonetas" },
+  { valor: "operador", etiqueta: "Operador", plural: "operadores" },
+];
+
+export async function listWorkers(pointId?: string): Promise<Persona[]> {
+  const q = pointId ? `?point_id=${encodeURIComponent(pointId)}` : "";
+  const res = await fetch(`${BACKEND_URL}/resources/workers${q}`, {
+    credentials: "include",
+  });
+  if (!res.ok) throw new Error(await parseErrorMessage(res, "No se pudo cargar el personal."));
+  return res.json();
+}
+
+export async function createWorker(persona: PersonaInput): Promise<Persona> {
+  const res = await fetch(`${BACKEND_URL}/resources/workers`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(persona),
+  });
+  if (!res.ok) throw new Error(await parseErrorMessage(res, "No se pudo agregar a la persona."));
+  return res.json();
+}
+
+export async function updateWorker(id: string, persona: PersonaInput): Promise<Persona> {
+  const res = await fetch(`${BACKEND_URL}/resources/workers/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(persona),
+  });
+  if (!res.ok) throw new Error(await parseErrorMessage(res, "No se pudo guardar el cambio."));
+  return res.json();
+}
+
+export async function deleteWorker(id: string): Promise<void> {
+  const res = await fetch(`${BACKEND_URL}/resources/workers/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!res.ok) throw new Error(await parseErrorMessage(res, "No se pudo quitar a la persona."));
+}
+
+/** Nombres repetidos entre las personas MARCADAS, normalizados.
+ *
+ *  Mismo criterio que las patentes de la flota, y aca ademas es necesario para
+ *  el criterio: el AC2 se verifica comprobando que un nombre no aparezca en dos
+ *  vehiculos del plan, y con dos filas llamadas igual esa comprobacion deja de
+ *  poder hacerse. */
+export function nombresRepetidos(personas: Persona[]): Set<string> {
+  const vistos = new Set<string>();
+  const repetidos = new Set<string>();
+  for (const p of personas) {
+    if (!p.disponible) continue;
+    const clave = p.nombre.trim().toLowerCase();
+    if (!clave) continue;
+    if (vistos.has(clave)) repetidos.add(clave);
+    vistos.add(clave);
+  }
+  return repetidos;
+}
+
 /** Pone TODAS las unidades de un punto en el mismo estado, en UNA peticion.
  *
  *  Un bucle de 21 PATCH desde el cliente se siente lento, y en paralelo son 21

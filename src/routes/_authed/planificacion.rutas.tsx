@@ -30,7 +30,7 @@
 // =============================================================================
 
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRightCircle,
@@ -48,6 +48,7 @@ import {
   MapPin,
   Route as RouteIcon,
   Scale,
+  Search,
   Star,
   StarFill,
   TriangleAlert,
@@ -82,8 +83,16 @@ import {
   type SavedAnalysisRecord,
 } from "@/lib/analysisStore";
 import {
+  createWorker,
+  deleteWorker,
   listResourcePoints,
   listResources,
+  listWorkers,
+  nombresRepetidos,
+  ROLES,
+  updateWorker,
+  type Persona,
+  type RolPersonal,
   resourcePhotoUrl,
   resumenParaRuta,
   TEXTO_FUERA_DE_RUTA,
@@ -99,14 +108,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  guardarCuadrilla,
-  leerCuadrilla,
-  nombresRepetidos,
-  ROLES,
-  type PersonaCuadrilla,
-  type RolPersonal,
-} from "@/lib/crewState";
 import { RELLENO_SANITARIO } from "@/lib/disposalSite";
 import { projectPolygonToWgs84 } from "@/lib/projection";
 import {
@@ -458,21 +459,115 @@ function RutasPage() {
 
   /** La cuadrilla declarada para hoy (AC1 y AC2 de HDU5.1).
    *
-   *  Se lee del navegador al montar y no en el `useState` inicial: esta vista la
-   *  renderiza el servidor (SSR en Node), donde `localStorage` no existe, y leer
-   *  ahí rompería la hidratación al no coincidir con lo que el cliente ve. */
-  const [cuadrilla, setCuadrilla] = useState<PersonaCuadrilla[]>([]);
-  useEffect(() => {
-    setCuadrilla(leerCuadrilla());
-  }, []);
+   *  Vive en el servidor: empezó en el navegador para no almacenar datos
+   *  personales, y se movió a pedido del equipo, porque una lista que no se
+   *  comparte entre equipos obliga a reescribirla en cada máquina. */
+  const [cuadrilla, setCuadrilla] = useState<Persona[]>([]);
+  const [buscandoPersonal, setBuscandoPersonal] = useState("");
+  const [guardandoPersona, setGuardandoPersona] = useState(false);
 
-  const actualizarCuadrilla = (personas: PersonaCuadrilla[]) => {
-    setCuadrilla(personas);
-    guardarCuadrilla(personas);
+  const recargarCuadrilla = useCallback(() => {
+    listWorkers()
+      .then(setCuadrilla)
+      .catch(() => {});
+  }, []);
+  useEffect(recargarCuadrilla, [recargarCuadrilla]);
+
+  /** Escribe el cambio en el servidor y refleja la respuesta.
+   *
+   *  Optimista en la tabla local primero: marcar una casilla tiene que sentirse
+   *  inmediato, y el viaje de red no debería notarse. Si falla, se recarga desde
+   *  el servidor en vez de dejar la vista afirmando un estado que no se guardó. */
+  const cambiarPersona = async (persona: Persona, cambios: Partial<Persona>) => {
+    const optimista = { ...persona, ...cambios };
+    setCuadrilla((prev) => prev.map((x) => (x.id === persona.id ? optimista : x)));
+    try {
+      const { id: _id, ...entrada } = optimista;
+      const guardada = await updateWorker(persona.id, entrada);
+      setCuadrilla((prev) => prev.map((x) => (x.id === persona.id ? guardada : x)));
+    } catch (err) {
+      notify.error(
+        "No se pudo guardar el cambio",
+        err instanceof Error ? err.message : "Intenta nuevamente.",
+      );
+      recargarCuadrilla();
+    }
+  };
+
+  const agregarPersona = async () => {
+    setGuardandoPersona(true);
+    try {
+      const puntoDestino = activePoints[0]?.id ?? originPoints[0]?.id;
+      if (!puntoDestino) {
+        notify.warning("No hay ningún punto", "Crea un punto antes de agregar personal.");
+        return;
+      }
+      const nueva = await createWorker({
+        nombre: "",
+        rol: "conductor",
+        disponible: true,
+        point_id: puntoDestino,
+      });
+      setCuadrilla((prev) => [...prev, nueva]);
+    } catch (err) {
+      notify.error(
+        "No se pudo agregar a la persona",
+        err instanceof Error ? err.message : "Intenta nuevamente.",
+      );
+    } finally {
+      setGuardandoPersona(false);
+    }
+  };
+
+  const quitarPersona = async (persona: Persona) => {
+    setCuadrilla((prev) => prev.filter((x) => x.id !== persona.id));
+    try {
+      await deleteWorker(persona.id);
+    } catch {
+      recargarCuadrilla();
+    }
   };
 
   const repetidos = nombresRepetidos(cuadrilla);
   const cuadrillaDeHoy = cuadrilla.filter((p) => p.disponible && p.nombre.trim());
+
+  /** Cuántos hay marcados de cada rol. Es la cifra que decide qué vehículos
+   *  pueden salir, y sin ella hay que contar filas a ojo en una lista que
+   *  además está filtrada por el buscador. */
+  const resumenCuadrilla = ROLES.map((r) => ({
+    ...r,
+    cantidad: cuadrillaDeHoy.filter((p) => p.rol === r.valor).length,
+  }));
+
+  const cuadrillaFiltrada = buscandoPersonal.trim()
+    ? cuadrilla.filter((p) =>
+        p.nombre.toLowerCase().includes(buscandoPersonal.trim().toLowerCase()),
+      )
+    : cuadrilla;
+
+  /** La dotación que haría falta para tripular toda la flota disponible.
+   *
+   *  Es lo que se le dice al trabajador cuando no marcó a nadie: la ruta se
+   *  genera igual, y conviene que sepa CUÁNTA gente haría falta. Cuánta y no
+   *  quiénes, porque el sistema no tiene cómo saber quiénes. */
+  const dotacionNecesaria = ROLES.map((r) => {
+    const campo = (
+      {
+        conductor: "conductores_requeridos",
+        peoneta: "peonetas_requeridas",
+        operador: "operadores_requeridos",
+      } as const
+    )[r.valor];
+    const total = activePoints.reduce(
+      (suma, punto) =>
+        suma +
+        (recursosPorPunto[punto.id] ?? [])
+          .filter((u) => u.disponible && u.familia === "carga" && u.capacidad_m3)
+          .reduce((s, u) => s + (u[campo] ?? 0), 0),
+      0,
+    );
+    return { ...r, total };
+  }).filter((r) => r.total > 0);
 
   // AC2/AC6.
   const [generating, setGenerating] = useState(false);
@@ -2071,13 +2166,15 @@ function RutasPage() {
                   className="max-h-[22rem] w-full rounded-lg border border-border/60 object-contain"
                 />
               )}
-              {/* Los tres límites del vehículo juntos, más su dotación. El de
-                  volumen decide el reparto, el de peso y la autonomía deciden
-                  si queda descartado (AC4 y AC3): si el plan deja una zona sin
-                  asignar por alguna de esas razones, acá está la cifra contra
-                  la que se comparó. "Sin límite" y "sin declarar" dicen cosas
-                  distintas y por eso no comparten texto. */}
-              <div className="grid grid-cols-2 gap-2">
+              {/* Los tres límites van en una fila de TRES, no en una grilla de
+                  2x2 con la dotación de cuarta. Las tres son cifras cortas de la
+                  misma naturaleza y se comparan entre sí; la dotación es una
+                  LISTA de personas, y metida en una celda de cifra se envolvía
+                  en cuatro renglones que rompían la fila y empujaban el resto.
+
+                  Un dato de otra forma no entra en la grilla de los demás solo
+                  porque sea el cuarto. */}
+              <div className="grid grid-cols-3 gap-2">
                 <CifraPlan
                   icono={<Boxes className="h-3.5 w-3.5" />}
                   etiqueta="Capacidad"
@@ -2105,15 +2202,49 @@ function RutasPage() {
                       : "Sin límite"
                   }
                 />
-                <CifraPlan
-                  icono={<Users className="h-3.5 w-3.5" />}
-                  etiqueta="Dotación"
-                  valor={
-                    vehiculoEnFoto.crew && vehiculoEnFoto.crew.length > 0
-                      ? vehiculoEnFoto.crew.join(", ")
-                      : "Sin declarar"
-                  }
-                />
+              </div>
+
+              {/* La dotación como lista, una persona por fila con su rol al
+                  costado. Es la tripulación que va en ESTE vehículo, así que el
+                  nombre manda y el rol lo califica: en una sola línea separada
+                  por comas había que leer la frase entera para contar cuántos
+                  van. */}
+              <div className="rounded-lg border border-border/60 bg-background/40 p-3">
+                <p className="flex items-center gap-1.5 text-[0.625rem] uppercase tracking-wide text-muted-foreground">
+                  <Users className="h-3 w-3" />
+                  Dotación
+                  {vehiculoEnFoto.crew && vehiculoEnFoto.crew.length > 0 && (
+                    <Conteo n={vehiculoEnFoto.crew.length} />
+                  )}
+                </p>
+                {vehiculoEnFoto.crew && vehiculoEnFoto.crew.length > 0 ? (
+                  <ul className="mt-2 space-y-1">
+                    {vehiculoEnFoto.crew.map((persona, i) => {
+                      // El backend manda "Juan Pérez (conductor)" cuando hay
+                      // personal declarado, y "2 peonetas" cuando no. Se parte
+                      // el paréntesis para poder jerarquizar nombre y rol; si no
+                      // lo trae, es un rol suelto y se imprime tal cual.
+                      const m = /^(.*?)\s*\(([^)]+)\)$/.exec(persona);
+                      return (
+                        <li
+                          key={`${persona}-${i}`}
+                          className="flex items-baseline justify-between gap-2"
+                        >
+                          <span className="min-w-0 truncate text-xs text-foreground">
+                            {m ? m[1] : persona}
+                          </span>
+                          {m && (
+                            <span className="flex-shrink-0 text-[0.625rem] text-muted-foreground">
+                              {m[2]}
+                            </span>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : (
+                  <p className="mt-1.5 text-xs text-muted-foreground">Sin declarar</p>
+                )}
               </div>
             </div>
           )}
@@ -2263,7 +2394,15 @@ function RutasPage() {
             de CONFIRMACIÓN, así que lo primero que hay que hacer es leerlo, no
             escribir. El teclado no queda afuera: el Tab entra igual, y Escape
             sigue cerrando porque eso lo maneja el diálogo y no el foco. */}
-        <DialogContent onOpenAutoFocus={(e) => e.preventDefault()}>
+        {/* Más ancho y con alto acotado: el diálogo pasó de tres controles
+            cortos a llevar también la cuadrilla, y en el ancho por omisión cada
+            fila de persona (casilla, nombre, rol y papelera) quedaba apretada.
+            El scroll es del diálogo entero y no solo de la lista, porque con la
+            lista llena el resto de los campos también necesita poder alcanzarse. */}
+        <DialogContent
+          onOpenAutoFocus={(e) => e.preventDefault()}
+          className="max-h-[90vh] max-w-2xl overflow-y-auto"
+        >
           <DialogHeader>
             <DialogTitle>Generar ruta óptima</DialogTitle>
             <DialogDescription>Confirma los datos antes de generar la ruta.</DialogDescription>
@@ -2335,11 +2474,6 @@ function RutasPage() {
                 operación como "se designa personal según requerimiento" y "se
                 flexibiliza por inasistencias".
 
-                La lista se recuerda en el navegador (crewState.ts) solo para no
-                retipearla; lo que decide el plan es lo que se manda en la
-                petición. Nada de esto se guarda en la base, porque son datos
-                personales que nadie nos entregó.
-
                 La casilla, y no la papelera, es lo que cubre la inasistencia:
                 quien falta hoy vuelve mañana, y obligar a reescribir su nombre
                 convertiría una ausencia en un alta nueva. */}
@@ -2348,23 +2482,69 @@ function RutasPage() {
                 <label className="text-xs font-medium text-muted-foreground">
                   Personal disponible hoy
                 </label>
-                {cuadrilla.length > 0 && (
-                  <span className="mono text-[0.625rem] tabular-nums text-muted-foreground">
-                    {cuadrillaDeHoy.length} de {cuadrilla.length} marcados
+                {/* El resumen por rol, que es la cifra que decide qué vehículos
+                    pueden salir. Sin esto hay que contar filas a ojo en una
+                    lista que además puede estar filtrada por el buscador. */}
+                {cuadrillaDeHoy.length > 0 && (
+                  <span className="flex items-baseline gap-2">
+                    {resumenCuadrilla
+                      .filter((r) => r.cantidad > 0)
+                      .map((r) => (
+                        <span key={r.valor} className="text-[0.625rem] text-muted-foreground">
+                          <span className="mono font-semibold tabular-nums text-foreground">
+                            {r.cantidad}
+                          </span>{" "}
+                          {r.cantidad === 1 ? r.etiqueta.toLowerCase() : r.plural}
+                        </span>
+                      ))}
                   </span>
                 )}
               </div>
 
+              {/* El buscador aparece recién cuando hay suficientes filas para
+                  que buscar tenga sentido: con cuatro personas es un control de
+                  más que ocupa el lugar de una de ellas. */}
+              {cuadrilla.length > 6 && (
+                <div className="relative">
+                  <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={buscandoPersonal}
+                    onChange={(e) => setBuscandoPersonal(e.target.value)}
+                    placeholder="Buscar por nombre"
+                    className="h-8 pl-8 text-xs"
+                  />
+                </div>
+              )}
+
               {cuadrilla.length === 0 ? (
                 <p className="rounded-md border border-dashed border-border/60 px-3 py-3 text-center text-[0.6875rem] leading-relaxed text-muted-foreground">
-                  Sin personal declarado, el plan no restringe por dotación. Agrega a tu cuadrilla
-                  para que solo se consideren los vehículos que se pueden tripular.
+                  Sin personal declarado, el plan no restringe por dotación y la ruta se genera
+                  igual.
+                  {dotacionNecesaria.length > 0 && (
+                    <>
+                      {" "}
+                      Para tripular toda la flota disponible harían falta{" "}
+                      <span className="font-medium text-foreground">
+                        {dotacionNecesaria
+                          .map(
+                            (r) =>
+                              `${r.total} ${r.total === 1 ? r.etiqueta.toLowerCase() : r.plural}`,
+                          )
+                          .join(" y ")}
+                      </span>
+                      .
+                    </>
+                  )}
+                </p>
+              ) : cuadrillaFiltrada.length === 0 ? (
+                <p className="rounded-md border border-dashed border-border/60 px-3 py-3 text-center text-[0.6875rem] text-muted-foreground">
+                  Nadie coincide con esa búsqueda.
                 </p>
               ) : (
-                // Alto acotado con scroll: con veinte personas el diálogo
+                // Alto acotado con scroll: con treinta personas el diálogo
                 // crecería hasta sacar el botón de generar de la pantalla.
-                <ul className="max-h-40 space-y-1 overflow-y-auto pr-0.5">
-                  {cuadrilla.map((persona) => {
+                <ul className="max-h-60 space-y-1 overflow-y-auto pr-0.5">
+                  {cuadrillaFiltrada.map((persona) => {
                     const repetido =
                       persona.disponible && repetidos.has(persona.nombre.trim().toLowerCase());
                     return (
@@ -2372,23 +2552,23 @@ function RutasPage() {
                         <Checkbox
                           checked={persona.disponible}
                           onCheckedChange={(v) =>
-                            actualizarCuadrilla(
-                              cuadrilla.map((x) =>
-                                x.id === persona.id ? { ...x, disponible: v === true } : x,
-                              ),
-                            )
+                            cambiarPersona(persona, { disponible: v === true })
                           }
                           aria-label={`${persona.nombre || "Sin nombre"} disponible hoy`}
                         />
                         <Input
                           value={persona.nombre}
+                          // Se escribe local y se guarda al salir del campo: una
+                          // petición por tecla sería una ráfaga contra el
+                          // servidor y haría saltar el cursor con cada respuesta.
                           onChange={(e) =>
-                            actualizarCuadrilla(
-                              cuadrilla.map((x) =>
+                            setCuadrilla((prev) =>
+                              prev.map((x) =>
                                 x.id === persona.id ? { ...x, nombre: e.target.value } : x,
                               ),
                             )
                           }
+                          onBlur={() => cambiarPersona(persona, {})}
                           placeholder="Nombre"
                           className={`h-8 flex-1 text-xs ${
                             repetido ? "border-destructive focus-visible:ring-destructive" : ""
@@ -2396,13 +2576,7 @@ function RutasPage() {
                         />
                         <Select
                           value={persona.rol}
-                          onValueChange={(v) =>
-                            actualizarCuadrilla(
-                              cuadrilla.map((x) =>
-                                x.id === persona.id ? { ...x, rol: v as RolPersonal } : x,
-                              ),
-                            )
-                          }
+                          onValueChange={(v) => cambiarPersona(persona, { rol: v as RolPersonal })}
                         >
                           <SelectTrigger className="h-8 w-[7.5rem] text-xs">
                             <SelectValue />
@@ -2417,9 +2591,7 @@ function RutasPage() {
                         </Select>
                         <button
                           type="button"
-                          onClick={() =>
-                            actualizarCuadrilla(cuadrilla.filter((x) => x.id !== persona.id))
-                          }
+                          onClick={() => quitarPersona(persona)}
                           aria-label={`Quitar a ${persona.nombre || "esta persona"}`}
                           title="Quitar de la cuadrilla"
                           className="flex h-7 w-7 flex-shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive-strong"
@@ -2440,21 +2612,20 @@ function RutasPage() {
                 </p>
               )}
 
+              {/* El mismo aviso cuando hay gente cargada pero nadie marcado: es
+                  el mismo caso para el algoritmo y no se ve igual en pantalla. */}
+              {cuadrilla.length > 0 && cuadrillaDeHoy.length === 0 && (
+                <p className="text-[0.625rem] leading-relaxed text-muted-foreground">
+                  Sin nadie marcado la ruta se genera igual, sin restringir por dotación.
+                </p>
+              )}
+
               <Button
                 variant="secondary"
                 size="sm"
                 className="h-8 w-full text-xs"
-                onClick={() =>
-                  actualizarCuadrilla([
-                    ...cuadrilla,
-                    {
-                      id: crypto.randomUUID(),
-                      nombre: "",
-                      rol: "conductor",
-                      disponible: true,
-                    },
-                  ])
-                }
+                disabled={guardandoPersona}
+                onClick={agregarPersona}
               >
                 <Plus className="mr-1.5 h-3 w-3" /> Agregar persona
               </Button>

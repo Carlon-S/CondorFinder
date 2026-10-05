@@ -650,6 +650,106 @@ async def set_disponibilidad(
     return _resource_to_out(actualizado)
 
 
+# =============================================================================
+# PERSONAL (AC1 y AC2 de HDU5.1)
+#
+# La cuadrilla de un punto. Vive en la base y no en el navegador: empezó en
+# localStorage para no almacenar datos personales, y se movió acá a pedido del
+# equipo, porque una lista que no se comparte entre equipos ni sobrevive a un
+# cambio de navegador obliga a reescribirla en cada máquina.
+#
+# **Son datos personales** (Ley 19.628) y conviene tenerlo presente: los escribe
+# el municipio sobre su propia gente, no se los pedimos a nadie, y no salen de su
+# instalación. El sistema no los usa para otra cosa que armar el plan del día.
+#
+# Colgados de un punto, igual que los vehículos: si mañana hay dos patios, cada
+# uno tiene su cuadrilla. El ruteo los junta todos porque las sub-rutas de puntos
+# distintos salen a la vez, pero eso es decisión del plan y no del registro.
+# =============================================================================
+
+Rol = Literal["conductor", "peoneta", "operador"]
+
+
+class WorkerIn(BaseModel):
+    nombre: str = Field(min_length=1, max_length=120)
+    rol: Rol
+    # Si entra en el plan del día. Es el equivalente del interruptor de los
+    # vehículos, y es lo que cubre "se flexibiliza por inasistencias": quien
+    # falta hoy vuelve mañana, y borrarlo convertiría una ausencia en una baja.
+    disponible: bool = True
+    point_id: str
+
+
+class WorkerOut(WorkerIn):
+    id: str
+    owner: str
+    created_at: datetime
+
+
+def _worker_to_out(doc: dict) -> WorkerOut:
+    return WorkerOut(
+        id=str(doc["_id"]),
+        owner=doc["owner"],
+        created_at=doc["created_at"],
+        nombre=doc.get("nombre", ""),
+        rol=doc.get("rol", "peoneta"),
+        disponible=doc.get("disponible", True),
+        point_id=doc.get("pointId", ""),
+    )
+
+
+@router.get("/workers", response_model=list[WorkerOut])
+async def list_workers(
+    point_id: str | None = None,
+    current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
+):
+    filtro = {"pointId": point_id} if point_id else {}
+    docs = await get_db().perfiles.find(filtro).sort("nombre", 1).to_list(length=None)
+    return [_worker_to_out(d) for d in docs]
+
+
+@router.post("/workers", response_model=WorkerOut, status_code=201)
+async def create_worker(
+    payload: WorkerIn,
+    current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
+):
+    doc = {
+        **payload.model_dump(exclude={"point_id"}),
+        "pointId": payload.point_id,
+        "owner": current_user.username,
+        "created_at": datetime.now(timezone.utc),
+    }
+    doc["_id"] = (await get_db().perfiles.insert_one(doc)).inserted_id
+    return _worker_to_out(doc)
+
+
+@router.put("/workers/{worker_id}", response_model=WorkerOut)
+async def update_worker(
+    worker_id: str,
+    payload: WorkerIn,
+    current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
+):
+    actualizado = await get_db().perfiles.find_one_and_update(
+        {"_id": _object_id(worker_id)},
+        {"$set": {**payload.model_dump(exclude={"point_id"}), "pointId": payload.point_id}},
+        return_document=ReturnDocument.AFTER,
+    )
+    if not actualizado:
+        raise HTTPException(status_code=404, detail="Persona no encontrada")
+    return _worker_to_out(actualizado)
+
+
+@router.delete("/workers/{worker_id}")
+async def delete_worker(
+    worker_id: str,
+    current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
+):
+    r = await get_db().perfiles.delete_one({"_id": _object_id(worker_id)})
+    if r.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Persona no encontrada")
+    return {"ok": True}
+
+
 @router.patch("/points/{point_id}/disponibilidad", response_model=list[ResourceOut])
 async def set_disponibilidad_del_punto(
     point_id: str,
