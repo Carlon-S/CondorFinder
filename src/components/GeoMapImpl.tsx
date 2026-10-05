@@ -31,6 +31,16 @@ import {
   MAIPU_VIEW_BBOX,
   MAIPU_VIEW_CENTER,
 } from "@/lib/maipuBoundary";
+import {
+  DISPOSAL_PIN,
+  DISPOSAL_PLATE,
+  ORIGIN_PIN_FILL,
+  ORIGIN_PIN_REGULAR,
+  ORIGIN_PIN_SIZE,
+  ZONE_PIN_FILL,
+  ZONE_PIN_REGULAR,
+  ZONE_PIN_SIZE,
+} from "@/components/map-pins";
 
 /** Encuadre inicial: el casco urbano de Maipú. Ver la nota de
  *  MAIPU_VIEW_CENTER sobre por qué no es el centro geométrico de la comuna.
@@ -55,31 +65,10 @@ L.Icon.Default.mergeOptions({
 
 // Pines reales (Phosphor "MapPin"/"MapPinArea", regular + fill) en vez de
 // las formas de CSS que había antes, se arman como <svg> crudo porque
-// Leaflet arma L.divIcon a partir de un string de HTML, no de JSX.
-//
-// Cada par regular/fill reemplaza el viejo truco de opacidad/borde para
-// distinguir "activo" de "no activo": la silueta hueca (regular) YA se lee
-// como "sin marcar" y la rellena (fill) como "marcado", sin necesitar CSS
-// adicional para esa distinción, son dibujos genuinamente distintos, no
-// el mismo dibujo con relleno distinto.
-const ZONE_PIN_REGULAR =
-  "M128,64a40,40,0,1,0,40,40A40,40,0,0,0,128,64Zm0,64a24,24,0,1,1,24-24A24,24,0,0,1,128,128Zm0-112a88.1,88.1,0,0,0-88,88c0,31.4,14.51,64.68,42,96.25a254.19,254.19,0,0,0,41.45,38.3,8,8,0,0,0,9.18,0A254.19,254.19,0,0,0,174,200.25c27.45-31.57,42-64.85,42-96.25A88.1,88.1,0,0,0,128,16Zm0,206c-16.53-13-72-60.75-72-118a72,72,0,0,1,144,0C200,161.23,144.53,209,128,222Z";
-const ZONE_PIN_FILL =
-  "M128,16a88.1,88.1,0,0,0-88,88c0,75.3,80,132.17,83.41,134.55a8,8,0,0,0,9.18,0C136,236.17,216,179.3,216,104A88.1,88.1,0,0,0,128,16Zm0,56a32,32,0,1,1-32,32A32,32,0,0,1,128,72Z";
-// "Puntos de partida y destino" (HDU6), un punto que el algoritmo de ruta
-// puede tratar como origen o como destino (ver el rename de "punto de
-// origen" a simplemente "punto" en toda la app), por eso un pin distinto
-// al de zona en vez de reusar la misma familia "MapPin".
-const ORIGIN_PIN_REGULAR =
-  "M128,16a88.1,88.1,0,0,0-88,88c0,31.4,14.51,64.68,42,96.25a254.19,254.19,0,0,0,41.45,38.3,8,8,0,0,0,9.18,0A254.19,254.19,0,0,0,174,200.25c27.45-31.57,42-64.85,42-96.25A88.1,88.1,0,0,0,128,16Zm0,206c-16.53-13-72-60.75-72-118a72,72,0,0,1,144,0C200,161.23,144.53,209,128,222Zm40-118a8,8,0,0,1-8,8H136v24a8,8,0,0,1-16,0V112H96a8,8,0,0,1,0-16h24V72a8,8,0,0,1,16,0V96h24A8,8,0,0,1,168,104Z";
-const ORIGIN_PIN_FILL =
-  "M128,16a88.1,88.1,0,0,0-88,88c0,31.4,14.51,64.68,42,96.25a254.19,254.19,0,0,0,41.45,38.3,8,8,0,0,0,9.18,0A254.19,254.19,0,0,0,174,200.25c27.45-31.57,42-64.85,42-96.25A88.1,88.1,0,0,0,128,16Zm32,96H136v24a8,8,0,0,1-16,0V112H96a8,8,0,0,1,0-16h24V72a8,8,0,0,1,16,0V96h24a8,8,0,0,1,0,16Z";
-
-// Sitio de disposición final (Phosphor "Warehouse"). Pin distinto al de zona y
-// al de punto porque es una tercera cosa: no es un basural que se retira ni un
-// patio desde donde sale la flota, es a dónde termina yendo el material.
-const DISPOSAL_PIN =
-  "M231.65,194.55,224,164.11V88a16,16,0,0,0-16-16H176V40a16,16,0,0,0-16-16H96A16,16,0,0,0,80,40V72H48A16,16,0,0,0,32,88v76.11L24.35,194.55A8,8,0,0,0,32,204.52V216a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V204.52A8,8,0,0,0,231.65,194.55ZM96,40h64V72H96ZM48,88H208v72H48Zm160,128H48V176H208Z";
+// Leaflet arma L.divIcon a partir de un string de HTML, no de JSX, asi que los
+// trazados entran interpolados. Los dibujos viven en map-pins.ts porque
+// GoogleMapImpl.tsx usa los mismos: con una copia en cada implementacion, la
+// que no se esta mirando se queda con el pin viejo.
 
 function pinDivIcon(path: string, color: string, size: number): L.DivIcon {
   return L.divIcon({
@@ -101,7 +90,7 @@ function zoneIcon(color: string, filled: boolean): L.DivIcon {
   return pinDivIcon(
     filled ? ZONE_PIN_FILL : ZONE_PIN_REGULAR,
     filled ? color : "var(--muted-foreground)",
-    44,
+    ZONE_PIN_SIZE,
   );
 }
 
@@ -111,7 +100,7 @@ function originIcon(active: boolean): L.DivIcon {
   return pinDivIcon(
     active ? ORIGIN_PIN_FILL : ORIGIN_PIN_REGULAR,
     active ? "var(--primary)" : "var(--muted-foreground)",
-    36,
+    ORIGIN_PIN_SIZE,
   );
 }
 
@@ -123,7 +112,6 @@ function originIcon(active: boolean): L.DivIcon {
  *  su CENTRO (`iconAnchor` a la mitad del alto de la placa) y no en una punta
  *  que no tiene. Ver `.disposal-marker` en styles.css para el detalle del
  *  tratamiento. */
-const DISPOSAL_PLATE = 32; // px de la placa, en lockstep con .disposal-marker__plate (2rem)
 
 function disposalIcon(name: string): L.DivIcon {
   return L.divIcon({

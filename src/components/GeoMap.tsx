@@ -123,13 +123,36 @@ export interface GeoMapProps {
  * acá vía import() dinámico dentro de un useEffect: así el import mismo
  * ocurre después del mount, solo en el cliente, y nunca durante SSR.
  */
+/** Con qué motor se dibuja el mapa.
+ *
+ *  Sin `VITE_MAPS_PROVIDER=google` (o sin clave) es Leaflet con tiles de
+ *  OpenStreetMap, que es gratis y no necesita cuenta: el sistema tiene que
+ *  seguir corriendo en la máquina de cualquiera del equipo. Mismo criterio que
+ *  `ROUTES_PROVIDER` en el backend.
+ *
+ *  Las DOS condiciones juntas, igual que allá: un `.env` a medio configurar no
+ *  debe dejar el mapa en un estado que nadie eligió.
+ *
+ *  **Google se cobra por CARGA DE MAPA**, o sea una por cada vez que se entra a
+ *  /rutas o a /recursos. El zoom, el paneo y las capas son gratis. Durante una
+ *  tarde de ajustes visuales conviene dejar esta variable sin definir: el hot
+ *  reload remonta el mapa en cada guardado. */
+const USA_GOOGLE =
+  import.meta.env.VITE_MAPS_PROVIDER === "google" && !!import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+
 export function GeoMap(props: GeoMapProps) {
   const [Impl, setImpl] = useState<ComponentType<GeoMapProps> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    import("./GeoMapImpl").then((mod) => {
-      if (!cancelled) setImpl(() => mod.GeoMapImpl);
+    // El import() dinámico cumple dos funciones: evita el SSR (Leaflet toca
+    // `window` en el top-level de su módulo) y deja cada motor en su propio
+    // bloque, así el que no se usa no viaja al navegador.
+    const cargar = USA_GOOGLE
+      ? import("./GoogleMapImpl").then((m) => m.GoogleMapImpl)
+      : import("./GeoMapImpl").then((m) => m.GeoMapImpl);
+    cargar.then((componente) => {
+      if (!cancelled) setImpl(() => componente);
     });
     return () => {
       cancelled = true;
