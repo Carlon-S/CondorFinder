@@ -504,7 +504,21 @@ Route Matrix se cobra **por elemento** (orígenes × destinos), así que crece a
 
 La primera fila es la que está implementada, y la segunda era el plan original: espejar `route_geometry()` habría significado una llamada por tramo. `computeRoutes` acepta paradas intermedias y devuelve `legs[]` con duración, distancia y polilínea **por tramo**, así que `origen → zonas → relleno → origen` vuelve completo en una sola petición. Triplica el techo gratuito y además es más correcto: es un cálculo de ruta, no tres tramos calculados por separado que podrían no empalmar.
 
-**El consumo está acotado por la estructura del código, no por prudencia.** Las cinco salidas por restricción de `_build_subroute` (sin dotación, sin vehículo compatible, servicio caído, excede autonomía, excede horas) ocurren **antes** de pedir la geometría, así que el bucle de relajación que descarta zonas itera gastando cero llamadas: la geometría se pide una sola vez, en la iteración que pasó todos los filtros. Con un punto de origen eso es exactamente **una llamada por botón apretado**. La garantía se rompería el día que alguien agregue una salida después de esa línea, y por eso está anotada ahí mismo en el código.
+**El consumo está acotado por la estructura del código, no por prudencia.** Las salidas baratas de `_build_subroute` (sin dotación, sin vehículo compatible, servicio caído, y excede autonomía u horas **según la matriz**) ocurren antes de pedir la geometría, así que el bucle de relajación descarta lo groseramente imposible gastando cero llamadas.
+
+Después de la geometría hay dos salidas más, las que vuelven a medir horas y autonomía contra las cifras reales, y esas sí consumen la llamada que se acaba de hacer. El costo es **1 llamada en el caso normal, más 1 por cada zona que haya que sacar porque el recorrido medido no cumplió**, con techo en la cantidad de zonas. En la práctica la matriz aproxima bien (3% de diferencia en el total medido), así que el extra es casi siempre cero.
+
+| Escenario | Llamadas | Generaciones gratis/mes |
+|---|---|---|
+| Caso normal | 1 | 5.000 |
+| Una zona descartada por medición | 2 | 2.500 |
+| Peor caso con 5 zonas | 5 | 1.000 |
+
+Incluso el peor caso deja 1.000 generaciones mensuales contra las ~600 del uso previsible.
+
+**Por qué se pagó ese precio.** La comprobación de la jornada se hacía contra la matriz, o sea a flujo libre, mientras lo mostrado venía con tráfico: el plan podía aceptarse como que cabe en 4 h y anunciar 4 h 30. Un plan que se contradice a sí mismo no se puede usar para coordinar a nadie. La misma corrección arregla la autonomía, que ahora se mide contra los kilómetros efectivamente recorridos y no contra los que la matriz supuso.
+
+La comprobación barata **no se puede borrar** y quedarse solo con la medida: sin ella habría que pedir geometría en cada iteración de la relajación. Y tampoco es redundante, porque la matriz no acota por un lado: OSRM sobreestima la velocidad en ciudad y la subestima en vía rápida, así que puede dar más o menos que el tráfico real.
 
 #### Qué protege el tramo gratuito
 
@@ -536,6 +550,19 @@ Esa indirección no es ceremonia. Antes `_build_subroute` hacía tres `route_geo
 **Qué cubre exactamente.** El criterio habla de *"los tiempos estimados de cada tramo"*, y esos son los que pasan a venir con tráfico: los que se muestran y los que calculan las horas de llegada de la línea de tiempo.
 
 Dos cosas siguen decidiéndose a flujo libre, y las dos son consecuencia de dejar la matriz en OSRM por costo. El **orden** de las paradas, que el criterio no pide. Y el **chequeo de horas disponibles**, que compara contra los tiempos de la matriz y no contra los de la geometría: un plan puede aceptarse como que cabe en la jornada y mostrarse después más largo que ella. Cerrar eso obligaría a pedir la geometría antes de decidir, o sea una llamada por cada iteración de la relajación en vez de una por plan, que es justamente la garantía que sostiene el costo. Cerrar eso también costaría 3 llamadas por generación (pedirle a Google las tres mejores permutaciones que OSRM ya enumeró, y quedarse con la de menor tiempo real), o sea 1.666 generaciones mensuales. Queda anotado como mejora con su costo calculado, no como deuda.
+
+**Verificado en producción el 05-10-2026**, y con un hallazgo que conviene registrar: **comparar el total del plan no sirve para comprobar este criterio**. Mismo recorrido, 37,8 km en los dos casos:
+
+| Tramo | Distancia | OSRM (flujo libre) | Google (con tráfico) |
+|---|---|---|---|
+| origen → zona | 4,32 km | 7,3 min (35 km/h) | **12,6 min (21 km/h)** |
+| zona → relleno | 18,40 km | 28,3 min (39 km/h) | **23,6 min (47 km/h)** |
+| relleno → origen | 15,08 km | 26,5 min (34 km/h) | 27,7 min (33 km/h) |
+| **Total** | 37,8 km | 62,1 min | 64,0 min |
+
+La distancia es idéntica, o sea son las mismas calles a otra velocidad. Pero **los tramos se mueven en direcciones opuestas y casi se cancelan**: OSRM sobreestima la velocidad en ciudad y la subestima en vía rápida, así que el total apenas se mueve (1,9 min) mientras el tramo urbano cambia un 73%. Lo que hay que mirar son las filas de la línea de tiempo y las horas de llegada de cada parada. Es también la razón de negocio del criterio: a la cuadrilla no le sirve saber cuánto dura la jornada, le sirve saber a qué hora está en cada zona.
+
+**Consumo medido**: 4 solicitudes para 2 generaciones más 2 pruebas por `curl`, o sea exactamente **1 llamada por ruta generada**, como predecía la estructura del código.
 
 **Para encenderlo**, en este orden: habilitar `Routes API` en el proyecto que ya tiene la VM (no uno nuevo: el tope se agrega por cuenta de facturación, así que un proyecto aparte no da otros 5.000); configurar las cuotas; crear la clave restringida; y recién entonces `ROUTES_PROVIDER=google` y `GOOGLE_ROUTES_API_KEY` en el `.env` de la VM. Las dos variables van juntas: una sola no activa nada, para que un `.env` a medio configurar no deje el ruteo en un estado que nadie quiso.
 

@@ -177,6 +177,26 @@ class RoutePlanVehicleOut(BaseModel):
     crew: list[str] = []
 
 
+class RoutePlanLegOut(BaseModel):
+    """Un salto entre dos paradas consecutivas, con su distancia y su tiempo.
+
+    Existe porque el dato de un tramo no pertenece a ninguna de las dos paradas
+    que une, y la línea de tiempo lo dibuja en la fila del medio. El contrato de
+    TypeScript lo esperaba desde siempre (`RoutePlanLeg` en routePlan.ts) y el
+    backend no lo mandaba nunca, así que `RouteTimeline` sumaba la ida COMPLETA
+    a la primera parada y CERO a las siguientes: entre zona y zona no aparecía
+    ningún tiempo, ni con tráfico ni sin él.
+
+    Los dos proveedores lo devuelven en la misma respuesta que la geometría, así
+    que esto no cuesta ni una llamada más."""
+    # null = sale del punto de origen.
+    fromOrder: int | None = None
+    # null = vuelve al punto de origen.
+    toOrder: int | None = None
+    distanceKm: float
+    durationHours: float
+
+
 class RouteSegmentOut(BaseModel):
     """Un resumen por sub-ruta/punto de origen usado — mismo índice que
     outboundPaths[i]/returnPaths[i] abajo, para que el frontend pueda
@@ -206,6 +226,9 @@ class RouteSegmentOut(BaseModel):
     disposalDurationHours: float | None = None
     returnDistanceKm: float
     returnDurationHours: float
+    # Un salto por cada par de paradas consecutivas de la ida. Lista vacía
+    # significa que el proveedor no los dio, y la vista cae a los totales.
+    legs: list[RoutePlanLegOut] = []
 
 
 class RoutePlanUnassignedOut(BaseModel):
@@ -1061,13 +1084,17 @@ async def _build_subroute(
     # Tres tramos, no dos: la carga se descarga en el relleno y el camión
     # recién después vuelve al patio.
     #
-    # **Esta es la ÚNICA línea del recorrido que pide geometría, y es la última
-    # del camino feliz.** Todas las salidas por restricción (sin dotación, sin
-    # vehículo compatible, excede autonomía, excede horas) están arriba, así que
-    # el bucle de relajación del handler itera sin gastar ni una llamada. Con el
-    # proveedor de AC5 activo eso es exactamente UNA llamada por recorrido
-    # generado, y esa garantía se rompe el día que alguien agregue una salida
-    # DESPUÉS de acá.
+    # **Esta es la ÚNICA línea del recorrido que pide geometría.** Las cuatro
+    # salidas por restricción baratas (sin dotación, sin vehículo compatible,
+    # excede autonomía o excede horas SEGÚN LA MATRIZ) están arriba, así que la
+    # relajación descarta lo groseramente imposible sin gastar ni una llamada.
+    #
+    # Debajo hay dos salidas más, las que vuelven a medir horas y autonomía
+    # contra las cifras reales. Esas sí gastan: cada una cuesta la llamada que
+    # se acaba de hacer. El costo por generación pasó de ser exactamente 1 a ser
+    # 1 en el caso normal, más 1 por cada zona que haya que sacar porque el
+    # recorrido real no cumplió. El techo es la cantidad de zonas del recorrido.
+    # Es el precio de que el plan no se contradiga, y se pagó a sabiendas.
     #
     # Cuántas peticiones cuesta no es asunto de esta función: routes_provider.py
     # lo resuelve con tres llamadas en paralelo contra OSRM, o con una sola
@@ -1103,6 +1130,42 @@ async def _build_subroute(
     outbound_hours = outbound_geo["durationHours"]
     disposal_hours = disposal_geo["durationHours"] / _LOADED_SPEED_FACTOR
     return_hours = return_geo["durationHours"]
+    horas_reales = outbound_hours + disposal_hours + return_hours
+    km_reales = (
+        outbound_geo["distanceKm"] + disposal_geo["distanceKm"] + return_geo["distanceKm"]
+    )
+
+    # ── Las dos restricciones, otra vez, contra las cifras REALES ──
+    #
+    # Arriba ya se comprobaron contra la matriz, que es gratis pero es OSRM a
+    # flujo libre. Eso alcanzaba mientras lo que se mostraba también salía de
+    # ahí; desde AC5 no, porque el plan se aceptaba con tiempos sin tráfico y se
+    # mostraba con tiempos con tráfico, o sea podía anunciar 4 h 30 dentro de una
+    # jornada de 4 h. Un plan que se contradice a sí mismo no se puede usar para
+    # coordinar a nadie.
+    #
+    # La de arriba NO se puede borrar y quedarse solo con esta: sin ella habría
+    # que pedir la geometría en cada iteración de la relajación. Y tampoco es un
+    # filtro redundante, porque la matriz no acota por un lado: medimos que OSRM
+    # sobreestima la velocidad en ciudad y la subestima en vía rápida, así que
+    # puede dar más o menos que el tráfico real. La de arriba descarta lo
+    # groseramente imposible sin gastar una llamada; esta decide de verdad.
+    if horas_reales > available_hours:
+        return {"excedeHoras": True, "horas": horas_reales, "medido": True}
+
+    # La autonomía contra los kilómetros efectivamente recorridos. El tráfico
+    # casi no mueve la distancia (medido: 0,05% entre proveedores, son las mismas
+    # calles), pero TRAFFIC_AWARE puede rodear un taco por un camino más largo, y
+    # en ese caso el que gasta combustible es el camino que el camión hace, no el
+    # que la matriz supuso.
+    if autonomia_km is not None and km_reales > autonomia_km:
+        return {
+            "excedeAutonomia": True,
+            "autonomiaKm": autonomia_km,
+            # Cuánto mide de verdad, que es lo accionable: "no cabe en 40 km" no
+            # dice nada, "son 52 km y el camión hace 40" sí.
+            "recorridoKm": km_reales,
+        }
 
     return {
         "originName": point.get("name", ""),
@@ -1111,6 +1174,9 @@ async def _build_subroute(
         # de la configuración haría que la vista afirmara el ajuste incluso
         # cuando el plan salió a flujo libre.
         "trafico": tramos.get("trafico", False),
+        # Los saltos de la ida, en el mismo orden que `stops`. El número de
+        # parada se lo pone el handler, que es donde se asigna.
+        "hops": tramos.get("hops") or [],
         # Los camiones elegidos viajan enteros, no solo su cantidad: el handler
         # necesita la patente y la dotación para el AC7. Se eligieron arriba,
         # antes de evaluar el recorrido.
@@ -1125,10 +1191,11 @@ async def _build_subroute(
         "disposalDurationHours": disposal_hours,
         "returnDistanceKm": return_geo["distanceKm"],
         "returnDurationHours": return_hours,
-        "distanceKm": (
-            outbound_geo["distanceKm"] + disposal_geo["distanceKm"] + return_geo["distanceKm"]
-        ),
-        "durationHours": outbound_hours + disposal_hours + return_hours,
+        # Las mismas cifras contra las que se acaba de verificar el plan, no un
+        # segundo cálculo: si se recalcularan acá, un cambio en una de las dos
+        # sumas dejaría al plan mostrando algo distinto de lo que aprobó.
+        "distanceKm": km_reales,
+        "durationHours": horas_reales,
     }
 
 
@@ -1393,20 +1460,40 @@ async def generate_route(
                     motivo = "Ningún vehículo disponible puede transportar este residuo."
                 descartar(lejana, motivo)
             elif result.get("excedeAutonomia"):
-                # AC3. Ningún ORDEN de visita cabía en el rango del vehículo, que
-                # es lo que el criterio pide evaluar; recién cuando se agotaron
-                # todos los órdenes se saca una zona.
-                descartar(
-                    lejana,
-                    f"Ningún orden de visita cabe en la autonomía del vehículo "
-                    f"({_format_number(result['autonomiaKm'])} km).",
-                )
+                # AC3. Dos caminos llegan acá y dicen cosas distintas: que
+                # NINGÚN orden de visita cupiera en el rango (lo que el criterio
+                # pide evaluar, decidido sobre la matriz), o que el orden elegido
+                # sí cabía en la estimación pero el recorrido medido de verdad
+                # no. El segundo puede nombrar la cifra, que es lo accionable.
+                if result.get("recorridoKm") is not None:
+                    descartar(
+                        lejana,
+                        f"El recorrido mide {_format_number(round(result['recorridoKm'], 1))} km "
+                        f"y la autonomía del vehículo es de "
+                        f"{_format_number(result['autonomiaKm'])} km.",
+                    )
+                else:
+                    descartar(
+                        lejana,
+                        f"Ningún orden de visita cabe en la autonomía del vehículo "
+                        f"({_format_number(result['autonomiaKm'])} km).",
+                    )
             else:
-                descartar(
-                    lejana,
-                    f"No alcanza dentro de las {_format_number(payload.availableHours)} horas "
-                    f"disponibles.",
-                )
+                # Igual que la autonomía: cuando el motivo salió de medir el
+                # recorrido real y no de la estimación, se dice cuánto da, porque
+                # es la diferencia entre "no entra" y "te faltan 40 minutos".
+                if result.get("medido"):
+                    descartar(
+                        lejana,
+                        f"El recorrido toma {_format_number(result['horas'])} horas y la jornada "
+                        f"disponible es de {_format_number(payload.availableHours)}.",
+                    )
+                else:
+                    descartar(
+                        lejana,
+                        f"No alcanza dentro de las {_format_number(payload.availableHours)} horas "
+                        f"disponibles.",
+                    )
 
     if not sub_routes:
         # Ninguna zona sobrevivió. No hay plan parcial que mostrar, así que esto
@@ -1432,6 +1519,10 @@ async def generate_route(
     total_volume_planificado = 0.0
     max_duration = 0.0  # sub-rutas de puntos distintos corren en paralelo (cuadrillas separadas)
     for sub in sub_routes:
+        # Los números que les toquen a las paradas de ESTA sub-ruta, en orden de
+        # visita. Se guardan porque los saltos se identifican por ellos, y acá es
+        # donde se asignan.
+        ordenes_sub: list[int] = []
         for s in sub["stops"]:
             out_stops.append(RoutePlanStopOut(
                 order=order,
@@ -1440,7 +1531,24 @@ async def generate_route(
                 label=s["name"],
                 analysisId=s.get("analysisId"),
             ))
+            ordenes_sub.append(order)
             order += 1
+
+        # Un salto por cada par consecutivo: el primero sale del punto de origen
+        # (fromOrder=None) y el resto van de una parada a la siguiente. Se corta
+        # por el más corto de los dos porque un proveedor que devuelva menos
+        # saltos de los esperados debe dejar filas sin dato, no desalinear todas
+        # las que siguen contra la parada equivocada.
+        hops = sub.get("hops") or []
+        legs_sub = [
+            RoutePlanLegOut(
+                fromOrder=None if i == 0 else ordenes_sub[i - 1],
+                toOrder=ordenes_sub[i],
+                distanceKm=round(hop["distanceKm"], 2),
+                durationHours=hop["durationHours"],
+            )
+            for i, hop in enumerate(hops[: len(ordenes_sub)])
+        ]
         outbound_paths.append(sub["outboundPath"])
         disposal_paths.append(sub["disposalPath"])
         return_paths.append(sub["returnPath"])
@@ -1480,6 +1588,7 @@ async def generate_route(
             outboundDurationHours=round(sub["outboundDurationHours"], 2),
             returnDistanceKm=round(sub["returnDistanceKm"], 2),
             returnDurationHours=round(sub["returnDurationHours"], 2),
+            legs=legs_sub,
         ))
         total_distance += sub["distanceKm"]
         # Se suma sobre las paradas que QUEDARON en la sub-ruta, no sobre las que

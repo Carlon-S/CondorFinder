@@ -88,6 +88,14 @@ def route_geometry(points: list[tuple[float, float]]) -> dict | None:
             "path": [[lat, lng] for lng, lat in coords],
             "distanceKm": route["distance"] / 1000,
             "durationHours": route["duration"] / 3600,
+            # Un tramo por SALTO entre puntos consecutivos. OSRM ya los
+            # devuelve en la misma respuesta y nadie los leía: la línea de
+            # tiempo mostraba la ida entera como una sola fila y cero entre
+            # zona y zona, porque este detalle se descartaba acá.
+            "legs": [
+                {"distanceKm": leg["distance"] / 1000, "durationHours": leg["duration"] / 3600}
+                for leg in route.get("legs", [])
+            ],
         }
     except Exception:
         return None

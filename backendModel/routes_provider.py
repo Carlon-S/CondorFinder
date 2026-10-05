@@ -66,6 +66,9 @@ async def _tramos_osrm(
         "disposal": descarga,
         "return": regreso,
         "trafico": False,
+        # Mismo detalle por salto que devuelve Google, para que la línea de
+        # tiempo se arme igual con los dos proveedores.
+        "hops": outbound.get("legs", []),
     }
 
 

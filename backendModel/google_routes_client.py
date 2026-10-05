@@ -206,4 +206,13 @@ def route_tramos(
         "outbound": _unir(tramos[: len(stops)]),
         "disposal": tramos[len(stops)],
         "return": tramos[len(stops) + 1],
+        # Los saltos de la ida SIN fusionar: origen->z1, z1->z2, ... Son los
+        # mismos legs que acaban de unirse para el trazo del mapa, pero la línea
+        # de tiempo necesita el detalle y venía en la misma respuesta. Fusionar
+        # sin conservarlos era tirar el dato por el que ya se pagó, y es lo que
+        # dejaba las conexiones entre zonas sin tiempo.
+        "hops": [
+            {"distanceKm": t["distanceKm"], "durationHours": t["durationHours"]}
+            for t in tramos[: len(stops)]
+        ],
     }
