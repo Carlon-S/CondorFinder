@@ -482,14 +482,24 @@ OSRM calcula a **flujo libre**: no sabe que hay taco. Ningún ajuste local lo ar
 
 Los números verificados contra la documentación de Google (02-10-2026):
 
-| SKU | Gratis/mes | Tras el tope | Unidad |
-|---|---|---|---|
-| Compute Routes Essentials | 10.000 | $5,00 / 1.000 | por llamada |
-| **Compute Routes Pro** | **5.000** | $10,00 / 1.000 | por llamada |
-| Compute Route Matrix Pro | 5.000 | $10,00 / 1.000 | **por elemento** |
-| RouteOptimization FleetRouting | 1.000 | $30,00 / 1.000 | por solicitud |
+| SKU | ID | Gratis/mes | Tras el tope | Unidad |
+|---|---|---|---|---|
+| Compute Routes Essentials | `9EFF-679A-9B16` | 10.000 | $5,00 / 1.000 | por llamada |
+| **Compute Routes Pro** | `02F7-1B55-DC90` | **5.000** | $10,00 / 1.000 | por llamada |
+| Compute Routes Enterprise | `6EBD-08E5-319A` | 1.000 | $15,00 / 1.000 | por llamada |
+| Compute Route Matrix Pro | `2E25-887A-DAD4` | 5.000 | $10,00 / 1.000 | **por elemento** |
+| RouteOptimization FleetRouting | — | 1.000 | $30,00 / 1.000 | por solicitud |
 
-`TRAFFIC_AWARE` y `TRAFFIC_AWARE_OPTIMAL` suben la petición a **Pro**, así que el techo gratis del AC5 es 5.000 y no 10.000. El antiguo crédito recurrente de 200 USD/mes **ya no existe**: lo reemplazaron por estos topes por SKU.
+**El SKU lo decide la función más cara de cada solicitud**, no un cargo aparte. `TRAFFIC_AWARE` y `TRAFFIC_AWARE_OPTIMAL` suben la petición a **Pro**, así que el techo gratis del AC5 es 5.000 y no 10.000. El antiguo crédito recurrente de 200 USD/mes **ya no existe**: lo reemplazaron por estos topes por SKU.
+
+Qué activa cada nivel, según la página de detalles de SKU:
+
+| Nivel | Lo activa |
+|---|---|
+| Pro | `TRAFFIC_AWARE` / `TRAFFIC_AWARE_OPTIMAL`, 11 a 25 paradas intermedias, `optimizeWaypointOrder`, modificadores de ubicación |
+| Enterprise | Vehículos de dos ruedas, cálculo de peajes, **información de tráfico sobre las polilíneas** |
+
+Esa última fila es la que descarta los colores de congestión sobre el trazo: ver "Colores de congestión, evaluados y descartados" más abajo.
 
 **La decisión que define el costo es dónde queda la matriz**, y la segunda es cómo se piden los tres tramos:
 
@@ -565,6 +575,25 @@ La distancia es idéntica, o sea son las mismas calles a otra velocidad. Pero **
 **Consumo medido**: 4 solicitudes para 2 generaciones más 2 pruebas por `curl`, o sea exactamente **1 llamada por ruta generada**, como predecía la estructura del código.
 
 **Para encenderlo**, en este orden: habilitar `Routes API` en el proyecto que ya tiene la VM (no uno nuevo: el tope se agrega por cuenta de facturación, así que un proyecto aparte no da otros 5.000); configurar las cuotas; crear la clave restringida; y recién entonces `ROUTES_PROVIDER=google` y `GOOGLE_ROUTES_API_KEY` en el `.env` de la VM. Las dos variables van juntas: una sola no activa nada, para que un `.env` a medio configurar no deje el ruteo en un estado que nadie quiso.
+
+#### Colores de congestión sobre el trazo, evaluados y descartados
+
+`extraComputations: TRAFFIC_ON_POLYLINE` devuelve `speedReadingIntervals`: tramos de la polilínea marcados `NORMAL`, `SLOW` o `TRAFFIC_JAM`, que es exactamente el verde/naranja/rojo de Google Maps. Viene en **la misma llamada** que ya se hace, así que no costaría ni una petición más.
+
+**Se probó contra la API real y funciona** (05-10-2026): devolvió 3 intervalos, uno de ellos `SLOW`. No es una limitación técnica.
+
+**Lo que lo descarta es el SKU.** La página de detalles lista *"Información sobre el tráfico en las polilíneas"* entre los disparadores de **Compute Routes Enterprise**, y como el SKU lo decide la función más cara de cada solicitud, habilitarlo **mueve todas las generaciones de Pro a Enterprise**:
+
+| | Hoy (Pro) | Con colores (Enterprise) |
+|---|---|---|
+| Gratis/mes | 5.000 | **1.000** |
+| Uso previsible | ~600 | ~600 |
+| Holgura | **8x** | **1,6x** |
+| Cuota diaria necesaria | 160 | **32** |
+
+Sigue siendo $0 al volumen real, así que el argumento **no es el costo**: es que la cuota diaria tendría que bajar de 160 a 32, y 32 generaciones por día es poco justo los días de prueba y de demostración, que es cuando más se genera.
+
+**La alternativa gratis es el `TrafficLayer` del Maps JavaScript API**, incluido sin costo en la carga del mapa: pinta la congestión sobre todas las calles del mapa base en vez de sobre el trazo. Para la cuadrilla responde la misma pregunta. Vive en la migración del mapa a Google, no acá.
 
 #### Route Optimization (FleetRouting), evaluado y descartado
 
