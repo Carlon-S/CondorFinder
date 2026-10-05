@@ -323,4 +323,37 @@ const ANILLO_EXTERIOR: [number, number][] = [
  * El contorno sigue dibujandose aparte, ahora SOLIDO y fino, porque la mascara
  * da la region pero no el limite exacto.
  */
-export const MAIPU_MASK: [number, number][][] = [ANILLO_EXTERIOR, MAIPU_BOUNDARY];
+/** El doble del area con signo de un anillo (formula del cordon de zapato).
+ *
+ *  Solo interesa el SIGNO: positivo es sentido antihorario, negativo horario.
+ *  Se calcula sobre (lng, lat) tratadas como (x, y) planas, que a esta escala
+ *  es exacto para lo unico que se pregunta. */
+function giroDe(anillo: [number, number][]): number {
+  let suma = 0;
+  for (let i = 0; i < anillo.length; i++) {
+    const [latA, lngA] = anillo[i];
+    const [latB, lngB] = anillo[(i + 1) % anillo.length];
+    suma += lngA * latB - lngB * latA;
+  }
+  return suma;
+}
+
+/**
+ * La mascara inversa: un poligono con AGUJERO, donde el agujero es Maipu.
+ *
+ * **El agujero tiene que girar AL REVES que el anillo exterior**, y eso no es
+ * un detalle de estilo. Leaflet rellena con la regla `evenodd`, a la que el
+ * sentido le da igual, pero Google usa `nonzero`, donde dos anillos que giran
+ * igual se suman en vez de restarse: la comuna quedaba rellena junto con todo
+ * lo demas y el mapa entero se veia oscurecido.
+ *
+ * El sentido se corrige por calculo y no a mano porque MAIPU_BOUNDARY viene de
+ * OpenStreetMap: el dia que se regenere desde Nominatim puede venir al reves y
+ * nadie se acordaria de invertirlo.
+ */
+export const MAIPU_MASK: [number, number][][] = [
+  ANILLO_EXTERIOR,
+  giroDe(MAIPU_BOUNDARY) * giroDe(ANILLO_EXTERIOR) > 0
+    ? [...MAIPU_BOUNDARY].reverse()
+    : MAIPU_BOUNDARY,
+];
