@@ -187,6 +187,13 @@ export interface RoutePlanSuccess {
     segments?: RoutePlanSegment[];
     /** HDU5.1/AC6. Ausente mientras el backend no lo calcule. */
     unassignedZones?: RoutePlanUnassigned[];
+    /** HDU5.1/AC5: si los tiempos de cada tramo se calcularon con el tráfico
+     *  del momento. Lo decide el backend según el proveedor configurado, y
+     *  viaja en la respuesta porque es una propiedad de ESTE plan: lo que
+     *  importa es cómo se calculó, no cómo se calcularía ahora.
+     *
+     *  Ausente o false significa flujo libre, que es lo que calcula OSRM. */
+    trafficAware?: boolean;
   };
 }
 

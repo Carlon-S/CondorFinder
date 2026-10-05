@@ -465,6 +465,19 @@ function RutasPage() {
   const [cuadrilla, setCuadrilla] = useState<Persona[]>([]);
   const [buscandoPersonal, setBuscandoPersonal] = useState("");
   const [guardandoPersona, setGuardandoPersona] = useState(false);
+  /** Filas recién agregadas que el trabajador todavía no terminó de escribir.
+   *
+   *  Una fila nueva nace vacía porque existe para llenarse, así que avisar que
+   *  "no entra en el plan" en el mismo instante en que aparece es regañar por
+   *  algo que nadie hizo todavía. El aviso aparece recién cuando el campo se
+   *  deja, que es cuando el blanco pasa de ser un estado intermedio a ser una
+   *  decisión.
+   *
+   *  Solo las de ESTA sesión: una fila vacía que vuelve del servidor quedó
+   *  abandonada en algún momento anterior, y esa sí hay que señalarla. */
+  const [recienAgregadas, setRecienAgregadas] = useState<Set<string>>(new Set());
+  const sinTerminar = (p: Persona) =>
+    p.disponible && !p.nombre.trim() && !recienAgregadas.has(p.id);
 
   const recargarCuadrilla = useCallback(() => {
     listWorkers()
@@ -509,6 +522,7 @@ function RutasPage() {
         point_id: puntoDestino,
       });
       setCuadrilla((prev) => [...prev, nueva]);
+      setRecienAgregadas((prev) => new Set(prev).add(nueva.id));
     } catch (err) {
       notify.error(
         "No se pudo agregar a la persona",
@@ -595,6 +609,10 @@ function RutasPage() {
     distanceKm?: number;
     durationHours?: number;
     volumeM3?: number;
+    /** HDU5.1/AC5. Viaja con los totales y no en un estado aparte porque es una
+     *  propiedad del plan generado, igual que sus cifras: describe con qué se
+     *  calcularon, así que se guarda y se limpia junto con ellas. */
+    trafficAware?: boolean;
   } | null>(null);
   // HDU5.1/AC6. Ausente mientras el backend no lo calcule, y entonces la
   // sección no se dibuja: una lista vacía de "zonas sin asignar" se lee como
@@ -892,6 +910,7 @@ function RutasPage() {
         distanceKm: result.route.totalDistanceKm,
         durationHours: result.route.totalDurationHours,
         volumeM3: result.route.totalVolumeM3,
+        trafficAware: result.route.trafficAware,
       });
       setUnassigned(result.route.unassignedZones ?? null);
       setSalidaPlan(new Date());
@@ -1757,6 +1776,31 @@ function RutasPage() {
                     />
                   </div>
 
+                  {/* ── AC5 de HDU5.1 ──
+                      El criterio pide que los tiempos se ajusten al tráfico
+                      "sin requerir que el trabajador lo indique", y eso solo se
+                      puede comprobar si el trabajador ve que está pasando: un
+                      ajuste invisible es indistinguible de no haberlo hecho.
+                      Lleva la hora de salida porque el tráfico es de un
+                      momento, no una propiedad de la calle.
+
+                      Solo aparece cuando el plan se calculó así. Mostrarlo
+                      siempre afirmaría de un plan a flujo libre algo que no
+                      hizo. */}
+                  {routeTotals?.trafficAware && salidaPlan && (
+                    <p className="-mt-2 flex items-center gap-1.5 text-[0.625rem] leading-relaxed text-muted-foreground">
+                      <Clock className="h-3 w-3 flex-shrink-0" />
+                      Tiempos ajustados al tráfico de las{" "}
+                      <span className="mono tabular-nums">
+                        {salidaPlan.toLocaleTimeString("es-CL", {
+                          timeZone: "America/Santiago",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </span>
+                    </p>
+                  )}
+
                   <RouteTimeline
                     segment={routeSegments[rutaAbierta]}
                     stops={routeStops}
@@ -2547,11 +2591,12 @@ function RutasPage() {
                   {cuadrillaFiltrada.map((persona) => {
                     const repetido =
                       persona.disponible && repetidos.has(persona.nombre.trim().toLowerCase());
-                    // Marcada pero sin nombre: no entra al plan, y callarlo
-                    // dejaría al trabajador contando a alguien que el sistema
-                    // no cuenta. Ámbar y no rojo, porque es un dato que falta y
-                    // no un error, mismo criterio que una capacidad sin declarar.
-                    const incompleta = persona.disponible && !persona.nombre.trim();
+                    // Marcada pero sin nombre, y ya se dejó el campo: no entra
+                    // al plan, y callarlo dejaría al trabajador contando a
+                    // alguien que el sistema no cuenta. Ámbar y no rojo, porque
+                    // es un dato que falta y no un error, mismo criterio que una
+                    // capacidad sin declarar.
+                    const incompleta = sinTerminar(persona);
                     return (
                       <li key={persona.id} className="flex items-center gap-1.5">
                         <Checkbox
@@ -2573,7 +2618,15 @@ function RutasPage() {
                               ),
                             )
                           }
-                          onBlur={() => cambiarPersona(persona, {})}
+                          onBlur={() => {
+                            setRecienAgregadas((prev) => {
+                              if (!prev.has(persona.id)) return prev;
+                              const next = new Set(prev);
+                              next.delete(persona.id);
+                              return next;
+                            });
+                            cambiarPersona(persona, {});
+                          }}
                           placeholder="Nombre"
                           className={`h-8 flex-1 text-xs ${
                             repetido
@@ -2613,7 +2666,7 @@ function RutasPage() {
                 </ul>
               )}
 
-              {cuadrilla.some((p) => p.disponible && !p.nombre.trim()) && (
+              {cuadrilla.some(sinTerminar) && (
                 <p className="text-[0.625rem] leading-relaxed text-warning-strong">
                   Hay personas marcadas sin nombre. No entran en el plan hasta que lo tengan: el
                   plan identifica a cada una por su nombre para poder comprobar que nadie esté en

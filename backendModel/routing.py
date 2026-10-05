@@ -13,6 +13,7 @@ from pyproj import Transformer
 import auth as auth_module
 import osrm_client
 import resources as resources_module
+import routes_provider
 
 # =============================================================================
 # CONDORFINDER — GENERACIÓN DE RUTA ÓPTIMA (HDU5)
@@ -242,6 +243,12 @@ class RoutePlanRouteOut(BaseModel):
     # AC6: el plan sigue siendo válido para el resto. Lista vacía significa que
     # todas las zonas entraron.
     unassignedZones: list[RoutePlanUnassignedOut] = []
+    # AC5: si los tiempos de los tramos se calcularon con el tráfico del
+    # momento. Viaja en la respuesta y no se deduce en el frontend porque es el
+    # backend el que sabe con qué proveedor se calculó ESTE plan, y porque un
+    # plan guardado o reabierto tiene que seguir diciendo la verdad sobre cómo
+    # se calculó, no sobre cómo se calcularía hoy.
+    trafficAware: bool = False
 
 
 class RoutePlanSuccessOut(BaseModel):
@@ -1050,27 +1057,41 @@ async def _build_subroute(
         return {"excedeHoras": True, "horas": total_hours}
 
     ordered_stops = [point_stops[i - 1] for i in order]
-    ultima = (ordered_stops[-1]["lat"], ordered_stops[-1]["lng"])
 
     # Tres tramos, no dos: la carga se descarga en el relleno y el camión
-    # recién después vuelve al patio. Las tres geometrías se piden en paralelo,
-    # así que agregar la descarga no agrega latencia, solo una llamada.
-    outbound_coords = [origin] + [(s["lat"], s["lng"]) for s in ordered_stops]
-    disposal_coords = [ultima, RELLENO_SANITARIO]
-    return_coords = [RELLENO_SANITARIO, origin]
-    outbound_geo, disposal_geo, return_geo = await asyncio.gather(
-        asyncio.to_thread(osrm_client.route_geometry, outbound_coords),
-        asyncio.to_thread(osrm_client.route_geometry, disposal_coords),
-        asyncio.to_thread(osrm_client.route_geometry, return_coords),
+    # recién después vuelve al patio.
+    #
+    # **Esta es la ÚNICA línea del recorrido que pide geometría, y es la última
+    # del camino feliz.** Todas las salidas por restricción (sin dotación, sin
+    # vehículo compatible, excede autonomía, excede horas) están arriba, así que
+    # el bucle de relajación del handler itera sin gastar ni una llamada. Con el
+    # proveedor de AC5 activo eso es exactamente UNA llamada por recorrido
+    # generado, y esa garantía se rompe el día que alguien agregue una salida
+    # DESPUÉS de acá.
+    #
+    # Cuántas peticiones cuesta no es asunto de esta función: routes_provider.py
+    # lo resuelve con tres llamadas en paralelo contra OSRM, o con una sola
+    # contra Google cuando AC5 está habilitado.
+    tramos = await routes_provider.route_tramos(
+        origin, [(s["lat"], s["lng"]) for s in ordered_stops], RELLENO_SANITARIO
     )
-    if outbound_geo is None or disposal_geo is None or return_geo is None:
+    if tramos is None:
         return None
+    outbound_geo = tramos["outbound"]
+    disposal_geo = tramos["disposal"]
+    return_geo = tramos["return"]
 
     # Duraciones "reales" (de la geometría final que se va a dibujar, no del
     # estimado de la matriz, que solo sirvió para elegir el orden). El factor de
     # carga se aplica al tramo de descarga, el mismo que ya se usó para decidir
     # factibilidad, para no mostrar un número "a velocidad de vacío" que
     # contradiga por qué ese tramo se calcula más lento.
+    #
+    # AC5: son estas las tres cifras que pasan a venir con tráfico, y son las
+    # mismas que la vista muestra, las que calculan las horas de llegada de la
+    # línea de tiempo y las que el chequeo de availableHours compara. El factor
+    # de carga se sigue aplicando encima: un camión lleno es más lento que un
+    # auto en la misma calle, independiente de cuánto tráfico haya.
     outbound_hours = outbound_geo["durationHours"]
     disposal_hours = disposal_geo["durationHours"] / _LOADED_SPEED_FACTOR
     return_hours = return_geo["durationHours"]
@@ -1473,5 +1494,6 @@ async def generate_route(
             returnPaths=return_paths,
             segments=segments,
             unassignedZones=sin_asignar,
+            trafficAware=routes_provider.con_trafico(),
         )
     )

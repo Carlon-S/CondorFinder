@@ -456,7 +456,7 @@ Historias comprometidas: HDU5.1 (13), HDU8 (5), HDU9 (5), HDU10 (5) y SP2 (13). 
 
 Mapa de los siete criterios contra lo que hay que escribir y lo que cuesta. **Seis de los siete no necesitan ninguna API externa**, y el único que sí es el de tráfico.
 
-**Estado: 6 de 7 implementados.** AC3, AC4, AC6 y AC7 verificados end to end; AC1 y AC2 recién implementados y pendientes de verificar en navegador. **El único que falta es AC5**, y es el único que necesita una API.
+**Estado: los 7 implementados.** AC1, AC2, AC3, AC4, AC6 y AC7 verificados end to end. **AC5 está implementado y apagado por omisión**: su código está escrito y probado, pero depende de una clave de Google que se cobra por llamada, así que mientras `ROUTES_PROVIDER` no diga `google` el sistema calcula a flujo libre y se comporta igual que antes. Lo que falta para encenderlo no es programar, es configurar la cuota y la clave en GCP.
 
 > **AC3 y AC4 verificados end to end** (2026-10-04), con sus casos borde y regresiones. La verificación encontró cinco defectos, todos corregidos: el plan salía con capacidad insuficiente cuando ninguna combinación de vehículos cubría la carga; el peso estaba modelado como filtro por vehículo en vez de restricción del conjunto, así que dos amplirolls nunca se complementaban; el campo de peso no dejaba escribir decimales menores a uno; la tabla de flota quedó desalineada al agregar la columna de autonomía; y el `infeasible` por "ninguna zona sobrevivió" descartaba los motivos ya calculados.
 >
@@ -468,7 +468,7 @@ Mapa de los siete criterios contra lo que hay que escribir y lo que cuesta. **Se
 | AC2 | Un perfil no cubre dos vehículos a la vez | ✅ | — | Ninguna | $0 |
 | AC3 | Autonomía | ✅ | — | Ninguna | $0 |
 | AC4 | Tipo de residuo | ✅ | — | Ninguna | $0 |
-| AC5 | Tráfico vigente | 🔲 | Cliente espejo de `osrm_client.py`, elegido por variable de entorno. Solo la geometría va a Google; **la matriz se queda en OSRM** | **Routes API** (`Compute Routes Pro`) | $0 con cuota |
+| AC5 | Tráfico vigente | ✅ apagado | — (implementado; falta habilitar la clave) | **Routes API** (`Compute Routes Pro`) | $0 con cuota |
 | AC6 | Zonas sin asignar con motivo | ✅ | — | OSRM (ya en uso) | $0 |
 | AC7 | Vehículo y personal por tramo | ✅ | — | Ninguna | $0 |
 
@@ -491,29 +491,57 @@ Los números verificados contra la documentación de Google (02-10-2026):
 
 `TRAFFIC_AWARE` y `TRAFFIC_AWARE_OPTIMAL` suben la petición a **Pro**, así que el techo gratis del AC5 es 5.000 y no 10.000. El antiguo crédito recurrente de 200 USD/mes **ya no existe**: lo reemplazaron por estos topes por SKU.
 
-**La decisión que define el costo es dónde queda la matriz.** Cada generación de ruta hace 3 llamadas de geometría (ida, descarga, regreso) y 1 de matriz:
+**La decisión que define el costo es dónde queda la matriz**, y la segunda es cómo se piden los tres tramos:
 
 | Reparto | Consumo por generación | Generaciones gratis/mes |
 |---|---|---|
-| Geometría en Google, matriz en OSRM | 3 llamadas | **1.666** |
-| Todo en Google, 2 zonas cargadas | 3 llamadas + 16 elementos | 312 |
-| Todo en Google, 5 zonas cargadas | 3 llamadas + 49 elementos | **102** |
+| **Una llamada con paradas intermedias, matriz en OSRM** | **1 llamada** | **5.000** |
+| Tres llamadas (un tramo cada una), matriz en OSRM | 3 llamadas | 1.666 |
+| Todo en Google, 2 zonas cargadas | 1 llamada + 16 elementos | 312 |
+| Todo en Google, 5 zonas cargadas | 1 llamada + 49 elementos | **102** |
 
 Route Matrix se cobra **por elemento** (orígenes × destinos), así que crece al cuadrado con las zonas. Por eso la matriz se queda en OSRM, y por eso `osrm_client.py` mantiene `table_matrix()` y `route_geometry()` separadas: permite migrar una mitad sin la otra.
+
+La primera fila es la que está implementada, y la segunda era el plan original: espejar `route_geometry()` habría significado una llamada por tramo. `computeRoutes` acepta paradas intermedias y devuelve `legs[]` con duración, distancia y polilínea **por tramo**, así que `origen → zonas → relleno → origen` vuelve completo en una sola petición. Triplica el techo gratuito y además es más correcto: es un cálculo de ruta, no tres tramos calculados por separado que podrían no empalmar.
+
+**El consumo está acotado por la estructura del código, no por prudencia.** Las cinco salidas por restricción de `_build_subroute` (sin dotación, sin vehículo compatible, servicio caído, excede autonomía, excede horas) ocurren **antes** de pedir la geometría, así que el bucle de relajación que descarta zonas itera gastando cero llamadas: la geometría se pide una sola vez, en la iteración que pasó todos los filtros. Con un punto de origen eso es exactamente **una llamada por botón apretado**. La garantía se rompería el día que alguien agregue una salida después de esa línea, y por eso está anotada ahí mismo en el código.
 
 #### Qué protege el tramo gratuito
 
 El crédito de prueba de Google Cloud **sí se puede gastar en Maps Platform**, así que pasarse del tramo gratuito no sale de un bolsillo aparte: sale del mismo crédito que sostiene la VM. Por eso el objetivo es no pasarse nunca, y eso se garantiza así:
 
-1. **Cuota diaria de 160 solicitudes** en la Routes API (GCP → APIs y servicios → Cuotas). 160 × 31 = 4.960 < 5.000: es una garantía aritmética, no un cuidado. Equivale a 53 generaciones por día.
-2. **Clave restringida por IP de la VM**, no por referente HTTP: las llamadas salen del backend, no del navegador.
-3. **Alerta de presupuesto** en la cuenta de facturación, como red de respaldo.
+1. **Cuota diaria de 160 solicitudes** en la Routes API (GCP → APIs y servicios → Cuotas). 160 × 31 = 4.960 < 5.000: es una garantía aritmética, no un cuidado. Con una llamada por generación equivale a **160 rutas generadas por día**, unas ocho veces el uso previsible. Se configura **antes** de crear la clave, para no dejar una ventana con la API habilitada y sin tope.
+2. **Cuota por minuto en ~10**, que frena una ráfaga antes de que se coma el día entero en treinta segundos. El tope diario protege el presupuesto; el tope por minuto protege el día.
+3. **Clave restringida por IP de la VM**, no por referente HTTP: las llamadas salen del backend, no del navegador.
+4. **Alerta de presupuesto** en la cuenta de facturación, como red de respaldo.
+
+Lo importante es que el tope vive **afuera del código**: si un error de programación llamara a la API en un bucle, Google responde `429` en la solicitud 161 del día, el backend cae a OSRM y la cuenta no se mueve. Ningún bug puede generar un cobro, porque el límite no depende de que el código esté bien.
+
+#### Cómo está implementado el AC5
+
+Tres piezas, y la que importa es la del medio:
+
+| Archivo | Qué hace |
+|---|---|
+| `backendModel/google_routes_client.py` | Habla con `computeRoutes`: una petición con paradas intermedias, `routingPreference: TRAFFIC_AWARE`, y el reparto de `legs[]` en los tres tramos. Decodifica la polilínea a mano, sin sumar dependencias |
+| `backendModel/routes_provider.py` | Expone **una** función, `route_tramos(origen, paradas, relleno)`, y elige proveedor según `ROUTES_PROVIDER` |
+| `backendModel/routing.py` | Llama a esa función y **no sabe cuántas peticiones HTTP costó** |
+
+Esa indirección no es ceremonia. Antes `_build_subroute` hacía tres `route_geometry()` en paralelo, que es lo correcto contra un servicio gratuito y lo incorrecto contra uno que se cobra por llamada y devuelve los tres tramos en una. El que sabe cuántas llamadas hacen falta tiene que ser el mismo que sabe cuánto cuesta cada una.
+
+**Si Google falla, se cae a OSRM y no se reintenta.** Clave inválida, cuota agotada, timeout: todo devuelve `None`, el plan sale con tiempos a flujo libre y la municipalidad puede seguir planificando. Un reintento automático es justamente el mecanismo por el que el consumo se dispara cuando el servicio del otro lado está lento.
+
+**El plan dice si sus tiempos son con tráfico.** La respuesta lleva `trafficAware`, y el detalle del recorrido imprime "Tiempos ajustados al tráfico de las HH:MM" solo cuando es verdad. El criterio pide que el ajuste ocurra *"sin requerir que el trabajador lo indique"*, y eso solo se puede comprobar si el trabajador ve que está pasando. Es una propiedad de **ese** plan y no del sistema: lo que importa es cómo se calculó, no cómo se calcularía ahora.
+
+**Qué cubre exactamente.** El criterio habla de *"los tiempos estimados de cada tramo"*, y esos son los que pasan a venir con tráfico: los que se muestran, los que calculan las horas de llegada de la línea de tiempo y los que el chequeo de horas disponibles compara. Lo que sigue decidiéndose a flujo libre es el **orden** de las paradas, que el criterio no pide y que la matriz de OSRM resuelve gratis. Cerrar eso también costaría 3 llamadas por generación (pedirle a Google las tres mejores permutaciones que OSRM ya enumeró, y quedarse con la de menor tiempo real), o sea 1.666 generaciones mensuales. Queda anotado como mejora con su costo calculado, no como deuda.
+
+**Para encenderlo**, en este orden: habilitar `Routes API` en el proyecto que ya tiene la VM (no uno nuevo: el tope se agrega por cuenta de facturación, así que un proyecto aparte no da otros 5.000); configurar las cuotas; crear la clave restringida; y recién entonces `ROUTES_PROVIDER=google` y `GOOGLE_ROUTES_API_KEY` en el `.env` de la VM. Las dos variables van juntas: una sola no activa nada, para que un `.env` a medio configurar no deje el ruteo en un estado que nadie quiso.
 
 #### Route Optimization (FleetRouting), evaluado y descartado
 
 `RouteOptimization FleetRouting` resuelve con **una sola llamada** lo que acá son criterios separados, y cubre nativamente **AC3** (límites de distancia por vehículo), **AC4** (capacidades de carga y compatibilidad vehículo-envío) y **AC5** (`considerRoadTraffic`, que es exactamente el ajuste por tráfico que pide el criterio).
 
-**El costo no es el argumento.** Son 1.000 solicitudes gratis al mes contra 5.000 de Routes Pro, pero no son unidades comparables: FleetRouting gasta **1 llamada por generación** y el enfoque con Routes Pro gasta 3. Eso deja 1.000 generaciones mensuales contra 1.666, o sea 33 por día, de sobra para una herramienta municipal.
+**El costo no es el argumento, aunque ahora juega en contra suya.** Son 1.000 solicitudes gratis al mes contra 5.000 de Routes Pro, y ambos enfoques gastan **1 llamada por generación**, así que son 1.000 generaciones mensuales contra 5.000. Mientras el plan era espejar `route_geometry()` con tres llamadas la comparación quedaba casi pareja (1.000 contra 1.666); con las paradas intermedias ya no lo está. De todos modos 1.000 generaciones son 33 por día, de sobra para una herramienta municipal: el costo no alcanzaba para decidir ni antes ni ahora.
 
 **Lo que lo descarta es el AC6.** El objeto `SkippedShipment` que devuelve trae `index` y `label`: dice **cuál** zona quedó fuera, no **por qué**. Y la descripción de la historia subraya justamente eso: *"un vehículo puede quedar descartado por falta de personal, por autonomía insuficiente, o por no transportar el tipo de residuo de la zona, y el sistema debe poder distinguir cuál fue el motivo en cada caso"*. Un optimizador devuelve un óptimo, no una explicación; el código actual puede decir *"La capacidad disponible (4 m³) no alcanza para esta zona"* porque aplica cada restricción él mismo.
 
@@ -527,7 +555,7 @@ Se suman dos cosas más: **AC1 y AC2 seguirían siendo nuestros igual** (que dos
 | HDU5.1 | Un mismo perfil de trabajador no puede cubrir dos vehículos que operan a la vez | ✅ Cumplido |
 | HDU5.1 | Se descarta toda subruta cuya distancia total supere la autonomía del vehículo | ✅ Cumplido |
 | HDU5.1 | Se prioriza la coincidencia de tipo de residuo, y solo se usa un vehículo no compatible si no hay alternativa | ✅ Cumplido |
-| HDU5.1 | Los tiempos de cada tramo se ajustan por las condiciones de tráfico vigentes, sin intervención del trabajador | 🔲 Pendiente |
+| HDU5.1 | Los tiempos de cada tramo se ajustan por las condiciones de tráfico vigentes, sin intervención del trabajador | ✅ Cumplido (apagado por omisión: requiere habilitar la clave de Google) |
 | HDU5.1 | Las zonas sin vehículo posible quedan marcadas "sin asignar" con el motivo, sin invalidar el resto del plan | ✅ Cumplido |
 | HDU5.1 | Cada tramo del plan muestra qué vehículo lo recorre, por patente y tipo, y su personal asociado | ✅ Cumplido |
 | HDU8 | "Agregar recurso" pide el tipo de recurso a añadir | ✅ Cumplido |
