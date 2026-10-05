@@ -14,6 +14,7 @@ from pymongo import ReturnDocument
 from pymongo.asynchronous.database import AsyncDatabase
 
 import auth as auth_module
+import google_places
 import street_view
 
 # =============================================================================
@@ -662,6 +663,61 @@ async def list_resource_types(
     llevaran su propia copia de esa tabla, una validación aceptada en pantalla
     podría ser rechazada por el servidor sin explicación."""
     return [{"tipo": t, "familia": f} for t, f in sorted(FAMILIA_POR_TIPO.items())]
+
+
+# =============================================================================
+# DIRECCIONES (Places + Geocoding de Google, con respaldo en Nominatim)
+#
+# Tres endpoints que son un PROXY fino sobre google_places.py. Existen para que
+# la clave se quede en la VM en vez de viajar al navegador: podrían llamarse
+# directo desde el cliente, pero entonces haría falta una segunda clave
+# restringida por referente, que es falsificable. Crear un punto de recurso se
+# hace un puñado de veces en la vida del sistema, así que el salto extra no le
+# cuesta nada a nadie.
+#
+# Los tres devuelven `null` cuando no hay clave o Google no responde, y
+# `src/lib/geocoding.ts` se queda con Nominatim. Nunca propagan un error: una
+# sugerencia de dirección es una cortesía, no un requisito para guardar.
+# =============================================================================
+
+
+@router.get("/direcciones/sugerencias")
+async def sugerir_direcciones(
+    q: str,
+    current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
+):
+    """Sugerencias mientras se escribe. Una solicitud POR LLAMADA, así que el
+    antirrebote del cliente es lo que mantiene el consumo bajo."""
+    return await asyncio.to_thread(google_places.autocompletar, q) or []
+
+
+@router.get("/direcciones/detalle")
+async def detalle_direccion(
+    placeId: str,
+    current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
+):
+    """La dirección elegida de la lista: calle con número, comuna y coordenada.
+    Es lo que llena el formulario y mueve el marcador de una sola vez."""
+    return await asyncio.to_thread(google_places.detalle, placeId)
+
+
+@router.get("/direcciones/inversa")
+async def direccion_inversa(
+    lat: float,
+    lng: float,
+    current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
+):
+    """Qué dirección hay en esa coordenada. Se dispara al clickear el mapa."""
+    return await asyncio.to_thread(google_places.direccion_de, lat, lng)
+
+
+@router.get("/direcciones/coordenada")
+async def coordenada_direccion(
+    q: str,
+    current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
+):
+    """Dónde queda una dirección escrita a mano, sin pasar por las sugerencias."""
+    return await asyncio.to_thread(google_places.coordenada_de, q)
 
 
 @router.post("/units", response_model=ResourceOut)

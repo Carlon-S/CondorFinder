@@ -71,7 +71,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { forwardGeocode, reverseGeocode } from "@/lib/geocoding";
+import {
+  detalleDeSugerencia,
+  forwardGeocode,
+  reverseGeocode,
+  sugerirDirecciones,
+  type SugerenciaDireccion,
+} from "@/lib/geocoding";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -199,6 +205,11 @@ export function PanelPuntos({
   // más nuevo), descarta el resultado en vez de pisar el campo con texto
   // desactualizado.
   const locationGenRef = useRef(0);
+  /** Sugerencias de dirección mientras se escribe. Vacío cuando no hay clave
+   *  de Google configurada, y entonces el campo se comporta como el texto libre
+   *  de siempre: el autocompletado es una ayuda, no un requisito. */
+  const [sugerencias, setSugerencias] = useState<SugerenciaDireccion[]>([]);
+  const [eligiendoSugerencia, setEligiendoSugerencia] = useState(false);
 
   // AC5, si está seteado, "configuring" es una edición (PUT) sobre este
   // punto en vez de una creación nueva (POST). Mismo formulario para ambos.
@@ -377,6 +388,68 @@ export function PanelPuntos({
 
     geocodeInFlightRef.current = promise;
     return promise;
+  };
+
+  // ── Sugerencias de dirección ──
+  //
+  // El antirrebote de 350 ms NO es pulido: Autocomplete se cobra POR SOLICITUD
+  // y no por sesión, así que sin él sería una petición por tecla. Con él, una
+  // dirección completa cuesta unas cinco.
+  //
+  // Solo busca cuando el campo está `dirty`, o sea cuando lo escribió una
+  // persona. Un click en el mapa también llena este campo, y ahí pedir
+  // sugerencias sería gastar para ofrecerle al trabajador que corrija una
+  // dirección que el sistema acaba de deducir de su propio click.
+  useEffect(() => {
+    if (!addressDirtyRef.current || form.address.trim().length < 3) {
+      setSugerencias([]);
+      return;
+    }
+    let cancelado = false;
+    const t = setTimeout(async () => {
+      const r = await sugerirDirecciones(form.address);
+      if (!cancelado) setSugerencias(r);
+    }, 350);
+    return () => {
+      cancelado = true;
+      clearTimeout(t);
+    };
+  }, [form.address]);
+
+  /** Aplica una sugerencia elegida: dirección, comuna y marcador de una sola
+   *  vez. Es UNA llamada a Place Details, y evita la geocodificación directa
+   *  que el `onBlur` haría si no, porque ya trae la coordenada. */
+  const elegirSugerencia = async (s: SugerenciaDireccion) => {
+    setSugerencias([]);
+    setEligiendoSugerencia(true);
+    try {
+      const d = await detalleDeSugerencia(s.placeId);
+      if (!d) {
+        // Sin detalle queda el texto de la sugerencia, que ya es mejor que lo
+        // escrito a mano, y el `onBlur` de siempre se encarga de ubicarlo.
+        setForm((f) => ({ ...f, address: s.texto }));
+        addressDirtyRef.current = true;
+        return;
+      }
+      // Mismo orden que ensureAddressGeocoded: invalidar primero cualquier
+      // reverseGeocode de un click anterior que siga en vuelo, para que su
+      // respuesta tardía no pise lo que el trabajador acaba de elegir.
+      locationGenRef.current++;
+      const coords: [number, number] = [d.lat, d.lng];
+      setForm((f) => ({
+        ...f,
+        address: d.address || s.texto,
+        comuna: d.comuna || f.comuna,
+      }));
+      setPendingPoint(coords);
+      setGeocodeFlyTarget(coords);
+      setGeocodeNotFound(false);
+      // Ya está ubicado: sin esto, el onBlur del campo volvería a geocodificar
+      // la misma dirección y gastaría una solicitud de más.
+      addressDirtyRef.current = false;
+    } finally {
+      setEligiendoSugerencia(false);
+    }
   };
 
   /** Qué falta para poder guardar, o null si no falta nada. Es una sola
@@ -682,22 +755,51 @@ export function PanelPuntos({
                 >
                   Dirección <Obligatorio />
                 </label>
-                {geocodingAddress && (
+                {(geocodingAddress || eligiendoSugerencia) && (
                   <span className="flex items-center gap-1 text-[0.625rem] text-muted-foreground">
                     <Loader2 className="h-3 w-3 animate-spin" /> Buscando dirección…
                   </span>
                 )}
               </div>
-              <Input
-                id="point-address"
-                placeholder="Ej: Av. Pajaritos 1234"
-                value={form.address}
-                onChange={(e) => {
-                  addressDirtyRef.current = true;
-                  setForm((f) => ({ ...f, address: e.target.value }));
-                }}
-                onBlur={ensureAddressGeocoded}
-              />
+              {/* El campo y su lista de sugerencias, en un contenedor relativo
+                  para que la lista flote encima del formulario en vez de
+                  empujar los campos de abajo cada vez que alguien escribe. */}
+              <div className="relative">
+                <Input
+                  id="point-address"
+                  placeholder="Ej: Av. Pajaritos 1234"
+                  value={form.address}
+                  autoComplete="off"
+                  onChange={(e) => {
+                    addressDirtyRef.current = true;
+                    setForm((f) => ({ ...f, address: e.target.value }));
+                  }}
+                  onBlur={ensureAddressGeocoded}
+                />
+                {sugerencias.length > 0 && (
+                  // onMouseDown con preventDefault y NO onClick: el clic sobre
+                  // la lista dispararía antes el onBlur del campo, que
+                  // geocodificaría el texto a medio escribir y gastaría una
+                  // solicitud para un resultado que la sugerencia ya trae. Al
+                  // frenar el mousedown, el campo no pierde el foco.
+                  <ul
+                    onMouseDown={(e) => e.preventDefault()}
+                    className="panel absolute top-full right-0 left-0 z-30 mt-1 max-h-56 overflow-y-auto rounded-md border border-border bg-card py-1"
+                  >
+                    {sugerencias.map((s) => (
+                      <li key={s.placeId}>
+                        <button
+                          type="button"
+                          onClick={() => elegirSugerencia(s)}
+                          className="block w-full cursor-pointer px-3 py-2 text-left text-xs leading-snug text-foreground hover:bg-muted"
+                        >
+                          {s.texto}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
               {geocodeNotFound && (
                 <p className="text-[0.625rem] text-muted-foreground">
                   No se encontró esta dirección en el mapa, el punto no se movió.
