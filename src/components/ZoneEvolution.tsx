@@ -27,7 +27,9 @@ import {
   zoneHistory,
   zoneTotals,
   type ZoneVersion,
+  versionDay,
   versionLabel,
+  versionTime,
 } from "@/lib/volumeReport";
 
 const chartConfig = {
@@ -69,8 +71,15 @@ export function ZoneEvolution({
     );
   }
 
+  // Cuando TODAS las capturas son del mismo día, el eje muestra solo la hora:
+  // repetir la fecha en cada marca es ruido, porque ya está en la cabecera, y
+  // una etiqueta larga en el primer punto se recorta contra el borde del
+  // gráfico. Con días distintos la fecha vuelve, porque entonces es lo que
+  // distingue a una captura de otra.
+  const mismoDia = new Set(points.map((p) => versionDay(p.date))).size === 1;
+
   const chartData = points.map((p) => ({
-    fecha: versionLabel(p.date, p.uploadedAt),
+    fecha: mismoDia ? versionTime(p.uploadedAt) : versionLabel(p.date, p.uploadedAt),
     volumeM3: p.volumeM3,
     analysisId: p.analysisId,
   }));
@@ -123,7 +132,22 @@ export function ZoneEvolution({
       <ChartContainer config={chartConfig} className="h-[13rem] w-full">
         <LineChart data={chartData} margin={{ left: 4, right: 12, top: 8, bottom: 4 }}>
           <CartesianGrid vertical={false} strokeDasharray="3 3" />
-          <XAxis dataKey="fecha" tickLine={false} axisLine={false} tickMargin={8} fontSize={11} />
+          {/* `padding` reserva aire en los dos extremos: la etiqueta va
+              centrada bajo su punto, y el primero cae sobre el borde del área
+              de dibujo, así que sin esto la mitad izquierda queda fuera y
+              recharts la oculta entera. Era por qué la primera captura no
+              aparecía en el eje. `interval={0}` fuerza a dibujar TODAS las
+              marcas: con pocas capturas recharts igual las muestra, pero al
+              decidir por su cuenta puede saltearse justo la primera. */}
+          <XAxis
+            dataKey="fecha"
+            tickLine={false}
+            axisLine={false}
+            tickMargin={8}
+            fontSize={11}
+            interval={0}
+            padding={{ left: 28, right: 28 }}
+          />
           <YAxis tickLine={false} axisLine={false} tickMargin={8} fontSize={11} width={44} />
           <ChartTooltip content={<ChartTooltipContent />} />
           <Line

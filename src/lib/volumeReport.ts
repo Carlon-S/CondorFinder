@@ -154,12 +154,35 @@ export function versionLabel(
   const u = uploadedAt ? new Date(uploadedAt) : null;
   if (!u || Number.isNaN(u.getTime())) return fecha;
 
-  const hora = u.toLocaleTimeString("es-CL", {
+  return `${fecha} · ${versionTime(uploadedAt)}`;
+}
+
+/** Solo la hora de subida, en 24 horas.
+ *
+ *  `hour12: false` explícito: `es-CL` devuelve "11:16 p. m." según el runtime,
+ *  que son once caracteres donde "23:16" son cinco, y además Chile escribe la
+ *  hora en 24. En el eje de un gráfico esa diferencia decide si la etiqueta
+ *  entra o se recorta.
+ *
+ *  Se expone aparte porque cuando todas las capturas de una zona son del mismo
+ *  día, repetir la fecha en cada marca del eje es ruido: la fecha ya está en la
+ *  cabecera. */
+export function versionTime(uploadedAt: string | null | undefined): string {
+  const u = uploadedAt ? new Date(uploadedAt) : null;
+  if (!u || Number.isNaN(u.getTime())) return "";
+  return u.toLocaleTimeString("es-CL", {
     timeZone: "America/Santiago",
     hour: "2-digit",
     minute: "2-digit",
+    hour12: false,
   });
-  return `${fecha} · ${hora}`;
+}
+
+/** La fecha de una captura sin la hora, para comparar si dos son del mismo día. */
+export function versionDay(captureDate: string | null | undefined): string {
+  const d = captureDate ? new Date(captureDate) : null;
+  if (!d || Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("es-CL", { timeZone: "America/Santiago" });
 }
 
 /** Fecha con la que se ordena una versión. Prioriza la captura; si falta, cae
