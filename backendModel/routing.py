@@ -1088,16 +1088,29 @@ async def _build_subroute(
     # contradiga por qué ese tramo se calcula más lento.
     #
     # AC5: son estas las tres cifras que pasan a venir con tráfico, y son las
-    # mismas que la vista muestra, las que calculan las horas de llegada de la
-    # línea de tiempo y las que el chequeo de availableHours compara. El factor
-    # de carga se sigue aplicando encima: un camión lleno es más lento que un
-    # auto en la misma calle, independiente de cuánto tráfico haya.
+    # mismas que la vista muestra y las que calculan las horas de llegada de la
+    # línea de tiempo. El factor de carga se sigue aplicando encima: un camión
+    # lleno es más lento que un auto en la misma calle, independiente de cuánto
+    # tráfico haya.
+    #
+    # **El chequeo de availableHours de arriba NO usa estas cifras**, usa las de
+    # la matriz, que siempre es OSRM a flujo libre. Es consecuencia de dejar la
+    # matriz afuera por costo, y tiene un efecto observable: un plan puede
+    # aceptarse como que cabe en la jornada y después mostrarse más largo que
+    # ella. Cerrarlo significaría pedir la geometría antes de decidir, o sea
+    # gastar una llamada por cada iteración de la relajación en vez de una por
+    # plan, que es exactamente la garantía que sostiene el costo.
     outbound_hours = outbound_geo["durationHours"]
     disposal_hours = disposal_geo["durationHours"] / _LOADED_SPEED_FACTOR
     return_hours = return_geo["durationHours"]
 
     return {
         "originName": point.get("name", ""),
+        # Si ESTE recorrido se calculó con tráfico. Viene del proveedor, que es
+        # el único que sabe si Google respondió o si se usó el respaldo; leerlo
+        # de la configuración haría que la vista afirmara el ajuste incluso
+        # cuando el plan salió a flujo libre.
+        "trafico": tramos.get("trafico", False),
         # Los camiones elegidos viajan enteros, no solo su cantidad: el handler
         # necesita la patente y la dotación para el AC7. Se eligieron arriba,
         # antes de evaluar el recorrido.
@@ -1494,6 +1507,12 @@ async def generate_route(
             returnPaths=return_paths,
             segments=segments,
             unassignedZones=sin_asignar,
-            trafficAware=routes_provider.con_trafico(),
+            # `all` y no `any`: con varios puntos de origen, un recorrido puede
+            # haberse calculado con tráfico y otro con el respaldo, y "los
+            # tiempos de este plan consideran el tráfico" solo es cierto si vale
+            # para todos. Con un solo punto, que es el caso de producción, da lo
+            # mismo; la diferencia aparece justo cuando Google falla a mitad de
+            # una generación, que es cuando el dato importa.
+            trafficAware=all(sub.get("trafico") for sub in sub_routes),
         )
     )

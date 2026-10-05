@@ -35,11 +35,13 @@ def _proveedor() -> str:
     return (os.getenv("ROUTES_PROVIDER") or "osrm").strip().lower()
 
 
-def con_trafico() -> bool:
-    """True si los tiempos del plan van a venir con tráfico. La vista lo usa
-    para decirlo en pantalla: el AC5 pide que el ajuste ocurra "sin requerir que
-    el trabajador lo indique", y eso solo es comprobable si el trabajador ve que
-    está pasando."""
+def trafico_configurado() -> bool:
+    """Si el sistema va a INTENTAR calcular con tráfico. Mira solo la
+    configuración, así que no dice nada sobre si Google respondió.
+
+    **No es lo que la vista debe mostrar.** Para eso está la bandera `trafico`
+    que devuelve `route_tramos()`, que sí sabe qué pasó. Esta función existe
+    para decidir a quién preguntarle, y nada más."""
     return _proveedor() == "google" and google_routes_client.disponible()
 
 
@@ -59,7 +61,12 @@ async def _tramos_osrm(
     )
     if outbound is None or descarga is None or regreso is None:
         return None
-    return {"outbound": outbound, "disposal": descarga, "return": regreso}
+    return {
+        "outbound": outbound,
+        "disposal": descarga,
+        "return": regreso,
+        "trafico": False,
+    }
 
 
 async def route_tramos(
@@ -69,8 +76,15 @@ async def route_tramos(
 ) -> dict | None:
     """Los tres tramos de `origen -> stops (EN ORDEN) -> relleno -> origen`.
 
-    {"outbound": t, "disposal": t, "return": t}, cada `t` con
+    {"outbound": t, "disposal": t, "return": t, "trafico": bool}, cada `t` con
     path/distanceKm/durationHours. None si no se pudo calcular el recorrido.
+
+    **`trafico` dice lo que PASÓ, no lo que se configuró.** Es False cuando el
+    recorrido salió de OSRM, incluso con Google configurado: si la clave falla y
+    se usa el respaldo, el plan no tiene tiempos con tráfico y la vista no puede
+    decir que sí. Afirmar el ajuste sin haberlo hecho es peor que no ofrecerlo,
+    porque la cuadrilla coordinaría horas de llegada creyendo que consideran el
+    taco.
 
     Se llama con el orden YA elegido, una sola vez por sub-ruta aceptada: todas
     las salidas por restricción de _build_subroute ocurren antes, así que el
@@ -78,11 +92,12 @@ async def route_tramos(
     if not stops:
         return None
 
-    if con_trafico():
+    if trafico_configurado():
         tramos = await asyncio.to_thread(
             google_routes_client.route_tramos, origin, stops, disposal
         )
         if tramos is not None:
+            tramos["trafico"] = True
             return tramos
         # Google no respondió (clave mala, cuota agotada, servicio caído). Se
         # cae a OSRM en vez de reintentar: el plan sale con tiempos a flujo
