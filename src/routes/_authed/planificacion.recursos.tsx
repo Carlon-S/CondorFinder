@@ -71,13 +71,7 @@ import {
   setPointActive,
   type ResourcePoint,
 } from "@/lib/resources";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 export const Route = createFileRoute("/_authed/planificacion/recursos")({
   component: RecursosPage,
@@ -89,13 +83,16 @@ export const Route = createFileRoute("/_authed/planificacion/recursos")({
  *  larga se comía el espacio y el encabezado de capacidad se partía en dos
  *  líneas. Suman 100. */
 const ANCHOS = {
-  estado: "w-[14%]",
-  lugar: "w-[9%]",
+  estado: "w-[12%]",
+  // Más ancha que las demás desde que la celda muestra la foto real del lugar
+  // y no una miniatura de mapa: una fachada a 4rem no se reconoce. Los puntos
+  // salieron de estado y acciones, que no los necesitaban.
+  lugar: "w-[13%]",
   punto: "w-[19%]",
   direccion: "w-[18%]",
   recursos: "w-[11%]",
   capacidad: "w-[13%]",
-  acciones: "w-[16%]",
+  acciones: "w-[14%]",
 } as const;
 
 /** Las columnas por las que se puede ordenar. La foto y las acciones quedan
@@ -404,7 +401,10 @@ function RecursosPage() {
               overflow-y-auto y no hidden: si una fila mide más de lo previsto
               (una dirección que envuelve, otra escala de fuente), el scroll es
               lo que impide que la quinta quede recortada sin forma de verla. */}
-          <div className="h-[26rem] overflow-y-auto px-5 pb-5">
+          {/* 30rem y no 26: con la foto del lugar a 4rem de alto, cinco filas
+              más la cabecera ya no entraban y la quinta quedaba bajo el scroll,
+              justo cuando la paginación promete cinco. */}
+          <div className="h-[30rem] overflow-y-auto px-5 pb-5">
             {loading ? (
               <div className="space-y-2 pt-4">
                 {[0, 1, 2].map((i) => (
@@ -541,7 +541,7 @@ function RecursosPage() {
                             type="button"
                             onClick={() => setFotoAmpliada(p)}
                             title={`Ver el lugar de ${p.name}`}
-                            className="group relative block h-11 w-16 cursor-pointer overflow-hidden rounded-md border border-border/60"
+                            className="group relative block h-16 w-24 cursor-pointer overflow-hidden rounded-md border border-border/60"
                           >
                             <img
                               src={resourcePhotoUrl(p.street_view)}
@@ -561,7 +561,7 @@ function RecursosPage() {
                             lat={p.lat}
                             lng={p.lng}
                             muted={!p.active}
-                            className="h-11 w-16 rounded-md border border-border/60"
+                            className="h-16 w-24 rounded-md border border-border/60"
                           />
                         )}
                       </TableCell>
@@ -738,35 +738,26 @@ function RecursosPage() {
           muestra sin reducir. Pedirle a Google una versión grande sería otra
           URL y por lo tanto otra solicitud cobrada.
 
-          Repite dirección y comuna debajo porque quien abre esto está
-          confirmando que ESE es el patio, y volver a la tabla a cotejar la
-          dirección anularía el propósito. */}
+          Mismo diálogo que el de la foto de un recurso (ver el de la vista de
+          flota): a sangre, sin padding ni encabezado visible, con el título
+          solo para lectores de pantalla. Dos visores de foto que se ven
+          distinto obligan a reaprender el segundo, y acá es la misma gesto
+          sobre la misma clase de contenido.
+
+          Sin línea de atribución: las imágenes de Street View Static traen el
+          logo de Google impreso en el propio ráster, así que repetirlo en texto
+          sería decir dos veces lo mismo. */}
       <Dialog open={fotoAmpliada !== null} onOpenChange={(open) => !open && setFotoAmpliada(null)}>
-        <DialogContent className="max-w-2xl">
-          {fotoAmpliada && (
-            <>
-              <DialogHeader>
-                <DialogTitle>{fotoAmpliada.name}</DialogTitle>
-                <DialogDescription>
-                  {[
-                    fotoAmpliada.address === fotoAmpliada.name ? null : fotoAmpliada.address,
-                    fotoAmpliada.comuna,
-                  ]
-                    .filter(Boolean)
-                    .join(", ") || "Sin dirección registrada"}
-                </DialogDescription>
-              </DialogHeader>
-              {fotoAmpliada.street_view && (
-                <img
-                  src={resourcePhotoUrl(fotoAmpliada.street_view)}
-                  alt={`Vista de calle de ${fotoAmpliada.name}`}
-                  className="w-full rounded-lg border border-border/60"
-                />
-              )}
-              {/* La atribución la exige Google al mostrar sus imágenes, y acá
-                  no la pone el visor porque la foto se sirve desde disco. */}
-              <p className="text-[0.625rem] text-muted-foreground">Imagen de Google Street View</p>
-            </>
+        <DialogContent className="max-w-3xl overflow-hidden p-0">
+          <DialogHeader className="sr-only">
+            <DialogTitle>{fotoAmpliada?.name ?? "Lugar del punto"}</DialogTitle>
+          </DialogHeader>
+          {fotoAmpliada?.street_view && (
+            <img
+              src={resourcePhotoUrl(fotoAmpliada.street_view)}
+              alt={`Vista de calle de ${fotoAmpliada.name}`}
+              className="h-auto w-full"
+            />
           )}
         </DialogContent>
       </Dialog>

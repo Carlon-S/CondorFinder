@@ -99,15 +99,18 @@ type Campo = "estado" | "equipo" | "tipo" | "capacidad" | "peso" | "autonomia" |
  *  un "CATERPILLAR 416F2 2018" y el encabezado de capacidad se partía en dos
  *  líneas. */
 const ANCHOS = {
-  estado: "w-[13%]",
-  foto: "w-[7%]",
+  estado: "w-[11%]",
+  // Igual de ancha que la del lugar en la tabla de puntos: las dos muestran una
+  // foto que hay que poder reconocer, y a 4rem un camión es una mancha. Los
+  // puntos salieron de estado y acciones.
+  foto: "w-[11%]",
   equipo: "w-[15%]",
   tipo: "w-[10%]",
   capacidad: "w-[11%]",
   peso: "w-[10%]",
   autonomia: "w-[10%]",
   vehiculo: "w-[12%]",
-  acciones: "w-[12%]",
+  acciones: "w-[10%]",
 } as const;
 
 /** La cifra de capacidad separada de qué mide. Antes la celda decía "balde 3"
@@ -806,7 +809,7 @@ function RecursosDelPuntoPage() {
                             onClick={() => r.foto && setFotoAmpliada(r.foto)}
                             disabled={!r.foto}
                             title={r.foto ? "Ver la foto en grande" : "Sin imagen todavía"}
-                            className={`detect-frame detect-frame-sm block h-11 w-16 overflow-hidden rounded-md bg-muted ${
+                            className={`detect-frame detect-frame-sm block h-16 w-24 overflow-hidden rounded-md bg-muted ${
                               r.disponible ? "" : "opacity-50 grayscale"
                             } ${r.foto ? "cursor-zoom-in transition-transform hover:scale-105" : "cursor-default"}`}
                           >
@@ -820,7 +823,7 @@ function RecursosDelPuntoPage() {
                               />
                             ) : (
                               <span className="flex h-full w-full items-center justify-center">
-                                <ImageOff className="h-4 w-4 text-muted-foreground/40" />
+                                <ImageOff className="h-5 w-5 text-muted-foreground/40" />
                               </span>
                             )}
                           </button>
