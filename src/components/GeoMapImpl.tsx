@@ -27,6 +27,7 @@ import {
 import {
   MAIPU_BBOX,
   MAIPU_BOUNDARY,
+  MAIPU_MASK,
   MAIPU_VIEW_BBOX,
   MAIPU_VIEW_CENTER,
 } from "@/lib/maipuBoundary";
@@ -453,26 +454,46 @@ export function GeoMapImpl({
           el polígono es la referencia visual, la restricción es del
           contenedor.
 
-          interactive={false} es lo importante: recursos.tsx crea un punto
-          haciendo click en el mapa, y un polígono que cubre toda la comuna se
-          quedaría con esos clicks antes de que lleguen al mapa. Sin relleno
-          por el mismo motivo visual: un tinte sobre la comuna entera compite
-          con el mapa base, que es lo que hay que leer.
+          Son DOS capas: la máscara que atenúa lo de afuera y, encima, el
+          contorno exacto. Antes era una sola línea punteada, y el problema no
+          era el estilo del trazo: un borde obliga a recorrerlo con la vista
+          para saber qué queda adentro, y sobre un mapa lleno de calles se
+          pierde. Atenuando el afuera, la comuna queda iluminada y la
+          pertenencia se lee sin buscarla. Es lo que hacen ArcGIS y Mapbox.
 
-          El color va en hexadecimal literal y NO como var(--primary): este
+          interactive={false} en las DOS, y acá es más crítico que antes: la
+          máscara cubre el mundo entero, así que si tomara eventos se quedaría
+          con todos los clicks con que recursos.tsx crea un punto, no solo con
+          los de adentro de la comuna.
+
+          Los colores van en hexadecimal literal y NO como var(--primary): este
           mapa dibuja los trazos con el renderer de canvas (ver el comentario
           de ROUTE_CANVAS_RENDERER más abajo), y una variable CSS no se
-          resuelve al asignarla a ctx.strokeStyle, se descarta en silencio y la
-          línea sale del color que hubiera quedado. Es el mismo motivo por el
-          que route-colors.ts guarda literales. */}
+          resuelve al asignarla a ctx.fillStyle, se descarta en silencio y sale
+          del color que hubiera quedado. Es el mismo motivo por el que
+          route-colors.ts guarda literales. */}
+      <Polygon
+        positions={MAIPU_MASK}
+        interactive={false}
+        pathOptions={{
+          // Sin trazo: el contorno lo pone la capa de abajo. Si esta lo
+          // dibujara, también trazaría el anillo mundial.
+          stroke: false,
+          fill: true,
+          fillColor: "#0F2244", // --primary
+          // Suficiente para separar adentro de afuera, poco para que el mapa
+          // base siga siendo legible fuera de la comuna: el recorrido hacia el
+          // relleno sanitario sale de Maipú y hay que poder seguirlo.
+          fillOpacity: 0.22,
+        }}
+      />
       <Polygon
         positions={MAIPU_BOUNDARY}
         interactive={false}
         pathOptions={{
           color: "#0F2244", // --primary
-          weight: 2,
-          opacity: 0.65,
-          dashArray: "6 4",
+          weight: 1.5,
+          opacity: 0.9,
           fill: false,
         }}
       />

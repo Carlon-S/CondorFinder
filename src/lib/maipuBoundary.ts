@@ -279,3 +279,41 @@ export const MAIPU_VIEW_BBOX: [[number, number], [number, number]] = [
   [-33.553, -70.825],
   [-33.464, -70.718],
 ];
+
+/**
+ * Anillo que cubre el mundo entero, para usar como contorno EXTERIOR de la
+ * mascara que atenua todo lo que no es Maipu (ver MAIPU_MASK).
+ *
+ * Mundial y no una caja generosa alrededor de la comuna porque el paneo es
+ * libre cuando lockToMaipu esta apagado: con una caja chica, alejandose lo
+ * suficiente se veria el borde de la propia mascara, que es justo el tipo de
+ * costura que delata un truco de dibujo.
+ *
+ * +-85 y no +-90: Web Mercator no proyecta los polos, la latitud se va a
+ * infinito. 85.05 es el limite practico de la proyeccion y 85 deja margen.
+ */
+const ANILLO_MUNDIAL: [number, number][] = [
+  [-85, -180],
+  [-85, 180],
+  [85, 180],
+  [85, -180],
+];
+
+/**
+ * La mascara inversa: un poligono con AGUJERO, donde el agujero es Maipu.
+ *
+ * Primer anillo el contorno exterior, los siguientes los huecos. Es como
+ * Leaflet y Google Maps representan un poligono con agujeros, y los dos pintan
+ * con la regla "evenodd", asi que el interior del segundo anillo queda sin
+ * rellenar.
+ *
+ * Reemplaza a la linea punteada que marcaba el limite comunal. El problema de
+ * la punteada no era el estilo: un borde obliga a seguirlo con la vista para
+ * saber que queda adentro, y sobre un mapa lleno de calles se pierde. Atenuando
+ * el afuera, la comuna queda iluminada y la pertenencia se lee de un vistazo,
+ * sin competir con el contenido. Es lo que hacen ArcGIS y Mapbox.
+ *
+ * El contorno sigue dibujandose aparte, ahora SOLIDO y fino, porque la mascara
+ * da la region pero no el limite exacto.
+ */
+export const MAIPU_MASK: [number, number][][] = [ANILLO_MUNDIAL, MAIPU_BOUNDARY];
