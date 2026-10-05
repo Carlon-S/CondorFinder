@@ -94,6 +94,17 @@ def get_db() -> AsyncDatabase:
 # MODELOS — mismo shape que src/lib/routePlan.ts
 # =============================================================================
 
+class RoutePlanWorkerIn(BaseModel):
+    """Una persona disponible para la jornada. AC1 y AC2 de HDU5.1.
+
+    El nombre lo escribe el trabajador municipal sobre su propia cuadrilla y
+    viaja solo en la petición: no se persiste acá ni se devuelve en ninguna
+    lectura. Es lo que permite verificar el AC2 leyendo el plan, porque un mismo
+    nombre no puede aparecer en dos vehículos."""
+    nombre: str
+    rol: Literal["conductor", "peoneta", "operador"]
+
+
 class RoutePlanRequestIn(BaseModel):
     analysisIds: list[str]
     activePointIds: list[str]
@@ -128,17 +139,6 @@ class RoutePlanRequestIn(BaseModel):
     # antes de que este criterio existiera, que es lo que evita que el despliegue
     # rompa todas las rutas antes de que alguien haya cargado nada.
     personal: list[RoutePlanWorkerIn] = []
-
-
-class RoutePlanWorkerIn(BaseModel):
-    """Una persona disponible para la jornada. AC1 y AC2 de HDU5.1.
-
-    El nombre lo escribe el trabajador municipal sobre su propia cuadrilla y
-    viaja solo en la petición: no se persiste acá ni se devuelve en ninguna
-    lectura. Es lo que permite verificar el AC2 leyendo el plan, porque un mismo
-    nombre no puede aparecer en dos vehículos."""
-    nombre: str
-    rol: Literal["conductor", "peoneta", "operador"]
 
 
 class RoutePlanStopOut(BaseModel):
