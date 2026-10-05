@@ -192,7 +192,12 @@ def coordenada_de(direccion: str) -> dict | None:
     """Geocodificación DIRECTA: dónde queda esa dirección escrita a mano.
 
     Es el camino inverso, para cuando alguien escribe sin usar las sugerencias.
-    Devuelve {"lat", "lng"}."""
+    Devuelve {"lat", "lng", "address", "comuna"}.
+
+    **La comuna viaja en la MISMA respuesta y no cuesta nada**: Geocoding manda
+    los `address_components` igual, y antes se descartaban. Sin eso, escribir
+    una dirección movía el marcador pero dejaba la comuna como estuviera, y
+    había que corregirla a mano aunque el servicio supiera cuál era."""
     clave = _clave()
     if not clave or not direccion.strip():
         return None
@@ -212,9 +217,16 @@ def coordenada_de(direccion: str) -> dict | None:
         d = r.json()
         if d.get("status") != "OK" or not d.get("results"):
             return None
-        loc = (d["results"][0].get("geometry") or {}).get("location") or {}
+        primero = d["results"][0]
+        loc = (primero.get("geometry") or {}).get("location") or {}
         if "lat" not in loc or "lng" not in loc:
             return None
-        return {"lat": loc["lat"], "lng": loc["lng"]}
+        comps = primero.get("address_components") or []
+        return {
+            "lat": loc["lat"],
+            "lng": loc["lng"],
+            "address": _calle_de(comps, "types", "long_name"),
+            "comuna": _comuna_de(comps, "types", "long_name"),
+        }
     except Exception:
         return None

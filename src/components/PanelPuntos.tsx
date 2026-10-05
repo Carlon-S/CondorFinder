@@ -378,6 +378,21 @@ export function PanelPuntos({
         const coords: [number, number] = [result.lat, result.lng];
         setPendingPoint(coords);
         setGeocodeFlyTarget(coords);
+        // La comuna viene en la MISMA respuesta cuando contesta Google, así que
+        // llenarla no cuesta una solicitud más. Antes solo la llenaba el click
+        // en el mapa, y escribir la dirección a mano dejaba al trabajador
+        // corrigiendo un dato que el servicio ya sabía.
+        //
+        // `|| f.comuna` por lo mismo que la dirección en el click: con el
+        // respaldo de Nominatim estos campos no vienen, y pisar con vacío sería
+        // peor que no tocar nada.
+        if (result.address || result.comuna) {
+          setForm((f) => ({
+            ...f,
+            address: result.address || f.address,
+            comuna: result.comuna || f.comuna,
+          }));
+        }
         addressDirtyRef.current = false;
         return coords;
       } finally {

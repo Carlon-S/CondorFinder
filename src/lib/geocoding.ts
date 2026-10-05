@@ -89,6 +89,14 @@ export async function reverseGeocode(
 export interface ForwardGeocodeResult {
   lat: number;
   lng: number;
+  /** La dirección normalizada y su comuna, cuando respondió Google.
+   *
+   *  Vienen en la MISMA respuesta que la coordenada, así que no cuestan una
+   *  solicitud aparte. Son opcionales porque Nominatim no las da: con el
+   *  respaldo, el marcador se mueve igual y la comuna queda como estaba, que es
+   *  el comportamiento que había antes de que esto existiera. */
+  address?: string;
+  comuna?: string;
 }
 
 export async function forwardGeocode(query: string): Promise<ForwardGeocodeResult | null> {
