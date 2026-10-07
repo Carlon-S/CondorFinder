@@ -780,6 +780,27 @@ async def _load_route_stops(analysis_ids: list[str]) -> list[dict]:
 
     docs = await get_db().analyses.find({"_id": {"$in": valid_ids}}).to_list(length=None)
 
+    # El nombre de cada parada es el de su ZONA, no el de la medición.
+    #
+    # Una parada del plan es un terreno al que hay que ir, y el análisis es una
+    # de sus mediciones. Usando `doc["name"]`, renombrar la zona no cambiaba
+    # nada en la línea de tiempo ni en el marcador del mapa, y el plan seguía
+    # nombrando el terreno por la medición con que se guardó la primera vez.
+    #
+    # Una sola consulta para todas las zonas involucradas, no una por parada.
+    zone_ids = {doc.get("zoneId") for doc in docs if doc.get("zoneId")}
+    nombres_de_zona: dict[str, str] = {}
+    if zone_ids:
+        oids = []
+        for zid in zone_ids:
+            try:
+                oids.append(ObjectId(zid))
+            except Exception:
+                continue
+        if oids:
+            async for zona in get_db().zones.find({"_id": {"$in": oids}}):
+                nombres_de_zona[str(zona["_id"])] = zona.get("name") or ""
+
     stops: list[dict] = []
     for doc in docs:
         crs = doc.get("crs")
@@ -824,7 +845,14 @@ async def _load_route_stops(analysis_ids: list[str]) -> list[dict]:
                 clases[clase] = clases.get(clase, 0) + vol
         stops.append({
             "analysisId": str(doc["_id"]),
-            "name": doc.get("name") or "Zona sin nombre",
+            # Respaldo al nombre de la medición: los análisis anteriores a la
+            # migración de zonas no tienen `zoneId`, y una zona borrada a mano
+            # dejaría la referencia colgando.
+            "name": (
+                nombres_de_zona.get(doc.get("zoneId") or "")
+                or doc.get("name")
+                or "Zona sin nombre"
+            ),
             "lat": lat,
             "lng": lng,
             "volumeM3": total_volume,

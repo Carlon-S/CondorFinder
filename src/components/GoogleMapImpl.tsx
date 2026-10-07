@@ -282,14 +282,32 @@ function Encuadre({ points }: { points: [number, number][] | null | undefined })
   return null;
 }
 
-/** Vuela a un punto cuando el padre lo pide (clic en una fila, deep link). */
+/** Vuela a un punto cuando el padre lo pide (clic en una fila, deep link).
+ *
+ *  **Centro y zoom se mueven JUNTOS, y no con `panTo`.** `panTo` es animado y
+ *  `setZoom` es inmediato, así que los dos corrían a la vez: el zoom saltaba
+ *  mientras el paneo seguía deslizándose y, como el zoom cambia la escala de
+ *  píxel a mundo, el deslizamiento terminaba en otra coordenada. El síntoma era
+ *  que el acercamiento ocurría pero no quedaba sobre la zona. La implementación
+ *  de Leaflet nunca lo sufrió porque `flyTo(target, zoom)` mueve las dos cosas
+ *  en una sola animación.
+ *
+ *  Y el zoom se FIJA, en vez de aplicarse solo cuando el actual es menor: con
+ *  la condición, llegar desde un zoom más alto dejaba la vista sin reencuadrar
+ *  y el resultado dependía de dónde se venía. */
 function VueloAPunto({ target }: { target: [number, number] | null | undefined }) {
   const map = useMap();
 
   useEffect(() => {
     if (!map || !target) return;
-    map.panTo(aLatLng(target));
-    if ((map.getZoom() ?? 0) < ZOOM_FOCO) map.setZoom(ZOOM_FOCO);
+    const camara = { center: aLatLng(target), zoom: ZOOM_FOCO };
+    // moveCamera aplica las dos en una sola operación. El respaldo son los dos
+    // setters, que son síncronos y por lo tanto tampoco compiten entre sí.
+    if (typeof map.moveCamera === "function") map.moveCamera(camara);
+    else {
+      map.setZoom(ZOOM_FOCO);
+      map.setCenter(camara.center);
+    }
   }, [map, target]);
 
   return null;

@@ -155,7 +155,11 @@ export const TEXTO_FUERA_DE_RUTA: Record<MotivoFueraDeRuta, string> = {
   no_disponible: "marcado como no disponible",
   se_remolca: "se remolca, no circula por sí solo",
   no_transporta: "no transporta carga",
-  solo_toneladas: "declara su capacidad en toneladas, no en m³",
+  // "en peso" y no "en toneladas": el campo se guarda en toneladas pero la
+  // interfaz lo imprime en kg, así que nombrar la unidad acá contradecía la
+  // cifra que la tabla de la flota muestra al lado. Lo que el motivo tiene que
+  // decir es que la magnitud declarada es otra, no en qué unidad.
+  solo_toneladas: "declara su capacidad en peso, no en m³",
   sin_capacidad: "sin capacidad declarada",
 };
 

@@ -85,6 +85,7 @@ import {
 } from "@/components/ui/select";
 import {
   listAnalyses,
+  listZones,
   setPendingOpenId,
   type AnalysisSummary,
   type SavedAnalysisRecord,
@@ -194,7 +195,13 @@ interface LoadedDetection {
 
 interface LoadedAnalysis {
   id: string;
+  /** El nombre que se MUESTRA, que es el de la zona cuando se conoce. Lo que se
+   *  carga a una ruta es un terreno, no una medición, así que rotular con el
+   *  nombre del análisis hacía que renombrar la zona no se viera acá. */
   name: string;
+  /** Para poder resolver el nombre de la zona cuando las zonas lleguen después
+   *  que los análisis, o cuando una se renombre sin recargar la página. */
+  zoneId?: string;
   mapUrl: string;
   /** Centroide de todas sus detecciones — posición del círculo en el mapa. */
   center: [number, number];
@@ -211,6 +218,19 @@ interface LoadedAnalysis {
    *  sobre la miniatura del tooltip de hover. Null hasta que la imagen
    *  termine de cargar (se resuelve async, ver refreshAllAnalyses). */
   imgSize: { w: number; h: number } | null;
+}
+
+/** El nombre de la zona si se conoce, y si no el de la medición.
+ *
+ *  El respaldo no es decoración: las tareas en curso y los análisis anteriores
+ *  a la migración de zonas no tienen `zoneId`, y la consulta de zonas puede
+ *  fallar sola sin que eso tenga que dejar la vista sin rótulos. */
+function nombreConZona(
+  nombreDelAnalisis: string,
+  zoneId: string | undefined,
+  nombres: Map<string, string>,
+): string {
+  return (zoneId ? nombres.get(zoneId) : undefined) ?? nombreDelAnalisis;
 }
 
 /** Centroide simple (promedio de todos los vértices) — suficiente para
@@ -306,6 +326,7 @@ function processRecord(record: SavedAnalysisRecord): LoadedAnalysis | null {
   return {
     id: record.id,
     name: record.name,
+    zoneId: record.zoneId ?? undefined,
     mapUrl: record.mapUrl,
     center,
     detections: resolved,
@@ -371,6 +392,9 @@ function RutasPage() {
 
   const [loadDialogOpen, setLoadDialogOpen] = useState(false);
   const [savedAnalyses, setSavedAnalyses] = useState<SavedAnalysisRecord[]>([]);
+  /** zoneId -> nombre de la zona. Lo que esta vista carga y rotula es un
+   *  terreno, así que el nombre sale de acá y no del análisis. */
+  const [zoneNames, setZoneNames] = useState<Map<string, string>>(new Map());
   const [loadingSaved, setLoadingSaved] = useState(false);
   // AC4 — selección múltiple: ids marcados en el diálogo, todavía no cargados.
   const [selectedToLoad, setSelectedToLoad] = useState<Set<string>>(new Set());
@@ -681,23 +705,35 @@ function RutasPage() {
   // volver a descargar imágenes ya conocidas gracias a imgSizeCacheRef.
   const refreshAllAnalyses = async (): Promise<void> => {
     let records: SavedAnalysisRecord[];
+    let nombres = new Map<string, string>();
     try {
-      records = await listAnalyses();
+      // Las dos consultas van juntas porque lo que se dibuja es una zona, no un
+      // análisis: el nombre tiene que salir de la colección de zonas. Esta vista
+      // imprimía `record.name`, o sea el nombre de la MEDICIÓN, así que
+      // renombrar la zona no se veía acá y el mapa seguía rotulando con el
+      // nombre viejo. Las zonas degradan solas: sin ellas se cae al nombre de la
+      // medición, que es lo que había antes, en vez de dejar la vista sin zonas.
+      const [analisis, zonas] = await Promise.all([listAnalyses(), listZones().catch(() => [])]);
+      records = analisis;
+      nombres = new Map(zonas.map((z) => [z.id, z.name]));
     } catch (err) {
       notify.error(
-        "No se pudieron cargar los análisis guardados",
+        "No se pudieron cargar las zonas guardadas",
         err instanceof Error ? err.message : "Intenta nuevamente.",
       );
       setAllAnalyses([]);
       return;
     }
 
+    setZoneNames(nombres);
+
     const processed = records
       .map(processRecord)
       .filter((a): a is LoadedAnalysis => a !== null)
       .map((a) => {
         const cached = imgSizeCacheRef.current.get(a.mapUrl);
-        return cached ? { ...a, imgSize: cached } : a;
+        const conNombre = { ...a, name: nombreConZona(a.name, a.zoneId, nombres) };
+        return cached ? { ...conNombre, imgSize: cached } : conNombre;
       });
     setAllAnalyses(processed);
 
@@ -743,11 +779,17 @@ function RutasPage() {
       // HDU7/AC3 — un análisis histórico (reemplazado) no debe aparecer acá
       // ni siquiera deshabilitado/"no ubicable" — directamente no es una
       // opción válida para cargar, es la versión vigente la que corresponde.
-      const records = await listAnalyses();
+      //
+      // Las zonas se releen en la misma vuelta, y no solo al montar: una zona
+      // renombrada en otra pestaña (o en la vista de análisis de esta misma
+      // sesión) tiene que aparecer con su nombre nuevo al abrir el diálogo, que
+      // es justo el momento en que alguien elige qué cargar.
+      const [records, zonas] = await Promise.all([listAnalyses(), listZones().catch(() => [])]);
       setSavedAnalyses(records.filter((r) => !r.historical));
+      if (zonas.length > 0) setZoneNames(new Map(zonas.map((z) => [z.id, z.name])));
     } catch (err) {
       notify.error(
-        "No se pudieron cargar los análisis guardados",
+        "No se pudieron cargar las zonas guardadas",
         err instanceof Error ? err.message : "Intenta nuevamente.",
       );
       setSavedAnalyses([]);
@@ -1929,7 +1971,12 @@ function RutasPage() {
                     />
                     <MapPin className="h-3.5 w-3.5 flex-shrink-0 text-primary/70" />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">{record.name}</p>
+                      {/* El nombre de la ZONA, no el de la medición: lo que se
+                          carga a una ruta es el terreno. Con el del análisis,
+                          renombrar la zona no se veía acá. */}
+                      <p className="truncate text-sm font-medium">
+                        {nombreConZona(record.name, record.zoneId ?? undefined, zoneNames)}
+                      </p>
                       <p className="text-[0.625rem] text-muted-foreground">
                         {new Date(record.savedAt).toLocaleDateString("es-CL")}
                         {record.summary && `, ${record.summary.totalVolumeM3} m³`}
@@ -2264,12 +2311,17 @@ function RutasPage() {
                       : "Sin declarar"
                   }
                 />
+                {/* En kg, la misma unidad en que la línea de tiempo imprime el
+                    peso de cada parada: el sentido de esta cifra es compararse
+                    contra esa, y con una en toneladas y la otra en kilos la
+                    comparación había que hacerla de cabeza. El campo guardado
+                    sigue en toneladas, que es como lo entregó la municipalidad. */}
                 <CifraPlan
                   icono={<Scale className="h-3.5 w-3.5" />}
                   etiqueta="Peso máximo"
                   valor={
                     vehiculoEnFoto.capacityTon != null
-                      ? `${vehiculoEnFoto.capacityTon} t`
+                      ? `${(vehiculoEnFoto.capacityTon * 1000).toLocaleString("es-CL")} kg`
                       : "Sin límite"
                   }
                 />

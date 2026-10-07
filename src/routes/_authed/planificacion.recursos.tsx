@@ -71,7 +71,7 @@ import {
   setPointActive,
   type ResourcePoint,
 } from "@/lib/resources";
-import { listAnalyses } from "@/lib/analysisStore";
+import { listAnalyses, listZones } from "@/lib/analysisStore";
 import { projectPolygonToWgs84 } from "@/lib/projection";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
@@ -101,6 +101,25 @@ const ANCHOS = {
  *  fuera: una imagen no tiene orden y una columna de botones tampoco. */
 type Campo = "estado" | "nombre" | "direccion" | "recursos" | "capacidad";
 
+/** Un basural guardado, dibujado en este mapa como contexto.
+ *
+ *  Guarda los datos y no un `GeoMapPoint` armado, porque el clic abre su mapa
+ *  unificado: con solo el marcador no quedaba de dónde sacar la imagen ni las
+ *  cifras del diálogo. El `id` es el del ANÁLISIS (lo que trae la posición y las
+ *  cifras) y el `nombre` es el de su ZONA. */
+interface ZonaEnMapa {
+  id: string;
+  nombre: string;
+  position: [number, number];
+  mapUrl: string | null;
+  volumeM3: number;
+  weightKg: number;
+}
+
+/** Prefijo del id de un marcador de zona en el mapa, para distinguirlo de un
+ *  punto de recurso: los dos viven en el mismo arreglo de `points`. */
+const PREFIJO_ZONA = "zona:";
+
 /** Cinco filas por página. Acá sí es un número fijo, y no la medición del alto
  *  disponible que hace la tabla de la flota: esa tabla ocupa la pantalla
  *  entera, ésta comparte la vista con el panel y el mapa, así que el alto que
@@ -127,10 +146,11 @@ function RecursosPage() {
   const [fotoAmpliada, setFotoAmpliada] = useState<ResourcePoint | null>(null);
   const [eliminando, setEliminando] = useState(false);
 
-  /** Las zonas guardadas, ya listas como marcadores del mapa. Son contexto, no
-   *  algo que esta vista administre, así que viven como marcadores y no como
-   *  registros. */
-  const [zonas, setZonas] = useState<GeoMapPoint[]>([]);
+  /** Las zonas guardadas, como contexto del mapa. Son el terreno al que hay que
+   *  ir, no algo que esta vista administre. */
+  const [zonas, setZonas] = useState<ZonaEnMapa[]>([]);
+  /** Zona cuyo mapa unificado se está mirando, o null. */
+  const [zonaAbierta, setZonaAbierta] = useState<ZonaEnMapa | null>(null);
 
   const [busqueda, setBusqueda] = useState("");
   const [filtroEstado, setFiltroEstado] = useState<"todos" | "activos" | "inactivos">("todos");
@@ -166,10 +186,15 @@ function RecursosPage() {
   // editan zonas, así que no hay nada que pueda cambiarlas mientras la vista
   // está abierta. Degrada en silencio porque son referencia: sin ellas el mapa
   // sigue sirviendo para lo que esta vista hace, que es configurar puntos.
+  //
+  // El nombre sale de la colección de ZONAS y no del análisis: lo que el mapa
+  // rotula es el terreno, así que con el nombre de la medición una zona
+  // renombrada seguía apareciendo con el nombre viejo.
   useEffect(() => {
-    listAnalyses()
-      .then((registros) => {
-        const resueltas: GeoMapPoint[] = [];
+    Promise.all([listAnalyses(), listZones().catch(() => [])])
+      .then(([registros, zonasGuardadas]) => {
+        const nombres = new Map(zonasGuardadas.map((z) => [z.id, z.name]));
+        const resueltas: ZonaEnMapa[] = [];
         for (const r of registros) {
           // Las reemplazadas por una captura más nueva (HDU7) quedan fuera, igual
           // que en /rutas: si no, una zona con tres capturas se dibujaría tres
@@ -180,17 +205,12 @@ function RecursosPage() {
           const centro = wgs84?.[0];
           if (!centro) continue;
           resueltas.push({
-            id: `zona:${r.id}`,
+            id: r.id,
+            nombre: (r.zoneId ? nombres.get(r.zoneId) : undefined) ?? r.name,
             position: centro,
-            label: `${r.name} · ${r.summary?.totalVolumeM3 ?? 0} m³`,
-            // Con `color` el marcador se dibuja como círculo en vez de pin, que
-            // es lo que distingue una zona de un punto en /rutas. Violeta, el
-            // primero de los colores de zona de esa vista: no compite con el
-            // navy de los puntos ni con el teal del relleno. Literal y no
-            // `var(--primary)` por el renderer de canvas, igual que el resto de
-            // los colores del mapa.
-            color: "#7c3aed",
-            previewImageUrl: r.thumbnailUrl ?? r.mapUrl ?? undefined,
+            mapUrl: r.mapUrl ?? null,
+            volumeM3: r.summary?.totalVolumeM3 ?? 0,
+            weightKg: r.summary?.totalWeightKg ?? 0,
           });
         }
         setZonas(resueltas);
@@ -297,8 +317,24 @@ function RecursosPage() {
   // Las zonas van PRIMERO para que los pines de los puntos queden dibujados
   // encima: lo que se administra acá son los puntos, y un círculo de zona
   // tapando el pin que se está editando esconde justo lo que se está haciendo.
+  //
+  // **Sin `previewImageUrl`, a propósito.** Ese campo hace que el mapa unificado
+  // aparezca al pasar el puntero, y acá eso está mal: una imagen de varios MB
+  // tapando el mapa mientras se ubica un punto estorba justo la operación de
+  // esta vista. La imagen se mira cuando se la pide, apretando la zona, igual
+  // que en /rutas.
   const mapPoints: GeoMapPoint[] = [
-    ...zonas,
+    ...zonas.map((z) => ({
+      id: `${PREFIJO_ZONA}${z.id}`,
+      position: z.position,
+      label: `${z.nombre} · ${z.volumeM3} m³`,
+      // Con `color` el marcador se dibuja como círculo en vez de pin, que es lo
+      // que distingue una zona de un punto en /rutas. Violeta, el primero de los
+      // colores de zona de esa vista: no compite con el navy de los puntos ni
+      // con el teal del relleno. Literal y no `var(--primary)` por el renderer
+      // de canvas, igual que el resto de los colores del mapa.
+      color: "#7c3aed",
+    })),
     ...points.map((p) => ({
       id: p.id,
       position: [p.lat, p.lng] as [number, number],
@@ -381,11 +417,16 @@ function RecursosPage() {
               className="h-full w-full"
               points={mapPoints}
               // Las zonas comparten el mapa pero no son puntos: su id va
-              // prefijado y el clic las ignora. Sin el filtro, apretar una zona
-              // le mandaba a PanelPuntos la orden de abrir un punto que no
-              // existe, que es una orden de un solo uso y se quedaba pegada.
+              // prefijado, y apretarlas abre su mapa unificado en vez de la
+              // ficha de un punto. Sin esta bifurcación se le mandaba a
+              // PanelPuntos la orden de abrir un punto que no existe, que es una
+              // orden de un solo uso y se quedaba pegada.
               onPointClick={(p) => {
-                if (p.id.startsWith("zona:")) return;
+                if (p.id.startsWith(PREFIJO_ZONA)) {
+                  const id = p.id.slice(PREFIJO_ZONA.length);
+                  setZonaAbierta(zonas.find((z) => z.id === id) ?? null);
+                  return;
+                }
                 setPuntoSeleccionado(p.id);
               }}
               marker={mapProps.marker}
@@ -821,6 +862,52 @@ function RecursosPage() {
               alt={`Vista de calle de ${fotoAmpliada.name}`}
               className="h-auto w-full"
             />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* El mapa unificado de una zona, al apretar su círculo.
+
+          Se abre a pedido y no al pasar el puntero: la imagen pesa varios MB y
+          taparía el mapa justo mientras se está ubicando un punto, que es para
+          lo que existe esta vista. Mismo gesto que en /rutas.
+
+          Es más simple que el visor de /rutas, y a propósito: ahí los recuadros
+          de detección se dibujan como SVG posicionado sobre los píxeles
+          naturales de la imagen, con zoom y paneo, porque ahí se está decidiendo
+          qué retirar. Acá la pregunta es cuál es esta zona y dónde queda, así
+          que alcanza con verla y con sus dos cifras. */}
+      <Dialog open={zonaAbierta !== null} onOpenChange={(open) => !open && setZonaAbierta(null)}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{zonaAbierta?.nombre ?? "Zona"}</DialogTitle>
+          </DialogHeader>
+          {zonaAbierta?.mapUrl ? (
+            <img
+              src={zonaAbierta.mapUrl}
+              alt={`Mapa unificado de ${zonaAbierta.nombre}`}
+              className="h-auto max-h-[60vh] w-full rounded-md object-contain"
+            />
+          ) : (
+            <p className="rounded-md border border-dashed border-border/50 py-8 text-center text-xs text-muted-foreground">
+              Esta zona no tiene mapa guardado.
+            </p>
+          )}
+          {zonaAbierta && (
+            <div className="flex items-center gap-5 text-xs">
+              <span>
+                <span className="text-muted-foreground">Volumen </span>
+                <span className="mono font-semibold tabular-nums text-foreground">
+                  {zonaAbierta.volumeM3} m³
+                </span>
+              </span>
+              <span>
+                <span className="text-muted-foreground">Peso </span>
+                <span className="mono font-semibold tabular-nums text-foreground">
+                  {Math.round(zonaAbierta.weightKg)} kg
+                </span>
+              </span>
+            </div>
           )}
         </DialogContent>
       </Dialog>

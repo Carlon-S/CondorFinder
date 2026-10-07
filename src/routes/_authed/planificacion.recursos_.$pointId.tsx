@@ -135,15 +135,22 @@ const ANCHOS = {
 function capacidadDe(
   r: Resource,
   declaradoEnSuTipo: { carga: boolean; balde: boolean },
-): { valor: number | null; unidad: "m³" | "t"; nota: string; falta: boolean } {
+): { valor: number | null; unidad: "m³" | "kg"; nota: string; falta: boolean } {
   if (r.familia === "carga") {
     if (r.capacidad_m3 != null)
       return { valor: r.capacidad_m3, unidad: "m³", nota: "carga", falta: false };
-    // Declara su límite en TONELADAS y no en volumen: es el CAMION 3/4 PLANO.
-    // No es un hueco, es otra magnitud, y marcarlo en ámbar como si faltara el
-    // dato sería falso ahora que la municipalidad lo entregó.
+    // Declara su límite en PESO y no en volumen: es el CAMION 3/4 PLANO. No es
+    // un hueco, es otra magnitud, y marcarlo en ámbar como si faltara el dato
+    // sería falso ahora que la municipalidad lo entregó.
+    //
+    // Se IMPRIME en kg aunque el campo guarde toneladas. El resto del sistema
+    // habla de peso en kilos (el de cada zona, el de cada parada del plan, el
+    // que calcula volumeCalc.py por detección), así que una flota en toneladas
+    // obligaba a convertir de cabeza para comparar la carga de una zona contra
+    // el límite del camión que la va a llevar. El dato guardado sigue en
+    // toneladas, que es la unidad en que lo entregó la municipalidad.
     if (r.capacidad_ton != null)
-      return { valor: r.capacidad_ton, unidad: "t", nota: "carga", falta: false };
+      return { valor: r.capacidad_ton * 1000, unidad: "kg", nota: "carga", falta: false };
     return declaradoEnSuTipo.carga
       ? { valor: null, unidad: "m³", nota: "sin declarar", falta: true }
       : { valor: null, unidad: "m³", nota: "sin dato", falta: false };
@@ -709,9 +716,9 @@ function RecursosDelPuntoPage() {
                         lista acá.
 
                         La columna tiene UNA excepción, los dos CAMION 3/4
-                        PLANO, que declaran toneladas. No se resuelve poniéndole
-                        la unidad a las 21 filas: esas dos la dicen en su propia
-                        segunda línea ("t · carga"), que ya existía para
+                        PLANO, que declaran peso. No se resuelve poniéndole la
+                        unidad a las 21 filas: esas dos la dicen en su propia
+                        segunda línea ("kg · carga"), que ya existía para
                         calificar la cifra. Una excepción se marca donde ocurre,
                         no en el encabezado de todas. */}
                     <SortableHead
@@ -730,10 +737,16 @@ function RecursosDelPuntoPage() {
                         Metidas en una sola celda, la de 15 t no se veía en
                         ninguna parte de la tabla y había que abrir la ficha de
                         cada unidad para encontrarla. */}
+                    {/* En kg y no en t: todo el resto del sistema habla de peso
+                        en kilos (el de cada zona, el de cada parada del plan),
+                        así que una columna en toneladas obligaba a convertir de
+                        cabeza para comparar la carga contra el límite del camión
+                        que la va a llevar. El campo guardado sigue en toneladas,
+                        que es como lo entregó la municipalidad. */}
                     <SortableHead
                       field="peso"
                       label="Peso máx."
-                      unit="t"
+                      unit="kg"
                       className={ANCHOS.peso}
                       sortBy={sortBy}
                       sortDir={sortDir}
@@ -871,7 +884,7 @@ function RecursosDelPuntoPage() {
                         <TableCell className="text-center">
                           {r.capacidad_ton != null ? (
                             <p className="mono text-xs font-semibold tabular-nums text-foreground">
-                              {r.capacidad_ton}
+                              {(r.capacidad_ton * 1000).toLocaleString("es-CL")}
                             </p>
                           ) : (
                             <p className="text-xs text-muted-foreground">
@@ -1156,12 +1169,15 @@ function RecursosDelPuntoPage() {
                       que es lo que el ruteo usa, así que sin esta fila su
                       límite de peso no se vería en ninguna parte.
 
-                      El CAMION 3/4 PLANO, en cambio, declara SOLO toneladas, y
-                      entonces la fila Capacidad ya dice "1 t de carga":
+                      El CAMION 3/4 PLANO, en cambio, declara SOLO peso, y
+                      entonces la fila Capacidad ya dice "1.000 kg de carga":
                       repetirlo acá imprimiría la misma cifra dos veces con dos
                       nombres distintos, que se lee como si fueran dos límites. */}
                   {enDetalle.capacidad_ton != null && enDetalle.capacidad_m3 != null && (
-                    <Dato etiqueta="Peso máximo" valor={`${enDetalle.capacidad_ton} t`} />
+                    <Dato
+                      etiqueta="Peso máximo"
+                      valor={`${(enDetalle.capacidad_ton * 1000).toLocaleString("es-CL")} kg`}
+                    />
                   )}
                   {/* AC3. Solo si está declarada: "sin límite" es el estado
                       normal de esta flota, y una fila que lo repita en las 21

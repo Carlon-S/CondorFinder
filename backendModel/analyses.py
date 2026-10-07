@@ -389,6 +389,7 @@ async def _find_possible_duplicates(new_doc: dict, exclude_id: ObjectId | None) 
     propio_vuelo = new_doc.get("sourceTaskId")
 
     candidatos = []
+    encontrados = []
     for other in await get_db().analyses.find(query).to_list(length=None):
         # Otra medición del MISMO vuelo calza consigo misma con superposición
         # perfecta. No es una zona que elegir, es la misma versión, así que no
@@ -397,12 +398,38 @@ async def _find_possible_duplicates(new_doc: dict, exclude_id: ObjectId | None) 
             continue
         ratio = _polygon_iou(new_rect, _bounds_to_rect(other["orthoBounds"]))
         if ratio >= OVERLAP_THRESHOLD:
-            candidatos.append({
-                "analysisId": str(other["_id"]),
-                "name": other.get("name", ""),
-                "zoneId": other.get("zoneId"),
-                "ratio": round(ratio, 4),
-            })
+            encontrados.append((other, ratio))
+
+    # El nombre del candidato es el de su ZONA, no el de la medición.
+    #
+    # El aviso pregunta "¿es la misma zona?", así que ofrecer una medición por
+    # nombre ("Medición 26-05-2026") obliga a adivinar a qué terreno pertenece,
+    # que es justo lo que se está preguntando. Una sola consulta para todas.
+    zone_ids = {o.get("zoneId") for o, _ in encontrados if o.get("zoneId")}
+    nombres_de_zona: dict[str, str] = {}
+    if zone_ids:
+        oids = []
+        for zid in zone_ids:
+            try:
+                oids.append(ObjectId(zid))
+            except Exception:
+                continue
+        if oids:
+            async for zona in get_db().zones.find({"_id": {"$in": oids}}):
+                nombres_de_zona[str(zona["_id"])] = zona.get("name") or ""
+
+    for other, ratio in encontrados:
+        candidatos.append({
+            "analysisId": str(other["_id"]),
+            # Respaldo al nombre de la medición: un análisis anterior a la
+            # migración de zonas no tiene `zoneId`.
+            "name": (
+                nombres_de_zona.get(other.get("zoneId") or "")
+                or other.get("name", "")
+            ),
+            "zoneId": other.get("zoneId"),
+            "ratio": round(ratio, 4),
+        })
 
     # Solo los mejores. Con muchas zonas registradas, todas las que rocen el
     # umbral producirían una lista que no cabe en el panel lateral, y la

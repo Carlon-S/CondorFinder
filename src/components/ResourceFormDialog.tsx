@@ -628,9 +628,14 @@ function PesoEnUnidad({
   valorTon: number | null;
   onChange: (ton: number | null) => void;
 }) {
-  // Arranca en kg cuando el valor guardado es menor a una tonelada, que es
-  // justo el caso donde las toneladas se leen mal.
-  const [unidad, setUnidad] = useState<"t" | "kg">(valorTon != null && valorTon < 1 ? "kg" : "t");
+  // Arranca SIEMPRE en kg, que es la unidad en que el resto del sistema habla
+  // de peso: el de cada zona, el de cada parada del plan y, desde este cambio,
+  // la columna de la tabla de la flota. Antes arrancaba en t salvo que el valor
+  // fuera menor a una tonelada, así que el formulario mostraba "15" donde la
+  // tabla de al lado decía "15.000" y había que mirar el selector para saber
+  // cuál de las dos cifras se estaba editando. El selector se queda para quien
+  // prefiera escribir en toneladas, y lo guardado no cambia.
+  const [unidad, setUnidad] = useState<"t" | "kg">("kg");
   const mostrado =
     valorTon == null ? "" : unidad === "kg" ? String(valorTon * 1000) : String(valorTon);
 
