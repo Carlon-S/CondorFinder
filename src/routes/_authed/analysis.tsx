@@ -94,7 +94,22 @@ import {
   deleteTask,
 } from "@/lib/unify";
 
-const WEIGHT_LIMIT_KG = 5000;
+// Acá vivía WEIGHT_LIMIT_KG = 5000, que descartaba toda detección de más de 5
+// toneladas antes de mostrarla. Se eliminó, y conviene saber por qué para no
+// reponerlo:
+//
+//   - Descartaba EN SILENCIO. El trabajador no veía el polígono ni sabía que
+//     existía, así que no podía decidir si era un error del modelo o un
+//     basural grande de verdad.
+//   - Solo filtraba en pantalla. El backend seguía calculando y guardando esas
+//     detecciones, de modo que el total de la vista no coincidía con lo que
+//     había en la base ni con lo que el ruteo iba a usar.
+//   - Sesgaba el volumen hacia abajo justo en las zonas más grandes, que es lo
+//     contrario de lo que SP2 busca demostrar sobre la precisión.
+//
+// Una detección exagerada sigue siendo visible y se apaga con el ojo de "Zonas
+// detectadas", que es una decisión del trabajador y queda registrada en el
+// campo `enabled` del análisis guardado.
 
 // ── tipos ──────────────────────────────────────────────────────────────────────
 
@@ -1008,8 +1023,7 @@ function AnalysisPage() {
       fetch(jsonUrl)
         .then(r => r.json())
         .then(data => {
-          const merged = mergeOverlapping(data.detections ?? [])
-            .filter(d => !(d.weight_kg != null && d.weight_kg > WEIGHT_LIMIT_KG));
+          const merged = mergeOverlapping(data.detections ?? []);
           setDisplayDetections(merged);
           setEnabledIds(new Set(merged.map(d => d.id)));
         })
@@ -1091,8 +1105,7 @@ function AnalysisPage() {
 
       const response = await pollVolumeAnalysis(taskId, detectionJsonUrl, setProgress);
       if (response.status === "success") {
-        const merged = mergeOverlapping(response.detections)
-          .filter(d => !(d.weight_kg != null && d.weight_kg > WEIGHT_LIMIT_KG));
+        const merged = mergeOverlapping(response.detections);
         setDisplayDetections(merged);
         setEnabledIds(new Set(merged.map(d => d.id)));
         setCrs(response.crs || undefined);

@@ -43,7 +43,13 @@ presetfast = {
         'feature-quality': 'low',
         'pc-quality': 'lowest',
         'min-num-features': 4000,
-        'resize-to': 1500,
+        # 'resize-to': 1500,  <- CONFIGURACION MUERTA, no la reactives.
+        # Esta version de ODM no tiene esa opcion: se comprobo contra el
+        # NodeODM de produccion (GET /options, 07-10-2026) y no figura, asi
+        # que se ignoraba en silencio y este preset nunca redujo nada. El
+        # tamano de entrada lo decide ahora el cliente, que reduce a 4096 px
+        # antes de subir (ver src/lib/imagenes.ts): ahi esta la medicion de
+        # cuanto es eso en centimetros por pixel y por que ese numero.
     }
 
 presethigh = {

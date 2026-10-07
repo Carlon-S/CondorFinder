@@ -15,6 +15,7 @@
 // navegador — necesita la ruta relativa que proxyea vite.config.ts, para
 // que la cookie de sesión no se pierda por ser cross-origin. Ver config.ts.
 import { CLIENT_BACKEND_URL as BACKEND_URL } from "./config";
+import { reducirTodas } from "./imagenes";
 
 // =============================================================================
 // INTERFACES DE RESPUESTA
@@ -361,12 +362,27 @@ function subirTanda(tanda: File[], onBytes: (enviados: number) => void): Promise
  * @param files      - Archivos JPG válidos a subir
  * @param onProgress - Callback opcional con porcentaje 0-100
  */
+/** Qué parte de la barra se lleva la reducción.
+ *
+ *  Reducir 84 fotos de 48 MP toma bastante, así que tiene que verse avanzar: sin
+ *  esto la barra queda clavada en cero el primer tramo y parece colgada. No es
+ *  la mitad porque, aun reducidas, subir sigue siendo lo que más tarda. */
+const PESO_REDUCCION = 0.25;
+
 export async function uploadImages(
   files: File[],
   onProgress?: (pct: number) => void,
 ): Promise<void> {
-  const tandas = repartirEnTandas(files);
-  const total = files.reduce((s, f) => s + f.size, 0) || 1;
+  // Las fotos de un vuelo real son de 48 MP y ~39 MB: 3,2 GB el set, que no
+  // sube por ninguna conexión doméstica. Se reducen a los 2 cm/px que pide el
+  // preset más exigente, lo que deja el set en ~0,41 GB sin tocar la precisión
+  // del ortomosaico ni la del volumen. Ver src/lib/imagenes.ts.
+  const listas = await reducirTodas(files, (hechas, cuantas) => {
+    onProgress?.(Math.round((hechas / cuantas) * PESO_REDUCCION * 100));
+  });
+
+  const tandas = repartirEnTandas(listas);
+  const total = listas.reduce((s, f) => s + f.size, 0) || 1;
   let yaEnviados = 0;
 
   for (let i = 0; i < tandas.length; i++) {
@@ -374,7 +390,10 @@ export async function uploadImages(
       await subirTanda(tandas[i], (deLaTanda) => {
         // El progreso se mide en BYTES y no en archivos: con fotos de pesos
         // distintos, contar archivos haría saltar la barra de a tirones.
-        onProgress?.(Math.min(99, Math.round(((yaEnviados + deLaTanda) * 100) / total)));
+        const subido = (yaEnviados + deLaTanda) / total;
+        onProgress?.(
+          Math.min(99, Math.round((PESO_REDUCCION + subido * (1 - PESO_REDUCCION)) * 100)),
+        );
       });
       yaEnviados += tandas[i].reduce((s, f) => s + f.size, 0);
     } catch (e) {
@@ -385,7 +404,7 @@ export async function uploadImages(
       const detalle = e instanceof Error ? e.message : "Error al subir";
       throw new Error(
         subidas > 0
-          ? `${detalle} Se alcanzaron a subir ${subidas} de ${files.length} imágenes; vuelve a intentar para completar el resto.`
+          ? `${detalle} Se alcanzaron a subir ${subidas} de ${listas.length} imágenes; vuelve a intentar para completar el resto.`
           : detalle,
       );
     }
