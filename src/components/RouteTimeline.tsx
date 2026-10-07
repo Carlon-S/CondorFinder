@@ -36,6 +36,12 @@
 // =============================================================================
 
 import { ImageIcon, Truck, Users, Warehouse } from "@/components/icons/Icons";
+import {
+  ROUTE_DISPOSAL_COLOR,
+  ROUTE_OUTBOUND_COLOR,
+  ROUTE_RETURN_COLOR,
+  ROUTE_TRANSFER_COLOR,
+} from "@/components/route-colors";
 import type {
   RoutePlanLeg,
   RoutePlanSegment,
@@ -153,10 +159,16 @@ function Tramo({
   tramo,
   respaldo,
   etiqueta,
+  color,
 }: {
   tramo?: RoutePlanLeg;
   respaldo?: { distanceKm: number; durationHours: number };
   etiqueta?: string;
+  /** El color con que el mapa pinta ESTE tramo. Es lo único que vuelve legibles
+   *  los cuatro colores del trazo: sin una clave, cuatro colores sobre el mapa
+   *  son decoración, y la leyenda que existía se eliminó junto con las burbujas
+   *  flotantes. Acá no ocupa lugar, porque la fila ya existe y nombra el tramo. */
+  color?: string;
 }) {
   const datos = tramo ?? respaldo;
   // Sin cifras, la fila igual ocupa alto: es lo que mantiene el riel visible
@@ -164,6 +176,16 @@ function Tramo({
   if (!datos) return <span className="block h-5" />;
   return (
     <span className="flex items-center gap-2 py-2">
+      {/* Un trazo corto, no un punto: lo que identifica es una línea del mapa,
+          y un punto se confundiría con los círculos de colores que la lista de
+          zonas detectadas usa para los tipos de residuo. */}
+      {color && (
+        <span
+          aria-hidden="true"
+          className="h-[3px] w-4 flex-shrink-0 rounded-full"
+          style={{ backgroundColor: color }}
+        />
+      )}
       {/* Cada cifra en su pastilla. Sueltas sobre el fondo se leían como una
           continuación del texto de la parada de arriba, cuando describen el
           espacio ENTRE dos paradas, que es otra cosa. */}
@@ -337,6 +359,9 @@ export function RouteTimeline({
                 }
               : undefined
           }
+          // El primer salto sale del patio y los demas son transiciones entre
+          // zonas: son dos tramos distintos en el mapa y llevan dos colores.
+          color={i === 0 ? ROUTE_OUTBOUND_COLOR : ROUTE_TRANSFER_COLOR}
         />
       ),
     });
@@ -459,6 +484,7 @@ export function RouteTimeline({
             durationHours: segment.disposalDurationHours ?? 0,
           }}
           etiqueta="cargado"
+          color={ROUTE_DISPOSAL_COLOR}
         />
       ),
     });
@@ -487,6 +513,7 @@ export function RouteTimeline({
           durationHours: segment.returnDurationHours,
         }}
         etiqueta={hayDescarga ? "vacío" : "regreso"}
+        color={ROUTE_RETURN_COLOR}
       />
     ),
   });

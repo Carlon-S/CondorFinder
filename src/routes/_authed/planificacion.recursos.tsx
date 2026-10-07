@@ -71,7 +71,7 @@ import {
   setPointActive,
   type ResourcePoint,
 } from "@/lib/resources";
-import { listAnalyses, listZones } from "@/lib/analysisStore";
+import { listAnalyses, listZones, setPendingOpenId } from "@/lib/analysisStore";
 import { projectPolygonToWgs84 } from "@/lib/projection";
 import { ZoneZoomDialog, type ZoneZoomData } from "@/components/ZoneZoomDialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -902,14 +902,14 @@ function RecursosPage() {
 
           Se abre a pedido y no al pasar el puntero: la imagen pesa varios MB y
           tapaba el mapa justo mientras se está ubicando un punto, que es para lo
-          que existe esta vista.
-
-          Sin onVerAnalisis: desde acá no se navega a /analysis, porque se está
-          configurando la flota y salir de la vista pierde el punto a medio
-          escribir. */}
+          que existe esta vista. */}
       <ZoneZoomDialog
         zona={zonaAbierta}
         onOpenChange={(abierto) => !abierto && setZonaAbierta(null)}
+        onVerAnalisis={(id) => {
+          setPendingOpenId(id);
+          navigate({ to: "/analysis" });
+        }}
       />
     </div>
   );

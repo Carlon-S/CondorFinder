@@ -75,8 +75,18 @@ def route_geometry(points: list[tuple[float, float]]) -> dict | None:
         # separada del trazado real en el mapa). El lag de zoom que esto
         # buscaba evitar se soluciona en el frontend con preferCanvas
         # (GeoMapImpl.tsx), sin sacrificar precisión acá.
+        # `steps=true` es lo que trae la geometría POR SALTO. La respuesta ya
+        # traía un `legs[]` con distancia y duración de cada uno, pero sin
+        # dibujo: la única geometría era la de la ruta completa, en una sola
+        # polilínea. El mapa necesita los saltos por separado para pintar de
+        # distinto el primer tramo (del patio a la primera zona) y las
+        # transiciones entre zonas, que es lo que los vuelve distinguibles.
+        #
+        # Cuesta tamaño de respuesta, no una petición más: es la misma llamada.
         resp = requests.get(
-            url, params={"overview": "full", "geometries": "geojson"}, timeout=_TIMEOUT_SECONDS
+            url,
+            params={"overview": "full", "geometries": "geojson", "steps": "true"},
+            timeout=_TIMEOUT_SECONDS,
         )
         resp.raise_for_status()
         data = resp.json()
@@ -93,9 +103,32 @@ def route_geometry(points: list[tuple[float, float]]) -> dict | None:
             # tiempo mostraba la ida entera como una sola fila y cero entre
             # zona y zona, porque este detalle se descartaba acá.
             "legs": [
-                {"distanceKm": leg["distance"] / 1000, "durationHours": leg["duration"] / 3600}
+                {
+                    "distanceKm": leg["distance"] / 1000,
+                    "durationHours": leg["duration"] / 3600,
+                    "path": _path_del_salto(leg),
+                }
                 for leg in route.get("legs", [])
             ],
         }
     except Exception:
         return None
+
+
+def _path_del_salto(leg: dict) -> list[list[float]]:
+    """La geometría de un salto, concatenando la de sus `steps`.
+
+    OSRM no da una polilínea por leg: la da por step (cada indicación de giro).
+    Pegarlas reconstruye el salto. El primer vértice de cada step repite el
+    último del anterior, y se descarta mirando si YA hay trazo acumulado y no la
+    posición en la lista: un step de longitud cero al principio deja el
+    acumulado vacío, y ahí cortarle el primer punto al siguiente perdería el
+    vértice donde empieza el salto. Mismo criterio que `_unir()` en
+    google_routes_client.
+    """
+    path: list[list[float]] = []
+    for step in leg.get("steps", []):
+        coords = (step.get("geometry") or {}).get("coordinates") or []
+        puntos = [[lat, lng] for lng, lat in coords]
+        path.extend(puntos if not path else puntos[1:])
+    return path

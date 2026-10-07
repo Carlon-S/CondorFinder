@@ -234,7 +234,14 @@ def route_tramos(
         # sin conservarlos era tirar el dato por el que ya se pagó, y es lo que
         # dejaba las conexiones entre zonas sin tiempo.
         "hops": [
-            {"distanceKm": t["distanceKm"], "durationHours": t["durationHours"]}
+            {
+                "distanceKm": t["distanceKm"],
+                "durationHours": t["durationHours"],
+                # La geometría del salto también, no solo sus cifras: el mapa
+                # pinta de distinto el primer tramo y las transiciones entre
+                # zonas, y ya está acá porque `_unir()` la acaba de concatenar.
+                "path": t["path"],
+            }
             for t in tramos[: len(stops)]
         ],
     }

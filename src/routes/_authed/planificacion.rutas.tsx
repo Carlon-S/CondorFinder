@@ -458,6 +458,7 @@ function RutasPage() {
     setRutaAbierta(null);
     setRouteStops(null);
     setRouteOutboundPaths(null);
+    setRouteTransferPaths(null);
     setRouteDisposalPaths(null);
     setRouteReturnPaths(null);
     setRouteSegments(null);
@@ -611,6 +612,11 @@ function RutasPage() {
   // pintarlos con estilos distintos (ver GeoMapImpl.tsx). Null hasta que
   // se genera una ruta con éxito.
   const [routeOutboundPaths, setRouteOutboundPaths] = useState<[number, number][][] | null>(null);
+  // Las transiciones entre zonas vienen aplanadas de todos los recorridos, no
+  // una por recorrido como las otras tres: el mapa las pinta todas igual, asi
+  // que no hace falta saber de cual es cada una. Por eso descartarRecorrido()
+  // no las filtra por indice.
+  const [routeTransferPaths, setRouteTransferPaths] = useState<[number, number][][] | null>(null);
   const [routeDisposalPaths, setRouteDisposalPaths] = useState<[number, number][][] | null>(null);
   /** Vehiculo cuya foto se esta mirando, o null. Un trabajador reconoce "el
    *  ampliroll amarillo" antes que "KBVZ-41", asi que la foto es lo que
@@ -949,6 +955,7 @@ function RutasPage() {
     if (result.status === "success") {
       setRouteStops(result.route.stops);
       setRouteOutboundPaths(result.route.outboundPaths ?? null);
+      setRouteTransferPaths(result.route.transferPaths ?? null);
       setRouteDisposalPaths(result.route.disposalPaths ?? null);
       setRouteReturnPaths(result.route.returnPaths ?? null);
       setRouteSegments(result.route.segments ?? null);
@@ -976,6 +983,7 @@ function RutasPage() {
     } else {
       setRouteStops(null);
       setRouteOutboundPaths(null);
+      setRouteTransferPaths(null);
       setRouteDisposalPaths(null);
       setRouteReturnPaths(null);
       setRouteSegments(null);
@@ -1052,6 +1060,7 @@ function RutasPage() {
     if (routeOutboundPaths || routeDisposalPaths || routeReturnPaths) {
       return [
         ...(routeOutboundPaths ?? []).flat(),
+        ...(routeTransferPaths ?? []).flat(),
         // El relleno queda al poniente de la comuna, bastante lejos de las
         // zonas: sin este tramo el encuadre automatico lo dejaba fuera de
         // pantalla y el plan parecia terminar en la ultima zona.
@@ -1067,7 +1076,7 @@ function RutasPage() {
     }
     return routePositions;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeOutboundPaths, routeDisposalPaths, routeReturnPaths]);
+  }, [routeOutboundPaths, routeTransferPaths, routeDisposalPaths, routeReturnPaths]);
 
   // Cifras de cabecera. Las cuatro responden la pregunta con la que se entra a
   // esta vista: con qué cuento y cuánto hay que retirar.
@@ -1317,6 +1326,7 @@ function RutasPage() {
             disposalSite={RELLENO_SANITARIO}
             routePositions={routePositions}
             outboundPaths={routeOutboundPaths}
+            transferPaths={routeTransferPaths}
             disposalPaths={routeDisposalPaths}
             returnPaths={routeReturnPaths}
             routeSegments={routeSegments}

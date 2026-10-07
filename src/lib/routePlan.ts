@@ -190,10 +190,17 @@ export interface RoutePlanSuccess {
      *  zonas fuera, así que "cargué 6,94 m³" y "el plan mueve 3,61 m³" son dos
      *  cifras distintas, y la segunda es la que describe el trabajo del día. */
     totalVolumeM3?: number;
-    /** Un trazo (calles reales, vía OSRM) por sub-ruta/punto de origen
-     *  usado — casi siempre uno solo. Separado de returnPaths para poder
-     *  pintar ida y vuelta con estilos distintos en el mapa. */
+    /** Del patio a la PRIMERA zona, un trazo por sub-ruta. Separado del resto
+     *  para poder pintar cada tramo distinto en el mapa. */
     outboundPaths?: [number, number][][];
+    /** Las transiciones entre zonas consecutivas, ya aplanadas de todas las
+     *  sub-rutas: el mapa las pinta todas igual, así que no necesita saber cuál
+     *  pertenece a cuál recorrido.
+     *
+     *  Vacío con una sola parada, y también cuando el plan lo generó una
+     *  versión anterior del backend: ahí la ida entera viene en `outboundPaths`
+     *  como un solo trazo, que es como se dibujaba antes. */
+    transferPaths?: [number, number][][];
     /** El tramo cargado, de la última zona al relleno. Separado de los otros
      *  dos para poder pintarlo distinto: es el único que el camión hace lleno. */
     disposalPaths?: [number, number][][];

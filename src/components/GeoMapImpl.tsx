@@ -23,6 +23,7 @@ import {
   ROUTE_OUTLINE_COLOR,
   ROUTE_RETURN_COLOR,
   ROUTE_RETURN_OPACITY,
+  ROUTE_TRANSFER_COLOR,
 } from "@/components/route-colors";
 import {
   MAIPU_BBOX,
@@ -236,11 +237,13 @@ function FitBounds({ points }: { points: [number, number][] | null | undefined }
  *  canvas o SVG, sin depender del hit-testing de la capa. */
 function RouteClickZoom({
   outboundPaths,
+  transferPaths,
   disposalPaths,
   returnPaths,
   onRouteClick,
 }: {
   outboundPaths: [number, number][][] | null | undefined;
+  transferPaths: [number, number][][] | null | undefined;
   disposalPaths: [number, number][][] | null | undefined;
   returnPaths: [number, number][][] | null | undefined;
   /** Índice del recorrido cuyo trazo se apretó. Es el mismo índice de
@@ -254,7 +257,12 @@ function RouteClickZoom({
       // índice con routeSegments (ver el contrato en routePlan.ts), así que se
       // recorren juntos y reportan el mismo número: apretar el tramo de
       // descarga abre el mismo recorrido que apretar la ida.
-      const familias = [outboundPaths ?? [], disposalPaths ?? [], returnPaths ?? []];
+      const familias = [
+        outboundPaths ?? [],
+        transferPaths ?? [],
+        disposalPaths ?? [],
+        returnPaths ?? [],
+      ];
       if (familias.every((f) => f.length === 0)) return;
       const clickPoint = map.latLngToContainerPoint(e.latlng);
 
@@ -370,6 +378,7 @@ export function GeoMapImpl({
   polygons,
   routePositions,
   outboundPaths,
+  transferPaths,
   disposalPaths,
   returnPaths,
   routeSegments,
@@ -384,6 +393,7 @@ export function GeoMapImpl({
 }: GeoMapProps) {
   const hasRealPaths =
     (outboundPaths && outboundPaths.length > 0) ||
+    (transferPaths && transferPaths.length > 0) ||
     (disposalPaths && disposalPaths.length > 0) ||
     (returnPaths && returnPaths.length > 0);
   return (
@@ -491,6 +501,7 @@ export function GeoMapImpl({
       <FitBounds points={fitBoundsTo ?? null} />
       <RouteClickZoom
         outboundPaths={outboundPaths}
+        transferPaths={transferPaths}
         disposalPaths={disposalPaths}
         returnPaths={returnPaths}
         onRouteClick={onRouteClick}
@@ -505,6 +516,13 @@ export function GeoMapImpl({
           {outboundPaths?.map((path, i) => (
             <Polyline
               key={`outbound-outline-${pathKey(path as [number, number][])}-${i}`}
+              positions={path as [number, number][]}
+              pathOptions={{ color: ROUTE_OUTLINE_COLOR, weight: 8, opacity: 0.5 }}
+            />
+          ))}
+          {transferPaths?.map((path, i) => (
+            <Polyline
+              key={`transfer-outline-${pathKey(path as [number, number][])}-${i}`}
               positions={path as [number, number][]}
               pathOptions={{ color: ROUTE_OUTLINE_COLOR, weight: 8, opacity: 0.5 }}
             />
@@ -537,6 +555,17 @@ export function GeoMapImpl({
               />
             );
           })}
+          {/* Transiciones entre zonas: el camión ya va cargando. Van en su
+              propio color porque antes viajaban DENTRO de la ida y, del mismo
+              azul, un recorrido de varias paradas se veía como una sola mancha
+              en la que no se distinguía ni el principio ni el orden. */}
+          {transferPaths?.map((path, i) => (
+            <Polyline
+              key={`transfer-${pathKey(path as [number, number][])}-${i}`}
+              positions={path as [number, number][]}
+              pathOptions={{ color: ROUTE_TRANSFER_COLOR, weight: 5 }}
+            />
+          ))}
           {/* Acá iban unas burbujas permanentes sobre cada trazo, con los
               camiones, la distancia, el tiempo y la velocidad media. Se
               eliminaron: son etiquetas fijas encima del mapa que tapan calles

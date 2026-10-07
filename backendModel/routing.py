@@ -272,6 +272,11 @@ class RoutePlanRouteOut(BaseModel):
     # casi siempre uno solo. Separados en ida/vuelta para que el frontend
     # los pinte con estilos distintos (ver GeoMapImpl.tsx).
     outboundPaths: list[list[list[float]]] = []
+    # Las transiciones entre zonas consecutivas, separadas de la ida: el primer
+    # tramo sale del patio vacio y estos ya se recorren cargando, y del mismo
+    # color un recorrido con varias paradas era una sola mancha donde no se
+    # distinguia ni el principio ni el orden.
+    transferPaths: list[list[list[float]]] = []
     # El tramo cargado, de la última zona al relleno. Separado de los otros dos
     # para poder pintarlo distinto: es el único que el camión hace lleno.
     disposalPaths: list[list[list[float]]] = []
@@ -441,6 +446,33 @@ async def _load_active_points(point_ids: list[str]) -> list[dict]:
 
 def _point_truck_capacity(point: dict) -> float:
     return sum(t.get("capacity_m3", 0) for t in point.get("trucks", []))
+
+
+def _primer_salto(tramos: dict, outbound_geo: dict) -> list[list[float]]:
+    """El trazo del patio a la PRIMERA zona.
+
+    Cae a la ida completa cuando el proveedor no mandó geometría por salto: un
+    trazo entero de un solo color es peor que uno partido, pero infinitamente
+    mejor que un mapa sin ruta.
+    """
+    hops = tramos.get("hops") or []
+    if hops and hops[0].get("path"):
+        return hops[0]["path"]
+    return outbound_geo["path"]
+
+
+def _saltos_entre_zonas(tramos: dict) -> list[list[list[float]]]:
+    """Un trazo por transición entre dos zonas consecutivas.
+
+    Vacío con una sola parada (no hay transición que dibujar) y vacío también
+    cuando el proveedor no dio geometría por salto, porque en ese caso la ida
+    completa ya se dibujó entera como primer tramo y repetir pedazos encima la
+    pintaría dos veces.
+    """
+    hops = tramos.get("hops") or []
+    if not hops or not hops[0].get("path"):
+        return []
+    return [h["path"] for h in hops[1:] if h.get("path")]
 
 
 def _capacidad_con_personal(
@@ -1362,7 +1394,16 @@ async def _build_subroute(
         # antes de evaluar el recorrido.
         "trucks": camiones,
         "stops": ordered_stops,
-        "outboundPath": outbound_geo["path"],
+        # La ida va PARTIDA en dos trazos, y no es cosmética: el primero sale
+        # del patio con el camión vacío y los demás son las transiciones entre
+        # zonas, que el camión ya hace cargando. Pintados del mismo color, un
+        # recorrido con varias paradas era una sola mancha azul en la que no se
+        # distinguía dónde empezaba ni en qué orden se recorría.
+        #
+        # El primer salto es `hops[0]`; si el proveedor no mandó geometría por
+        # salto, cae a la ida completa como un solo trazo, que es como estaba.
+        "outboundPath": _primer_salto(tramos, outbound_geo),
+        "transferPaths": _saltos_entre_zonas(tramos),
         "disposalPath": disposal_geo["path"],
         "returnPath": return_geo["path"],
         "outboundDistanceKm": outbound_geo["distanceKm"],
@@ -1787,6 +1828,10 @@ async def generate_route(
 
     out_stops: list[RoutePlanStopOut] = []
     outbound_paths: list[list[list[float]]] = []
+    # Las transiciones entre zonas, aplanadas: son varias por sub-ruta, y el
+    # mapa las pinta todas del mismo color, asi que no necesita saber cual
+    # pertenece a cual recorrido.
+    transfer_paths: list[list[list[float]]] = []
     disposal_paths: list[list[list[float]]] = []
     return_paths: list[list[list[float]]] = []
     segments: list[RouteSegmentOut] = []
@@ -1834,6 +1879,7 @@ async def generate_route(
             for i, hop in enumerate(hops[: len(ordenes_sub)])
         ]
         outbound_paths.append(sub["outboundPath"])
+        transfer_paths.extend(sub.get("transferPaths") or [])
         disposal_paths.append(sub["disposalPath"])
         return_paths.append(sub["returnPath"])
 
@@ -1896,6 +1942,7 @@ async def generate_route(
             totalDurationHours=round(max_duration, 2),
             totalVolumeM3=round(total_volume_planificado, 2),
             outboundPaths=outbound_paths,
+            transferPaths=transfer_paths,
             disposalPaths=disposal_paths,
             returnPaths=return_paths,
             segments=segments,

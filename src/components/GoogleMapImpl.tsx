@@ -13,6 +13,7 @@ import {
   ROUTE_OUTBOUND_COLOR,
   ROUTE_OUTLINE_COLOR,
   ROUTE_RETURN_COLOR,
+  ROUTE_TRANSFER_COLOR,
   ROUTE_RETURN_OPACITY,
 } from "@/components/route-colors";
 import {
@@ -205,13 +206,19 @@ function Poligonos({ polygons }: { polygons: GeoMapProps["polygons"] }) {
  *  el mismo detalle. */
 function Trazos({
   outboundPaths,
+  transferPaths,
   disposalPaths,
   returnPaths,
   routePositions,
   onRouteClick,
 }: Pick<
   GeoMapProps,
-  "outboundPaths" | "disposalPaths" | "returnPaths" | "routePositions" | "onRouteClick"
+  | "outboundPaths"
+  | "transferPaths"
+  | "disposalPaths"
+  | "returnPaths"
+  | "routePositions"
+  | "onRouteClick"
 >) {
   const map = useMap();
   const maps = useMapsLibrary("maps");
@@ -255,6 +262,10 @@ function Trazos({
 
     if (outboundPaths?.length) {
       outboundPaths.forEach((c, i) => trazar(c, ROUTE_OUTBOUND_COLOR, 1, i));
+      // Las transiciones no llevan indice de recorrido: son varias por
+      // sub-ruta y vienen aplanadas, asi que no hay a cual abrir al apretarlas.
+      // El clic sobre el recorrido se sigue atendiendo en los otros tres.
+      transferPaths?.forEach((c) => trazar(c, ROUTE_TRANSFER_COLOR, 1, null));
       disposalPaths?.forEach((c, i) => trazar(c, ROUTE_DISPOSAL_COLOR, ROUTE_DISPOSAL_OPACITY, i));
       returnPaths?.forEach((c, i) => trazar(c, ROUTE_RETURN_COLOR, ROUTE_RETURN_OPACITY, i));
     } else if (routePositions?.length) {
@@ -264,7 +275,16 @@ function Trazos({
     }
 
     return () => creadas.forEach((p) => p.setMap(null));
-  }, [map, maps, outboundPaths, disposalPaths, returnPaths, routePositions, onRouteClick]);
+  }, [
+    map,
+    maps,
+    outboundPaths,
+    transferPaths,
+    disposalPaths,
+    returnPaths,
+    routePositions,
+    onRouteClick,
+  ]);
 
   return null;
 }
@@ -514,6 +534,7 @@ export function GoogleMapImpl({
   polygons,
   routePositions,
   outboundPaths,
+  transferPaths,
   disposalPaths,
   returnPaths,
   fitBoundsTo,
@@ -592,6 +613,7 @@ export function GoogleMapImpl({
           <Poligonos polygons={polygons} />
           <Trazos
             outboundPaths={outboundPaths}
+            transferPaths={transferPaths}
             disposalPaths={disposalPaths}
             returnPaths={returnPaths}
             routePositions={routePositions}

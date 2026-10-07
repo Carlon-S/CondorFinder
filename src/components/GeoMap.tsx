@@ -71,6 +71,10 @@ export interface GeoMapProps {
    *  cuando vienen, se pintan en vez de routePositions, cada uno con su
    *  propio estilo (ver GeoMapImpl.tsx). */
   outboundPaths?: [number, number][][] | null;
+  /** Las transiciones entre zonas consecutivas, todas juntas. Se pintan con su
+   *  propio color: es donde el camión va cargando, y metidas dentro de la ida
+   *  un recorrido de varias paradas era una sola mancha. */
+  transferPaths?: [number, number][][] | null;
   /** Tramo de la última zona al relleno sanitario, el único que el camión hace
    *  cargado. Mismo índice que los otros dos. Separado para poder pintarlo
    *  distinto: no es "la misma ruta en el otro sentido". */
