@@ -412,14 +412,33 @@ def tipo_participa_en_microbasural(tipo: str) -> bool:
 
 
 def tipo_prefiere_clase(tipo: str, clase: str | None) -> bool:
-    """Si este tipo de vehículo es el preferido para esa clase de residuo.
+    """Si este tipo de vehículo **prefiere** esa clase de residuo.
 
-    Sin preferencia declarada devuelve True: un vehículo que no discrimina es
-    compatible con todo, y tratarlo como incompatible lo mandaría a la segunda
-    vuelta de la selección sin motivo."""
+    **Sin preferencia declarada devuelve False, y ese es el punto.** Antes
+    devolvía True, con el argumento de que un vehículo que no discrimina es
+    compatible con todo. El argumento es correcto para la COMPATIBILIDAD y
+    equivocado para la PREFERENCIA, que son dos preguntas distintas: "¿puede
+    llevarlo?" la responde la regla dura de `TIPOS_FUERA_DE_MICROBASURAL`, y
+    "¿es el preferido?" la responde esta.
+
+    Mezclarlas rompía el AC4 entero. `_trucks_used` arma el conjunto de
+    preferidos con esta función y solo corre la primera vuelta si ese conjunto
+    es MÁS CHICO que la flota; como las tolvas no declaran preferencia y
+    devolvían True, los ocho vehículos quedaban "preferidos", la guarda no se
+    cumplía nunca y la selección saltaba directo a la segunda vuelta sobre la
+    flota completa. El resultado: pedir "Muebles" despachaba una tolva igual que
+    sin pedir nada, o sea la preferencia no se aplicaba jamás.
+
+    Con False, el conjunto de preferidos para "Muebles" son los dos AMPLIROLL,
+    la guarda se cumple y la primera vuelta hace lo que el criterio pide. Y
+    cuando ningún tipo prefiere la clase (Metal, por ejemplo) el conjunto queda
+    vacío, la primera vuelta se saltea sola y se elige entre todos, que es
+    exactamente el *"solo usará un vehículo no compatible si no existe ninguna
+    alternativa compatible"* del criterio.
+    """
     preferidas = PREFERENCIA_POR_TIPO.get(tipo)
     if preferidas is None or clase is None:
-        return True
+        return False
     return clase in preferidas
 
 

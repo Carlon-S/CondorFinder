@@ -775,6 +775,14 @@ def _trucks_used(
         return con_tripulacion(elegidos) or []
 
     # ── Primera vuelta: solo los preferidos para esta clase ──
+    #
+    # La guarda `len(preferidos) < len(camiones)` es la que salta la primera
+    # vuelta cuando no hay nada que preferir, y depende de que
+    # `tipo_prefiere_clase` devuelva False para un tipo sin preferencia
+    # declarada. Devolvía True, así que los ocho vehículos quedaban preferidos,
+    # la guarda no se cumplía nunca y el criterio no se aplicaba jamás. Si
+    # alguien vuelve a cambiar esa función, esto deja de funcionar en silencio:
+    # el plan sale igual, solo que con el vehículo equivocado.
     preferidos = [
         c
         for c in camiones
