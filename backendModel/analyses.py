@@ -654,14 +654,53 @@ async def rename_zone(
     payload: ZoneIn,
     current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
 ):
+    # Se recorta y se rechaza vacío: hasta ahora este endpoint no tenía interfaz
+    # que lo llamara, y con una sí la tiene un campo de texto detrás.
+    nombre = payload.name.strip()
+    if not nombre:
+        raise HTTPException(status_code=400, detail="El nombre no puede estar vacío")
     doc = await get_db().zones.find_one_and_update(
         {"_id": _object_id(zone_id)},
-        {"$set": {"name": payload.name}},
+        {"$set": {"name": nombre}},
         return_document=ReturnDocument.AFTER,
     )
     if not doc:
         raise HTTPException(status_code=404, detail="Zona no encontrada")
     return ZoneOut(id=str(doc["_id"]), owner=doc["owner"], name=doc["name"], createdAt=doc["createdAt"])
+
+
+@router.patch("/{analysis_id}/name", response_model=SavedAnalysisOut)
+async def rename_analysis(
+    analysis_id: str,
+    payload: ZoneIn,
+    current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
+):
+    """Cambia SOLO el nombre de un análisis.
+
+    Existe aparte de `PUT /{analysis_id}` porque ese reemplaza el documento
+    entero y exige el `SavedAnalysisIn` completo, con el blob de detecciones
+    adentro. Para corregir un nombre eso significa volver a subir varios cientos
+    de kilobytes y, peor, obliga a quien renombra a tener cargado el registro
+    completo; desde una lista no lo tiene, y armarlo a mano es justo la clase de
+    reconstrucción donde se pierde un campo en silencio.
+
+    El nombre del análisis NO es el de su zona, y son dos renombrados distintos
+    a propósito. La zona es el terreno y su nombre lo dice ("Avenida Las
+    Industrias"); el análisis es una medición con su fecha ("Medición
+    26-05-2026"). Que la zona naciera con el nombre del primer análisis
+    (`_resolve_zone`) es una conveniencia del alta, no una equivalencia.
+    """
+    nombre = payload.name.strip()
+    if not nombre:
+        raise HTTPException(status_code=400, detail="El nombre no puede estar vacío")
+    doc = await get_db().analyses.find_one_and_update(
+        {"_id": _object_id(analysis_id)},
+        {"$set": {"name": nombre}},
+        return_document=ReturnDocument.AFTER,
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="Análisis no encontrado")
+    return _to_out(doc)
 
 
 @router.post("/versions/{source_task_id}/reassign")

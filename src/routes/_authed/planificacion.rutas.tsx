@@ -2,8 +2,8 @@
 // CONDORFINDER — GENERAR RUTA ÓPTIMA (HDU5)
 // Archivo: src/routes/_authed/rutas.tsx
 //
-// AC4: "Cargar archivo de análisis" enlista los análisis guardados (HDU4) y,
-// al elegir uno (o varios, con checkbox), cada zona detectada se marca en el
+// AC4: "Cargar zona" enlista lo guardado por HDU4 y,
+// al elegir una (o varias, con checkbox), cada zona detectada se marca en el
 // mapa como un círculo grande y preciso (geo_polygon reproyectado UTM→WGS84,
 // centroide como posición) — no como el polígono real dibujado sobre
 // Leaflet: a la escala de toda la comuna, un polígono de detección (unos
@@ -12,6 +12,13 @@
 // precisión de píxel — mismo tipo de vista que ya usa /analysis. Cada carga
 // SUMA análisis, no reemplaza, para poder armar una ruta que cubra varios
 // basurales.
+//
+// El botón se llamaba "Cargar archivo de análisis", que es el texto literal del
+// criterio. Se cambió a "Cargar zona" a sabiendas: lo que se elige no es un
+// archivo (nada se sube ni se descarga, son registros guardados en la base) y
+// tampoco un análisis suelto, sino la zona cuyos basurales entran a la ruta.
+// Queda anotado como divergencia deliberada en la tabla de criterios del
+// README, igual que los tres criterios de HDU6 que ya no describen su pantalla.
 //
 // Todos los análisis guardados con coordenadas ubicables se ven SIEMPRE en
 // el mapa como círculos (atenuados si todavía no están "cargados" para la
@@ -758,47 +765,59 @@ function RutasPage() {
     });
   };
 
-  // AC4 — carga (suma a la ruta) todos los análisis marcados en el diálogo.
+  // AC4 — carga (suma a la ruta) todas las zonas marcadas en el diálogo.
   // No reemplaza lo que ya estaba cargado.
+  //
+  // Las zonas ubicables se resuelven ANTES de tocar el estado, y no dentro del
+  // updater de setLoadedIds como antes. React no garantiza correr ese updater
+  // de forma síncrona: lo encola para el próximo render. Las variables que se
+  // llenaban ahí adentro seguían vacías en las líneas de abajo, así que el
+  // encuadre y el recuento dependían de una optimización interna de React
+  // (evaluar el updater al vuelo cuando la cola está vacía) para funcionar,
+  // y dejaban de hacerlo en cuanto había otra actualización en vuelo.
   const handleLoadSelected = () => {
     const ids = Array.from(selectedToLoad);
     if (ids.length === 0) return;
 
-    let placedCount = 0;
-    let unplaceableCount = 0;
-    let lastCenter: [number, number] | null = null;
+    const ubicables = ids
+      .map((id) => allAnalyses.find((a) => a.id === id))
+      .filter((a): a is (typeof allAnalyses)[number] => Boolean(a));
+    const noUbicables = ids.length - ubicables.length;
 
     setLoadedIds((prev) => {
       const next = new Set(prev);
-      for (const id of ids) {
-        const analysis = allAnalyses.find((a) => a.id === id);
-        if (!analysis) {
-          unplaceableCount++;
-          continue;
-        }
-        next.add(id);
-        lastCenter = analysis.center;
-        placedCount++;
-      }
+      for (const a of ubicables) next.add(a.id);
       return next;
     });
 
     setLoadDialogOpen(false);
     setSelectedToLoad(new Set());
 
-    if (lastCenter) setFocusPoint(lastCenter);
+    // Acercarse a lo que se acaba de cargar, que es lo que se viene a mirar.
+    //
+    // Una sola zona se enfoca con zoom fijo y varias se encuadran juntas, y la
+    // diferencia no es estética: los límites de un único punto son degenerados,
+    // y ante ellos el encuadre responde con el zoom máximo, o sea encima del
+    // tejado. Con varias, en cambio, volar a una dejaría las demás fuera de
+    // pantalla justo cuando lo que importa es cómo se reparten por la comuna.
+    if (ubicables.length === 1) {
+      const [lat, lng] = ubicables[0].center;
+      setFocusPoint([lat, lng]);
+    } else if (ubicables.length > 1) {
+      setRecentrar(ubicables.map((a) => [a.center[0], a.center[1]] as [number, number]));
+    }
 
-    if (placedCount > 0) {
+    if (ubicables.length > 0) {
       notify.success(
-        placedCount === 1 ? "Análisis cargado" : "Análisis cargados",
-        `${placedCount} análisis se agregaron a la ruta${
-          unplaceableCount > 0 ? ` (${unplaceableCount} no se pudieron ubicar en el mapa)` : ""
+        ubicables.length === 1 ? "Zona cargada" : "Zonas cargadas",
+        `${ubicables.length} zona${ubicables.length === 1 ? " se agregó" : "s se agregaron"} a la ruta${
+          noUbicables > 0 ? ` (${noUbicables} no se pudieron ubicar en el mapa)` : ""
         }.`,
       );
     } else {
       notify.warning(
-        "No se pudo cargar ningún análisis",
-        "Ninguno de los seleccionados tiene coordenadas ubicables — vuelve a analizarlos y guardarlos.",
+        "No se pudo cargar ninguna zona",
+        "Ninguna de las seleccionadas tiene coordenadas ubicables — vuelve a analizarlas y guardarlas.",
       );
     }
   };
@@ -915,6 +934,12 @@ function RutasPage() {
       setUnassigned(result.route.unassignedZones ?? null);
       setSalidaPlan(new Date());
       setRouteError(null);
+      // Devuelve el encuadre al automático, que es el que abarca los tres
+      // tramos del plan recién calculado. `recentrar` tiene prioridad sobre él
+      // y no se apagaba nunca: bastaba haber apretado "ver toda la comuna" (o,
+      // desde ahora, haber cargado varias zonas) para que la ruta se dibujara
+      // fuera de pantalla sin que nada lo explicara.
+      setRecentrar(null);
       // Con UN recorrido se entra directo a su detalle: es lo que el trabajador
       // viene a ver, y dejarlo en la lista lo obliga a apretar el único
       // elemento que hay. Con varios, en cambio, la lista es la información:
@@ -1037,9 +1062,20 @@ function RutasPage() {
       if (porNombre.length === 1) zona = porNombre[0];
     }
     if (!zona) return undefined;
+
+    // Lo que se retira manda sobre lo que hay. Cuando el plan recorta una zona
+    // porque ya no entra en la capacidad despachada, la cifra que la cuadrilla
+    // necesita es la que va a cargar, no la que mide el basural; el total de la
+    // zona pasa a ser el contexto ("de 12,40"). Sin esta sustitución la línea de
+    // tiempo imprimiría el volumen completo de una parada que retira la mitad,
+    // y la suma de las paradas no cuadraría con el total del plan.
+    const pendiente = stop.pendingVolumeM3 ?? 0;
+    const parcial = pendiente > 0;
     return {
-      volumeM3: zona.summary.totalVolumeM3,
-      weightKg: zona.summary.totalWeightKg,
+      volumeM3: stop.removedVolumeM3 ?? zona.summary.totalVolumeM3,
+      weightKg: stop.removedWeightKg ?? zona.summary.totalWeightKg,
+      zoneVolumeM3: parcial ? zona.summary.totalVolumeM3 : undefined,
+      pendingM3: parcial ? pendiente : undefined,
       wasteTypes: tiposDeZona(zona),
       wasteColor: classColor,
       direccion: direcciones[zona.id] || undefined,
@@ -1348,7 +1384,7 @@ function RutasPage() {
                 <div className="animate-in fade-in flex flex-col gap-5 duration-300">
                   <div className="flex flex-col gap-2">
                     <Button onClick={openLoadDialog} variant="secondary" className="w-full">
-                      <FolderOpen className="mr-2 h-4 w-4" /> Cargar archivo de análisis
+                      <FolderOpen className="mr-2 h-4 w-4" /> Cargar zona
                     </Button>
                     <Button
                       onClick={openConfirm}
@@ -1824,13 +1860,13 @@ function RutasPage() {
         </aside>
       </main>
 
-      {/* AC4 — elegir uno o varios análisis guardados para cargar */}
+      {/* AC4 — elegir una o varias zonas guardadas para cargar */}
       <Dialog open={loadDialogOpen} onOpenChange={setLoadDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Cargar archivo de análisis</DialogTitle>
+            <DialogTitle>Cargar zona</DialogTitle>
             <DialogDescription>
-              Marca uno o más análisis guardados para agregar sus basurales al mapa.
+              Marca una o más zonas guardadas para agregar sus basurales al mapa.
             </DialogDescription>
           </DialogHeader>
           {loadingSaved ? (
@@ -1839,7 +1875,7 @@ function RutasPage() {
             </div>
           ) : savedAnalyses.length === 0 ? (
             <p className="rounded-md border border-dashed border-border/50 py-6 text-center text-xs text-muted-foreground">
-              Todavía no hay análisis guardados.
+              Todavía no hay zonas guardadas.
             </p>
           ) : (
             <ul className="max-h-80 space-y-1.5 overflow-y-auto">

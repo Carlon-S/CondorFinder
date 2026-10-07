@@ -357,19 +357,43 @@ export async function listZones(): Promise<ZoneRecord[]> {
   return res.json();
 }
 
-export async function renameZone(zoneId: string, name: string): Promise<ZoneRecord | null> {
-  try {
-    const res = await fetch(`${BACKEND_URL}/analyses/zones/${encodeURIComponent(zoneId)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ name }),
-    });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
-    return null;
+/** Renombra la ZONA, o sea el terreno que persiste entre vuelos.
+ *
+ *  Lanza en vez de devolver null, a diferencia de casi todo el resto de este
+ *  archivo: detrás de esto hay un campo de texto, y "no se pudo" sin decir por
+ *  qué deja a quien escribió un nombre sin saber si el problema es el nombre, la
+ *  sesión o la red. Hasta ahora esta función no tenía ninguna interfaz que la
+ *  llamara, así que el cambio de contrato no rompe nada. */
+export async function renameZone(zoneId: string, name: string): Promise<ZoneRecord> {
+  const res = await fetch(`${BACKEND_URL}/analyses/zones/${encodeURIComponent(zoneId)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) {
+    throw new Error(await parseErrorMessage(res, "No se pudo renombrar la zona."));
   }
+  return res.json();
+}
+
+/** Renombra UNA versión, o sea una medición guardada con su fecha.
+ *
+ *  Va contra `PATCH /analyses/{id}/name` y no contra el `PUT` de sobrescritura:
+ *  ese reemplaza el documento entero y exigiría volver a mandar el blob de
+ *  detecciones para corregir un nombre, además de tener el registro completo
+ *  cargado. Desde una lista no se tiene. */
+export async function renameAnalysis(id: string, name: string): Promise<SavedAnalysisRecord> {
+  const res = await fetch(`${BACKEND_URL}/analyses/${encodeURIComponent(id)}/name`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) {
+    throw new Error(await parseErrorMessage(res, "No se pudo renombrar la versión."));
+  }
+  return res.json();
 }
 
 /** Separa una versión completa (todos los análisis de un mismo vuelo) en una

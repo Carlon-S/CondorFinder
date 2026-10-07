@@ -403,7 +403,7 @@ CondorFinder/
 | HDU5 | Dado un mapa interactivo con polígonos georreferenciados, cuando presione el botón de generar ruta, entonces aparecerá una pantalla de confirmación pidiendo el estado de los puntos de referencia, las horas disponibles y el tipo de basura prioritario, y preguntando si desea continuar o no | ✅ Cumplido |
 | HDU5 | Dada una pantalla de confirmación, cuando se presione el botón de generar ruta, entonces el sistema generará una ruta óptima | 🔲 Pendiente (falta el algoritmo real de optimización en `backendModel/routing.py`) |
 | HDU5 | Dado un mapa georreferenciado sin polígonos, cuando se esté visualizando el mapa, entonces el botón de generar ruta se encontrará deshabilitado | ✅ Cumplido |
-| HDU5 | Dado un mapa georreferenciado, cuando se presione el botón de cargar archivo de análisis y se seleccione uno de los archivos guardados (HDU4), entonces el sistema cargará los polígonos asociados en el mapa junto con su metadata | ✅ Cumplido |
+| HDU5 | Dado un mapa georreferenciado, cuando se presione el botón de cargar archivo de análisis y se seleccione uno de los archivos guardados (HDU4), entonces el sistema cargará los polígonos asociados en el mapa junto con su metadata | ✅ Cumplido (el botón se llama **"Cargar zona"**, no "Cargar archivo de análisis": ver nota abajo) |
 | HDU5 | Dada una pantalla de confirmación, cuando el trabajador presione "No" o cancele, entonces el sistema cerrará la pantalla de confirmación sin generar la ruta y sin perder el estado actual del mapa | ✅ Cumplido |
 | HDU5 | Dada una pantalla de confirmación con los datos ingresados, cuando el sistema no logre generar una ruta factible con los recursos y restricciones indicadas, entonces mostrará un mensaje informando que no fue posible generar una ruta y sugerirá revisar los recursos disponibles (HDU6) | ✅ Cumplido |
 | HDU6 | Al presionar "Definir punto" con el mapa georreferenciado, se puede ubicar un punto concreto que el sistema considera origen o destino de vehículos y maquinaria | ✅ Cumplido |
@@ -417,6 +417,12 @@ CondorFinder/
 | HDU6 | El recurso "personal" permite ingresar la cantidad de trabajadores disponibles | ✅ Cumplido |
 | HDU7 (Deseable) | Fusión de detecciones entre cargas de la misma zona: al guardar un nuevo análisis, el sistema compara sus polígonos georreferenciados contra los análisis guardados y, si detecta >50% de superposición con uno anterior, permite marcarlos como duplicados o mantenerlos por separado | ✅ Cumplido |
 | SP1 (Spike, 21 pts) | Investigación e implementación de mejoras al modelo de reconocimiento de imágenes: precisión ≥75% en detección/volumen, distinguir construcciones de basurales, mejorar el umbral de solapamiento. AC: dado un set de imágenes, cuando el trabajador genere el mapa georreferenciado, el sistema le dará la opción de elegir un modelo preciso y lento o uno más óptimo y rápido | ✅ Cumplido el AC del selector (verificado en vivo); el resto del spike (investigación de precisión ≥75%, distinguir construcciones de basurales) es de otros integrantes del equipo, estado a confirmar con ellos |
+
+> **Tres criterios de HDU5 y HDU6 ya no describen la pantalla, y es evolución deliberada.** Se anotan acá en vez de dejarlos divergir en silencio:
+>
+> - **"Cargar archivo de análisis" ahora se llama "Cargar zona"**. Lo que se elige no es un archivo (nada se sube ni se descarga: son registros en la base) ni un análisis suelto, sino la zona cuyos basurales entran a la ruta. El criterio sigue cumpliéndose en lo que pide, cargar los polígonos con su metadata.
+> - **"Definir punto" desapareció** (el formulario está abierto desde el principio) y **"Modificar puntos" también** (la tabla de puntos al pie reemplazó ese modo).
+> - **El campo `personal` del punto se quitó del formulario.** La pregunta que importa no es cuánta gente tiene el punto sino quién va en cada tramo, y eso es HDU5.1. El valor sigue guardado y se conserva al editar.
 
 ---
 
@@ -630,6 +636,16 @@ Se suman dos cosas más: **AC1 y AC2 seguirían siendo nuestros igual** (que dos
 | HDU10 | Una zona sin versiones anteriores lo indica explícitamente | ✅ Cumplido |
 | HDU10 | Al hacer click en una versión, se abre en modo solo lectura con el visor de HDU4 | ✅ Cumplido |
 | SP2 (Spike, 13 pts) | Primer entregable: tabla comparando el desempeño con una única imagen, para demostrar estabilidad de las estimaciones | 🔲 Pendiente |
+
+> **Una zona que no cabe en la capacidad despachada ya no se descarta: se retira de ella lo que entra y el resto queda pendiente.** Antes el plan la dejaba entera fuera, lo que no es lo que hace la cuadrilla: el camión va, carga lo que le entra y la zona queda con un resto para otra jornada. La línea de tiempo lo dice en la parada ("se retiran 8,00 de 12,40 m³, quedan 4,40 en la zona").
+>
+> **No incumple ningún criterio.** El de HDU5 habla de cuando *no se logra generar una ruta factible*, y ese mensaje sigue existiendo para los casos en que no hay plan que construir (ningún punto activo, ninguna zona ubicable, ningún vehículo con capacidad declarada). El AC6 de HDU5.1 habla de zonas *sin vehículo posible*, y sus motivos siguen todos en pie: autonomía, horas, tipo de residuo, falta de dotación, y ahora además "no queda capacidad" para las zonas que vienen después de la parcial.
+>
+> Tres cosas que el cambio obligó a cuidar:
+>
+> - **La geometría de tres tramos sigue siendo exacta.** Lo que se carga nunca *supera* la capacidad, solo la alcanza, así que el camión sigue saliendo vacío, llegando lleno al relleno y volviendo vacío. Lo que cambia es que la zona queda con un pendiente, no que el recorrido tenga un tramo más.
+> - **El peso recorta igual que el volumen**, porque son dos límites distintos del mismo vehículo y la densidad cambia con el tipo de residuo. La fracción la decide el que primero se agota, y escala las dos magnitudes juntas: con el peso completo de la zona contra una carga parcial, `_trucks_used` rechazaría camiones que sí sirven.
+> - **Una capacidad en toneladas no declarada sigue significando "no medida", no cero.** Es la regla que ya tenía `aguanta_el_peso`, y las dos tienen que moverse juntas o el plan recorta una zona por peso y después no encuentra vehículo que la lleve.
 | SP2 (Spike, 13 pts) | Segundo entregable: tabla con una imagen con datos reales validados por la municipalidad | 🔲 Pendiente |
 
 

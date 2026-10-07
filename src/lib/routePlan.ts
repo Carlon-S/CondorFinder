@@ -63,6 +63,20 @@ export interface RoutePlanStop {
    *  solo le falta saber cuál es cuál. Sin él tendría que emparejar por nombre,
    *  que se rompe en cuanto dos zonas se llaman parecido. */
   analysisId?: string;
+  /** Cuánto se retira DE VERDAD en esta parada, que no siempre es el volumen de
+   *  la zona.
+   *
+   *  Una zona que no cabe en la capacidad despachada ya no se descarta entera:
+   *  el camión carga lo que le entra y la zona queda con un resto. Y la vista no
+   *  puede deducirlo, porque toma las cifras del análisis que empareja por
+   *  `analysisId`: sin estos campos imprimiría el volumen completo de una zona
+   *  que se retira a medias.
+   *
+   *  `pendingVolumeM3` en cero, o ausente en un plan generado por una versión
+   *  anterior del backend, significa retiro completo. */
+  removedVolumeM3?: number;
+  removedWeightKg?: number;
+  pendingVolumeM3?: number;
 }
 
 /** Un tramo entre dos paradas consecutivas. HDU5.1/AC7 habla de "cada tramo del

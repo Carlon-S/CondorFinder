@@ -35,6 +35,7 @@ import {
   FolderOpen,
   Layers,
   Loader2,
+  Pencil,
   Plus,
   Scale,
   Search,
@@ -58,10 +59,12 @@ import {
   listZones,
   deleteAnalysis,
   setPendingOpenId,
+  renameZone,
   type SavedAnalysisRecord,
   type AnalysisSummary,
   type ZoneRecord,
 } from "@/lib/analysisStore";
+import { RenameDialog } from "@/components/RenameDialog";
 // Carga diferida por el mismo motivo que jspdf en el informe: ZoneEvolution
 // arrastra recharts (cerca de 900 kB), y quien nunca abre la evolución de una
 // zona no tiene por qué descargarlo. Importado de forma normal, recharts caía
@@ -329,6 +332,9 @@ function MainPage() {
   const [previewOpen, setPreviewOpen] = useState(false);
   /** Zona cuya evolución se está viendo, o null si el diálogo está cerrado. */
   const [evolutionZone, setEvolutionZone] = useState<ZoneRecord | null>(null);
+  /** Zona que se está renombrando, o null. Guarda la zona entera y no su id
+   *  porque el diálogo necesita además el nombre actual para sembrar el campo. */
+  const [renombrarZona, setRenombrarZona] = useState<ZoneRecord | null>(null);
 
   useEffect(() => {
     // Degrada en silencio: si falla, los botones de informe y evolución
@@ -885,7 +891,45 @@ function MainPage() {
                         )}
                       </TableCell>
                       <TableCell className="font-medium">
-                        {z.name}
+                        {/* El nombre de la ZONA arriba y el de la versión
+                            debajo. Una fila es un análisis, pero lo que se lee
+                            en esta columna es "qué terreno es", y mostrando solo
+                            el nombre del análisis la tabla decía "Medición
+                            02-06-2026" donde el trabajador busca "Avenida Las
+                            Industrias": la zona quedaba nombrada por su primera
+                            medición y nada en pantalla distinguía las dos cosas.
+
+                            Cae al nombre del análisis cuando no hay zona: las
+                            tareas en curso todavía no tienen una, y los
+                            análisis anteriores a la migración de zonas tampoco. */}
+                        {(() => {
+                          const zona = zoneOf(z.recordId);
+                          if (!zona) return z.name;
+                          return (
+                            <>
+                              <span className="inline-flex items-center gap-1.5">
+                                {zona.name}
+                                <button
+                                  type="button"
+                                  onClick={() => setRenombrarZona(zona)}
+                                  title="Renombrar la zona"
+                                  aria-label={`Renombrar la zona ${zona.name}`}
+                                  className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                >
+                                  <Pencil className="h-3 w-3" />
+                                </button>
+                              </span>
+                              {/* El nombre de la versión se renombra desde su
+                                  propia vista, donde además se ve de qué captura
+                                  se trata. Acá solo se nombra. */}
+                              {z.name !== zona.name && (
+                                <p className="mt-0.5 text-[0.625rem] font-normal text-muted-foreground">
+                                  {z.name}
+                                </p>
+                              )}
+                            </>
+                          );
+                        })()}
                         {z.state !== "done" && (
                           <span
                             className={`ml-2 rounded px-1.5 py-0.5 text-[0.5625rem] font-semibold uppercase tracking-wide ${
@@ -1191,6 +1235,28 @@ function MainPage() {
         open={previewOpen}
         onOpenChange={setPreviewOpen}
         selections={reportSelection}
+      />
+
+      {/* Renombrar la zona desde el listado. El nombre de cada versión se
+          cambia en la vista de análisis, donde se ve de qué captura se trata;
+          acá lo que se compara entre filas es el terreno. */}
+      <RenameDialog
+        open={renombrarZona !== null}
+        onOpenChange={(abierto) => !abierto && setRenombrarZona(null)}
+        titulo="Renombrar la zona"
+        descripcion="El nombre del terreno, el que se mantiene entre vuelos. No cambia el nombre de ninguna de sus capturas."
+        etiqueta="Nombre de la zona"
+        valorInicial={renombrarZona?.name ?? ""}
+        onGuardar={async (nombre) => {
+          if (!renombrarZona) return;
+          await renameZone(renombrarZona.id, nombre);
+          // Se recarga la lista de zonas y no solo esta: el diálogo de informe y
+          // el de evolución leen de `zoneRecords`, y con una copia parchada a
+          // mano quedaría el nombre nuevo en la tabla y el viejo en los dos
+          // diálogos.
+          await listZones().then(setZoneRecords).catch(() => {});
+          notify.success("Zona renombrada", `Ahora se llama "${nombre}".`);
+        }}
       />
 
       {/* ── HDU10, evolución de una zona ── */}

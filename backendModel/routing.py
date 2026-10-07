@@ -152,6 +152,20 @@ class RoutePlanStopOut(BaseModel):
     # emparejar la parada con su zona POR NOMBRE para mostrarle el volumen y el
     # tipo de residuo, cosa que se rompe con dos zonas que se llamen parecido.
     analysisId: str | None = None
+    # ── RETIRO PARCIAL ──
+    # Cuánto se retira DE VERDAD en esta parada, que no siempre es el volumen de
+    # la zona. Antes una zona que no cabía en la capacidad despachada se
+    # descartaba entera, y eso no es lo que pasa en terreno: el camión va, carga
+    # lo que le entra y la zona queda con un resto para otra jornada.
+    #
+    # La vista no puede deducirlo por su cuenta. Empareja la parada con su zona
+    # por `analysisId` y toma las cifras de ahí, así que sin estos campos
+    # imprimiría el volumen completo de la zona para una parada que retira la
+    # mitad. `pendingVolumeM3` en cero (o ausente) significa que la zona se
+    # retira completa, que es el caso normal.
+    removedVolumeM3: float | None = None
+    removedWeightKg: float | None = None
+    pendingVolumeM3: float | None = None
 
 
 class RoutePlanVehicleOut(BaseModel):
@@ -429,6 +443,39 @@ def _point_truck_capacity(point: dict) -> float:
     return sum(t.get("capacity_m3", 0) for t in point.get("trucks", []))
 
 
+def _capacidad_de_peso(puntos: list[dict]) -> float | None:
+    """Toneladas que el grupo de puntos puede cargar, o None si no hay límite.
+
+    **None no es cero: es "nadie declaró el suyo".** Un vehículo sin
+    `capacity_ton` no significa que aguante cero kilos, significa que ese límite
+    no está medido, y restringir por él inventaría una restricción. Es la misma
+    regla que `aguanta_el_peso` dentro de `_trucks_used`, y tiene que seguir
+    siendo la misma: si una declara el dato ausente como cero y la otra como
+    infinito, el plan recorta una zona por peso y después no encuentra vehículo
+    que la lleve, o al revés.
+
+    Ese es el caso de producción: de las 21 unidades de la flota real solo los
+    dos AMPLIROLL (15 t) y los dos CAMION 3/4 PLANO (1 t) traen la cifra, y los
+    planos no entran a estas rutas, así que basta con que una tolva participe
+    para que el peso no limite nada. El recorte por peso existe para cuando esa
+    situación cambie, no para la flota de hoy.
+
+    Suma la flota COMPLETA del punto, no el subconjunto despachado, y eso es
+    deliberado: el subconjunto lo elige `_trucks_used` después, probando tamaños
+    crecientes, así que encuentra un conjunto que aguante el peso siempre que
+    alguno exista. El único caso que no puede resolver es que la flota entera no
+    aguante, y es exactamente el que esta función acota.
+    """
+    total = 0.0
+    for punto in puntos:
+        for camion in punto.get("trucks", []):
+            limite = camion.get("capacity_ton")
+            if limite is None:
+                return None
+            total += limite
+    return total if total > 0 else None
+
+
 _MAX_UNIDADES_FUERZA_BRUTA = 14  # 2^14 = 16384 subconjuntos, instantáneo
 
 # Qué campo del vehículo pide cada rol. El vehículo declara su dotación
@@ -607,7 +654,13 @@ def _trucks_used(
                 mejor: tuple[float, list[dict]] | None = None
                 for combo in itertools.combinations(por_capacidad, tamano):
                     capacidad = sum(c.get("capacity_m3", 0) for c in combo)
-                    if capacidad < assigned_volume:
+                    # La misma holgura que el reparto por punto, y por el mismo
+                    # motivo: a una zona parcial se le asigna exactamente la
+                    # capacidad libre, así que acá se compara una suma contra
+                    # otra suma de los mismos números en otro orden. Un epsilon
+                    # de más dejaría sin solución al conjunto completo, y el plan
+                    # saldría diciendo que ningún vehículo puede con la carga.
+                    if capacidad < assigned_volume - 1e-9:
                         continue
                     if not aguanta_el_peso(combo):
                         continue
@@ -785,6 +838,46 @@ async def _load_route_stops(analysis_ids: list[str]) -> list[dict]:
     return stops
 
 
+# Volumen por debajo del cual no vale la pena mandar a nadie. Una parada existe
+# para que un camión llegue, cargue y se vaya, y hacer ese viaje por veinte
+# litros no es un retiro. Medio metro cúbico es del orden del balde más chico de
+# la flota real (el minicargador, 0,5 m³), así que es la unidad de carga más
+# pequeña que la municipalidad puede mover de hecho.
+_MINIMO_RETIRO_M3 = 0.5
+
+
+def _parcializar(zona: dict, volumen: float) -> dict:
+    """La misma zona, pero retirando solo `volumen` de su total.
+
+    **Escala el peso y el desglose por clase junto con el volumen, y eso no es
+    cosmético.** `_trucks_used` compara el peso del conjunto contra el límite en
+    toneladas de los vehículos; con el peso completo de la zona contra una carga
+    parcial, rechazaría camiones que sí sirven y la zona terminaría descartada
+    por el mismo motivo que el retiro parcial vino a evitar. Lo mismo con las
+    clases, que deciden qué vehículo se prefiere.
+
+    La clase dominante no se recalcula porque no cambia: escalar todas las
+    clases por el mismo factor no altera cuál es la mayor.
+
+    No muta la zona original: el bucle de llenado la recorre mientras decide, y
+    el diccionario que entra acá es el mismo que vive en `stops`.
+    """
+    total = zona["volumeM3"]
+    fraccion = volumen / total if total > 0 else 0
+    return {
+        **zona,
+        "volumeM3": volumen,
+        "weightTon": zona.get("weightTon", 0) * fraccion,
+        "clasesPorVolumen": {
+            clase: vol * fraccion for clase, vol in (zona.get("clasesPorVolumen") or {}).items()
+        },
+        # Lo que la vista necesita para decir "se retiran 8 de 12,4 m³".
+        "volumenZonaM3": total,
+        "pesoZonaKg": zona.get("weightTon", 0) * 1000,
+        "pendienteM3": total - volumen,
+    }
+
+
 # =============================================================================
 # SELECCIÓN DE ORIGEN(ES) — "mochila" de puntos por capacidad de camiones
 # =============================================================================
@@ -875,10 +968,18 @@ _MAX_STOPS_BRUTE_FORCE = 8  # 8! = 40320 permutaciones, instantáneo
 # **Y para los planes que este sistema genera, esa geometría es exacta, no una
 # aproximación.** Lo que la municipalidad describe como "volver a concluir la
 # ruta" son los viajes intermedios de un camión que se llena a mitad de camino,
-# y eso acá no puede pasar: el handler solo deja entrar al plan las zonas cuyo
-# volumen cabe en la capacidad despachada, así que la carga llega completa a la
-# primera descarga. El día que el plan permita exceder la capacidad con viajes
-# múltiples, esto vuelve a ser una simplificación y hay que decirlo.
+# y eso acá no puede pasar: lo que el plan carga nunca SUPERA la capacidad
+# despachada, así que la carga llega completa a la primera descarga.
+#
+# El retiro parcial no rompe ese invariante, y conviene decir por qué, porque es
+# justo el cambio que parecía romperlo: una zona que no cabe entera ya no se
+# descarta, pero lo que se retira de ella es exactamente la capacidad que
+# quedaba libre, nunca más. El camión sigue saliendo vacío, llegando lleno al
+# relleno y volviendo vacío. Lo que cambia es que esa zona queda con un
+# pendiente, no que el recorrido tenga un tramo más.
+#
+# El día que el plan permita exceder la capacidad con viajes múltiples, esto
+# vuelve a ser una simplificación y hay que decirlo.
 #
 # Duplicado en src/lib/disposalSite.ts, que lo necesita para dibujar el marcador
 # antes de que exista una ruta. Si cambia, cambia en los dos. El arreglo de
@@ -1301,20 +1402,81 @@ async def generate_route(
             )
         )
 
+    # Una zona que no cabe entera ya NO se descarta: se retira de ella lo que la
+    # capacidad libre permita y el resto queda pendiente para otra jornada. Es lo
+    # que de verdad hace la cuadrilla, y descartarla negaba el viaje completo por
+    # no poder hacerlo entero.
+    #
+    # **Los dos límites del vehículo recortan igual**, el volumen y el peso. Un
+    # camión tiene cuánto le entra y cuánto aguanta, y el que primero se agota es
+    # el que decide la fracción. El peso no es redundante con el volumen porque
+    # la densidad cambia con el tipo de residuo: una zona de escombros llena la
+    # tolva por peso mucho antes que por metros cúbicos.
+    #
+    # Normalmente queda **una sola** zona parcial: la primera que desborda se
+    # lleva la capacidad que quedaba, así que a las siguientes no les queda nada
+    # y se descartan con un motivo propio, más honesto que el anterior (no es que
+    # la capacidad total no alcance para esa zona, es que las anteriores ya la
+    # ocuparon). La excepción es una zona sin peso calculado, que no consume
+    # capacidad de peso y por lo tanto puede entrar después de una parcial que
+    # quedó limitada por toneladas.
+    capacidad_peso = _capacidad_de_peso(origin_group)
+
     stops_que_caben: list[dict] = []
     acumulado = 0.0
+    acumulado_peso = 0.0
     for zona in sorted(stops, key=lambda z: (not z["prioritaria"], z["volumeM3"])):
-        if acumulado + zona["volumeM3"] <= capacidad_total:
+        volumen_zona = zona["volumeM3"]
+        peso_zona = zona.get("weightTon", 0)
+
+        cabe_volumen = acumulado + volumen_zona <= capacidad_total
+        cabe_peso = capacidad_peso is None or acumulado_peso + peso_zona <= capacidad_peso
+        if cabe_volumen and cabe_peso:
             stops_que_caben.append(zona)
-            acumulado += zona["volumeM3"]
+            acumulado += volumen_zona
+            acumulado_peso += peso_zona
+            continue
+
+        # Qué fracción de la zona entra según cada límite. El peso no limita
+        # cuando nadie declaró el suyo (capacidad_peso None), igual que en
+        # `aguanta_el_peso`: un dato ausente significa "no medido", no "cero".
+        fraccion_volumen = (capacidad_total - acumulado) / volumen_zona if volumen_zona > 0 else 0.0
+        if capacidad_peso is None or peso_zona <= 0:
+            fraccion_peso = 1.0
         else:
-            descartar(
-                zona,
-                f"La capacidad disponible ({_format_number(capacidad_total)} m³) no alcanza "
-                f"para esta zona.",
-            )
+            fraccion_peso = (capacidad_peso - acumulado_peso) / peso_zona
+        fraccion = max(0.0, min(1.0, fraccion_volumen, fraccion_peso))
+        volumen_parcial = volumen_zona * fraccion
+
+        if volumen_parcial < _MINIMO_RETIRO_M3:
+            # El motivo nombra el límite que se agotó, no "no se pudo": la
+            # descripción de HDU5.1 pide poder distinguir cuál fue en cada caso,
+            # y "no queda capacidad" sin decir de qué manda a revisar la cifra
+            # equivocada en los recursos.
+            if fraccion_peso < fraccion_volumen:
+                descartar(
+                    zona,
+                    f"No queda capacidad de peso para esta zona: las "
+                    f"{_format_number(capacidad_peso or 0)} t disponibles se ocuparon con "
+                    f"las zonas anteriores.",
+                )
+            else:
+                descartar(
+                    zona,
+                    f"No queda capacidad para esta zona: los "
+                    f"{_format_number(capacidad_total)} m³ disponibles se ocuparon con "
+                    f"las zonas anteriores.",
+                )
+            continue
+
+        parcial = _parcializar(zona, volumen_parcial)
+        stops_que_caben.append(parcial)
+        acumulado += volumen_parcial
+        acumulado_peso += parcial.get("weightTon", 0)
 
     if not stops_que_caben:
+        # Sigue siendo alcanzable: basta que la capacidad libre quede por debajo
+        # del mínimo de retiro para la única zona cargada.
         return RoutePlanInfeasibleOut(
             message=(
                 f"Ninguna zona cargada cabe en la capacidad disponible "
@@ -1341,7 +1503,13 @@ async def generate_route(
         # alcance. Antes eso devolvía infeasible; ahora se recorta ese punto.
         capacidad_punto = _point_truck_capacity(point)
         asignado = sum(s["volumeM3"] for s in point_stops)
-        while point_stops and asignado > capacidad_punto:
+        # La holgura es por el retiro parcial, no por prolijidad: a la zona
+        # parcial se le asigna exactamente la capacidad que quedaba libre, así
+        # que la suma de las paradas da la capacidad del punto al último bit. Al
+        # recomputarla acá en otro orden, el resultado puede quedar un epsilon
+        # por encima, y sin holgura el bucle descartaría una zona que cabe
+        # justo, con un motivo que nadie podría explicar.
+        while point_stops and asignado > capacidad_punto + 1e-9:
             # `not prioritaria` delante del volumen en la clave de `max` es lo que
             # hace que una prioritaria sea la ÚLTIMA en salir: las no prioritarias
             # puntúan 1 y las marcadas 0, así que se recorta entre las no
@@ -1530,6 +1698,14 @@ async def generate_route(
                 lng=s["lng"],
                 label=s["name"],
                 analysisId=s.get("analysisId"),
+                # Se redondea acá por la misma razón que totalVolumeM3: la vista
+                # imprime dos decimales, y un retirado crudo contra un pendiente
+                # crudo no suman el total de la zona en pantalla.
+                removedVolumeM3=round(s["volumeM3"], 2),
+                removedWeightKg=round(s.get("weightTon", 0) * 1000),
+                # Solo las parciales lo traen. Cero significa "se retira
+                # completa", que es lo que la vista ya sabía hacer.
+                pendingVolumeM3=round(s.get("pendienteM3", 0), 2),
             ))
             ordenes_sub.append(order)
             order += 1

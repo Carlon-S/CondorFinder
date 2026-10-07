@@ -71,6 +71,8 @@ import {
   setPointActive,
   type ResourcePoint,
 } from "@/lib/resources";
+import { listAnalyses } from "@/lib/analysisStore";
+import { projectPolygonToWgs84 } from "@/lib/projection";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 export const Route = createFileRoute("/_authed/planificacion/recursos")({
@@ -125,6 +127,11 @@ function RecursosPage() {
   const [fotoAmpliada, setFotoAmpliada] = useState<ResourcePoint | null>(null);
   const [eliminando, setEliminando] = useState(false);
 
+  /** Las zonas guardadas, ya listas como marcadores del mapa. Son contexto, no
+   *  algo que esta vista administre, así que viven como marcadores y no como
+   *  registros. */
+  const [zonas, setZonas] = useState<GeoMapPoint[]>([]);
+
   const [busqueda, setBusqueda] = useState("");
   const [filtroEstado, setFiltroEstado] = useState<"todos" | "activos" | "inactivos">("todos");
   const [sortBy, setSortBy] = useState<Campo>("nombre");
@@ -146,6 +153,49 @@ function RecursosPage() {
 
   useEffect(() => {
     recargar();
+  }, []);
+
+  // Las zonas guardadas, como CONTEXTO del mapa.
+  //
+  // Un punto de origen no se ubica en el vacío: se ubica respecto de los
+  // basurales que hay que ir a retirar. Sin ellas, este mapa mostraba solo los
+  // pines de los puntos y había que irse a /rutas para saber si el punto que se
+  // estaba creando quedaba cerca o lejos del trabajo.
+  //
+  // Se cargan una vez al montar y no se vuelven a pedir: acá no se crean ni se
+  // editan zonas, así que no hay nada que pueda cambiarlas mientras la vista
+  // está abierta. Degrada en silencio porque son referencia: sin ellas el mapa
+  // sigue sirviendo para lo que esta vista hace, que es configurar puntos.
+  useEffect(() => {
+    listAnalyses()
+      .then((registros) => {
+        const resueltas: GeoMapPoint[] = [];
+        for (const r of registros) {
+          // Las reemplazadas por una captura más nueva (HDU7) quedan fuera, igual
+          // que en /rutas: si no, una zona con tres capturas se dibujaría tres
+          // veces sobre la misma coordenada.
+          if (r.historical) continue;
+          if (!r.orthoCenter || !r.crs) continue;
+          const wgs84 = projectPolygonToWgs84([r.orthoCenter], r.crs);
+          const centro = wgs84?.[0];
+          if (!centro) continue;
+          resueltas.push({
+            id: `zona:${r.id}`,
+            position: centro,
+            label: `${r.name} · ${r.summary?.totalVolumeM3 ?? 0} m³`,
+            // Con `color` el marcador se dibuja como círculo en vez de pin, que
+            // es lo que distingue una zona de un punto en /rutas. Violeta, el
+            // primero de los colores de zona de esa vista: no compite con el
+            // navy de los puntos ni con el teal del relleno. Literal y no
+            // `var(--primary)` por el renderer de canvas, igual que el resto de
+            // los colores del mapa.
+            color: "#7c3aed",
+            previewImageUrl: r.thumbnailUrl ?? r.mapUrl ?? undefined,
+          });
+        }
+        setZonas(resueltas);
+      })
+      .catch(() => {});
   }, []);
 
   const totales = {
@@ -244,14 +294,20 @@ function RecursosPage() {
   const irAlPunto = (id: string) =>
     navigate({ to: "/planificacion/recursos/$pointId", params: { pointId: id } });
 
-  const mapPoints: GeoMapPoint[] = points.map((p) => ({
-    id: p.id,
-    position: [p.lat, p.lng] as [number, number],
-    label: p.active
-      ? `${p.name} · ${p.capacity_m3} m³`
-      : `${p.name} (inactivo) · ${p.capacity_m3} m³`,
-    muted: !p.active,
-  }));
+  // Las zonas van PRIMERO para que los pines de los puntos queden dibujados
+  // encima: lo que se administra acá son los puntos, y un círculo de zona
+  // tapando el pin que se está editando esconde justo lo que se está haciendo.
+  const mapPoints: GeoMapPoint[] = [
+    ...zonas,
+    ...points.map((p) => ({
+      id: p.id,
+      position: [p.lat, p.lng] as [number, number],
+      label: p.active
+        ? `${p.name} · ${p.capacity_m3} m³`
+        : `${p.name} (inactivo) · ${p.capacity_m3} m³`,
+      muted: !p.active,
+    })),
+  ];
 
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
@@ -324,7 +380,14 @@ function RecursosPage() {
             <GeoMap
               className="h-full w-full"
               points={mapPoints}
-              onPointClick={(p) => setPuntoSeleccionado(p.id)}
+              // Las zonas comparten el mapa pero no son puntos: su id va
+              // prefijado y el clic las ignora. Sin el filtro, apretar una zona
+              // le mandaba a PanelPuntos la orden de abrir un punto que no
+              // existe, que es una orden de un solo uso y se quedaba pegada.
+              onPointClick={(p) => {
+                if (p.id.startsWith("zona:")) return;
+                setPuntoSeleccionado(p.id);
+              }}
               marker={mapProps.marker}
               onMapClick={mapProps.onMapClick ?? undefined}
               focusPoint={mapProps.focusPoint}

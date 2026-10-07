@@ -15,6 +15,7 @@ import {
   FileText,
   Map as MapIcon,
   MousePointerClick,
+  Pencil,
   RotateCcw,
   Save,
   Scale,
@@ -45,9 +46,12 @@ import {
   consumePendingOpenId,
   confirmDuplicate,
   rejectDuplicate,
+  renameZone,
+  renameAnalysis,
   type SavedAnalysisRecord,
   type DuplicateCandidate,
 } from "@/lib/analysisStore";
+import { RenameDialog } from "@/components/RenameDialog";
 import { buildVersions, type ZoneVersion } from "@/lib/volumeReport";
 import { VersionBar } from "@/components/VersionBar";
 import { ReportPreview } from "@/components/ReportPreview";
@@ -442,6 +446,13 @@ function AnalysisPage() {
    *  2") y un instante después lo reemplazaba por el de la ZONA ("Zona A"): un
    *  cambio de nombre a la vista que parecía un error de datos. */
   const [zoneNameLoading, setZoneNameLoading] = useState(false);
+
+  /** Cuál de los dos renombrados está abierto, o null.
+   *
+   *  Un solo estado y no dos banderas: son excluyentes por construcción (los
+   *  abre el mismo gesto en dos lugares distintos) y con dos banderas hay un
+   *  cuarto estado, "los dos abiertos", que no significa nada. */
+  const [renombrando, setRenombrando] = useState<"zona" | "version" | null>(null);
 
   // ── HDU4 / AC1, guardar análisis: pide nombre ─────────────────────────────
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
@@ -1272,22 +1283,42 @@ function AnalysisPage() {
                 // mientras la consulta sigue en curso (ver zoneNameLoading).
                 <Skeleton className="h-9 w-3/4 rounded md:h-10" />
               ) : (
-                <h1
-                  // break-words + line-clamp: un nombre largo antes desbordaba
-                  // la columna o la estiraba. Ahora corta por palabras, se
-                  // limita a dos líneas y el nombre completo queda en el
-                  // title. El cuerpo baja un escalón de tamaño pasados los 22
-                  // caracteres, que es lo que entra cómodo en una línea al
-                  // ancho de este panel.
-                  title={zoneName ?? currentAnalysisName ?? undefined}
-                  className={`font-rubik font-semibold tracking-normal text-foreground line-clamp-2 break-words hyphens-auto ${
-                    (zoneName ?? currentAnalysisName ?? "").length > 22
-                      ? "text-xl md:text-2xl"
-                      : "text-3xl md:text-4xl"
-                  }`}
-                >
-                  {zoneName ?? currentAnalysisName ?? "Análisis"}
-                </h1>
+                // El lápiz va DENTRO del flujo del título, no flotando a su
+                // derecha: el nombre ocupa hasta dos líneas y su alto cambia con
+                // el largo, así que un botón posicionado aparte terminaba
+                // despegado del texto justo en los nombres largos.
+                <div className="flex items-start gap-1.5">
+                  <h1
+                    // break-words + line-clamp: un nombre largo antes desbordaba
+                    // la columna o la estiraba. Ahora corta por palabras, se
+                    // limita a dos líneas y el nombre completo queda en el
+                    // title. El cuerpo baja un escalón de tamaño pasados los 22
+                    // caracteres, que es lo que entra cómodo en una línea al
+                    // ancho de este panel.
+                    title={zoneName ?? currentAnalysisName ?? undefined}
+                    className={`min-w-0 font-rubik font-semibold tracking-normal text-foreground line-clamp-2 break-words hyphens-auto ${
+                      (zoneName ?? currentAnalysisName ?? "").length > 22
+                        ? "text-xl md:text-2xl"
+                        : "text-3xl md:text-4xl"
+                    }`}
+                  >
+                    {zoneName ?? currentAnalysisName ?? "Análisis"}
+                  </h1>
+                  {/* Solo con zona: antes de guardar no hay nada que renombrar,
+                      el nombre que se ve es el del análisis y se pide al
+                      guardar. */}
+                  {zoneId && zoneName && (
+                    <button
+                      type="button"
+                      onClick={() => setRenombrando("zona")}
+                      title="Renombrar la zona"
+                      aria-label="Renombrar la zona"
+                      className="mt-1.5 flex-shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
               )}
               {(currentAnalysisName || captureDate) && (
                 <p className="mt-1.5 flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
@@ -1300,6 +1331,21 @@ function AnalysisPage() {
                     >
                       {currentAnalysisName}
                     </span>
+                  )}
+                  {/* El segundo renombrado, el de la versión. Va pegado a su
+                      nombre y no junto al de la zona, porque son dos nombres
+                      distintos y poner los dos lápices arriba no diría cuál
+                      cambia cuál. */}
+                  {currentAnalysisName && currentAnalysisId && (
+                    <button
+                      type="button"
+                      onClick={() => setRenombrando("version")}
+                      title="Renombrar esta versión"
+                      aria-label="Renombrar esta versión"
+                      className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </button>
                   )}
                   {currentAnalysisName && captureDate && <span>·</span>}
                   {captureDate && (
@@ -1372,7 +1418,7 @@ function AnalysisPage() {
                 ) : (
                   <Save className="mr-2 h-4 w-4" />
                 )}
-                {currentAnalysisId ? "Guardar cambios" : "Guardar análisis"}
+                {currentAnalysisId ? "Guardar cambios" : "Guardar versión"}
               </Button>
 
               {/* "Informe de esta zona" y "Ver evolución" ya no viven acá:
@@ -2060,19 +2106,33 @@ function AnalysisPage() {
       <Dialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Guardar análisis</DialogTitle>
+            <DialogTitle>Guardar esta versión</DialogTitle>
             <DialogDescription>
-              Ingresa un nombre para identificar este análisis en el listado de
-              análisis disponibles.
+              Es el nombre de esta medición, no el del terreno. Conviene que diga
+              cuándo se midió.
             </DialogDescription>
           </DialogHeader>
 
           <Input
             autoFocus
-            placeholder="Ej: Basural Camino Melipilla - agosto"
+            placeholder="Ej: Medición 26-05-2026"
             value={analysisName}
             onChange={(e) => setAnalysisName(e.target.value)}
           />
+
+          {/* Decir qué pasa con la zona, porque lo que pasa no es evidente y
+              era justo la confusión: una zona nueva nace con el nombre de su
+              primera medición, así que sin este aviso el terreno terminaba
+              llamándose "Medición 26-05-2026" y nada explicaba por qué. Solo se
+              muestra cuando la zona todavía no existe; guardando dentro de una
+              zona conocida, su nombre no se toca. */}
+          {!zoneId && (
+            <p className="text-[0.6875rem] text-muted-foreground">
+              Esta es la primera medición del terreno, así que la zona se creará
+              con este mismo nombre. Después puedes cambiarlo con el lápiz del
+              título.
+            </p>
+          )}
 
           <DialogFooter>
             <Button
@@ -2093,10 +2153,10 @@ function AnalysisPage() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Ya existe un análisis con ese nombre</AlertDialogTitle>
+            <AlertDialogTitle>Ya existe una versión con ese nombre</AlertDialogTitle>
             <AlertDialogDescription>
-              Puedes elegir otro nombre o sobrescribir el análisis existente con esta
-              nueva versión.
+              Puedes elegir otro nombre o sobrescribir la versión existente con esta
+              medición.
             </AlertDialogDescription>
           </AlertDialogHeader>
 
@@ -2148,6 +2208,47 @@ function AnalysisPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Los dos renombrados. La zona es el terreno y la versión es una
+          medición suya: el sistema los confundía porque al guardar se pedía un
+          solo nombre y la zona nacía con el del primer análisis. */}
+      <RenameDialog
+        open={renombrando === "zona"}
+        onOpenChange={(v) => setRenombrando(v ? "zona" : null)}
+        titulo="Renombrar la zona"
+        descripcion="El nombre del terreno, el que se mantiene entre vuelos. No cambia el nombre de ninguna de sus capturas."
+        etiqueta="Nombre de la zona"
+        valorInicial={zoneName ?? ""}
+        onGuardar={async (nombre) => {
+          if (!zoneId) return;
+          await renameZone(zoneId, nombre);
+          // Optimista y además recarga: el título tiene que cambiar en el acto,
+          // y la recarga es la que arrastra lo demás que depende de la zona (la
+          // barra de capturas, el informe, la evolución).
+          setZoneName(nombre);
+          cargarVersionesDeLaZona(zoneId);
+          notify.success("Zona renombrada", `Ahora se llama "${nombre}".`);
+        }}
+      />
+      <RenameDialog
+        open={renombrando === "version"}
+        onOpenChange={(v) => setRenombrando(v ? "version" : null)}
+        titulo="Renombrar esta versión"
+        descripcion="El nombre de esta medición. La zona a la que pertenece conserva el suyo."
+        etiqueta="Nombre de la versión"
+        valorInicial={currentAnalysisName ?? ""}
+        onGuardar={async (nombre) => {
+          if (!currentAnalysisId) return;
+          await renameAnalysis(currentAnalysisId, nombre);
+          setCurrentAnalysisName(nombre);
+          // Se persiste igual que al guardar: sin esto, un F5 recuperaría el
+          // nombre viejo desde sessionStorage y parecería que el cambio se
+          // perdió, cuando en la base ya está.
+          saveCurrentAnalysisName(nombre);
+          cargarVersionesDeLaZona(zoneId);
+          notify.success("Versión renombrada", `Ahora se llama "${nombre}".`);
+        }}
+      />
     </div>
   );
 }

@@ -46,11 +46,20 @@ import type {
 /** Lo que la vista sabe de cada zona y el timeline no: dónde queda, cuánto
  *  hay y de qué es. */
 export interface DatosDeParada {
+  /** Lo que se retira en esta parada. Con un retiro parcial NO es el volumen de
+   *  la zona, que viaja aparte en `zoneVolumeM3`. */
   volumeM3: number;
   /** Lo que el camión va a cargar de verdad. El volumen dice si entra en la
    *  tolva; el peso dice si el vehículo lo aguanta, que es otra restricción
    *  (AC4) y hasta ahora no se veía en el plan. */
   weightKg?: number;
+  /** El volumen TOTAL de la zona, solo cuando el retiro es parcial. Es el
+   *  contexto de la cifra de arriba: "se retiran 8,00 de 12,40 m³". */
+  zoneVolumeM3?: number;
+  /** Lo que queda en la zona después de este retiro, solo cuando hay resto.
+   *  Es el dato que convierte una parada en una visita pendiente, así que se
+   *  dice explícito en vez de dejarlo a la resta del lector. */
+  pendingM3?: number;
   /** TODOS los tipos presentes en la zona, con su volumen, de mayor a menor.
    *  Antes viajaba solo el dominante, y una zona con cuatro tipos se anunciaba
    *  como si tuviera uno: el trabajador que va a cargar necesita saber con qué
@@ -344,7 +353,18 @@ export function RouteTimeline({
           <>
             <span className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.6875rem]">
               <span className="mono font-semibold tabular-nums text-foreground">
-                {datos.volumeM3.toFixed(2)} m³
+                {datos.volumeM3.toFixed(2)}
+                {/* Con retiro parcial, el total de la zona va pegado a lo que se
+                    retira y en muted: la cifra que se ejecuta es la primera, la
+                    segunda explica por qué queda un resto. La unidad se imprime
+                    una sola vez, al final, porque son la misma magnitud. */}
+                {datos.zoneVolumeM3 != null && (
+                  <span className="font-normal text-muted-foreground">
+                    {" de "}
+                    {datos.zoneVolumeM3.toFixed(2)}
+                  </span>
+                )}
+                {" m³"}
               </span>
               {/* El peso al lado del volumen, en muted: son dos magnitudes de la
                   misma carga y dos restricciones distintas del vehículo. */}
@@ -356,6 +376,19 @@ export function RouteTimeline({
                 </span>
               )}
             </span>
+            {/* El resto que queda en la zona. En ámbar y con su propia línea,
+                no como un paréntesis más: significa que esta zona hay que
+                volver a visitarla, y eso no es un detalle de la parada sino
+                trabajo que queda abierto. */}
+            {datos.pendingM3 != null && datos.pendingM3 > 0 && (
+              <span className="mt-1 block text-[0.6875rem] text-warning-strong">
+                Quedan{" "}
+                <span className="mono font-semibold tabular-nums">
+                  {datos.pendingM3.toFixed(2)} m³
+                </span>{" "}
+                en la zona
+              </span>
+            )}
             {/* Todos los tipos, no solo el dominante. Cada uno con su volumen,
                 porque "tiene plástico" y "tiene 3 m³ de plástico" no dicen lo
                 mismo a quien va a cargar. */}
