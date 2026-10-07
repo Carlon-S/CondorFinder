@@ -88,6 +88,7 @@ import {
 import {
   clearImageState,
   saveZonaDestino,
+  clearZonaDestino,
   saveItems,
   saveUploadDone,
   saveTaskId,
@@ -604,8 +605,11 @@ function MainPage() {
     clearMapUrl();
     clearCurrentAnalysisId();
     deleteAllImages().catch(() => {});
-    // Se guarda DESPUÉS de clearImageState, que también la borra: si se
-    // guardara antes, la limpieza se llevaría justo lo que acabamos de elegir.
+    // ESTE es el punto donde la zona anterior deja de valer: empieza una carga
+    // nueva. Va explícito porque clearImageState() ya no la borra, justamente
+    // para que no se pierda en los otros lugares donde se limpia el estado de
+    // la carga sin que la decisión de zona haya caducado.
+    clearZonaDestino();
     if (zonaDestino) saveZonaDestino(zonaDestino);
     setAddZoneOpen(false);
     navigate({ to: "/carga" });

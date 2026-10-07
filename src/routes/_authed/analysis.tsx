@@ -601,6 +601,11 @@ function AnalysisPage() {
       return;
     }
 
+    // La zona declarada ya cumplió: viajó en este guardado y quedó en el
+    // registro. Se limpia ACÁ y no al desmontar la vista, porque éste es el
+    // momento en que deja de valer.
+    clearZonaDestino();
+
     setCurrentAnalysisId(result.record.id);
     setCurrentAnalysisName(result.record.name);
     saveCurrentAnalysisId(result.record.id);
@@ -1047,9 +1052,14 @@ function AnalysisPage() {
       clearThumbnailUrl();
       clearDetectionJsonUrl();
       clearCurrentAnalysisId();
-      // La zona declarada vale para ESTA carga. Sin limpiarla, la siguiente
-      // generacion heredaria en silencio la zona de la anterior.
-      clearZonaDestino();
+      // Acá se llamaba a clearZonaDestino(), y era un defecto: desmontar esta
+      // vista no significa que la carga terminó, significa que el trabajador
+      // navegó. Mirar el mapa recién generado y volver atrás desligaba en
+      // silencio la zona que había elegido antes de subir las fotos, y el
+      // análisis terminaba guardándose en una zona nueva.
+      //
+      // La zona se limpia donde de verdad caduca: al empezar otra carga
+      // (goToCarga) y al guardar el análisis, que es cuando se consume.
     };
   }, []);
 

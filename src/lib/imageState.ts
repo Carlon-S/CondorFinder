@@ -187,6 +187,17 @@ export function clearZonaDestino(): void {
   sessionStorage.removeItem(KEY_ZONA_DESTINO);
 }
 
+/**
+ * Limpia el estado de la CARGA: las imágenes, la fase, la tarea en curso.
+ *
+ * **No toca la zona de destino, a propósito.** La borraba, y eso desligaba la
+ * zona elegida en tres situaciones donde no correspondía: al apretar "limpiar
+ * todo" en la carga (que descarta las imágenes, no la decisión de a qué zona
+ * pertenecen), al retomar una generación en curso desde Vista Principal, y en
+ * la primera mitad de `goToCarga()`. La zona se maneja explícitamente con
+ * `clearZonaDestino()` donde de verdad deja de valer: al empezar una carga
+ * nueva y al guardar el análisis, que es cuando se consume.
+ */
 export function clearImageState(): void {
   if (!isBrowser) return;
   sessionStorage.removeItem(KEY_ITEMS);
@@ -198,5 +209,4 @@ export function clearImageState(): void {
   sessionStorage.removeItem(KEY_BACKEND_STAGE);
   sessionStorage.removeItem(KEY_DETECTION_JSON_URL);
   sessionStorage.removeItem(KEY_CANCEL_REQUESTED);
-  sessionStorage.removeItem(KEY_ZONA_DESTINO);
 }
