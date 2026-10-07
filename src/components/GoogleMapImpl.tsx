@@ -68,6 +68,9 @@ const MAP_ID = import.meta.env.VITE_GOOGLE_MAPS_ID ?? "DEMO_MAP_ID";
 /** Cuántos niveles de zoom al volar a un punto, mismo valor que el de Leaflet
  *  para que cambiar de motor no cambie cuánto se acerca. */
 const ZOOM_FOCO = 16;
+/** Lo que tarda el vuelo a una zona. Los mismos 800 ms que el `flyTo` de la
+ *  implementación de Leaflet, para que las dos se sientan igual. */
+const DURACION_VUELO_MS = 800;
 
 /** Hasta dónde se puede pasear con `lockToMaipu`.
  *
@@ -300,14 +303,59 @@ function VueloAPunto({ target }: { target: [number, number] | null | undefined }
 
   useEffect(() => {
     if (!map || !target) return;
-    const camara = { center: aLatLng(target), zoom: ZOOM_FOCO };
-    // moveCamera aplica las dos en una sola operación. El respaldo son los dos
-    // setters, que son síncronos y por lo tanto tampoco compiten entre sí.
-    if (typeof map.moveCamera === "function") map.moveCamera(camara);
-    else {
-      map.setZoom(ZOOM_FOCO);
-      map.setCenter(camara.center);
+
+    const destino = aLatLng(target);
+    const centroInicial = map.getCenter();
+    const zoomInicial = map.getZoom();
+
+    // Sin centro o sin zoom todavía (el mapa recién montado) no hay de dónde
+    // interpolar: se salta directo, que es lo correcto porque no hay nada que
+    // el ojo pueda seguir.
+    if (!centroInicial || zoomInicial == null) {
+      map.moveCamera({ center: destino, zoom: ZOOM_FOCO });
+      return;
     }
+
+    const desde = { lat: centroInicial.lat(), lng: centroInicial.lng(), zoom: zoomInicial };
+    const hacia = { lat: destino.lat, lng: destino.lng, zoom: ZOOM_FOCO };
+    if (
+      Math.abs(desde.lat - hacia.lat) < 1e-9 &&
+      Math.abs(desde.lng - hacia.lng) < 1e-9 &&
+      desde.zoom === hacia.zoom
+    ) {
+      return;
+    }
+
+    // La animación se escribe a mano porque el motor no tiene un `flyTo`: hay
+    // `panTo`, que anima SOLO el centro, y `setZoom`, que es inmediato. Usarlos
+    // juntos es lo que estaba mal antes, y no solo porque sea abrupto: el zoom
+    // saltaba a mitad del deslizamiento, y como el zoom cambia la escala de
+    // píxel a mundo, el paneo terminaba en otra coordenada. Interpolando las
+    // tres magnitudes en el mismo cuadro, el movimiento es continuo y el destino
+    // exacto. Equivale al `flyTo(target, zoom, { duration })` de Leaflet, que es
+    // lo que la otra implementación ya hacía.
+    let cuadro = 0;
+    const inicio = performance.now();
+    const paso = (ahora: number) => {
+      const t = Math.min(1, (ahora - inicio) / DURACION_VUELO_MS);
+      // easeInOutCubic: arranca y termina suave. Una interpolación lineal se
+      // nota tan mecánica como un salto.
+      const e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      map.moveCamera({
+        center: {
+          lat: desde.lat + (hacia.lat - desde.lat) * e,
+          lng: desde.lng + (hacia.lng - desde.lng) * e,
+        },
+        zoom: desde.zoom + (hacia.zoom - desde.zoom) * e,
+      });
+      if (t < 1) cuadro = requestAnimationFrame(paso);
+    };
+    cuadro = requestAnimationFrame(paso);
+
+    // Cancelar al desmontar o al cambiar de destino: dos animaciones a la vez
+    // se pelean el mismo mapa y la cámara queda a mitad de camino entre dos
+    // zonas.
+    return () => cancelAnimationFrame(cuadro);
   }, [map, target]);
 
   return null;

@@ -73,6 +73,7 @@ import {
 } from "@/lib/resources";
 import { listAnalyses, listZones } from "@/lib/analysisStore";
 import { projectPolygonToWgs84 } from "@/lib/projection";
+import { ZoneZoomDialog, type ZoneZoomData } from "@/components/ZoneZoomDialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 export const Route = createFileRoute("/_authed/planificacion/recursos")({
@@ -104,16 +105,12 @@ type Campo = "estado" | "nombre" | "direccion" | "recursos" | "capacidad";
 /** Un basural guardado, dibujado en este mapa como contexto.
  *
  *  Guarda los datos y no un `GeoMapPoint` armado, porque el clic abre su mapa
- *  unificado: con solo el marcador no quedaba de dónde sacar la imagen ni las
- *  cifras del diálogo. El `id` es el del ANÁLISIS (lo que trae la posición y las
- *  cifras) y el `nombre` es el de su ZONA. */
+ *  unificado con el MISMO visor que /rutas (`ZoneZoomDialog`), y ese necesita
+ *  las detecciones y los tres totales. El `id` es el del ANÁLISIS (lo que trae
+ *  la posición y las cifras) y el `nombre` es el de su ZONA. */
 interface ZonaEnMapa {
-  id: string;
-  nombre: string;
   position: [number, number];
-  mapUrl: string | null;
-  volumeM3: number;
-  weightKg: number;
+  visor: ZoneZoomData;
 }
 
 /** Prefijo del id de un marcador de zona en el mapa, para distinguirlo de un
@@ -150,7 +147,7 @@ function RecursosPage() {
    *  ir, no algo que esta vista administre. */
   const [zonas, setZonas] = useState<ZonaEnMapa[]>([]);
   /** Zona cuyo mapa unificado se está mirando, o null. */
-  const [zonaAbierta, setZonaAbierta] = useState<ZonaEnMapa | null>(null);
+  const [zonaAbierta, setZonaAbierta] = useState<ZoneZoomData | null>(null);
 
   const [busqueda, setBusqueda] = useState("");
   const [filtroEstado, setFiltroEstado] = useState<"todos" | "activos" | "inactivos">("todos");
@@ -203,14 +200,46 @@ function RecursosPage() {
           if (!r.orthoCenter || !r.crs) continue;
           const wgs84 = projectPolygonToWgs84([r.orthoCenter], r.crs);
           const centro = wgs84?.[0];
-          if (!centro) continue;
+          if (!centro || !r.mapUrl) continue;
+          // Las detecciones vienen como un blob opaco en el registro guardado
+          // (ver analyses.py), así que se filtran las que no sirven para dibujar
+          // en vez de confiar en su forma: sin bbox no hay recuadro que poner.
+          const detecciones = (Array.isArray(r.detections) ? r.detections : [])
+            .filter((d): d is Record<string, never> => {
+              const det = d as { enabled?: boolean; bbox?: unknown };
+              return det.enabled !== false && !!det.bbox;
+            })
+            .map((d, i) => {
+              const det = d as unknown as {
+                id?: number;
+                class?: string;
+                volume_m3?: number;
+                weight_kg?: number;
+                area_m2?: number;
+                bbox: { minx: number; miny: number; maxx: number; maxy: number };
+              };
+              return {
+                id: det.id ?? i,
+                wasteClass: det.class ?? "Tipo de basura indefinido",
+                volumeM3: det.volume_m3 ?? null,
+                weightKg: det.weight_kg ?? null,
+                areaM2: det.area_m2 ?? null,
+                bbox: det.bbox,
+              };
+            });
           resueltas.push({
-            id: r.id,
-            nombre: (r.zoneId ? nombres.get(r.zoneId) : undefined) ?? r.name,
             position: centro,
-            mapUrl: r.mapUrl ?? null,
-            volumeM3: r.summary?.totalVolumeM3 ?? 0,
-            weightKg: r.summary?.totalWeightKg ?? 0,
+            visor: {
+              id: r.id,
+              name: (r.zoneId ? nombres.get(r.zoneId) : undefined) ?? r.name,
+              mapUrl: r.mapUrl,
+              detections: detecciones,
+              summary: {
+                totalVolumeM3: r.summary?.totalVolumeM3 ?? 0,
+                totalWeightKg: r.summary?.totalWeightKg ?? 0,
+                totalAreaM2: r.summary?.totalAreaM2 ?? 0,
+              },
+            },
           });
         }
         setZonas(resueltas);
@@ -325,9 +354,9 @@ function RecursosPage() {
   // que en /rutas.
   const mapPoints: GeoMapPoint[] = [
     ...zonas.map((z) => ({
-      id: `${PREFIJO_ZONA}${z.id}`,
+      id: `${PREFIJO_ZONA}${z.visor.id}`,
       position: z.position,
-      label: `${z.nombre} · ${z.volumeM3} m³`,
+      label: `${z.visor.name} · ${z.visor.summary.totalVolumeM3} m³`,
       // Con `color` el marcador se dibuja como círculo en vez de pin, que es lo
       // que distingue una zona de un punto en /rutas. Violeta, el primero de los
       // colores de zona de esa vista: no compite con el navy de los puntos ni
@@ -424,7 +453,7 @@ function RecursosPage() {
               onPointClick={(p) => {
                 if (p.id.startsWith(PREFIJO_ZONA)) {
                   const id = p.id.slice(PREFIJO_ZONA.length);
-                  setZonaAbierta(zonas.find((z) => z.id === id) ?? null);
+                  setZonaAbierta(zonas.find((z) => z.visor.id === id)?.visor ?? null);
                   return;
                 }
                 setPuntoSeleccionado(p.id);
@@ -866,51 +895,22 @@ function RecursosPage() {
         </DialogContent>
       </Dialog>
 
-      {/* El mapa unificado de una zona, al apretar su círculo.
+      {/* El mapa unificado de una zona, al apretar su círculo. El MISMO visor
+          que /rutas: antes era una versión propia con la imagen y dos cifras,
+          sin recuadros de detección ni detalle por tipo, o sea dos respuestas
+          distintas a la misma pregunta según de dónde se abriera.
 
           Se abre a pedido y no al pasar el puntero: la imagen pesa varios MB y
-          taparía el mapa justo mientras se está ubicando un punto, que es para
-          lo que existe esta vista. Mismo gesto que en /rutas.
+          tapaba el mapa justo mientras se está ubicando un punto, que es para lo
+          que existe esta vista.
 
-          Es más simple que el visor de /rutas, y a propósito: ahí los recuadros
-          de detección se dibujan como SVG posicionado sobre los píxeles
-          naturales de la imagen, con zoom y paneo, porque ahí se está decidiendo
-          qué retirar. Acá la pregunta es cuál es esta zona y dónde queda, así
-          que alcanza con verla y con sus dos cifras. */}
-      <Dialog open={zonaAbierta !== null} onOpenChange={(open) => !open && setZonaAbierta(null)}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>{zonaAbierta?.nombre ?? "Zona"}</DialogTitle>
-          </DialogHeader>
-          {zonaAbierta?.mapUrl ? (
-            <img
-              src={zonaAbierta.mapUrl}
-              alt={`Mapa unificado de ${zonaAbierta.nombre}`}
-              className="h-auto max-h-[60vh] w-full rounded-md object-contain"
-            />
-          ) : (
-            <p className="rounded-md border border-dashed border-border/50 py-8 text-center text-xs text-muted-foreground">
-              Esta zona no tiene mapa guardado.
-            </p>
-          )}
-          {zonaAbierta && (
-            <div className="flex items-center gap-5 text-xs">
-              <span>
-                <span className="text-muted-foreground">Volumen </span>
-                <span className="mono font-semibold tabular-nums text-foreground">
-                  {zonaAbierta.volumeM3} m³
-                </span>
-              </span>
-              <span>
-                <span className="text-muted-foreground">Peso </span>
-                <span className="mono font-semibold tabular-nums text-foreground">
-                  {Math.round(zonaAbierta.weightKg)} kg
-                </span>
-              </span>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+          Sin onVerAnalisis: desde acá no se navega a /analysis, porque se está
+          configurando la flota y salir de la vista pierde el punto a medio
+          escribir. */}
+      <ZoneZoomDialog
+        zona={zonaAbierta}
+        onOpenChange={(abierto) => !abierto && setZonaAbierta(null)}
+      />
     </div>
   );
 }

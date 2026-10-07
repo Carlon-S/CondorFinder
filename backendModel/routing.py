@@ -443,6 +443,57 @@ def _point_truck_capacity(point: dict) -> float:
     return sum(t.get("capacity_m3", 0) for t in point.get("trucks", []))
 
 
+def _capacidad_con_personal(
+    puntos: list[dict], personal: dict[str, list[str]] | None
+) -> float | None:
+    """Los m³ que la cuadrilla declarada alcanza a TRIPULAR, o None si no limita.
+
+    Existe por un defecto que el retiro parcial hizo aparecer: una zona enorme
+    (7.498 m³ contra 100 de capacidad) ya no se descarta, se recorta, y el
+    recorte tomaba la capacidad COMPLETA del punto, o sea pedía la flota entera.
+    Ocho camiones son ocho dotaciones, así que con dos conductores declarados
+    ningún conjunto podía tripularse y el plan no salía. El síntoma no apuntaba
+    a ninguna parte: con menos personal del que la flota entera necesita, no se
+    generaba ruta, sin importar el tamaño de la zona.
+
+    La capacidad despachable es entonces un techo más del reparto, al lado del
+    volumen y del peso, y por el mismo motivo: el plan no puede cargar más de lo
+    que puede mover.
+
+    **Voraz por capacidad descendente, no exacta.** Cada camión cuesta una
+    dotación parecida (un conductor y una o dos peonetas), así que para una
+    cantidad dada de vehículos la mayor capacidad sale de tomar los más grandes.
+    La selección fina la sigue haciendo `_trucks_used`, que enumera exacto; esto
+    solo acota cuánto se deja entrar al plan.
+
+    La cuadrilla es del PLAN y no de la sub-ruta, así que el repartidor recorre
+    los puntos con un único pool compartido, igual que el handler al consumirlo.
+    """
+    if personal is None:
+        return None
+
+    restante = {rol: list(nombres) for rol, nombres in personal.items()}
+    total = 0.0
+    for punto in puntos:
+        camiones = sorted(
+            punto.get("trucks", []),
+            key=lambda t: t.get("capacity_m3", 0) or 0,
+            reverse=True,
+        )
+        for camion in camiones:
+            # Se prueba de a uno contra lo que queda del pool: si este camión se
+            # puede tripular, su dotación se descuenta y su capacidad suma.
+            equipo = _asignar_dotacion([camion], restante)
+            if equipo is None:
+                break
+            for persona in equipo[0]:
+                nombres = restante.get(persona["rol"])
+                if nombres and persona["nombre"] in nombres:
+                    nombres.remove(persona["nombre"])
+            total += camion.get("capacity_m3", 0) or 0
+    return total
+
+
 def _capacidad_de_peso(puntos: list[dict]) -> float | None:
     """Toneladas que el grupo de puntos puede cargar, o None si no hay límite.
 
@@ -1429,6 +1480,35 @@ async def generate_route(
                 "Revisa los recursos del punto antes de generar la ruta."
             )
         )
+
+    # El plan no puede cargar más de lo que la cuadrilla declarada alcanza a
+    # tripular, y ese es un techo tan real como el volumen o el peso.
+    #
+    # Con el retiro parcial, una zona enorme (7.498 m³ contra 100 de capacidad)
+    # tomaba la capacidad COMPLETA del punto, o sea exigía la flota entera, y
+    # ocho camiones son ocho dotaciones: con dos conductores declarados ningún
+    # conjunto podía tripularse y no se generaba ruta. Con el techo, si alcanza
+    # para un vehículo se despacha ese vehículo y se retira lo que le entra,
+    # exactamente como cuando la zona sí cabe.
+    capacidad_tripulable = _capacidad_con_personal(origin_group, personal_restante)
+    if capacidad_tripulable is not None:
+        if capacidad_tripulable <= 0:
+            # Ni un solo vehículo se puede tripular. No es un plan parcial: no
+            # hay con qué salir, y el motivo es el personal y no la capacidad.
+            faltan = ", ".join(
+                f"{rol}es" if rol != "conductor" else "conductores"
+                for rol in _CAMPO_POR_ROL
+                if not (personal_restante or {}).get(rol)
+            )
+            return RoutePlanInfeasibleOut(
+                message=(
+                    "El personal declarado no alcanza para tripular ningún vehículo"
+                    + (f" (falta: {faltan})" if faltan else "")
+                    + ". Agrega personas al generar la ruta o revisa la dotación "
+                    "que pide cada vehículo."
+                )
+            )
+        capacidad_total = min(capacidad_total, capacidad_tripulable)
 
     # Una zona que no cabe entera ya NO se descarta: se retira de ella lo que la
     # capacidad libre permita y el resto queda pendiente para otra jornada. Es lo

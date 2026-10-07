@@ -126,6 +126,8 @@ import {
   type RoutePlanVehicle,
 } from "@/lib/routePlan";
 import { RouteTimeline, type DatosDeParada } from "@/components/RouteTimeline";
+import { ZoneZoomDialog } from "@/components/ZoneZoomDialog";
+import { classColor } from "@/components/zone-colors";
 import { reverseGeocode } from "@/lib/geocoding";
 import { notify } from "@/lib/notify";
 // Aca se importaban ROUTE_OUTBOUND_COLOR/RETURN_COLOR/RETURN_OPACITY para
@@ -148,22 +150,9 @@ const WASTE_CLASSES = [
   "Tipo de basura indefinido",
 ];
 
-// Mismos colores que analysis.tsx usa para las mismas clases — consistencia
-// visual entre el "zoom" de acá y la vista real de análisis.
-const CLASS_COLORS: Record<string, string> = {
-  "Residuo de construcción": "#ef4444",
-  Metal: "#f97316",
-  Plástico: "#3b82f6",
-  "Residuo orgánico": "#22c55e",
-  Muebles: "#a855f7",
-  Neumáticos: "#64748b",
-  "Tipo de basura indefinido": "#f59e0b",
-  "Varios tipos": "#7c3aed",
-};
-
-function classColor(cls: string): string {
-  return CLASS_COLORS[cls] ?? "#7c3aed";
-}
+// Los colores por clase de residuo se mudaron a zone-colors.ts: el visor de una
+// zona lo abren esta vista y la de recursos, y una tabla por vista significaría
+// que un plástico se pinta de dos azules distintos según de dónde se abrió.
 
 const ZONE_COLORS = ["#7c3aed", "#0ea5e9", "#f97316", "#22c55e", "#ef4444", "#eab308"];
 
@@ -378,12 +367,10 @@ function RutasPage() {
   // Análisis cuyo "zoom" (mapa real + polígonos en precisión de píxel) está
   // abierto — null si el diálogo está cerrado. Puede ser uno no cargado
   // todavía: la interacción es la misma para ambos casos.
+  // El tamaño medido de la imagen y el estado de error se mudaron adentro de
+  // ZoneZoomDialog: son estado del visor, no de esta vista, y acá quedaban como
+  // dos banderas que había que recordar reiniciar al abrir y al cerrar.
   const [zoomAnalysis, setZoomAnalysis] = useState<LoadedAnalysis | null>(null);
-  const [zoomImgSize, setZoomImgSize] = useState<{ w: number; h: number } | null>(null);
-  // true si el PNG del mapa de esta zona no cargó (404) — pasa si el archivo
-  // se borró desde otra pestaña/sesión (ej. "Eliminar zona" en Vista
-  // Principal) mientras esta zona seguía en memoria acá.
-  const [zoomImgError, setZoomImgError] = useState(false);
 
   // Ficha de datos de un punto (HDU6) — a diferencia de zoomAnalysis, no hay
   // mapa/imagen que ampliar, solo su información (dirección, recursos,
@@ -908,8 +895,6 @@ function RutasPage() {
   const handlePointClick = (point: GeoMapPoint) => {
     const analysis = allAnalyses.find((a) => a.id === point.id);
     if (analysis) {
-      setZoomImgSize(null);
-      setZoomImgError(false);
       setZoomAnalysis(analysis);
       setFocusPoint(point.position);
       return;
@@ -2004,262 +1989,27 @@ function RutasPage() {
         </DialogContent>
       </Dialog>
 
-      {/* "Zoom" de una zona: el mapa unificado real, con sus polígonos en
-          precisión de píxel — mismo tipo de vista que /analysis. Se abre
-          igual esté la zona cargada en la ruta o no. */}
-      <Dialog
-        open={zoomAnalysis !== null}
-        onOpenChange={(open) => {
-          if (!open) {
-            setZoomAnalysis(null);
-            setZoomImgSize(null);
-            setZoomImgError(false);
-          }
+      {/* "Zoom" de una zona: el mapa unificado real, con sus recuadros en
+          precisión de píxel. El visor vive en ZoneZoomDialog porque el mapa de
+          recursos abre el mismo: con una copia por vista, el de allá nació como
+          una versión pobre de este. */}
+      <ZoneZoomDialog
+        zona={zoomAnalysis}
+        onOpenChange={(abierto) => !abierto && setZoomAnalysis(null)}
+        direccion={zoomAnalysis ? direcciones[zoomAnalysis.id] : undefined}
+        insignia={
+          zoomAnalysis
+            ? {
+                texto: loadedIds.has(zoomAnalysis.id) ? "En la ruta" : "No está en la ruta",
+                activa: loadedIds.has(zoomAnalysis.id),
+              }
+            : undefined
+        }
+        onVerAnalisis={(id) => {
+          setPendingOpenId(id);
+          navigate({ to: "/analysis" });
         }}
-      >
-        <DialogContent className="max-h-[92vh] max-w-6xl overflow-y-auto">
-          <DialogHeader>
-            <div className="flex items-center gap-2">
-              <DialogTitle>{zoomAnalysis?.name}</DialogTitle>
-              {zoomAnalysis && (
-                <span
-                  className={`flex-shrink-0 rounded-full px-2 py-0.5 text-[0.625rem] font-medium ${
-                    loadedIds.has(zoomAnalysis.id)
-                      ? "bg-primary/15 text-primary"
-                      : "bg-muted text-muted-foreground"
-                  }`}
-                >
-                  {loadedIds.has(zoomAnalysis.id) ? "En la ruta" : "No está en la ruta"}
-                </span>
-              )}
-            </div>
-            <DialogDescription>
-              {/* La dirección antes que la descripción genérica: es el dato que
-                  permite reconocer la zona en terreno, y "Zona A" no lo da.
-                  Solo aparece cuando Nominatim la resolvió. */}
-              {zoomAnalysis && direcciones[zoomAnalysis.id] ? (
-                <span className="flex items-center gap-1.5">
-                  <MapPin className="h-3.5 w-3.5 flex-shrink-0 text-primary/70" />
-                  {direcciones[zoomAnalysis.id]}
-                </span>
-              ) : (
-                "Mapa unificado real de esta zona, con los basurales detectados."
-              )}
-            </DialogDescription>
-          </DialogHeader>
-          {zoomAnalysis && (
-            // Dos columnas parejas (imagen | información) para que el
-            // diálogo quede simétrico, cerca de un cuadrado, en vez de una
-            // franja angosta y muy alta.
-            <div className="grid grid-cols-2 gap-4">
-              {/* group acá arriba (no en el <button> de más abajo): la
-                  etiqueta "Ver análisis" necesita pintar por ENCIMA del
-                  <svg> de polígonos, que en el DOM viene después del
-                  botón -- moverla afuera del botón, como último hijo de
-                  este div, la deja arriba por simple orden de pintado, sin
-                  depender de z-index contra un hermano de un ancestro. */}
-              {/* detect-frame va en este contenedor, no en el <img>: así las
-                  esquinas quedan en el marco del visor y no se recortan con el
-                  rounded-md de la imagen. */}
-              <div className="group relative detect-frame">
-                <span className="detect-corners" aria-hidden="true" />
-                {zoomImgError ? (
-                  // El PNG no cargó (404) — probablemente se eliminó desde
-                  // otra pestaña/sesión mientras esta zona seguía en
-                  // memoria acá. Aviso claro en vez de un ícono de imagen
-                  // rota o un overlay que nunca termina de aparecer.
-                  <div className="flex aspect-square w-full flex-col items-center justify-center gap-2 rounded-md border border-dashed border-border/50 bg-muted/30 p-6 text-center">
-                    <TriangleAlert className="h-6 w-6 flex-shrink-0 text-warning" />
-                    <p className="text-xs text-muted-foreground">
-                      No se pudo cargar el mapa de esta zona — puede que se haya eliminado desde
-                      otra pestaña o sesión.
-                    </p>
-                  </div>
-                ) : (
-                  <>
-                    {/* Placeholder mientras la imagen carga -- sin esto, el
-                        <img> se renderizaba visible desde el primer byte,
-                        mostrando el clásico efecto de PNG grande cargando
-                        de arriba hacia abajo antes de que el overlay de
-                        polígonos (que espera a onLoad) apareciera. Ahora
-                        la imagen queda oculta hasta que termina de cargar
-                        del todo, y aparece ya completa junto al overlay. */}
-                    {!zoomImgSize && (
-                      <div className="flex aspect-square w-full items-center justify-center rounded-md border border-border/40 bg-muted/20">
-                        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                      </div>
-                    )}
-                    {/* <button> real (no un <img> con onClick suelto) — mismo
-                        patrón que "Ver análisis de detección" en /carga:
-                        cursor y estado hover garantizados por ser un
-                        control nativo, con la etiqueta apareciendo al
-                        pasar el mouse en vez de un cursor-pointer sin
-                        ningún otro indicio visual. */}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPendingOpenId(zoomAnalysis.id);
-                        navigate({ to: "/analysis" });
-                      }}
-                      className={`block w-full cursor-pointer ${zoomImgSize ? "" : "hidden"}`}
-                      title="Ver análisis de esta zona"
-                    >
-                      <img
-                        src={zoomAnalysis.mapUrl}
-                        alt={`Mapa unificado de ${zoomAnalysis.name}`}
-                        className="w-full rounded-md transition-opacity group-hover:opacity-80"
-                        decoding="async"
-                        onLoad={(e) => {
-                          const img = e.currentTarget;
-                          setZoomImgSize({ w: img.naturalWidth, h: img.naturalHeight });
-                        }}
-                        onError={() => setZoomImgError(true)}
-                      />
-                    </button>
-                  </>
-                )}
-                {!zoomImgError && zoomImgSize && (
-                  <svg
-                    viewBox={`0 0 ${zoomImgSize.w} ${zoomImgSize.h}`}
-                    className="pointer-events-none absolute inset-0 h-full w-full"
-                    preserveAspectRatio="xMidYMid meet"
-                  >
-                    {zoomAnalysis.detections.map((d) => {
-                      const color = classColor(d.wasteClass);
-                      const bw = d.bbox.maxx - d.bbox.minx;
-                      const bh = d.bbox.maxy - d.bbox.miny;
-                      return (
-                        <g key={d.id}>
-                          <rect
-                            x={d.bbox.minx}
-                            y={d.bbox.miny}
-                            width={bw}
-                            height={bh}
-                            fill={color}
-                            fillOpacity={0.35}
-                            stroke={color}
-                            strokeWidth={Math.max(2, zoomImgSize.w / 400)}
-                            strokeLinejoin="round"
-                          />
-                          <text
-                            x={d.bbox.minx}
-                            y={d.bbox.miny - zoomImgSize.w / 200}
-                            fontSize={Math.max(20, zoomImgSize.w / 60)}
-                            fill={color}
-                            fontFamily="monospace"
-                            fontWeight="700"
-                            paintOrder="stroke"
-                            stroke="rgba(0,0,0,0.75)"
-                            strokeWidth={zoomImgSize.w / 300}
-                            strokeLinejoin="round"
-                          >
-                            {d.wasteClass}
-                            {d.volumeM3 ? ` — ${d.volumeM3} m³` : ""}
-                          </text>
-                        </g>
-                      );
-                    })}
-                  </svg>
-                )}
-                {!zoomImgError && zoomImgSize && (
-                  // Último hijo del contenedor -> pinta por encima del <svg>
-                  // de polígonos sin necesitar z-index. pointer-events-none
-                  // para no tapar los clicks del <button> de más arriba
-                  // (el pointer-events-none del svg ya deja pasar el click
-                  // hacia el botón; este div necesita lo mismo).
-                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100">
-                    <div className="flex items-center gap-2 rounded-md bg-background/85 px-4 py-2 shadow-xl backdrop-blur">
-                      <MapIcon className="h-4 w-4 text-primary" />
-                      <span className="text-sm font-semibold text-foreground">
-                        Ver análisis de detección
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="flex min-h-0 flex-col gap-3">
-                {zoomAnalysis.partial && (
-                  <div className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 p-2.5 text-[0.625rem] text-muted-foreground">
-                    <TriangleAlert className="h-3.5 w-3.5 flex-shrink-0 text-warning" />
-                    <span>
-                      Algunas zonas de este análisis no se pudieron ubicar en el mapa y no aparecen
-                      abajo.
-                    </span>
-                  </div>
-                )}
-
-                {/* Resumen recalculado solo con las zonas efectivamente
-                    ubicadas — ver computeSummary(). */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between rounded-md bg-background/40 p-2.5">
-                    <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Boxes className="h-4 w-4 flex-shrink-0 text-primary/70" /> Volumen total
-                    </span>
-                    <span className="text-sm font-semibold">
-                      {zoomAnalysis.summary.totalVolumeM3} m³
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between rounded-md bg-background/40 p-2.5">
-                    <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Scale className="h-4 w-4 flex-shrink-0 text-primary/70" /> Peso total
-                    </span>
-                    <span className="text-sm font-semibold">
-                      {zoomAnalysis.summary.totalWeightKg} kg
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between rounded-md bg-background/40 p-2.5">
-                    <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Crosshair className="h-4 w-4 flex-shrink-0 text-primary/70" /> Área total
-                    </span>
-                    <span className="text-sm font-semibold">
-                      {zoomAnalysis.summary.totalAreaM2} m²
-                    </span>
-                  </div>
-                </div>
-
-                {/* Zonas detectadas — mismo detalle que ya se ve en /analysis.
-                    max-h fijo (no flex-1): el flex-1 dependía de una altura
-                    real del grid de 2 columnas de arriba, que no la tiene
-                    (las filas de grid se ajustan a su contenido por
-                    default) -- con muchos tipos de basura, el scroll
-                    terminaba pasando al DialogContent completo (imagen
-                    incluida) en vez de quedar contenido solo en esta lista. */}
-                <div className="flex flex-col">
-                  <p className="mb-2 text-xs font-semibold text-muted-foreground">
-                    Zonas detectadas
-                  </p>
-                  <ul className="max-h-[17.5rem] space-y-1.5 overflow-y-auto pr-0.5">
-                    {zoomAnalysis.detections.map((d) => (
-                      <li
-                        key={d.id}
-                        className="rounded-md border border-border/60 bg-background/60 p-2 text-xs"
-                      >
-                        <div className="flex items-center gap-2">
-                          <span
-                            className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
-                            style={{ backgroundColor: classColor(d.wasteClass) }}
-                          />
-                          <span className="min-w-0 flex-1 truncate font-medium">
-                            {d.wasteClass}
-                          </span>
-                        </div>
-                        <p className="mt-1 pl-4.5 text-muted-foreground">
-                          {d.volumeM3 != null ? `${d.volumeM3} m³` : "—"}
-                          {" · "}
-                          {d.weightKg != null ? `${d.weightKg} kg` : "—"}
-                          {" · "}
-                          {d.areaM2 != null ? `${d.areaM2} m²` : "—"}
-                        </p>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+      />
 
       {/* Ficha de datos de un punto (HDU6) — no hay mapa/imagen que ampliar
           como en zoomAnalysis, así que es una sola columna con la
