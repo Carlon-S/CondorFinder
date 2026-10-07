@@ -983,6 +983,13 @@ def _parcializar(zona: dict, volumen: float) -> dict:
     """
     total = zona["volumeM3"]
     fraccion = volumen / total if total > 0 else 0
+    # El volumen de la ZONA, que no es el de la parada cuando ya venía recortada.
+    # Se conserva el original para que la vista siga pudiendo decir "se retiran 8
+    # de 12,4 m³": sin esto, recortar dos veces (la segunda ocurre cuando la
+    # autonomía obliga a despachar un vehículo más chico) haría que la cifra de
+    # referencia fuera el recorte anterior y el pendiente saliera menor que el
+    # real.
+    volumen_de_la_zona = zona.get("volumenZonaM3", total)
     return {
         **zona,
         "volumeM3": volumen,
@@ -991,10 +998,43 @@ def _parcializar(zona: dict, volumen: float) -> dict:
             clase: vol * fraccion for clase, vol in (zona.get("clasesPorVolumen") or {}).items()
         },
         # Lo que la vista necesita para decir "se retiran 8 de 12,4 m³".
-        "volumenZonaM3": total,
-        "pesoZonaKg": zona.get("weightTon", 0) * 1000,
-        "pendienteM3": total - volumen,
+        "volumenZonaM3": volumen_de_la_zona,
+        "pesoZonaKg": zona.get("pesoZonaKg", zona.get("weightTon", 0) * 1000),
+        "pendienteM3": volumen_de_la_zona - volumen,
     }
+
+
+def _recortar_a_capacidad(stops: list[dict], capacidad: float) -> list[dict] | None:
+    """Las mismas paradas cargando `capacidad` entre todas, o None si no se puede.
+
+    **Conserva TODAS las paradas, o devuelve None.** No descarta ninguna a
+    propósito: una zona que desaparece acá adentro se iría del plan sin aparecer
+    en `unassignedZones`, o sea sin motivo y sin que nadie se entere. Descartar
+    es trabajo del handler, que es quien sabe escribir el porqué (AC6).
+
+    El reparto es proporcional y no por orden ascendente como el del handler,
+    porque acá no se está decidiendo qué zonas entran (eso ya se decidió) sino
+    cuánto se lleva de cada una cuando el vehículo que puede hacer el viaje es
+    más chico que el que se había elegido.
+    """
+    total = sum(s["volumeM3"] for s in stops)
+    if total <= capacidad:
+        return list(stops)
+    if capacidad <= 0:
+        return None
+    fraccion = capacidad / total
+    recortadas = []
+    for s in stops:
+        if s["volumeM3"] <= 0:
+            recortadas.append(s)
+            continue
+        nuevo = s["volumeM3"] * fraccion
+        if nuevo < _MINIMO_RETIRO_M3:
+            # Esta parada quedaría por debajo del mínimo para mandar un camión.
+            # No se la saca: se devuelve None y decide el handler.
+            return None
+        recortadas.append(_parcializar(s, nuevo))
+    return recortadas
 
 
 # =============================================================================
@@ -1247,9 +1287,65 @@ async def _build_subroute(
     if clase_preferida:
         clase_dominante = clase_preferida
 
+    # ── Elegir vehículos, y REELEGIR si los elegidos no llegan ──
+    #
+    # El conjunto se arma por capacidad, sin saber todavía cuán largo es el
+    # recorrido, y recién después se comprueba la autonomía. Cuando ninguna orden
+    # cabía en el rango, el recorrido se daba por imposible y la zona se
+    # descartaba, aunque hubiera un vehículo más chico capaz de hacer el viaje
+    # llevando menos: con dos amplirolls de 20 km de rango y seis tolvas sin
+    # límite, un recorrido de 40 km no se hacía, cuando una tolva lo hacía
+    # perfectamente con 10 m³ en vez de 40.
+    #
+    # Ahora, si el conjunto no llega, se saca a los de rango corto y se vuelve a
+    # elegir cargando lo que la flota restante pueda. Es la misma degradación que
+    # el retiro parcial hace con la capacidad: mover menos antes que no ir.
+    #
+    # El bucle termina siempre, porque cada vuelta saca al menos un vehículo del
+    # pool y se corta cuando queda vacío o cuando ya no se puede recortar la
+    # carga sin dejar una parada bajo el mínimo.
+    flota = list(point.get("trucks") or [])
+    stops_actuales = point_stops
+    # El orden ya validado, para no volver a pedir la matriz mas abajo: cada
+    # llamada a _best_stop_order es una peticion a OSRM, y recalcular lo que el
+    # bucle acaba de resolver seria pagarla dos veces por generacion.
+    order_result = None
+    while True:
+        punto_pool = {**point, "trucks": flota}
+        volumen_sub = sum(s["volumeM3"] for s in stops_actuales)
+        peso_sub = sum(s.get("weightTon", 0) for s in stops_actuales)
+        camiones = _trucks_used(punto_pool, volumen_sub, peso_sub, clase_dominante, personal)
+        if camiones:
+            autonomias = [c["autonomia_km"] for c in camiones if c.get("autonomia_km")]
+            rango = min(autonomias) if autonomias else None
+            if rango is None:
+                break
+            prueba = await _best_stop_order(origin, stop_coords, rango)
+            if prueba is None:
+                return None
+            if prueba != "sin_autonomia":
+                order_result = prueba
+                break
+            # No llega. Se prueba con los que sí: los que no declaran rango y los
+            # que declaran uno mayor.
+            resto = [c for c in flota if not c.get("autonomia_km") or c["autonomia_km"] > rango]
+            if not resto or len(resto) == len(flota):
+                return {"excedeAutonomia": True, "autonomiaKm": rango}
+            cabe = _capacidad_con_personal([{**point, "trucks": resto}], personal)
+            tope = sum(c.get("capacity_m3", 0) or 0 for c in resto)
+            if cabe is not None:
+                tope = min(tope, cabe)
+            recortadas = _recortar_a_capacidad(stops_actuales, tope)
+            if recortadas is None:
+                return {"excedeAutonomia": True, "autonomiaKm": rango}
+            flota = resto
+            stops_actuales = recortadas
+            continue
+        break
+
+    point_stops = stops_actuales
     volumen_sub = sum(s["volumeM3"] for s in point_stops)
     peso_sub = sum(s.get("weightTon", 0) for s in point_stops)
-    camiones = _trucks_used(point, volumen_sub, peso_sub, clase_dominante, personal)
 
     if not camiones and personal is not None:
         # ¿Fue el personal el que faltó? Se repite la selección ignorándolo: si
@@ -1286,11 +1382,14 @@ async def _build_subroute(
     autonomias = [c["autonomia_km"] for c in camiones if c.get("autonomia_km")]
     autonomia_km = min(autonomias) if autonomias else None
 
-    order_result = await _best_stop_order(origin, stop_coords, autonomia_km)
+    # Sin rango declarado el bucle corta antes de pedir el orden, asi que acá se
+    # pide una sola vez. Con rango, el bucle ya lo resolvió y lo trae resuelto.
     if order_result is None:
-        return None
-    if order_result == "sin_autonomia":
-        return {"excedeAutonomia": True, "autonomiaKm": autonomia_km}
+        order_result = await _best_stop_order(origin, stop_coords, autonomia_km)
+        if order_result is None:
+            return None
+        if order_result == "sin_autonomia":
+            return {"excedeAutonomia": True, "autonomiaKm": autonomia_km}
     order, ida_seconds, descarga_seconds, regreso_seconds = order_result
 
     total_hours = (ida_seconds + descarga_seconds + regreso_seconds) / 3600
