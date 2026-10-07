@@ -42,6 +42,13 @@ export const ROUTE_RETURN_COLOR = "#A21CAF";
 export const ROUTE_RETURN_OPACITY = 1;
 export const ROUTE_DISPOSAL_OPACITY = 1;
 
+// Se evaluó puntear el regreso para distinguirlo donde comparte calle con el
+// tramo de descarga, y **no hacía falta**: los dos trazos sí se distinguen,
+// porque OSRM rutea cada sentido por su propia calzada y quedan uno al lado del
+// otro, no encima. Lo que se confunde a zoom muy alto es la precisión del
+// trazado, que es la geometría que devuelve el proveedor y no algo que un estilo
+// pueda arreglar. Queda anotado para no volver a intentarlo.
+
 // Borde oscuro debajo de todos los trazos (técnica de "casing" cartográfico),
 // que los separa del fondo del mapa sin importar qué colores tenga debajo.
 // Neutro y no azul, ahora que los trazos ya no son todos de la familia azul.

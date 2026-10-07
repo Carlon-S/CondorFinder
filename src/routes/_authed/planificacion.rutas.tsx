@@ -127,6 +127,7 @@ import {
 } from "@/lib/routePlan";
 import { RouteTimeline, type DatosDeParada } from "@/components/RouteTimeline";
 import { ZoneZoomDialog } from "@/components/ZoneZoomDialog";
+import { RouteLegend } from "@/components/RouteLegend";
 import { classColor } from "@/components/zone-colors";
 import { reverseGeocode } from "@/lib/geocoding";
 import { notify } from "@/lib/notify";
@@ -1351,6 +1352,11 @@ function RutasPage() {
           >
             <Crosshair className="mr-1.5 h-3.5 w-3.5" /> Centrar en Maipú
           </Button>
+
+          {/* Solo con un recorrido dibujado: sin trazo, la leyenda explicaría
+              colores que no están en pantalla y ocuparía una esquina del mapa
+              para no decir nada. */}
+          {routeOutboundPaths && routeOutboundPaths.length > 0 && <RouteLegend />}
 
           {mapDataLoading && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/60">
