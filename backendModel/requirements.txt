@@ -57,7 +57,11 @@ rasterstats
 geopandas
 pyproj
 pymongo>=4.13
-PyJWT
+# El extra [crypto] trae `cryptography`, necesario para verificar firmas RS256.
+# Los id_token de Microsoft y Google vienen firmados con RS256; sin el extra,
+# PyJWT solo sabe HS256 (que es lo que usa nuestra propia cookie de sesión) y la
+# verificación del token del proveedor falla en tiempo de ejecución.
+PyJWT[crypto]
 pwdlib[argon2]
 python-dotenv
 google-cloud-storage

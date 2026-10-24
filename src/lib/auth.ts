@@ -34,7 +34,15 @@ import { BACKEND_URL, CLIENT_BACKEND_URL } from "./config";
 import { clearCachedAuth, loadCachedAuth, saveCachedAuth } from "./authState";
 
 export interface CurrentUser {
+  /** El identificador de la sesión. Desde el inicio de sesión federado lleva el
+   *  correo de la persona, y es lo que queda como `owner` de cada zona,
+   *  análisis y recurso que crea. Conserva el nombre `username` porque ese
+   *  campo alimenta `owner` en ocho lugares del backend: renombrarlo es churn
+   *  mecánico sin beneficio funcional. */
   username: string;
+  /** El nombre para mostrar que entrega el proveedor. Ausente cuando la sesión
+   *  viene del login por contraseña de desarrollo, que no tiene ninguno. */
+  name?: string | null;
 }
 
 // login/logout corren en el navegador — usan CLIENT_BACKEND_URL (relativa,

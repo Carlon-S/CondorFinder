@@ -165,13 +165,17 @@ export function AppSidebar() {
               los demás íconos del sidebar. Ícono de usuario por defecto: no
               hay fotos de perfil todavía, es un placeholder momentáneo. */}
           <CircleUserRound className="h-4 w-4 flex-shrink-0 text-sidebar-foreground/70" />
+          {/* El nombre si el proveedor lo entregó, y si no el correo. El correo
+              va igual en el `title`, porque con varias personas de la misma
+              municipalidad puede haber dos "Marcos" y lo que las distingue es
+              la dirección. */}
           <span
-            title={collapsed ? user.username : undefined}
+            title={user.username}
             className={`overflow-hidden truncate whitespace-nowrap text-sm font-medium transition-[max-width,opacity] duration-300 ease-in-out ${
               collapsed ? "max-w-0 opacity-0" : "max-w-[10rem] opacity-100"
             }`}
           >
-            {user.username}
+            {user.name || user.username}
           </span>
         </div>
 

@@ -10,6 +10,7 @@ from pymongo.asynchronous.database import AsyncDatabase
 from shapely.geometry import Polygon
 
 import auth as auth_module
+import auditoria
 import task_store
 
 # =============================================================================
@@ -693,6 +694,9 @@ async def rename_zone(
     )
     if not doc:
         raise HTTPException(status_code=404, detail="Zona no encontrada")
+    await auditoria.registrar(
+        current_user.username, "renombrar", "zona", zone_id, {"nombre": nombre}
+    )
     return ZoneOut(id=str(doc["_id"]), owner=doc["owner"], name=doc["name"], createdAt=doc["createdAt"])
 
 
@@ -727,6 +731,9 @@ async def rename_analysis(
     )
     if not doc:
         raise HTTPException(status_code=404, detail="Análisis no encontrado")
+    await auditoria.registrar(
+        current_user.username, "renombrar", "version", analysis_id, {"nombre": nombre}
+    )
     return _to_out(doc)
 
 
@@ -860,6 +867,17 @@ async def delete_analysis(
     doc = await get_db().analyses.find_one_and_delete({"_id": _object_id(analysis_id)})
     if not doc:
         raise HTTPException(status_code=404, detail="Análisis no encontrado")
+
+    # El nombre y la zona se copian DENTRO de la bitácora porque el documento
+    # que los tenía acaba de dejar de existir. Sin eso, el registro diría que
+    # alguien borró un id y nadie podría saber nunca qué era.
+    await auditoria.registrar(
+        current_user.username,
+        "eliminar",
+        "analisis",
+        analysis_id,
+        {"nombre": doc.get("name"), "zoneId": doc.get("zoneId")},
+    )
 
     # (1) Se sueltan los punteros que apuntaban a este análisis, para no dejar
     # capturas marcadas como reemplazadas por un id que ya no existe. Esto por

@@ -14,6 +14,7 @@ from pymongo import ReturnDocument
 from pymongo.asynchronous.database import AsyncDatabase
 
 import auth as auth_module
+import auditoria
 import google_places
 import street_view
 
@@ -309,6 +310,15 @@ async def delete_point(
     result = await get_db().resource_points.delete_one({"_id": oid})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Punto no encontrado")
+    # Borrar un punto se lleva TODA su flota por delante, asi que el registro
+    # tiene que decir cual era: es el borrado mas destructivo del sistema.
+    await auditoria.registrar(
+        current_user.username,
+        "eliminar",
+        "punto",
+        point_id,
+        {"nombre": (previo or {}).get("name")},
+    )
     # La foto se va con el punto: nada más la referencia, y quedaría ocupando
     # disco sin forma de saber de qué lugar era.
     if previo:
@@ -950,9 +960,17 @@ async def delete_resource(
     resource_id: str,
     current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
 ):
+    previo = await get_db().resources.find_one({"_id": _object_id(resource_id)})
     result = await get_db().resources.delete_one({"_id": _object_id(resource_id)})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Recurso no encontrado")
+    await auditoria.registrar(
+        current_user.username,
+        "eliminar",
+        "recurso",
+        resource_id,
+        {"tipo": (previo or {}).get("tipo"), "patente": (previo or {}).get("patente")},
+    )
     return {"message": "Recurso eliminado"}
 
 

@@ -12,6 +12,7 @@ from pyproj import Transformer
 
 import auth as auth_module
 import osrm_client
+from rate_limit import limitar
 import resources as resources_module
 import routes_provider
 
@@ -1534,7 +1535,13 @@ async def _build_subroute(
 router = APIRouter(prefix="/routes", tags=["routes"])
 
 
-@router.post("/generate")
+# El tope existe por COSTO, no por seguridad: cada generacion es una llamada a
+# la Routes API de Google y la garantia de gasto es una cuota diaria de 160
+# solicitudes. Un bucle accidental en el navegador la quema en un minuto y deja
+# al sistema calculando a flujo libre el resto del dia. 30 por hora y por
+# persona es muy por encima de cualquier uso real: planificar una jornada son
+# unas pocas generaciones.
+@router.post("/generate", dependencies=[Depends(limitar("rutas", 30, 3600))])
 async def generate_route(
     payload: RoutePlanRequestIn,
     current_user: auth_module.UserOut = Depends(auth_module.get_current_user),

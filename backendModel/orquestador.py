@@ -6,7 +6,7 @@ import json
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import Depends, FastAPI, File, Request, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
@@ -31,6 +31,8 @@ import routing as routing_module
 import analyses as analyses_module
 import task_store
 import storage as storage_module
+import auditoria
+from rate_limit import limitar
 
 
 # =============================================================================
@@ -48,6 +50,7 @@ async def lifespan(app: FastAPI):
     mongo_client = AsyncMongoClient(os.environ["MONGODB_URI"])
     db = mongo_client[os.environ.get("MONGODB_DB_NAME", "condorfinder")]
     auth_module.set_db(db)
+    auditoria.set_db(db)
     resources_module.set_db(db)
     routing_module.set_db(db)
     analyses_module.set_db(db)
@@ -93,6 +96,10 @@ async def lifespan(app: FastAPI):
     # seguro de usar ahí. Misma URI/base, dos conexiones al mismo lugar.
     sync_mongo_client = MongoClient(os.environ["MONGODB_URI"])
     sync_db = sync_mongo_client[os.environ.get("MONGODB_DB_NAME", "condorfinder")]
+    # Bitacora: quien borro o renombro que. Indice por fecha descendente, que
+    # es como se consulta siempre ("que paso ultimamente").
+    await auditoria.create_index()
+
     task_store.set_db(db, sync_db)
     await db.tasks.create_index([("status", 1), ("reviewed", 1), ("created_at", 1)])
 
@@ -109,7 +116,53 @@ async def lifespan(app: FastAPI):
     await mongo_client.close()
 
 
-app = FastAPI(lifespan=lifespan)
+# =============================================================================
+# SESIÓN OBLIGATORIA EN TODA LA APLICACIÓN
+#
+# **Esto antes no existía y era un agujero real.** Los routers (`auth`,
+# `resources`, `routing`, `analyses`) piden sesión endpoint por endpoint, pero
+# los de este archivo no pedían ninguna: `POST /generate`, `POST /upload`,
+# `DELETE /status/{id}`, `DELETE /result/{f}`, `DELETE /finals/{f}` y
+# `DELETE /task-images/{id}` estaban abiertos en `api.condorfinder.cl`.
+# Cualquiera con `curl` podía ocupar la VM cuarenta minutos o borrar datos.
+#
+# CORS no cubría nada de eso: es una política del NAVEGADOR y una petición desde
+# `curl` la ignora por completo.
+#
+# Va como dependencia GLOBAL y no endpoint por endpoint a propósito: con veinte
+# endpoints, agregar el parámetro en cada uno significa que el día que alguien
+# escriba el veintiuno y se olvide, el agujero vuelve en silencio. Acá hay que
+# pedir explícitamente ser público para serlo.
+# =============================================================================
+
+# Lo único que queda abierto, y por qué cada uno:
+#
+# - `/auth/...`: es la puerta. Pedir sesión para iniciar sesión no cierra.
+# - `GET /result/...` y `GET /task-images/...`: los sirve un `<img>` del
+#   navegador, y una imagen cross-origin NO manda cookies, así que exigirlas
+#   rompería las miniaturas en producción. Siguen siendo de lectura y su
+#   contenido ya es alcanzable por la URL pública de GCS, así que no se pierde
+#   nada que no estuviera perdido. **Los DELETE de esas mismas rutas SÍ quedan
+#   protegidos**, que es donde estaba el daño.
+_PREFIJOS_PUBLICOS = ("/auth/",)
+_LECTURAS_PUBLICAS = ("/result/", "/task-images/")
+
+
+async def exigir_sesion(request: Request) -> None:
+    # El preflight de CORS viaja sin cookies por definición: exigirle sesión
+    # haría fallar la comprobación previa y el navegador nunca mandaría la
+    # petición real.
+    if request.method == "OPTIONS":
+        return
+    ruta = request.url.path
+    if ruta.startswith(_PREFIJOS_PUBLICOS) or ruta in ("/", "/docs", "/openapi.json"):
+        return
+    if request.method == "GET" and ruta.startswith(_LECTURAS_PUBLICAS):
+        return
+    await auth_module.get_current_user(request)
+
+
+app = FastAPI(lifespan=lifespan, dependencies=[Depends(exigir_sesion)])
 
 # localhost:8080 siempre permitido (desarrollo local), EXTRA_CORS_ORIGINS
 # (coma-separado) agrega el/los orígenes del frontend desplegado sin
@@ -227,7 +280,11 @@ async def is_pipeline_busy() -> bool:
 # ENDPOINTS DE CARGA DE IMÁGENES (lógica existente, sin cambios)
 # =============================================================================
 
-@app.post("/upload")
+# El pipeline ocupa la VM entera por decenas de minutos, asi que el tope es por
+# uso de maquina. Las imagenes suben en tandas (ver src/lib/unify.ts), asi que
+# un vuelo de 84 fotos son varias peticiones: por eso el tope de subida es alto
+# y el de generacion bajo.
+@app.post("/upload", dependencies=[Depends(limitar("subida", 120, 3600))])
 async def upload_images(images: List[UploadFile] = File(...)):
     if await is_pipeline_busy():
         raise HTTPException(
@@ -518,7 +575,7 @@ class GenerateRequest(BaseModel):
     opc: int = 0
 
 
-@app.post("/generate")
+@app.post("/generate", dependencies=[Depends(limitar("generacion", 10, 3600))])
 async def generate_map(request: GenerateRequest = GenerateRequest()):
     """
     Inicia el pipeline join + detect en background.
