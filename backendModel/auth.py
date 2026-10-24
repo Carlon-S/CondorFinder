@@ -324,15 +324,21 @@ def _app_url() -> str:
 
 
 def _redirect_uri(request: Request, proveedor: str) -> str:
-    """La URI de retorno, derivada del origen por el que entró la petición.
+    """La URI de retorno. Tiene que coincidir EXACTA con la registrada en la consola.
 
-    Se arma así y no desde una constante porque tiene que coincidir **exacta**
-    con una de las registradas en la consola del proveedor, y hay dos orígenes
-    legítimos (el dominio de producción y localhost). Derivarla del request deja
-    que la misma imagen sirva a los dos sin una variable más.
+    Manda `PUBLIC_BASE_URL` y solo se cae al origen de la petición cuando no
+    está definida, que es el caso de desarrollo local.
+
+    No se deriva del request en la VM porque ahí sale mal: uvicorn solo hace
+    caso a `X-Forwarded-Proto` cuando viene de `127.0.0.1`, y Caddy llega desde
+    la red interna de compose, así que `request.base_url` dice `http` sobre un
+    sitio que es `https`. El proveedor rechazaría el canje por una URI que no
+    coincide, y el error llega como un `redirect_uri_mismatch` que no nombra el
+    esquema. Que la variable ya exista y ya esté puesta en la VM hace que esto
+    no agregue configuración nueva.
     """
-    base = str(request.base_url).rstrip("/")
-    return f"{base}/auth/oidc/{proveedor}/callback"
+    base = os.environ.get("PUBLIC_BASE_URL") or str(request.base_url)
+    return f"{base.rstrip('/')}/auth/oidc/{proveedor}/callback"
 
 
 def _destino_seguro(destino: str | None) -> str:
