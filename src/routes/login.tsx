@@ -46,7 +46,7 @@
 
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Loader2 } from "@/components/icons/Icons";
+import { Loader2, Users } from "@/components/icons/Icons";
 import { Button } from "@/components/ui/button";
 import { CLIENT_BACKEND_URL } from "@/lib/config";
 import logoOscuro from "@/assets/Logo/logo-dark-mode.svg";
@@ -148,44 +148,56 @@ function LoginPage() {
         className="pointer-events-none absolute left-1/2 top-1/2 h-[44rem] w-[44rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(255,197,61,0.055),transparent_62%)]"
       />
 
-      <main className="relative z-10 w-full max-w-sm">
-        {/* p-10 y no p-8: las esquinas de `.detect-frame` ocupan de 10px a 36px
-            desde el borde, así que con menos aire el primer elemento quedaría
-            pisado por el trazo. */}
-        <div className="detect-frame animate-in fade-in zoom-in-95 duration-500 fill-mode-both rounded-xl border border-border bg-card p-10 shadow-2xl shadow-black/40">
+      <main className="relative z-10 w-full max-w-md">
+        {/* Todo centrado: con una sola acción adentro, una tarjeta alineada a
+            la izquierda deja una columna de aire muerto a la derecha de cada
+            línea. El padding es generoso y uniforme porque las esquinas de
+            `.detect-frame` ocupan de 10px a 36px desde el borde, así que con
+            menos aire el primer elemento quedaría pisado por el trazo. */}
+        <div className="detect-frame animate-in fade-in zoom-in-95 duration-500 fill-mode-both rounded-xl border border-border bg-card px-10 py-12 text-center shadow-2xl shadow-black/40">
           <span className="detect-corners" aria-hidden="true" />
 
-          <img src={logoOscuro} alt="CondorFinder" className="h-12 w-auto" />
+          <img src={logoOscuro} alt="CondorFinder" className="mx-auto h-20 w-auto" />
 
-          <p className="eyebrow mt-7">Detección de microbasurales</p>
+          <p className="eyebrow mt-8 justify-center">Detección de microbasurales</p>
 
-          <h1 className="font-rubik text-2xl font-semibold tracking-normal text-foreground">
+          <h1 className="font-rubik text-3xl font-semibold tracking-normal text-foreground">
             Iniciar sesión
           </h1>
 
-          <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">
+          <p className="mx-auto mt-3 max-w-[22rem] text-sm leading-relaxed text-muted-foreground">
             Detección automatizada de basurales desde imágenes aéreas, con cálculo de volumen y
             planificación de retiro.
           </p>
 
           {motivo && (
-            <p className="mt-6 animate-in fade-in duration-200 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-xs leading-relaxed text-destructive-strong">
+            <p className="mt-7 animate-in fade-in duration-200 rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-xs leading-relaxed text-destructive-strong">
               {MENSAJES[motivo] ?? "No se pudo iniciar sesión. Intenta nuevamente."}
             </p>
           )}
 
-          <div className="mt-7">
+          <div className="mt-8">
             {disponibles === null ? (
               // Un marcador de carga y no los botones deshabilitados: un botón
               // que aparece apagado y después se enciende se lee como si
               // hubiera fallado algo.
-              <div className="flex h-11 items-center justify-center rounded-md border border-border">
+              <div className="flex h-12 items-center justify-center rounded-md border border-border">
                 <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
               </div>
             ) : hayMicrosoft ? (
+              // Claro y NO el amarillo de `--cta`, que es el variant por
+              // omisión. El logotipo de Microsoft lleva un cuadrado amarillo
+              // (#ffba08) que sobre el amarillo de marca se pierde y ensucia
+              // los otros tres. Sus propias guías piden fondo blanco o negro.
+              //
+              // `bg-primary` y no un hex: en `.login-dark` ese token ya es
+              // #EDF1F9 sobre texto navy, así que el color sigue saliendo del
+              // tema. El amarillo se queda donde no compite: el guion del
+              // eyebrow y las esquinas del marco.
               <Button
+                variant="secondary"
                 size="lg"
-                className="h-11 w-full"
+                className="h-12 w-full bg-primary text-base text-primary-foreground hover:bg-primary/90"
                 onClick={() => entrarCon("microsoft")}
                 disabled={yendo !== null}
               >
@@ -197,7 +209,7 @@ function LoginPage() {
                 Continuar con Microsoft
               </Button>
             ) : (
-              <p className="rounded-md border border-dashed border-border px-3 py-3 text-xs leading-relaxed text-muted-foreground">
+              <p className="rounded-md border border-dashed border-border px-4 py-3 text-xs leading-relaxed text-muted-foreground">
                 El inicio de sesión con Microsoft todavía no está configurado en este servidor.
               </p>
             )}
@@ -207,7 +219,7 @@ function LoginPage() {
             // Solo en desarrollo: en la VM `ALLOW_PASSWORD_LOGIN` no está
             // definida y el endpoint devuelve 404, así que este aviso no
             // aparece nunca en producción.
-            <p className="mt-5 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-[0.6875rem] leading-relaxed text-muted-foreground">
+            <p className="mt-5 rounded-md border border-warning/40 bg-warning/10 px-4 py-2.5 text-[0.6875rem] leading-relaxed text-muted-foreground">
               El inicio de sesión con contraseña sigue habilitado en este servidor. Es para
               desarrollo local y no debería estar activo en producción.
             </p>
@@ -223,19 +235,15 @@ function LoginPage() {
               esconder. El clic de más es lo que separa al que lo busca del que
               lo encuentra de casualidad. */}
           {hayGoogle && (
-            <div className="mt-7">
+            <div className="mt-8 border-t border-border pt-6">
               {equipoVisible ? (
                 <div className="animate-in fade-in slide-in-from-top-1 duration-300">
-                  <div className="flex items-center gap-3">
-                    <span className="h-px flex-1 bg-border" />
-                    <span className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">
-                      Equipo CondorFinder
-                    </span>
-                    <span className="h-px flex-1 bg-border" />
-                  </div>
+                  <p className="text-[0.625rem] uppercase tracking-[0.14em] text-muted-foreground">
+                    Equipo CondorFinder
+                  </p>
                   <Button
                     variant="outline"
-                    className="mt-4 h-10 w-full"
+                    className="mt-4 h-11 w-full"
                     onClick={() => entrarCon("google")}
                     disabled={yendo !== null}
                   >
@@ -248,11 +256,16 @@ function LoginPage() {
                   </Button>
                 </div>
               ) : (
+                // `cursor-pointer` explícito: Tailwind v4 cambió el preflight y
+                // un <button> ya no lo trae solo. Los de `components/ui/button`
+                // lo tienen en la base de `buttonVariants`, este no pasa por
+                // ahí, y sin el cursor el enlace no se anunciaba como apretable.
                 <button
                   type="button"
                   onClick={() => setEquipoVisible(true)}
-                  className="text-[0.6875rem] text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
+                  className="mx-auto flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
+                  <Users className="h-3.5 w-3.5" />
                   Acceso del equipo de desarrollo
                 </button>
               )}
