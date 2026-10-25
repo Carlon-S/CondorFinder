@@ -319,11 +319,15 @@ const DETECCIONES = [
   },
 ];
 
-/** El período de `login-scan`, en segundos. Vive acá porque de él sale el
- *  retardo de cada zona: compartir el número es lo que hace que la franja
- *  parezca la causa de que se enciendan. Si se cambia en styles.css, cambiarlo
- *  también acá o las dos cosas vuelven a ser bucles independientes. */
-const CICLO_S = 14;
+/** Las zonas se dibujan de arriba hacia abajo, escalonadas por su altura en el
+ *  lienzo. Es un orden y no un desorden: el ojo lee la pantalla en esa
+ *  dirección, así que coincidir con ella hace que la entrada se sienta
+ *  ordenada en vez de aleatoria.
+ *
+ *  2,5 segundos de desfase total más 1,8 de dibujado dejan todo quieto antes de
+ *  los cuatro segundos. Repartirlo en más tiempo haría que la última zona
+ *  siguiera apareciendo cuando la persona ya está mirando el botón. */
+const DESFASE_S = 2.5;
 const ALTO_LIENZO = 900;
 
 /** Las cuatro esquinas en L alrededor de una caja, el mismo dibujo que
@@ -338,7 +342,8 @@ function Marco({ caja, retardo }: { caja: [number, number, number, number]; reta
   const b = 14;
   return (
     <path
-      className="zona-marco"
+      className="zona-trazo"
+      pathLength={1}
       style={{ animationDelay: retardo }}
       d={[
         `M${x1} ${y1 + b} L${x1} ${y1} L${x1 + b} ${y1}`,
@@ -373,38 +378,24 @@ function CampoDeDetecciones() {
           cuenta. Animando polígono por polígono el fondo se vería hervir. */}
       <g className="campo-deriva">
         {DETECCIONES.map((zona) => {
-          // El retardo sale de la ALTURA de la zona: la franja de `login-scan`
-          // baja en el mismo período, así que cada una se enciende cuando le
-          // pasa por encima. Dos zonas a la misma altura arrancan juntas, que
-          // es lo correcto, no una coincidencia a evitar.
-          const retardo = `${((zona.y / ALTO_LIENZO) * CICLO_S).toFixed(2)}s`;
+          // El retardo sale de la ALTURA de la zona, así que se dibujan de
+          // arriba hacia abajo. Dos a la misma altura arrancan juntas, que es
+          // lo correcto y no una coincidencia a evitar.
+          const retardo = `${((zona.y / ALTO_LIENZO) * DESFASE_S).toFixed(2)}s`;
           return (
             <g key={zona.d}>
-              {/* Capa quieta: nunca se apaga. Es lo que impide que el fondo
-                  quede vacío entre pasadas. */}
-              <path
-                d={zona.d}
-                fill={zona.color}
-                fillOpacity={0.035}
-                stroke={zona.color}
-                strokeOpacity={0.1}
-                strokeWidth={1.5}
-              />
-              {/* Capa de realce: el relleno aparece y el contorno se dibuja. */}
-              <path
-                className="zona-relleno"
-                style={{ animationDelay: retardo }}
-                d={zona.d}
-                fill={zona.color}
-                stroke="none"
-              />
+              {/* Un solo path: el `stroke-dasharray` del dibujado afecta nada
+                  más que el contorno, así que el relleno queda quieto desde el
+                  primer cuadro sin necesitar una capa aparte. */}
               <path
                 className="zona-trazo"
                 style={{ animationDelay: retardo }}
                 pathLength={1}
                 d={zona.d}
-                fill="none"
+                fill={zona.color}
+                fillOpacity={0.05}
                 stroke={zona.color}
+                strokeOpacity={0.22}
                 strokeWidth={1.5}
               />
               {zona.marco && (

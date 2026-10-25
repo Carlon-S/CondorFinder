@@ -603,41 +603,24 @@ html {
    apaga nunca. Un fondo que se vacía unos segundos por ciclo se lee como un
    error, no como una pausa. */
 @keyframes zona-trazo {
-  0%        { stroke-dashoffset: 1; stroke-opacity: 0; }
-  14%       { stroke-dashoffset: 0; stroke-opacity: 0.34; }
-  46%       { stroke-dashoffset: 0; stroke-opacity: 0.34; }
-  70%, 100% { stroke-dashoffset: 0; stroke-opacity: 0; }
+  from { stroke-dashoffset: 1; }
+  to   { stroke-dashoffset: 0; }
 }
 
+/* UNA SOLA VEZ, no en bucle. Es el gesto de delinear una zona encontrada, y
+   eso ocurre una vez: repetirlo cada pocos segundos lo convertiría en un
+   adorno que parpadea al lado del único botón de la página.
+
+   `backwards` mantiene el trazo sin dibujar durante el retardo. Sin eso, un
+   polígono con retardo aparecería entero y recién después empezaría a
+   dibujarse, que es el orden al revés.
+
+   El relleno NO se anima: queda quieto desde el primer cuadro. Y como nada se
+   apaga, tampoco hace falta la capa de respaldo que sí necesitaba la versión
+   que entraba y salía. */
 .zona-trazo {
   stroke-dasharray: 1;
-  animation: zona-trazo 14s ease-in-out infinite;
-}
-
-@keyframes zona-marco {
-  0%, 12%   { opacity: 0; transform: scale(1.08); }
-  22%       { opacity: 1; transform: scale(1); }
-  46%       { opacity: 1; transform: scale(1); }
-  70%, 100% { opacity: 0; transform: scale(1); }
-}
-
-/* transform-box: fill-box para que el scale tome como centro la caja del
-   propio dibujo y no el origen del lienzo de 1440x900, donde el marco saldría
-   disparado hacia la esquina. */
-.zona-marco {
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: zona-marco 14s ease-in-out infinite;
-}
-
-@keyframes zona-relleno {
-  0%, 10%   { fill-opacity: 0; }
-  26%, 46%  { fill-opacity: 0.07; }
-  70%, 100% { fill-opacity: 0; }
-}
-
-.zona-relleno {
-  animation: zona-relleno 14s ease-in-out infinite;
+  animation: zona-trazo 1.8s ease-out backwards;
 }
 
 
