@@ -10,21 +10,38 @@
 // proveedor externo y acá solo se elige cuál. Nadie escribe una contraseña en
 // este sistema, así que no hay ninguna que se pueda robar en esta pantalla.
 //
-// ── La estructura ──
-// Dos columnas, tomadas de las referencias visuales: el acceso a la izquierda
-// sobre superficie clara, la marca a la derecha sobre un campo saturado. Lo que
-// NO se toma es el violeta de esas referencias, que es su marca; acá el campo
-// es el navy del tema.
+// ── Una tarjeta centrada, no dos columnas ──
+// Esto fue dos columnas (acceso a la izquierda sobre superficie clara, marca a
+// la derecha sobre navy) y se revirtió. El motivo no es de gusto: las
+// referencias de ese patrón llenan la columna del formulario con cuatro o cinco
+// campos, y acá hay UN botón y un enlace. La mitad derecha existía para tapar
+// que la izquierda quedaba vacía.
 //
-// Las referencias llenan la columna del formulario con tres o cuatro campos y
-// nosotros tenemos dos botones, así que ese lado quedaría vacío. La salida es
-// usar esa asimetría para decir algo verdadero: **Microsoft es el botón
-// principal porque es el cliente**, y el acceso del equipo queda detrás de un
-// enlace discreto. La municipalidad ve un solo camino, que es exactamente la
-// política de acceso, y el equipo sabe dónde apretar.
+// Una tarjeta del tamaño de su contenido no tiene ese problema: con poco
+// adentro se lee como deliberada, mientras que media pantalla con lo mismo se
+// lee como incompleta. Y funciona igual en cualquier ancho, sin una maqueta
+// aparte para pantallas angostas.
 //
-// Bajo 64rem la columna de marca desaparece y queda el acceso centrado, que es
-// más o menos la pantalla anterior.
+// ── Oscura, con el navy de la marca y no negro ──
+// Toda la página va dentro de `.login-dark`, que redefine los tokens del tema
+// SOLO para este subárbol (src/styles.css). Por eso los componentes de
+// `components/ui/` toman el tratamiento oscuro sin que haya que escribir un
+// color a mano: leen `var(--card)`, `var(--border)`, etc.
+//
+// ── El marco de detección ──
+// Las cuatro esquinas en L de `.detect-frame` enmarcan la tarjeta. Es el motivo
+// de marca y además significa algo: es el recuadro con que se marca un objeto
+// detectado, que es exactamente lo que hace el producto. En CLAUDE.md está
+// escrito que la aplicación no lleva patrón de fondo, y la razón es que en las
+// vistas de trabajo cualquier textura compite con el mapa o la tabla de cifras
+// que hay que mirar. Acá no hay datos que mirar, así que la razón no aplica:
+// es una excepción razonada, no un olvido.
+//
+// ── Lo que esta pantalla NO dice ──
+// No nombra al cliente ni explica cómo está organizado el acceso. Decía "El
+// acceso está restringido a cuentas de la Municipalidad de Maipú", y eso le
+// contaba a cualquiera que abriera la página quién es el cliente y por dónde se
+// entra. En su lugar va una línea sobre qué hace el sistema.
 // =============================================================================
 
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -32,7 +49,6 @@ import { useEffect, useState } from "react";
 import { Loader2 } from "@/components/icons/Icons";
 import { Button } from "@/components/ui/button";
 import { CLIENT_BACKEND_URL } from "@/lib/config";
-import logoClaro from "@/assets/Logo/logo-light-mode.svg";
 import logoOscuro from "@/assets/Logo/logo-dark-mode.svg";
 
 export const Route = createFileRoute("/login")({
@@ -57,7 +73,7 @@ export const Route = createFileRoute("/login")({
  *  preferible un mensaje genérico a una pantalla que no dice nada. */
 const MENSAJES: Record<string, string> = {
   "organizacion-no-autorizada":
-    "Esa cuenta no pertenece a la Municipalidad de Maipú, así que no tiene acceso al sistema.",
+    "Esa cuenta no pertenece a una organización autorizada para usar el sistema.",
   "cuenta-no-autorizada": "Esa cuenta no está autorizada para entrar.",
   "sin-correo": "La cuenta con la que entraste no tiene un correo asociado.",
   "proveedor-rechazo":
@@ -70,6 +86,9 @@ const MENSAJES: Record<string, string> = {
   "token-invalido": "No se pudo validar la respuesta del proveedor.",
 };
 
+/** Las cuatro etapas del proceso, que dicen qué es esto mejor que un párrafo. */
+const ETAPAS = ["Ortomosaico", "Detección", "Volumen", "Rutas"];
+
 interface Disponibles {
   proveedores: string[];
   password: boolean;
@@ -77,7 +96,6 @@ interface Disponibles {
 
 function LoginPage() {
   const { redirect, error } = Route.useSearch();
-
   const navigate = useNavigate({ from: "/login" });
 
   const [disponibles, setDisponibles] = useState<Disponibles | null>(null);
@@ -121,21 +139,33 @@ function LoginPage() {
   const hayGoogle = disponibles?.proveedores.includes("google") ?? false;
 
   return (
-    <div className="grid min-h-screen lg:grid-cols-[2fr_3fr]">
-      {/* ── Acceso ── */}
-      <main className="flex items-center justify-center px-6 py-12">
-        <div className="w-full max-w-sm">
-          <img
-            src={logoClaro}
-            alt="CondorFinder"
-            className="h-16 w-auto animate-in fade-in zoom-in-95 duration-500 fill-mode-both"
-          />
+    <div className="login-dark relative flex min-h-screen items-center justify-center overflow-hidden px-6 py-12">
+      {/* Un resplandor amplio y muy tenue detrás de la tarjeta. No es un patrón
+          ni una textura: no tiene dibujo, solo levanta el centro del navy para
+          que la tarjeta no flote sobre un plano uniforme. */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute left-1/2 top-1/2 h-[44rem] w-[44rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(255,197,61,0.055),transparent_62%)]"
+      />
 
-          <h1 className="mt-8 animate-in fade-in slide-in-from-top-2 duration-500 delay-100 fill-mode-both font-rubik text-3xl font-semibold tracking-normal text-foreground">
+      <main className="relative z-10 w-full max-w-sm">
+        {/* p-10 y no p-8: las esquinas de `.detect-frame` ocupan de 10px a 36px
+            desde el borde, así que con menos aire el primer elemento quedaría
+            pisado por el trazo. */}
+        <div className="detect-frame animate-in fade-in zoom-in-95 duration-500 fill-mode-both rounded-xl border border-border bg-card p-10 shadow-2xl shadow-black/40">
+          <span className="detect-corners" aria-hidden="true" />
+
+          <img src={logoOscuro} alt="CondorFinder" className="h-12 w-auto" />
+
+          <p className="eyebrow mt-7">Detección de microbasurales</p>
+
+          <h1 className="font-rubik text-2xl font-semibold tracking-normal text-foreground">
             Iniciar sesión
           </h1>
-          <p className="mt-2 animate-in fade-in slide-in-from-top-2 duration-500 delay-150 fill-mode-both text-sm text-muted-foreground">
-            Entra con tu cuenta institucional para acceder al sistema.
+
+          <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">
+            Detección automatizada de basurales desde imágenes aéreas, con cálculo de volumen y
+            planificación de retiro.
           </p>
 
           {motivo && (
@@ -144,12 +174,12 @@ function LoginPage() {
             </p>
           )}
 
-          <div className="mt-8 animate-in fade-in slide-in-from-top-2 duration-500 delay-200 fill-mode-both">
+          <div className="mt-7">
             {disponibles === null ? (
               // Un marcador de carga y no los botones deshabilitados: un botón
               // que aparece apagado y después se enciende se lee como si
               // hubiera fallado algo.
-              <div className="flex h-11 items-center justify-center rounded-md border border-border/60">
+              <div className="flex h-11 items-center justify-center rounded-md border border-border">
                 <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
               </div>
             ) : hayMicrosoft ? (
@@ -164,10 +194,10 @@ function LoginPage() {
                 ) : (
                   <IconoMicrosoft />
                 )}
-                Iniciar sesión con Microsoft
+                Continuar con Microsoft
               </Button>
             ) : (
-              <p className="rounded-md border border-dashed border-border/60 px-3 py-3 text-xs text-muted-foreground">
+              <p className="rounded-md border border-dashed border-border px-3 py-3 text-xs leading-relaxed text-muted-foreground">
                 El inicio de sesión con Microsoft todavía no está configurado en este servidor.
               </p>
             )}
@@ -177,15 +207,11 @@ function LoginPage() {
             // Solo en desarrollo: en la VM `ALLOW_PASSWORD_LOGIN` no está
             // definida y el endpoint devuelve 404, así que este aviso no
             // aparece nunca en producción.
-            <p className="mt-6 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-[0.6875rem] leading-relaxed text-muted-foreground">
+            <p className="mt-5 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-[0.6875rem] leading-relaxed text-muted-foreground">
               El inicio de sesión con contraseña sigue habilitado en este servidor. Es para
               desarrollo local y no debería estar activo en producción.
             </p>
           )}
-
-          <p className="mt-10 text-[0.6875rem] leading-relaxed text-muted-foreground">
-            El acceso está restringido a cuentas de la Municipalidad de Maipú.
-          </p>
 
           {/* LA PUERTA DEL EQUIPO, DETRÁS DE UN CLIC.
               El funcionario municipal tiene que ver UN camino. Con los dos
@@ -197,7 +223,7 @@ function LoginPage() {
               esconder. El clic de más es lo que separa al que lo busca del que
               lo encuentra de casualidad. */}
           {hayGoogle && (
-            <div className="mt-6">
+            <div className="mt-7">
               {equipoVisible ? (
                 <div className="animate-in fade-in slide-in-from-top-1 duration-300">
                   <div className="flex items-center gap-3">
@@ -233,31 +259,18 @@ function LoginPage() {
             </div>
           )}
         </div>
+
+        {/* El pie va FUERA de la tarjeta: ancla la composición y dice qué hace
+            el sistema sin ocupar espacio adentro, donde solo hay una acción. */}
+        <ul className="mt-7 flex animate-in fade-in duration-500 delay-200 fill-mode-both items-center justify-center gap-3 text-[0.625rem] uppercase tracking-[0.16em] text-muted-foreground/70">
+          {ETAPAS.map((etapa, i) => (
+            <li key={etapa} className="flex items-center gap-3">
+              {i > 0 && <span aria-hidden="true" className="h-1 w-1 rounded-full bg-current" />}
+              {etapa}
+            </li>
+          ))}
+        </ul>
       </main>
-
-      {/* ── Marca ──
-          `login-dark` redefine los tokens del tema SOLO para este subárbol, así
-          que lo que viva acá adentro toma el tratamiento oscuro sin que haya
-          que escribir un color a mano. Antes envolvía la página entera; con el
-          acceso sobre superficie clara, solo lo necesita este panel.
-
-          El hueco del centro está pensado para un ortomosaico con sus recuadros
-          de detección, que es lo más persuasivo que tiene el proyecto y lo que
-          la referencia de floret pone en este mismo lugar. Mientras no haya uno
-          en `src/assets`, sostiene el logo: un marco vacío se vería como una
-          imagen que no cargó. */}
-      <aside className="login-dark relative hidden items-center justify-center overflow-hidden bg-sidebar px-12 lg:flex">
-        <div className="relative z-10 max-w-md text-center">
-          <div className="detect-frame mx-auto flex aspect-[4/3] w-full items-center justify-center rounded-xl border border-white/10 bg-white/[0.03]">
-            <span className="detect-corners" aria-hidden="true" />
-            <img src={logoOscuro} alt="" className="h-24 w-auto opacity-90" />
-          </div>
-          <p className="mt-8 font-rubik text-2xl font-semibold leading-snug text-white">
-            Detección de microbasurales desde imágenes aéreas
-          </p>
-          <p className="mt-3 text-sm leading-relaxed text-white/60">Municipalidad de Maipú</p>
-        </div>
-      </aside>
     </div>
   );
 }

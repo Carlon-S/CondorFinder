@@ -967,6 +967,12 @@ html {
   --input:                rgba(255, 255, 255, 0.16);
   --ring:                 #FFC53D;
   --destructive:          #FF6B6B;
+  /* El `-strong` de :root (#B91C1C) está calculado para texto sobre el cuerpo
+     CLARO, y sobre esta tarjeta da 1.9:1. Acá la relación se invierte: el rojo
+     tiene que ser más claro que el fondo, no más oscuro. #FCA5A5 sobre #0E1626
+     da 9.3:1. Misma lógica que el par --success/--success-strong: el token de
+     relleno y el de texto no pueden ser el mismo color. */
+  --destructive-strong:   #FCA5A5;
 
   background-color: var(--background);
   color: var(--foreground);
