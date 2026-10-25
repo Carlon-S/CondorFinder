@@ -18,30 +18,40 @@
 // TanStack Start ejecuta SSR en Node.js donde sessionStorage no existe.
 // =============================================================================
 
+import type { CurrentUser } from "./auth";
+
 const KEY_AUTH_CACHE = "condorfinder_auth_cache";
 const TTL_MS = 5 * 60 * 1000;
 
-interface CachedAuth {
-  username: string;
+/** Guarda la sesión ENTERA y no solo el identificador.
+ *
+ *  Guardaba solo `username`, así que la barra lateral mostraba el nombre de la
+ *  persona en la primera carga (la que sí consulta /auth/me) y el correo
+ *  completo en cada navegación posterior, cuando la respuesta salía de acá. Un
+ *  cache que devuelve menos campos que la fuente que reemplaza no es un cache,
+ *  es una segunda versión del dato. */
+interface CachedAuth extends CurrentUser {
   verifiedAt: number;
 }
 
 const isBrowser = typeof window !== "undefined";
 
-export function saveCachedAuth(username: string): void {
+export function saveCachedAuth(user: CurrentUser): void {
   if (!isBrowser) return;
-  const entry: CachedAuth = { username, verifiedAt: Date.now() };
+  const entry: CachedAuth = { ...user, verifiedAt: Date.now() };
   sessionStorage.setItem(KEY_AUTH_CACHE, JSON.stringify(entry));
 }
 
-export function loadCachedAuth(): string | null {
+export function loadCachedAuth(): CurrentUser | null {
   if (!isBrowser) return null;
   try {
     const raw = sessionStorage.getItem(KEY_AUTH_CACHE);
     if (!raw) return null;
     const entry: CachedAuth = JSON.parse(raw);
-    if (Date.now() - entry.verifiedAt > TTL_MS) return null;
-    return entry.username;
+    // Una entrada guardada por la versión anterior no trae `username` en el
+    // lugar esperado ni `name`; se descarta en vez de devolver media sesión.
+    if (!entry?.username || Date.now() - entry.verifiedAt > TTL_MS) return null;
+    return { username: entry.username, name: entry.name ?? null };
   } catch {
     return null;
   }

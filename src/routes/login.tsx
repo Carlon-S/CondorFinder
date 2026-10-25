@@ -80,6 +80,7 @@ function LoginPage() {
 
   const [disponibles, setDisponibles] = useState<Disponibles | null>(null);
   const [yendo, setYendo] = useState<string | null>(null);
+  const [equipoVisible, setEquipoVisible] = useState(false);
 
   // Qué proveedores ofrecer lo decide el backend, según qué credenciales tenga
   // configuradas. Sin esto, un `.env` a medio llenar mostraría un botón que
@@ -156,34 +157,6 @@ function LoginPage() {
             )}
           </div>
 
-          {/* La puerta del equipo: presente, pero sin competir con la principal.
-              Que la municipalidad vea UN camino es la política de acceso dicha
-              con la jerarquía visual en vez de con un párrafo. */}
-          {hayGoogle && (
-            <div className="mt-6 animate-in fade-in duration-500 delay-300 fill-mode-both">
-              <div className="flex items-center gap-3">
-                <span className="h-px flex-1 bg-border" />
-                <span className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">
-                  Equipo CondorFinder
-                </span>
-                <span className="h-px flex-1 bg-border" />
-              </div>
-              <Button
-                variant="outline"
-                className="mt-4 h-10 w-full"
-                onClick={() => entrarCon("google")}
-                disabled={yendo !== null}
-              >
-                {yendo === "google" ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <IconoGoogle />
-                )}
-                Continuar con Google
-              </Button>
-            </div>
-          )}
-
           {disponibles?.password && (
             // Solo en desarrollo: en la VM `ALLOW_PASSWORD_LOGIN` no está
             // definida y el endpoint devuelve 404, así que este aviso no
@@ -197,6 +170,52 @@ function LoginPage() {
           <p className="mt-10 text-[0.6875rem] leading-relaxed text-muted-foreground">
             El acceso está restringido a cuentas de la Municipalidad de Maipú.
           </p>
+
+          {/* LA PUERTA DEL EQUIPO, DETRÁS DE UN CLIC.
+              El funcionario municipal tiene que ver UN camino. Con los dos
+              botones a la vista, el de Google es el que no le sirve y es
+              además el que reconoce, así que es el que iba a apretar.
+
+              Detrás de un enlace y no en otra URL: una dirección aparte se
+              olvida y termina anotada en alguna parte, y acá no hay nada que
+              esconder. El clic de más es lo que separa al que lo busca del que
+              lo encuentra de casualidad. */}
+          {hayGoogle && (
+            <div className="mt-6">
+              {equipoVisible ? (
+                <div className="animate-in fade-in slide-in-from-top-1 duration-300">
+                  <div className="flex items-center gap-3">
+                    <span className="h-px flex-1 bg-border" />
+                    <span className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">
+                      Equipo CondorFinder
+                    </span>
+                    <span className="h-px flex-1 bg-border" />
+                  </div>
+                  <Button
+                    variant="outline"
+                    className="mt-4 h-10 w-full"
+                    onClick={() => entrarCon("google")}
+                    disabled={yendo !== null}
+                  >
+                    {yendo === "google" ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <IconoGoogle />
+                    )}
+                    Continuar con Google
+                  </Button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setEquipoVisible(true)}
+                  className="text-[0.6875rem] text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
+                >
+                  Acceso del equipo de desarrollo
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </main>
 

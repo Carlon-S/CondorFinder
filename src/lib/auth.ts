@@ -106,14 +106,14 @@ export const getCurrentUser = createIsomorphicFn()
     // authState.ts) — el componente de la ruta hija no se monta hasta que
     // esto resuelve, así que una caché vigente lo hace prácticamente
     // instantáneo en vez de esperar un viaje redondo al backend.
-    const cachedUsername = loadCachedAuth();
-    if (cachedUsername) return { username: cachedUsername };
+    const cached = loadCachedAuth();
+    if (cached) return cached;
 
     try {
       const res = await fetch(`${CLIENT_BACKEND_URL}/auth/me`, { credentials: "include" });
       if (!res.ok) return null;
       const user: CurrentUser = await res.json();
-      saveCachedAuth(user.username);
+      saveCachedAuth(user);
       return user;
     } catch {
       return null;
