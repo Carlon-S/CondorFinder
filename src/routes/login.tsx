@@ -27,7 +27,7 @@
 // más o menos la pantalla anterior.
 // =============================================================================
 
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Loader2 } from "@/components/icons/Icons";
 import { Button } from "@/components/ui/button";
@@ -78,9 +78,18 @@ interface Disponibles {
 function LoginPage() {
   const { redirect, error } = Route.useSearch();
 
+  const navigate = useNavigate({ from: "/login" });
+
   const [disponibles, setDisponibles] = useState<Disponibles | null>(null);
   const [yendo, setYendo] = useState<string | null>(null);
   const [equipoVisible, setEquipoVisible] = useState(false);
+  // El motivo se copia a estado y se saca de la barra de direcciones.
+  //
+  // Vive en la URL porque el regreso desde el proveedor es una navegación del
+  // navegador y no hay otro lugar donde ponerlo, pero dejarlo ahí lo vuelve
+  // permanente: recargar la página reimprime un rechazo que ya ocurrió, y el
+  // mensaje parece pegado a la pantalla en vez de referirse a un intento.
+  const [motivo, setMotivo] = useState<string | undefined>(error);
 
   // Qué proveedores ofrecer lo decide el backend, según qué credenciales tenga
   // configuradas. Sin esto, un `.env` a medio llenar mostraría un botón que
@@ -92,10 +101,17 @@ function LoginPage() {
       .catch(() => setDisponibles({ proveedores: [], password: false }));
   }, []);
 
+  useEffect(() => {
+    if (!error) return;
+    setMotivo(error);
+    navigate({ search: (prev) => ({ ...prev, error: undefined }), replace: true });
+  }, [error, navigate]);
+
   // Navegación de página completa y no un fetch: el flujo necesita que el
   // navegador siga los redirects hasta el proveedor y de vuelta, y que las
   // cookies que el backend emite en el camino se apliquen de verdad.
   const entrarCon = (proveedor: string) => {
+    setMotivo(undefined);
     setYendo(proveedor);
     const destino = redirect ? `?redirect=${encodeURIComponent(redirect)}` : "";
     window.location.href = `${CLIENT_BACKEND_URL}/auth/oidc/${proveedor}/start${destino}`;
@@ -122,9 +138,9 @@ function LoginPage() {
             Entra con tu cuenta institucional para acceder al sistema.
           </p>
 
-          {error && (
+          {motivo && (
             <p className="mt-6 animate-in fade-in duration-200 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-xs leading-relaxed text-destructive-strong">
-              {MENSAJES[error] ?? "No se pudo iniciar sesión. Intenta nuevamente."}
+              {MENSAJES[motivo] ?? "No se pudo iniciar sesión. Intenta nuevamente."}
             </p>
           )}
 
