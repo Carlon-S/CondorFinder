@@ -2058,6 +2058,13 @@ function AnalysisPage() {
                   owner: "",
                   name: zoneName ?? currentAnalysisName ?? "Zona",
                   createdAt: new Date().toISOString(),
+                  // Zona sintética: esta vista tiene el id y el nombre, que es
+                  // todo lo que el informe usa. El resto se rellena con lo que
+                  // vale para una zona nacida de un vuelo, que es lo que esta
+                  // pantalla siempre está mirando.
+                  kind: "basural" as const,
+                  active: true,
+                  analysisCount: zoneAnalyses.length,
                 },
                 analyses: zoneAnalyses,
               }]
@@ -2089,6 +2096,9 @@ function AnalysisPage() {
                   owner: "",
                   name: zoneName ?? "Zona",
                   createdAt: new Date().toISOString(),
+                  kind: "basural" as const,
+                  active: true,
+                  analysisCount: zoneAnalyses.length,
                 }}
                 analyses={zoneAnalyses}
                 onOpenAnalysis={(id) => {

@@ -29,6 +29,8 @@ import auth as auth_module
 import resources as resources_module
 import routing as routing_module
 import analyses as analyses_module
+import itinerario as itinerario_module
+import puntos_diarios as puntos_diarios_module
 import task_store
 import storage as storage_module
 import auditoria
@@ -54,6 +56,8 @@ async def lifespan(app: FastAPI):
     resources_module.set_db(db)
     routing_module.set_db(db)
     analyses_module.set_db(db)
+    itinerario_module.set_db(db)
+    puntos_diarios_module.set_db(db)
 
     # Índices, create_index es idempotente (no rompe nada si ya existen),
     # así que se piden cada vez que arranca el proceso en vez de una
@@ -69,6 +73,13 @@ async def lifespan(app: FastAPI):
     await db.analyses.create_index([("zoneId", 1), ("captureDate", 1)])
     await db.analyses.create_index("sourceTaskId")
     await db.zones.create_index("owner")
+    # HDU14: la grilla del itinerario se lee entera en cada apertura y cada día
+    # es único; HDU15 lista los puntos de UNA fecha y de una clase.
+    await itinerario_module.create_index()
+    await puntos_diarios_module.create_index()
+    # Los 17 programas de la hoja SOLICITUDES. Siembra idempotente: sin ella el
+    # desplegable de "extras" arranca vacío y eso se lee como una falla.
+    await puntos_diarios_module.sembrar_solicitudes()
     # HDU8: los recursos se listan siempre por punto, y el ruteo los pide por
     # punto MÁS disponibilidad en cada generación de ruta.
     await db.resources.create_index([("pointId", 1), ("disponible", 1)])
@@ -180,6 +191,8 @@ app.include_router(auth_module.router)
 app.include_router(resources_module.router)
 app.include_router(routing_module.router)
 app.include_router(analyses_module.router)
+app.include_router(itinerario_module.router)
+app.include_router(puntos_diarios_module.router)
 
 # =============================================================================
 # CONFIGURACIÓN DE RED

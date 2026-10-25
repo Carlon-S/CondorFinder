@@ -48,6 +48,17 @@ import task_store
 
 _db: AsyncDatabase | None = None
 
+# Las dos formas en que una zona puede nacer. No es un enumerado de Pydantic
+# porque se compara contra documentos ya guardados que no lo traen, y ausente
+# tiene que seguir significando `basural`.
+KIND_BASURAL = "basural"
+KIND_PERMANENTE = "permanente"
+KINDS = (KIND_BASURAL, KIND_PERMANENTE)
+
+# Los dos tipos con que la municipalidad clasifica un punto permanente en su
+# planilla: microbasural y vertedero ilegal de residuos sólidos.
+TIPOS_PUNTO = ("Microbasural", "VIRS")
+
 
 def set_db(db: AsyncDatabase) -> None:
     global _db
@@ -78,15 +89,67 @@ class ZoneOut(BaseModel):
     medición de volumen). Antes el nombre vivía en cada análisis guardado, lo
     que hacía imposible hablar de "la misma zona" sin recorrer la cadena de
     duplicados de HDU7 a mano.
+
+    **Una zona ya no nace solo de un vuelo.** Hasta HDU14 la única forma de
+    crear una era guardar un análisis, así que el sistema no podía nombrar un
+    lugar antes de volarlo. La municipalidad conoce 54 microbasurales y le voló
+    el dron a dos: el lugar existe mucho antes que la medición.
+
+    De ahí los campos de abajo, todos opcionales. Un punto permanente creado a
+    mano trae dirección, barrio, tipo y frecuencia y ningún análisis; una zona
+    nacida de un vuelo trae análisis y ninguno de esos campos, hasta que
+    alguien se los complete. **Los dos juegos son disjuntos**, así que una zona
+    puede tener los dos sin que haya nada que reconciliar: ningún camino
+    escribe un campo que el otro también quiera escribir.
     """
     id: str
     owner: str
     name: str
     createdAt: datetime
+    # Ausente significa "basural", que es lo que son todas las zonas anteriores
+    # a HDU14. No hay nada que migrar.
+    kind: str = KIND_BASURAL
+    address: str | None = None
+    comuna: str | None = None
+    barrio: str | None = None
+    lat: float | None = None
+    lng: float | None = None
+    photoUrl: str | None = None
+    tipo: str | None = None
+    frecuencia: str | None = None
+    active: bool = True
+    # Calculado en cada lectura, nunca almacenado: guardarlo daría dos fuentes
+    # de verdad sobre cuántos análisis tiene una zona, y la de Mongo ya es
+    # autoritativa. Mismo criterio que `_resumen_por_punto()` en resources.py.
+    analysisCount: int = 0
 
 
 class ZoneIn(BaseModel):
+    """Solo el nombre. Lo usa `rename_analysis`, que renombra una VERSIÓN."""
     name: str
+
+
+class ZoneUpsertIn(BaseModel):
+    """El alta y la edición de una zona.
+
+    Todo menos el nombre es opcional, y se escribe con `exclude_unset=True`:
+    un campo que no viajó en el cuerpo no se toca. Eso es lo que permite que
+    `RenameDialog`, que manda nada más que `{name}`, siga funcionando contra el
+    mismo endpoint sin borrarle la dirección a la zona.
+
+    Mandar `null` explícito SÍ borra el campo, que es como se limpia una foto.
+    """
+    name: str
+    kind: str | None = None
+    address: str | None = None
+    comuna: str | None = None
+    barrio: str | None = None
+    lat: float | None = None
+    lng: float | None = None
+    photoUrl: str | None = None
+    tipo: str | None = None
+    frecuencia: str | None = None
+    active: bool | None = None
 
 
 class ConfirmDuplicateIn(BaseModel):
@@ -657,6 +720,63 @@ async def list_analyses(
 # siempre junto a ellos, igual que HDU7 vive acá y no en su propio módulo.
 # =============================================================================
 
+def _zone_out(doc: dict, analysis_count: int = 0) -> ZoneOut:
+    """Un documento de `zones` como lo ve el frontend.
+
+    Centralizado porque lo arman cuatro endpoints, y cada campo nuevo que se
+    agregue tiene que aparecer en los cuatro: la versión anterior repetía la
+    construcción y por eso era fácil que uno quedara devolviendo menos.
+    """
+    return ZoneOut(
+        id=str(doc["_id"]),
+        owner=doc["owner"],
+        name=doc["name"],
+        createdAt=doc["createdAt"],
+        kind=doc.get("kind") or KIND_BASURAL,
+        address=doc.get("address"),
+        comuna=doc.get("comuna"),
+        barrio=doc.get("barrio"),
+        lat=doc.get("lat"),
+        lng=doc.get("lng"),
+        photoUrl=doc.get("photoUrl"),
+        tipo=doc.get("tipo"),
+        frecuencia=doc.get("frecuencia"),
+        active=doc.get("active", True),
+        analysisCount=analysis_count,
+    )
+
+
+def _validar_zona(campos: dict) -> None:
+    """Rechaza el valor que no corresponde, en vez de guardarlo y olvidarlo."""
+    kind = campos.get("kind")
+    if kind is not None and kind not in KINDS:
+        raise HTTPException(status_code=400, detail=f"Tipo de zona desconocido: {kind}")
+    tipo = campos.get("tipo")
+    if tipo is not None and tipo not in TIPOS_PUNTO:
+        raise HTTPException(status_code=400, detail=f"Tipo de punto desconocido: {tipo}")
+    # Una coordenada a medias deja un pin que no se puede dibujar y una zona
+    # que no entra a ninguna ruta, sin que nada lo diga.
+    tiene_lat = campos.get("lat") is not None
+    tiene_lng = campos.get("lng") is not None
+    if tiene_lat != tiene_lng:
+        raise HTTPException(status_code=400, detail="La latitud y la longitud van juntas o ninguna")
+
+
+async def _conteo_de_analisis(zone_ids: list[str]) -> dict[str, int]:
+    """Cuántos análisis tiene cada zona, en UNA consulta.
+
+    Agregación y no un `count_documents` por zona: con 54 puntos permanentes
+    eso serían 54 viajes a Mongo cada vez que se abre Vista Principal.
+    """
+    if not zone_ids:
+        return {}
+    cursor = await get_db().analyses.aggregate([
+        {"$match": {"zoneId": {"$in": zone_ids}}},
+        {"$group": {"_id": "$zoneId", "n": {"$sum": 1}}},
+    ])
+    return {d["_id"]: d["n"] async for d in cursor}
+
+
 @router.get("/zones/all", response_model=list[ZoneOut])
 async def list_zones(
     current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
@@ -665,39 +785,117 @@ async def list_zones(
     cualquier segmento suelto: sin el segundo tramo, FastAPI resolvería
     /analyses/zones como "el análisis con id 'zones'"."""
     docs = await get_db().zones.find().to_list(length=None)
-    return [
-        ZoneOut(
-            id=str(d["_id"]),
-            owner=d["owner"],
-            name=d["name"],
-            createdAt=d["createdAt"],
-        )
-        for d in docs
-    ]
+    conteos = await _conteo_de_analisis([str(d["_id"]) for d in docs])
+    return [_zone_out(d, conteos.get(str(d["_id"]), 0)) for d in docs]
+
+
+@router.post("/zones", response_model=ZoneOut)
+async def create_zone(
+    payload: ZoneUpsertIn,
+    current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
+):
+    """Alta a mano de una zona, sin vuelo (HDU14).
+
+    Es el camino que no existía: hasta acá una zona solo aparecía como efecto
+    secundario de `_resolve_zone()` al guardar un análisis. Con este endpoint
+    el lugar se registra primero y el vuelo, si llega, se le cuelga después.
+    """
+    nombre = payload.name.strip()
+    if not nombre:
+        raise HTTPException(status_code=400, detail="El nombre no puede estar vacío")
+
+    campos = payload.model_dump(exclude_unset=True)
+    _validar_zona(campos)
+    campos["name"] = nombre
+    campos.setdefault("kind", KIND_PERMANENTE)
+    campos.setdefault("active", True)
+    campos["owner"] = current_user.username
+    campos["createdAt"] = datetime.now(timezone.utc)
+
+    res = await get_db().zones.insert_one(campos)
+    doc = await get_db().zones.find_one({"_id": res.inserted_id})
+    await auditoria.registrar(
+        current_user.username, "crear", "zona", str(res.inserted_id), {"nombre": nombre}
+    )
+    return _zone_out(doc)
 
 
 @router.put("/zones/{zone_id}", response_model=ZoneOut)
 async def rename_zone(
     zone_id: str,
-    payload: ZoneIn,
+    payload: ZoneUpsertIn,
     current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
 ):
+    """Edita una zona. Sigue llamándose `rename_zone` porque ese es su uso más
+    frecuente y porque `RenameDialog` lo invoca con nada más que `{name}`.
+
+    `exclude_unset=True` es lo que hace compatibles los dos usos: un cuerpo que
+    solo trae el nombre no le borra la dirección a la zona, y uno que trae el
+    formulario completo la actualiza entera.
+    """
     # Se recorta y se rechaza vacío: hasta ahora este endpoint no tenía interfaz
     # que lo llamara, y con una sí la tiene un campo de texto detrás.
     nombre = payload.name.strip()
     if not nombre:
         raise HTTPException(status_code=400, detail="El nombre no puede estar vacío")
+
+    campos = payload.model_dump(exclude_unset=True)
+    _validar_zona(campos)
+    campos["name"] = nombre
+
     doc = await get_db().zones.find_one_and_update(
         {"_id": _object_id(zone_id)},
-        {"$set": {"name": nombre}},
+        {"$set": campos},
         return_document=ReturnDocument.AFTER,
     )
     if not doc:
         raise HTTPException(status_code=404, detail="Zona no encontrada")
     await auditoria.registrar(
-        current_user.username, "renombrar", "zona", zone_id, {"nombre": nombre}
+        current_user.username, "editar", "zona", zone_id, {"nombre": nombre}
     )
-    return ZoneOut(id=str(doc["_id"]), owner=doc["owner"], name=doc["name"], createdAt=doc["createdAt"])
+    conteos = await _conteo_de_analisis([zone_id])
+    return _zone_out(doc, conteos.get(zone_id, 0))
+
+
+@router.delete("/zones/{zone_id}")
+async def delete_zone(
+    zone_id: str,
+    current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
+):
+    """Borra una zona que no tenga ningún análisis.
+
+    **Se niega si los tiene**, nombrando cuántos. Borrar en cascada el historial
+    de mediciones de un terreno detrás de un solo clic no es una operación que
+    deba existir: el camino para eso es borrar los análisis uno por uno, donde
+    cada borrado se ve y queda en la bitácora.
+
+    Sacarla del itinerario semanal va en la misma operación. Si no, el día de
+    la semana quedaría apuntando a un id que ya no resuelve, y la grilla
+    mostraría un hueco sin explicación.
+    """
+    doc = await get_db().zones.find_one({"_id": _object_id(zone_id)})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Zona no encontrada")
+
+    n = await get_db().analyses.count_documents({"zoneId": zone_id})
+    if n:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"La zona tiene {n} análisis guardado{'s' if n != 1 else ''}. "
+                "Borralos primero si de verdad querés eliminarla."
+            ),
+        )
+
+    # Escritura directa sobre la colección del itinerario en vez de importar
+    # `itinerario.py`: ese módulo importa modelos de acá, y el import cruzado
+    # sería circular. Es un `$pull` de un id, no lógica de negocio prestada.
+    await get_db().itinerario_dias.update_many({}, {"$pull": {"puntos": zone_id}})
+    await get_db().zones.delete_one({"_id": _object_id(zone_id)})
+    await auditoria.registrar(
+        current_user.username, "eliminar", "zona", zone_id, {"nombre": doc.get("name")}
+    )
+    return {"ok": True}
 
 
 @router.patch("/{analysis_id}/name", response_model=SavedAnalysisOut)

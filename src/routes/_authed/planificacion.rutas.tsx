@@ -128,6 +128,12 @@ import {
 import { RouteTimeline, type DatosDeParada } from "@/components/RouteTimeline";
 import { ZoneZoomDialog } from "@/components/ZoneZoomDialog";
 import { RouteLegend } from "@/components/RouteLegend";
+import { PuntoDiarioDialog } from "@/components/PuntoDiarioDialog";
+import {
+  eliminarPuntoDiario,
+  listarPuntosDiarios,
+  type PuntoDiario,
+} from "@/lib/puntosDiarios";
 import { classColor } from "@/components/zone-colors";
 import { reverseGeocode } from "@/lib/geocoding";
 import { notify } from "@/lib/notify";
@@ -156,6 +162,22 @@ const WASTE_CLASSES = [
 // que un plástico se pinta de dos azules distintos según de dónde se abrió.
 
 const ZONE_COLORS = ["#7c3aed", "#0ea5e9", "#f97316", "#22c55e", "#ef4444", "#eab308"];
+
+/** Prefijo del id de un marcador de punto diario (HDU15).
+ *
+ *  Mismo mecanismo que `PREFIJO_ZONA` en el mapa de recursos: en este mapa
+ *  conviven zonas, puntos de origen y puntos diarios, y `onPointClick` recibe
+ *  nada más que el id. Sin el prefijo, apretar un punto diario buscaría un
+ *  análisis con ese id, no lo encontraría, y el clic quedaría sin efecto. */
+const PREFIJO_DIARIO = "diario:";
+
+/** Ámbar, literal y no `var(--warning)`: este mapa dibuja con el renderer de
+ *  canvas, que descarta en silencio una variable CSS asignada a `strokeStyle`.
+ *  Mismo motivo que `route-colors.ts`.
+ *
+ *  Fuera de la escala verde a rojo de las zonas y del navy de los puntos de
+ *  origen, porque un punto diario no es ninguna de las dos cosas. */
+const COLOR_PUNTO_DIARIO = "#f59e0b";
 
 /** Forma mínima de una detección tal como quedó en un SavedAnalysisRecord —
  *  `detections` ahí es `unknown`, este es el subset que HDU5 necesita leer. */
@@ -377,6 +399,24 @@ function RutasPage() {
   // mapa/imagen que ampliar, solo su información (dirección, recursos,
   // activo/inactivo) en modo solo lectura, mismo estilo de diálogo.
   const [zoomPoint, setZoomPoint] = useState<ResourcePoint | null>(null);
+
+  // ── HDU15: los retiros del día ────────────────────────────────────────────
+  // Se cargan los de HOY: un punto diario de la semana pasada ya se retiró, y
+  // dibujarlo acá haría que el plan incluyera un viaje que no corresponde.
+  const [puntosDiarios, setPuntosDiarios] = useState<PuntoDiario[]>([]);
+  const [puntoDiarioAbierto, setPuntoDiarioAbierto] = useState(false);
+  const [puntoDiarioEditando, setPuntoDiarioEditando] = useState<PuntoDiario | null>(null);
+  const [editarPuntosAbierto, setEditarPuntosAbierto] = useState(false);
+
+  const recargarPuntosDiarios = useCallback(() => {
+    // Degrada en silencio, igual que el resto de las cargas de esta vista: sin
+    // los puntos del día la generación de rutas sigue sirviendo.
+    listarPuntosDiarios().then(setPuntosDiarios).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    recargarPuntosDiarios();
+  }, [recargarPuntosDiarios]);
 
   const [loadDialogOpen, setLoadDialogOpen] = useState(false);
   const [savedAnalyses, setSavedAnalyses] = useState<SavedAnalysisRecord[]>([]);
@@ -900,6 +940,19 @@ function RutasPage() {
   // "Cargar archivo de análisis" con focusPoint/FlyToPoint) — antes solo
   // abría el diálogo sin mover el mapa.
   const handlePointClick = (point: GeoMapPoint) => {
+    // El prefijo bifurca antes que nada: sin él, apretar un punto diario
+    // buscaría un análisis con ese id, no lo encontraría, y después un punto
+    // de origen tampoco, así que el clic no haría nada sin explicación.
+    if (point.id.startsWith(PREFIJO_DIARIO)) {
+      const id = point.id.slice(PREFIJO_DIARIO.length);
+      const diario = puntosDiarios.find((p) => p.id === id);
+      if (diario) {
+        setPuntoDiarioEditando(diario);
+        setPuntoDiarioAbierto(true);
+        setFocusPoint(point.position);
+      }
+      return;
+    }
     const analysis = allAnalyses.find((a) => a.id === point.id);
     if (analysis) {
       setZoomAnalysis(analysis);
@@ -1043,7 +1096,27 @@ function RutasPage() {
     };
   });
 
-  const mapPoints: GeoMapPoint[] = [...zoneMapPoints, ...originMapPoints];
+  // HDU15: los retiros del día, en ámbar para que no se confundan ni con las
+  // zonas (escala verde a rojo por volumen) ni con los puntos de origen
+  // (navy). Solo los que tienen coordenada: sin ella no hay dónde dibujarlos,
+  // y el diálogo de edición es donde se corrige eso.
+  const puntoDiarioMapPoints: GeoMapPoint[] = puntosDiarios
+    .filter((p) => p.lat != null && p.lng != null)
+    .map((p) => ({
+      id: `${PREFIJO_DIARIO}${p.id}`,
+      position: [p.lat as number, p.lng as number],
+      label: `${p.address} (${p.clase === "escombros" ? "escombros" : "extra"}${
+        p.volumenM3 ? `, ${p.volumenM3} m³` : ""
+      })`,
+      color: COLOR_PUNTO_DIARIO,
+      muted: false,
+    }));
+
+  const mapPoints: GeoMapPoint[] = [
+    ...zoneMapPoints,
+    ...originMapPoints,
+    ...puntoDiarioMapPoints,
+  ];
 
   const routePositions = routeStops?.map((s) => [s.lat, s.lng] as [number, number]) ?? null;
   // Encuadre automático de la ruta recién generada -- todos los puntos de
@@ -1428,6 +1501,34 @@ function RutasPage() {
                   <div className="flex flex-col gap-2">
                     <Button onClick={openLoadDialog} variant="secondary" className="w-full">
                       <FolderOpen className="mr-2 h-4 w-4" /> Cargar zona
+                    </Button>
+                    {/* HDU15/AC1: abre la selección entre escombros y extras. */}
+                    <Button
+                      onClick={() => {
+                        setPuntoDiarioEditando(null);
+                        setPuntoDiarioAbierto(true);
+                      }}
+                      variant="outline"
+                      className="w-full"
+                    >
+                      <Plus className="mr-2 h-4 w-4" /> Crear punto diario
+                    </Button>
+                    {/* HDU15/AC4: solo cuando hay algo que editar. Un botón que
+                        abre una lista vacía no dice qué falta para usarlo; el
+                        título sí. */}
+                    <Button
+                      onClick={() => setEditarPuntosAbierto(true)}
+                      disabled={puntosDiarios.length === 0}
+                      variant="ghost"
+                      className="w-full"
+                      title={
+                        puntosDiarios.length === 0
+                          ? "Todavía no hay puntos diarios creados hoy"
+                          : undefined
+                      }
+                    >
+                      <Pencil className="mr-2 h-4 w-4" /> Editar puntos
+                      {puntosDiarios.length > 0 && ` (${puntosDiarios.length})`}
                     </Button>
                     <Button
                       onClick={openConfirm}
@@ -2009,6 +2110,77 @@ function RutasPage() {
           precisión de píxel. El visor vive en ZoneZoomDialog porque el mapa de
           recursos abre el mismo: con una copia por vista, el de allá nació como
           una versión pobre de este. */}
+      {/* HDU15: alta (AC1 a AC3) y edición de un punto suelto. */}
+      <PuntoDiarioDialog
+        open={puntoDiarioAbierto}
+        onOpenChange={setPuntoDiarioAbierto}
+        punto={puntoDiarioEditando}
+        onGuardado={recargarPuntosDiarios}
+      />
+
+      {/* HDU15/AC4: todos los puntos del día, editables de a uno. */}
+      <Dialog open={editarPuntosAbierto} onOpenChange={setEditarPuntosAbierto}>
+        <DialogContent className="flex max-h-[80vh] flex-col sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Puntos diarios de hoy</DialogTitle>
+            <DialogDescription>
+              Los retiros de escombros y extras cargados para la jornada.
+            </DialogDescription>
+          </DialogHeader>
+          <ul className="-mx-1 flex-1 space-y-1.5 overflow-y-auto px-1">
+            {puntosDiarios.map((p) => (
+              <li
+                key={p.id}
+                className="flex items-center gap-3 rounded-md border border-border px-3 py-2"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs font-medium text-foreground">{p.address}</p>
+                  <p className="truncate text-[0.625rem] text-muted-foreground">
+                    {[
+                      p.clase === "escombros" ? "Escombros" : "Extra",
+                      p.tipoResiduo,
+                      p.solicitud,
+                      p.solicitante,
+                      p.volumenM3 != null ? `${p.volumenM3} m³` : null,
+                      p.lat == null ? "Sin ubicar" : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditarPuntosAbierto(false);
+                    setPuntoDiarioEditando(p);
+                    setPuntoDiarioAbierto(true);
+                  }}
+                  className="shrink-0 cursor-pointer rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  aria-label={`Editar ${p.address}`}
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await eliminarPuntoDiario(p.id);
+                      recargarPuntosDiarios();
+                    } catch (e) {
+                      notify.error("No se pudo eliminar", (e as Error).message);
+                    }
+                  }}
+                  className="shrink-0 cursor-pointer rounded p-1 text-muted-foreground hover:bg-accent hover:text-destructive-strong"
+                  aria-label={`Eliminar ${p.address}`}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </DialogContent>
+      </Dialog>
+
       <ZoneZoomDialog
         zona={zoomAnalysis}
         onOpenChange={(abierto) => !abierto && setZoomAnalysis(null)}

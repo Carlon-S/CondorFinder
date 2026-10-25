@@ -7,6 +7,7 @@ import {
   UploadCloud,
   Truck,
   Route,
+  ListChecks,
   CircleUserRound,
   LogOut,
 } from "@/components/icons/Icons";
@@ -39,6 +40,7 @@ const NAV_ITEMS = [
     icon: Route,
     hijos: [
       { to: "/planificacion/recursos", label: "Recursos", icon: Truck },
+      { to: "/planificacion/itinerario", label: "Itinerario", icon: ListChecks },
       { to: "/planificacion/rutas", label: "Rutas", icon: Route },
     ],
   },

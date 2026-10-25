@@ -125,13 +125,68 @@ export interface SavedAnalysisRecord {
 }
 
 /** Una zona geográfica seguida en el tiempo. Agrupa versiones (vuelos) y,
- *  dentro de cada una, sus análisis. */
+ *  dentro de cada una, sus análisis.
+ *
+ *  **Desde HDU14 una zona también puede no tener ningún vuelo.** Un punto
+ *  permanente de la municipalidad es una zona creada a mano: tiene dirección,
+ *  barrio, tipo y frecuencia, y ningún análisis todavía. Los dos juegos de
+ *  campos son disjuntos, así que una zona puede ir completándose sin que haya
+ *  nada que reconciliar. */
 export interface ZoneRecord {
   id: string;
   owner: string;
   name: string;
   createdAt: string;
+  /** `"basural"` (nacida de un vuelo) o `"permanente"` (creada a mano). */
+  kind: ZoneKind;
+  address?: string | null;
+  comuna?: string | null;
+  barrio?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+  photoUrl?: string | null;
+  /** `"Microbasural"` o `"VIRS"`, como los clasifica la municipalidad. */
+  tipo?: string | null;
+  frecuencia?: string | null;
+  active: boolean;
+  /** Cuántos análisis cuelgan de esta zona. Lo calcula el backend en cada
+   *  lectura; cero significa que todavía no se le voló el dron. */
+  analysisCount: number;
 }
+
+export type ZoneKind = "basural" | "permanente";
+
+/** Lo que el formulario de alta y edición manda. Todo opcional menos el
+ *  nombre: el backend escribe con `exclude_unset`, así que un cuerpo que solo
+ *  trae `{name}` no le borra la dirección a la zona. Es lo que permite que
+ *  `RenameDialog` siga usando el mismo endpoint. */
+export interface ZoneInput {
+  name: string;
+  kind?: ZoneKind;
+  address?: string | null;
+  comuna?: string | null;
+  barrio?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+  photoUrl?: string | null;
+  tipo?: string | null;
+  frecuencia?: string | null;
+  active?: boolean;
+}
+
+/** Las frecuencias que la municipalidad usa en su planilla de puntos
+ *  permanentes. Es texto libre en la base, pero ofrecerlas como lista evita
+ *  que el mismo concepto aparezca escrito de cuatro formas distintas. */
+export const FRECUENCIAS = [
+  "1 vez por semana",
+  "2 veces por semana",
+  "3 veces por semana",
+  "5 veces a la semana",
+  "1 vez al mes",
+  "2 veces al mes",
+] as const;
+
+export const TIPOS_PUNTO = ["Microbasural", "VIRS"] as const;
 
 async function parseErrorMessage(res: Response, fallback: string): Promise<string> {
   try {
@@ -365,16 +420,51 @@ export async function listZones(): Promise<ZoneRecord[]> {
  *  sesión o la red. Hasta ahora esta función no tenía ninguna interfaz que la
  *  llamara, así que el cambio de contrato no rompe nada. */
 export async function renameZone(zoneId: string, name: string): Promise<ZoneRecord> {
+  return updateZone(zoneId, { name });
+}
+
+/** Crea una zona SIN vuelo: un punto permanente de HDU14.
+ *
+ *  Es el camino que no existía. Hasta acá una zona solo aparecía como efecto
+ *  secundario de guardar un análisis, así que el sistema no podía nombrar un
+ *  lugar antes de volarlo. */
+export async function createZone(data: ZoneInput): Promise<ZoneRecord> {
+  const res = await fetch(`${BACKEND_URL}/analyses/zones`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    throw new Error(await parseErrorMessage(res, "No se pudo crear el punto."));
+  }
+  return res.json();
+}
+
+/** Edita una zona. Solo viajan los campos presentes en `data`. */
+export async function updateZone(zoneId: string, data: ZoneInput): Promise<ZoneRecord> {
   const res = await fetch(`${BACKEND_URL}/analyses/zones/${encodeURIComponent(zoneId)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ name }),
+    body: JSON.stringify(data),
   });
   if (!res.ok) {
-    throw new Error(await parseErrorMessage(res, "No se pudo renombrar la zona."));
+    throw new Error(await parseErrorMessage(res, "No se pudo guardar la zona."));
   }
   return res.json();
+}
+
+/** Borra una zona. El backend la rechaza con 409 si tiene análisis guardados,
+ *  y ese mensaje es el que hay que mostrar: dice cuántos tiene. */
+export async function deleteZone(zoneId: string): Promise<void> {
+  const res = await fetch(`${BACKEND_URL}/analyses/zones/${encodeURIComponent(zoneId)}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    throw new Error(await parseErrorMessage(res, "No se pudo eliminar la zona."));
+  }
 }
 
 /** Renombra UNA versión, o sea una medición guardada con su fecha.

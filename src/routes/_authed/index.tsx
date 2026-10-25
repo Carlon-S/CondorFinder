@@ -57,6 +57,7 @@ import {
 import {
   listAnalyses,
   listZones,
+  deleteZone,
   deleteAnalysis,
   setPendingOpenId,
   renameZone,
@@ -136,7 +137,13 @@ export const Route = createFileRoute("/_authed/")({
 
 // ── modelo de fila combinado (guardadas + trackeadas) ──────────────────────
 
-type ZoneState = "done" | "in_progress" | "pending_analysis";
+/** `no_flight` es una zona registrada a la que todavía no se le voló el dron.
+ *
+ *  Hasta HDU14 este estado no podía existir: una zona solo nacía al guardar un
+ *  análisis, así que esta vista únicamente sabía mostrar lugares ya medidos. La
+ *  municipalidad conoce 54 microbasurales y le voló el dron a dos, o sea que la
+ *  tabla decía que administra dos lugares. */
+type ZoneState = "done" | "in_progress" | "pending_analysis" | "no_flight";
 
 interface ZoneRow {
   state: ZoneState;
@@ -162,6 +169,12 @@ interface ZoneRow {
    *  contra las demás filas ya cargadas (ver loadZoneRows), no hace falta
    *  pedirle nada extra al backend para esto. */
   supersededByName?: string;
+  /** Solo en filas `no_flight`: la zona a la que corresponde la fila. La fila
+   *  ES la zona, así que no hay un análisis del que sacar el id. */
+  zoneId?: string;
+  /** Lo que va bajo el nombre cuando no hay una versión que nombrar: la
+   *  dirección del punto permanente. */
+  subtitle?: string;
 }
 
 function fromRecord(r: SavedAnalysisRecord): ZoneRow {
@@ -203,6 +216,33 @@ async function loadZoneRows(): Promise<ZoneRow[]> {
       ...fromRecord(r),
       supersededByName: r.supersededBy ? nameById.get(r.supersededBy) : undefined,
     }));
+  } catch {
+    // ver comentario de arriba
+  }
+
+  // Las zonas SIN ningún análisis. No salen de `listAnalyses()` por
+  // definición, así que sin esta consulta serían invisibles en la vista que
+  // justamente lista lo que la municipalidad administra.
+  //
+  // `analysisCount` lo calcula el backend en una sola agregación; contar acá
+  // habría significado recorrer todos los análisis por cada zona.
+  let sinVuelo: ZoneRow[] = [];
+  try {
+    const zonas = await listZones();
+    sinVuelo = zonas
+      .filter((z) => z.analysisCount === 0)
+      .map((z) => ({
+        state: "no_flight" as const,
+        key: `zona-${z.id}`,
+        name: z.name,
+        subtitle: z.address ?? undefined,
+        // Se ordenan junto a las demás por esta fecha, que para una zona a
+        // mano es cuándo se registró el lugar.
+        savedAt: z.createdAt,
+        mapUrl: null,
+        summary: null,
+        zoneId: z.id,
+      }));
   } catch {
     // ver comentario de arriba
   }
@@ -265,8 +305,13 @@ async function loadZoneRows(): Promise<ZoneRow[]> {
     (a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime(),
   );
 
-  // En progreso y pendientes de análisis van primero (necesitan atención).
-  return [...inProgress, ...pendingAnalysis, ...doneSorted];
+  const sinVueloSorted = [...sinVuelo].sort(
+    (a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime(),
+  );
+
+  // En progreso y pendientes de análisis van primero (necesitan atención). Las
+  // zonas sin vuelo van al final: no piden nada, solo están registradas.
+  return [...inProgress, ...pendingAnalysis, ...doneSorted, ...sinVueloSorted];
 }
 
 function round(n: number): number {
@@ -555,6 +600,21 @@ function MainPage() {
       return;
     }
 
+    // Una zona sin vuelo no tiene análisis ni archivos: se borra el documento
+    // y listo. El backend igual se niega con 409 si resulta que sí los tiene,
+    // que es la red de seguridad por si la vista quedó desactualizada.
+    if (target.state === "no_flight" && target.zoneId) {
+      try {
+        await deleteZone(target.zoneId);
+        notify.success("Punto eliminado", `"${deletedName}" ya no aparece en tu listado.`);
+      } catch (e) {
+        notify.error("No se pudo eliminar", (e as Error).message);
+      }
+      setDeletingRowKey(null);
+      await refreshZones();
+      return;
+    }
+
     if (target.state === "done" && target.recordId) {
       await deleteAnalysis(target.recordId);
 
@@ -659,7 +719,13 @@ function MainPage() {
     const query = normalize(nameQuery.trim());
     const filtered = query === "" ? byState : byState.filter((r) => normalize(r.name).includes(query));
 
-    const pinned = filtered.filter((r) => r.state !== "done");
+    // Arriba va lo que PIDE ATENCIÓN, y una zona sin vuelo no pide ninguna:
+    // está registrada y nada más. Si entrara acá, los 54 puntos permanentes
+    // empujarían fuera de pantalla las zonas que sí tienen trabajo pendiente.
+    const pinned = filtered.filter(
+      (r) => r.state === "in_progress" || r.state === "pending_analysis",
+    );
+    const sinVuelo = filtered.filter((r) => r.state === "no_flight");
     const doneOnly = [...filtered.filter((r) => r.state === "done")];
 
     doneOnly.sort((a, b) => {
@@ -681,7 +747,7 @@ function MainPage() {
       return sortDir === "asc" ? av - bv : bv - av;
     });
 
-    return [...pinned, ...doneOnly];
+    return [...pinned, ...doneOnly, ...sinVuelo];
   }, [zones, stateFilter, nameQuery, sortBy, sortDir]);
 
   return (
@@ -763,6 +829,9 @@ function MainPage() {
                 <FilterChip active={stateFilter === "done"} onClick={() => setStateFilter("done")}>Terminadas</FilterChip>
                 <FilterChip active={stateFilter === "in_progress"} onClick={() => setStateFilter("in_progress")}>En progreso</FilterChip>
                 <FilterChip active={stateFilter === "pending_analysis"} onClick={() => setStateFilter("pending_analysis")}>Pendientes</FilterChip>
+                {/* HDU14: los puntos permanentes registrados a los que todavía
+                    no se les voló el dron. */}
+                <FilterChip active={stateFilter === "no_flight"} onClick={() => setStateFilter("no_flight")}>Sin vuelo</FilterChip>
                 <FilterChip active={stateFilter === "historical"} onClick={() => setStateFilter("historical")}>Historial</FilterChip>
               </div>
               {/* HDU9/AC4, sin ninguna zona guardada no hay informe posible:
@@ -935,11 +1004,25 @@ function MainPage() {
                             className={`ml-2 rounded px-1.5 py-0.5 text-[0.5625rem] font-semibold uppercase tracking-wide ${
                               z.state === "in_progress"
                                 ? "bg-primary/15 text-primary"
-                                : "bg-warning/15 text-warning"
+                                : z.state === "no_flight"
+                                  ? "bg-muted text-muted-foreground"
+                                  : "bg-warning/15 text-warning"
                             }`}
                           >
-                            {z.state === "in_progress" ? "En progreso" : "Pendiente"}
+                            {z.state === "in_progress"
+                              ? "En progreso"
+                              : z.state === "no_flight"
+                                ? "Sin vuelo"
+                                : "Pendiente"}
                           </span>
+                        )}
+                        {/* Para un punto permanente no hay versión que nombrar
+                            debajo, así que ese renglón lo ocupa su dirección,
+                            que es lo que permite reconocer el lugar. */}
+                        {z.subtitle && (
+                          <p className="mt-0.5 text-[0.625rem] font-normal text-muted-foreground">
+                            {z.subtitle}
+                          </p>
                         )}
                         {z.historical && (
                           <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[0.5625rem] font-semibold uppercase tracking-wide text-muted-foreground">
