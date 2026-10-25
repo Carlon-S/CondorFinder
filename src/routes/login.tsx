@@ -140,6 +140,8 @@ function LoginPage() {
 
   return (
     <div className="login-dark relative flex min-h-screen items-center justify-center overflow-hidden px-6 py-12">
+      <CampoDeDetecciones />
+
       {/* Un resplandor amplio y muy tenue detrás de la tarjeta. No es un patrón
           ni una textura: no tiene dibujo, solo levanta el centro del navy para
           que la tarjeta no flote sobre un plano uniforme. */}
@@ -148,20 +150,24 @@ function LoginPage() {
         className="pointer-events-none absolute left-1/2 top-1/2 h-[44rem] w-[44rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(255,197,61,0.055),transparent_62%)]"
       />
 
+      {/* El barrido pasa POR ENCIMA de los polígonos y por debajo de la tarjeta,
+          así que los enciende apenas al cruzarlos. Es lo que convierte dos capas
+          quietas en una sola que respira. */}
+      <div
+        aria-hidden="true"
+        className="login-scan pointer-events-none absolute inset-0 overflow-hidden"
+      />
+
       <main className="relative z-10 w-full max-w-md">
         {/* Todo centrado: con una sola acción adentro, una tarjeta alineada a
             la izquierda deja una columna de aire muerto a la derecha de cada
             línea. El padding es generoso y uniforme porque las esquinas de
             `.detect-frame` ocupan de 10px a 36px desde el borde, así que con
             menos aire el primer elemento quedaría pisado por el trazo. */}
-        <div className="detect-frame animate-in fade-in zoom-in-95 duration-500 fill-mode-both rounded-xl border border-border bg-card px-10 py-12 text-center shadow-2xl shadow-black/40">
-          <span className="detect-corners" aria-hidden="true" />
-
+        <div className="animate-in fade-in zoom-in-95 duration-500 fill-mode-both rounded-xl border border-border bg-card px-10 py-12 text-center shadow-2xl shadow-black/40">
           <img src={logoOscuro} alt="CondorFinder" className="mx-auto h-20 w-auto" />
 
-          <p className="eyebrow mt-8 justify-center">Detección de microbasurales</p>
-
-          <h1 className="font-rubik text-3xl font-semibold tracking-normal text-foreground">
+          <h1 className="mt-8 font-rubik text-3xl font-semibold tracking-normal text-foreground">
             Iniciar sesión
           </h1>
 
@@ -285,6 +291,89 @@ function LoginPage() {
         </ul>
       </main>
     </div>
+  );
+}
+
+/** Polígonos de ejemplo, en la escala de verde a rojo con que la aplicación
+ *  pinta el volumen de una zona. Coordenadas en un lienzo de 1440x900 que se
+ *  recorta para cubrir el viewport (`slice`), así que en pantallas angostas los
+ *  de los costados salen de cuadro y quedan los de arriba y abajo.
+ *
+ *  Deliberadamente lejos del centro: ahí va la tarjeta. Que sea opaca hace que
+ *  un solape no se vea, pero un polígono escondido es trabajo tirado. */
+const DETECCIONES = [
+  {
+    d: "M120 140 L250 110 L300 200 L190 250 L110 210 Z",
+    color: "#4ade80",
+    marco: [96, 96, 314, 264],
+  },
+  { d: "M60 420 L170 390 L220 480 L120 540 Z", color: "#fbbf24", marco: null },
+  { d: "M200 640 L340 620 L390 720 L250 760 L180 710 Z", color: "#f87171", marco: null },
+  { d: "M520 70 L650 50 L690 140 L560 170 Z", color: "#a3e635", marco: null },
+  { d: "M1150 120 L1300 150 L1330 260 L1200 280 Z", color: "#fb923c", marco: null },
+  {
+    d: "M1050 430 L1180 400 L1240 500 L1100 540 L1030 490 Z",
+    color: "#4ade80",
+    marco: [1016, 386, 1254, 554],
+  },
+  { d: "M1220 660 L1360 690 L1340 790 L1190 760 Z", color: "#fbbf24", marco: null },
+  { d: "M800 780 L950 760 L980 860 L830 880 Z", color: "#fb923c", marco: [786, 746, 994, 894] },
+];
+
+/** Las cuatro esquinas en L alrededor de una caja, el mismo dibujo que
+ *  `.detect-frame`, pero acá hecho en SVG porque marca un polígono y no un
+ *  elemento del DOM.
+ *
+ *  Este motivo estuvo enmarcando la tarjeta de acceso y se sacó: una tarjeta no
+ *  es una detección, así que ahí el recuadro no significaba nada. Alrededor de
+ *  un polígono dice exactamente lo que dice en la vista de análisis. */
+function Marco({ caja }: { caja: [number, number, number, number] }) {
+  const [x1, y1, x2, y2] = caja;
+  const b = 22;
+  return (
+    <path
+      d={[
+        `M${x1} ${y1 + b} L${x1} ${y1} L${x1 + b} ${y1}`,
+        `M${x2 - b} ${y1} L${x2} ${y1} L${x2} ${y1 + b}`,
+        `M${x2} ${y2 - b} L${x2} ${y2} L${x2 - b} ${y2}`,
+        `M${x1 + b} ${y2} L${x1} ${y2} L${x1} ${y2 - b}`,
+      ].join(" ")}
+      fill="none"
+      stroke="#FFC53D"
+      strokeOpacity={0.22}
+      strokeWidth={2}
+    />
+  );
+}
+
+/** El fondo de la página: un ortomosaico analizado, dibujado con el lenguaje
+ *  propio del producto en vez de con una textura genérica.
+ *
+ *  Nada de esto sale de un vuelo real. Una foto aérea del territorio del
+ *  cliente en la pantalla pública de acceso es justamente lo que esta vista
+ *  dejó de decir en texto. */
+function CampoDeDetecciones() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-0 h-full w-full"
+      viewBox="0 0 1440 900"
+      preserveAspectRatio="xMidYMid slice"
+    >
+      {DETECCIONES.map((zona) => (
+        <g key={zona.d}>
+          <path
+            d={zona.d}
+            fill={zona.color}
+            fillOpacity={0.05}
+            stroke={zona.color}
+            strokeOpacity={0.16}
+            strokeWidth={1.5}
+          />
+          {zona.marco && <Marco caja={zona.marco as [number, number, number, number]} />}
+        </g>
+      ))}
+    </svg>
   );
 }
 

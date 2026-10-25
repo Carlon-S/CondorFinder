@@ -532,6 +532,34 @@ html {
   pointer-events: none;
 }
 
+/* =============================================================================
+   ANIMACIÓN: barrido del fondo del login
+   La misma idea que .scan-line pero en otra escala y por eso en su propia
+   clase. Aquella recorre un indicador de proceso en 2 segundos, porque está
+   diciendo "esto está trabajando ahora"; esta cruza la pantalla entera en 14 y
+   no pide que la miren: es el fondo de una pantalla donde lo único que hay que
+   hacer es apretar un botón. Reusar la de 2s acá habría puesto un destello cada
+   dos segundos al lado del único control de la página.
+
+   La franja mide 55vh y el recorrido va de -70% a 170% para que entre y salga
+   fuera de cuadro, sin el corte seco que deja un 0%-100%.
+   ============================================================================= */
+@keyframes login-scan {
+  0%   { transform: translateY(-70%); }
+  100% { transform: translateY(170%); }
+}
+
+.login-scan::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 55vh;
+  background: linear-gradient(180deg, transparent, rgba(255, 197, 61, 0.045), transparent);
+  animation: login-scan 14s linear infinite;
+  pointer-events: none;
+}
+
 
 /* =============================================================================
    ANIMACIÓN: tramo indeterminado del stepper
