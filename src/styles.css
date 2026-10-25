@@ -585,13 +585,59 @@ html {
   animation: deriva 36s ease-in-out infinite alternate;
 }
 
-@keyframes deteccion-pulso {
-  0%, 100% { opacity: 0.4; }
-  45%      { opacity: 1; }
+/* El realce: el contorno se DIBUJA de un vértice al siguiente, el marco se
+   cierra sobre la zona y el relleno aparece. Es el gesto de detectar, no una
+   decoración que late.
+
+   Los tres comparten el período de `login-scan` (14s) y cada zona arranca con
+   el retardo que le corresponde según su altura (lo calcula el componente), así
+   que la franja que cruza la pantalla es lo que ENCIENDE cada una al pasarle
+   por encima. Con períodos distintos serían dos bucles que no se hablan; con
+   el mismo, hay una causa y un efecto.
+
+   `pathLength=1` en el path normaliza su largo a 1, así que el dibujado se
+   anima con dasharray/dashoffset entre 1 y 0 sin tener que medir cada
+   polígono. El salto de vuelta a 1 ocurre con el trazo ya invisible.
+
+   Nada de esto es la única capa: debajo queda el campo quieto, que no se
+   apaga nunca. Un fondo que se vacía unos segundos por ciclo se lee como un
+   error, no como una pausa. */
+@keyframes zona-trazo {
+  0%        { stroke-dashoffset: 1; stroke-opacity: 0; }
+  14%       { stroke-dashoffset: 0; stroke-opacity: 0.34; }
+  46%       { stroke-dashoffset: 0; stroke-opacity: 0.34; }
+  70%, 100% { stroke-dashoffset: 0; stroke-opacity: 0; }
 }
 
-.deteccion-pulso {
-  animation: deteccion-pulso 9s ease-in-out infinite;
+.zona-trazo {
+  stroke-dasharray: 1;
+  animation: zona-trazo 14s ease-in-out infinite;
+}
+
+@keyframes zona-marco {
+  0%, 12%   { opacity: 0; transform: scale(1.08); }
+  22%       { opacity: 1; transform: scale(1); }
+  46%       { opacity: 1; transform: scale(1); }
+  70%, 100% { opacity: 0; transform: scale(1); }
+}
+
+/* transform-box: fill-box para que el scale tome como centro la caja del
+   propio dibujo y no el origen del lienzo de 1440x900, donde el marco saldría
+   disparado hacia la esquina. */
+.zona-marco {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: zona-marco 14s ease-in-out infinite;
+}
+
+@keyframes zona-relleno {
+  0%, 10%   { fill-opacity: 0; }
+  26%, 46%  { fill-opacity: 0.07; }
+  70%, 100% { fill-opacity: 0; }
+}
+
+.zona-relleno {
+  animation: zona-relleno 14s ease-in-out infinite;
 }
 
 

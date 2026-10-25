@@ -305,17 +305,26 @@ const DETECCIONES = [
   {
     d: "M140 180 L215 162 L238 224 L172 248 L128 214 Z",
     color: "#4ade80",
+    y: 162,
     marco: [116, 150, 250, 260],
   },
-  { d: "M92 562 L160 544 L184 604 L112 628 Z", color: "#fbbf24", marco: null },
-  { d: "M302 758 L378 744 L398 808 L316 826 Z", color: "#f87171", marco: null },
-  { d: "M1182 202 L1264 182 L1288 248 L1200 270 Z", color: "#fb923c", marco: null },
+  { d: "M92 562 L160 544 L184 604 L112 628 Z", color: "#fbbf24", y: 544, marco: null },
+  { d: "M302 758 L378 744 L398 808 L316 826 Z", color: "#f87171", y: 744, marco: null },
+  { d: "M1182 202 L1264 182 L1288 248 L1200 270 Z", color: "#fb923c", y: 182, marco: null },
   {
     d: "M1092 560 L1174 546 L1198 614 L1106 634 Z",
     color: "#4ade80",
+    y: 546,
     marco: [1080, 534, 1210, 646],
   },
 ];
+
+/** El período de `login-scan`, en segundos. Vive acá porque de él sale el
+ *  retardo de cada zona: compartir el número es lo que hace que la franja
+ *  parezca la causa de que se enciendan. Si se cambia en styles.css, cambiarlo
+ *  también acá o las dos cosas vuelven a ser bucles independientes. */
+const CICLO_S = 14;
+const ALTO_LIENZO = 900;
 
 /** Las cuatro esquinas en L alrededor de una caja, el mismo dibujo que
  *  `.detect-frame`, pero acá hecho en SVG porque marca un polígono y no un
@@ -324,11 +333,13 @@ const DETECCIONES = [
  *  Este motivo estuvo enmarcando la tarjeta de acceso y se sacó: una tarjeta no
  *  es una detección, así que ahí el recuadro no significaba nada. Alrededor de
  *  un polígono dice exactamente lo que dice en la vista de análisis. */
-function Marco({ caja }: { caja: [number, number, number, number] }) {
+function Marco({ caja, retardo }: { caja: [number, number, number, number]; retardo: string }) {
   const [x1, y1, x2, y2] = caja;
   const b = 14;
   return (
     <path
+      className="zona-marco"
+      style={{ animationDelay: retardo }}
       d={[
         `M${x1} ${y1 + b} L${x1} ${y1} L${x1 + b} ${y1}`,
         `M${x2 - b} ${y1} L${x2} ${y1} L${x2} ${y1 + b}`,
@@ -337,7 +348,7 @@ function Marco({ caja }: { caja: [number, number, number, number] }) {
       ].join(" ")}
       fill="none"
       stroke="#FFC53D"
-      strokeOpacity={0.22}
+      strokeOpacity={0.3}
       strokeWidth={2}
     />
   );
@@ -361,26 +372,47 @@ function CampoDeDetecciones() {
           se mueve, como una cámara sobre el terreno, no cada zona por su
           cuenta. Animando polígono por polígono el fondo se vería hervir. */}
       <g className="campo-deriva">
-        {DETECCIONES.map((zona, i) => (
-          // Cada zona late en su propio momento (`animationDelay`), así que
-          // nunca coinciden y el fondo no pulsa entero como un corazón. El
-          // escalonado es el período dividido por la cantidad.
-          <g
-            key={zona.d}
-            className="deteccion-pulso"
-            style={{ animationDelay: `${(i * 9) / DETECCIONES.length}s` }}
-          >
-            <path
-              d={zona.d}
-              fill={zona.color}
-              fillOpacity={0.05}
-              stroke={zona.color}
-              strokeOpacity={0.16}
-              strokeWidth={1.5}
-            />
-            {zona.marco && <Marco caja={zona.marco as [number, number, number, number]} />}
-          </g>
-        ))}
+        {DETECCIONES.map((zona) => {
+          // El retardo sale de la ALTURA de la zona: la franja de `login-scan`
+          // baja en el mismo período, así que cada una se enciende cuando le
+          // pasa por encima. Dos zonas a la misma altura arrancan juntas, que
+          // es lo correcto, no una coincidencia a evitar.
+          const retardo = `${((zona.y / ALTO_LIENZO) * CICLO_S).toFixed(2)}s`;
+          return (
+            <g key={zona.d}>
+              {/* Capa quieta: nunca se apaga. Es lo que impide que el fondo
+                  quede vacío entre pasadas. */}
+              <path
+                d={zona.d}
+                fill={zona.color}
+                fillOpacity={0.035}
+                stroke={zona.color}
+                strokeOpacity={0.1}
+                strokeWidth={1.5}
+              />
+              {/* Capa de realce: el relleno aparece y el contorno se dibuja. */}
+              <path
+                className="zona-relleno"
+                style={{ animationDelay: retardo }}
+                d={zona.d}
+                fill={zona.color}
+                stroke="none"
+              />
+              <path
+                className="zona-trazo"
+                style={{ animationDelay: retardo }}
+                pathLength={1}
+                d={zona.d}
+                fill="none"
+                stroke={zona.color}
+                strokeWidth={1.5}
+              />
+              {zona.marco && (
+                <Marco caja={zona.marco as [number, number, number, number]} retardo={retardo} />
+              )}
+            </g>
+          );
+        })}
       </g>
     </svg>
   );
