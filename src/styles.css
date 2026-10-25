@@ -95,7 +95,7 @@
   --font-JetBrainsMono: "JetBrains Mono", monospace;
 
   /* Tailwind v4 genera las utilidades animate-accordion-down/up a partir de
-     estos --animate-*, igual que --color-*/--font-* generan sus propias
+     estos --animate-*, igual que --color-* y --font-* generan sus propias
      utilidades más arriba, accordion.tsx (shadcn) ya referencia esas
      clases, pero el proyecto usa config en CSS (no tailwind.config.js), así
      que sin esto no existían y el accordion abría/cerraba de golpe. */
@@ -558,6 +558,40 @@ html {
   background: linear-gradient(180deg, transparent, rgba(255, 197, 61, 0.045), transparent);
   animation: login-scan 14s linear infinite;
   pointer-events: none;
+}
+
+/* =============================================================================
+   ANIMACIÓN: el campo de detecciones del login
+   Dos movimientos que hacen cosas distintas y por eso están separados.
+
+   `deriva` mueve el ENCUADRE, no las zonas: un solo grupo que envuelve a todos
+   los polígonos, como una cámara desplazándose sobre el terreno. Animar cada
+   polígono por su cuenta haría hervir el fondo. Son 22px en 36 segundos sobre
+   un lienzo de 1440, o sea un movimiento que no se ve ocurrir pero que impide
+   que la pantalla se lea como una imagen fija.
+
+   `deteccion-pulso` sube y baja la opacidad de cada zona en su propio momento
+   (el escalonado lo pone `animationDelay` desde el componente), que es el
+   sistema encontrándolas una por una. Nunca baja de 0.4 porque una zona que
+   desaparece del todo y vuelve se lee como un parpadeo roto, no como un
+   hallazgo.
+   ============================================================================= */
+@keyframes deriva {
+  from { transform: translate(0, 0); }
+  to   { transform: translate(-22px, 12px); }
+}
+
+.campo-deriva {
+  animation: deriva 36s ease-in-out infinite alternate;
+}
+
+@keyframes deteccion-pulso {
+  0%, 100% { opacity: 0.4; }
+  45%      { opacity: 1; }
+}
+
+.deteccion-pulso {
+  animation: deteccion-pulso 9s ease-in-out infinite;
 }
 
 

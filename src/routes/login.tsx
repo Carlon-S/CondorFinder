@@ -303,21 +303,18 @@ function LoginPage() {
  *  un solape no se vea, pero un polígono escondido es trabajo tirado. */
 const DETECCIONES = [
   {
-    d: "M120 140 L250 110 L300 200 L190 250 L110 210 Z",
+    d: "M140 180 L215 162 L238 224 L172 248 L128 214 Z",
     color: "#4ade80",
-    marco: [96, 96, 314, 264],
+    marco: [116, 150, 250, 260],
   },
-  { d: "M60 420 L170 390 L220 480 L120 540 Z", color: "#fbbf24", marco: null },
-  { d: "M200 640 L340 620 L390 720 L250 760 L180 710 Z", color: "#f87171", marco: null },
-  { d: "M520 70 L650 50 L690 140 L560 170 Z", color: "#a3e635", marco: null },
-  { d: "M1150 120 L1300 150 L1330 260 L1200 280 Z", color: "#fb923c", marco: null },
+  { d: "M92 562 L160 544 L184 604 L112 628 Z", color: "#fbbf24", marco: null },
+  { d: "M302 758 L378 744 L398 808 L316 826 Z", color: "#f87171", marco: null },
+  { d: "M1182 202 L1264 182 L1288 248 L1200 270 Z", color: "#fb923c", marco: null },
   {
-    d: "M1050 430 L1180 400 L1240 500 L1100 540 L1030 490 Z",
+    d: "M1092 560 L1174 546 L1198 614 L1106 634 Z",
     color: "#4ade80",
-    marco: [1016, 386, 1254, 554],
+    marco: [1080, 534, 1210, 646],
   },
-  { d: "M1220 660 L1360 690 L1340 790 L1190 760 Z", color: "#fbbf24", marco: null },
-  { d: "M800 780 L950 760 L980 860 L830 880 Z", color: "#fb923c", marco: [786, 746, 994, 894] },
 ];
 
 /** Las cuatro esquinas en L alrededor de una caja, el mismo dibujo que
@@ -329,7 +326,7 @@ const DETECCIONES = [
  *  un polígono dice exactamente lo que dice en la vista de análisis. */
 function Marco({ caja }: { caja: [number, number, number, number] }) {
   const [x1, y1, x2, y2] = caja;
-  const b = 22;
+  const b = 14;
   return (
     <path
       d={[
@@ -360,19 +357,31 @@ function CampoDeDetecciones() {
       viewBox="0 0 1440 900"
       preserveAspectRatio="xMidYMid slice"
     >
-      {DETECCIONES.map((zona) => (
-        <g key={zona.d}>
-          <path
-            d={zona.d}
-            fill={zona.color}
-            fillOpacity={0.05}
-            stroke={zona.color}
-            strokeOpacity={0.16}
-            strokeWidth={1.5}
-          />
-          {zona.marco && <Marco caja={zona.marco as [number, number, number, number]} />}
-        </g>
-      ))}
+      {/* La deriva va en un grupo que envuelve a todos: es el encuadre el que
+          se mueve, como una cámara sobre el terreno, no cada zona por su
+          cuenta. Animando polígono por polígono el fondo se vería hervir. */}
+      <g className="campo-deriva">
+        {DETECCIONES.map((zona, i) => (
+          // Cada zona late en su propio momento (`animationDelay`), así que
+          // nunca coinciden y el fondo no pulsa entero como un corazón. El
+          // escalonado es el período dividido por la cantidad.
+          <g
+            key={zona.d}
+            className="deteccion-pulso"
+            style={{ animationDelay: `${(i * 9) / DETECCIONES.length}s` }}
+          >
+            <path
+              d={zona.d}
+              fill={zona.color}
+              fillOpacity={0.05}
+              stroke={zona.color}
+              strokeOpacity={0.16}
+              strokeWidth={1.5}
+            />
+            {zona.marco && <Marco caja={zona.marco as [number, number, number, number]} />}
+          </g>
+        ))}
+      </g>
     </svg>
   );
 }
