@@ -175,6 +175,17 @@ def url_de_autorizacion(
         "nonce": nonce,
         "code_challenge": desafio_de(verificador),
         "code_challenge_method": "S256",
+        # Siempre el selector de cuenta, nunca el inicio de sesión silencioso.
+        #
+        # Sin esto, el proveedor reutiliza la sesión que ya exista en el
+        # navegador y devuelve un token sin preguntar nada. En un computador
+        # compartido de la municipalidad eso significa que el segundo
+        # funcionario del día entra como el primero, sin enterarse.
+        #
+        # También vuelve legible el rechazo: con una cuenta de otro directorio
+        # ya iniciada, todo el flujo ocurría en redirecciones automáticas y el
+        # resultado se veía como un rechazo instantáneo sin motivo aparente.
+        "prompt": "select_account",
     }
     return f"{doc['authorization_endpoint']}?{urlencode(params)}"
 
