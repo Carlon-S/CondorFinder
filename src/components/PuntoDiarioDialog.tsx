@@ -20,7 +20,8 @@
 // mezclarlos acá haría imposible después comparar uno con otro.
 // =============================================================================
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -102,6 +103,10 @@ export function PuntoDiarioDialog({
   const [nuevaSolicitud, setNuevaSolicitud] = useState("");
   const [filtroSolicitud, setFiltroSolicitud] = useState("");
   const [solicitudAbierta, setSolicitudAbierta] = useState(false);
+  /** Dónde dibujar el panel, en coordenadas de viewport. Se calcula del
+   *  rectángulo del disparador al abrir, porque portalizado al `body` el panel
+   *  ya no tiene con qué posicionarse respecto del campo. */
+  const [caja, setCaja] = useState<{ left: number; top: number; width: number } | null>(null);
   /** Solicitud en espera de confirmación de borrado, o null. */
   const [solicitudABorrar, setSolicitudABorrar] = useState<Solicitud | null>(null);
   const [agregandoSolicitud, setAgregandoSolicitud] = useState(false);
@@ -109,6 +114,8 @@ export function PuntoDiarioDialog({
   const [guardando, setGuardando] = useState(false);
 
   const escribioRef = useRef(false);
+  const anclaRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -167,6 +174,50 @@ export function PuntoDiarioDialog({
       setAgregandoSolicitud(false);
     }
   };
+
+  const medir = useCallback(() => {
+    const r = anclaRef.current?.getBoundingClientRect();
+    if (r) setCaja({ left: r.left, top: r.bottom + 4, width: r.width });
+  }, []);
+
+  const abrirSolicitudes = () => {
+    if (solicitudAbierta) {
+      setSolicitudAbierta(false);
+      return;
+    }
+    medir();
+    setFiltroSolicitud("");
+    setSolicitudAbierta(true);
+  };
+
+  // Cerrar al apretar afuera o con Escape, y seguir al campo si la página se
+  // mueve: portalizado, el panel no viaja solo con su disparador.
+  useEffect(() => {
+    if (!solicitudAbierta) return;
+    const afuera = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (panelRef.current?.contains(t) || anclaRef.current?.contains(t)) return;
+      setSolicitudAbierta(false);
+    };
+    const tecla = (e: KeyboardEvent) => {
+      // Solo cierra el desplegable: sin esto, Escape cerraría además el
+      // diálogo entero y se perdería el formulario a medio llenar.
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        setSolicitudAbierta(false);
+      }
+    };
+    document.addEventListener("mousedown", afuera);
+    document.addEventListener("keydown", tecla, true);
+    window.addEventListener("resize", medir);
+    window.addEventListener("scroll", medir, true);
+    return () => {
+      document.removeEventListener("mousedown", afuera);
+      document.removeEventListener("keydown", tecla, true);
+      window.removeEventListener("resize", medir);
+      window.removeEventListener("scroll", medir, true);
+    };
+  }, [solicitudAbierta, medir]);
 
   const solicitudesFiltradas = useMemo(() => {
     const q = filtroSolicitud.trim().toLowerCase();
@@ -381,23 +432,25 @@ export function PuntoDiarioDialog({
                 <>
                   <div className="grid gap-1.5">
                     <Label>Solicitud</Label>
-                    {/* UN DESPLEGABLE, con buscador y scroll adentro, pero
-                        posicionado en ABSOLUTO dentro del formulario y no con
-                        Popover.
+                    {/* UN DESPLEGABLE PORTALIZADO A `body`.
+                        Dos cosas lo obligan, y las dos son de este diálogo:
 
-                        Popover se portaliza al `body`, igual que el diálogo, y
-                        ahí el apilamiento lo decide el orden del DOM antes que
-                        el z-index: el panel quedaba detrás de la tarjeta del
-                        diálogo. Subirle el z-index no alcanzó.
+                        `DialogContent` tiene `overflow-y-auto`, así que
+                        recorta cualquier hijo posicionado dentro: el panel no
+                        podía sobresalir del formulario.
 
-                        Las sugerencias de dirección de este mismo formulario ya
-                        resolvían esto con un `absolute` adentro del contenedor
-                        relativo, y funcionan. Es el mismo problema, así que es
-                        la misma solución y no una segunda. */}
-                    <div className="relative">
+                        Y es `z-[1100]`, no el `z-50` de shadcn. Por eso un
+                        `Popover` con `z-[60]` quedaba DETRÁS del diálogo: no
+                        era el orden del DOM, era que el número no alcanzaba.
+
+                        Portalizado al `body` no hay ancestro que lo recorte, y
+                        como el diálogo tiene `transform`, posicionarlo con
+                        `fixed` solo funciona desde afuera de su árbol. La
+                        posición se calcula del rectángulo del disparador. */}
+                    <div ref={anclaRef}>
                       <button
                         type="button"
-                        onClick={() => setSolicitudAbierta((v) => !v)}
+                        onClick={abrirSolicitudes}
                         className="flex h-9 w-full cursor-pointer items-center justify-between rounded-md border border-input bg-transparent px-3 text-sm"
                       >
                         <span
@@ -409,9 +462,16 @@ export function PuntoDiarioDialog({
                           className={`ml-2 h-4 w-4 shrink-0 text-muted-foreground transition-transform ${solicitudAbierta ? "rotate-180" : ""}`}
                         />
                       </button>
+                    </div>
 
-                      {solicitudAbierta && (
-                        <div className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-md border border-border bg-popover shadow-lg">
+                    {solicitudAbierta &&
+                      caja &&
+                      createPortal(
+                        <div
+                          ref={panelRef}
+                          style={{ left: caja.left, top: caja.top, width: caja.width }}
+                          className="fixed z-[1200] overflow-hidden rounded-md border border-border bg-popover shadow-xl"
+                        >
                           <div className="relative border-b border-border">
                             <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                             <Input
@@ -422,7 +482,7 @@ export function PuntoDiarioDialog({
                               autoFocus
                             />
                           </div>
-                          <ul className="max-h-48 overflow-y-auto p-1">
+                          <ul className="max-h-64 overflow-y-auto p-1">
                             <li>
                               <button
                                 type="button"
@@ -474,9 +534,9 @@ export function PuntoDiarioDialog({
                               </li>
                             )}
                           </ul>
-                        </div>
+                        </div>,
+                        document.body,
                       )}
-                    </div>
                     {/* El vocabulario es de la municipalidad, no del sistema:
                         se puede ampliar sin un despliegue. */}
                     <div className="mt-1 flex gap-2">
