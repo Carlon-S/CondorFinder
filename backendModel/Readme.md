@@ -75,7 +75,33 @@ pip install -r backendModel/requirements.txt
 cp backendModel/.env.example backendModel/.env
 ```
 
-Completa `MONGODB_URI` (connection string de Atlas), `MONGODB_DB_NAME`, `JWT_SECRET` y `SEED_ADMIN_USERNAME`/`SEED_ADMIN_PASSWORD` en `backendModel/.env`. Sin esto el proceso no arranca: el `lifespan` de `orquestador.py` necesita `MONGODB_URI` para conectar, y `auth.py` lanza `RuntimeError` si falta `JWT_SECRET`.
+**Obligatorias.** Sin estas el proceso no arranca: el `lifespan` de `orquestador.py` necesita `MONGODB_URI` para conectar, y `auth.py` lanza `RuntimeError` si falta `JWT_SECRET`.
+
+| Variable | Qué es |
+|---|---|
+| `MONGODB_URI` | Connection string del cluster de Atlas |
+| `MONGODB_DB_NAME` | Nombre de la base dentro del cluster |
+| `JWT_SECRET` | Secreto de la sesión: `python -c "import secrets; print(secrets.token_hex(32))"` |
+
+**Para poder entrar.** La identidad la emite un proveedor externo; este backend solo decide quién entra. Cada proveedor necesita sus **dos** credenciales: con una sola, ese botón no se ofrece, para que un `.env` a medio llenar no deje el login en un estado que nadie quiso.
+
+| Variable | Qué es |
+|---|---|
+| `GOOGLE_OIDC_CLIENT_ID` / `GOOGLE_OIDC_CLIENT_SECRET` | Cliente OAuth web, creado en el mismo proyecto de GCP |
+| `AUTH_EMAILS_PERMITIDOS` | Correos del equipo, separados por coma |
+| `MS_CLIENT_ID` / `MS_CLIENT_SECRET` | Registro multiinquilino en Microsoft Entra ID |
+| `AUTH_MS_TENANTS` | Identificadores de directorio (`tid`) autorizados, separados por coma |
+
+Las URIs de retorno que hay que registrar en cada consola salen de `PUBLIC_BASE_URL`, y tienen que coincidir **exactas**:
+
+```
+<PUBLIC_BASE_URL>/auth/oidc/google/callback
+<PUBLIC_BASE_URL>/auth/oidc/microsoft/callback
+```
+
+En local, sin esa variable, son `http://localhost:8000/auth/oidc/{proveedor}/callback`.
+
+**Salida de emergencia, solo desarrollo.** `ALLOW_PASSWORD_LOGIN=true` junto a `SEED_ADMIN_USERNAME`/`SEED_ADMIN_PASSWORD` devuelve el login por contraseña, para levantar el proyecto sin credenciales de Google ni de Azure. Sin esa bandera el endpoint responde `404` y no se siembra ningún usuario. **No la pongas en la VM**: ahí está SSH, que es mejor puerta de emergencia que un usuario con contraseña expuesto en internet.
 
 ---
 
@@ -120,9 +146,23 @@ Todos los endpoints salvo `POST /auth/login` requieren una sesión válida (cook
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| `POST` | `/auth/login` | Inicia sesión con usuario/contraseña, setea la cookie httpOnly. `401` si las credenciales son incorrectas |
+| `GET` | `/auth/proveedores` | Con qué se puede entrar hoy: `{"proveedores": ["microsoft", "google"], "password": false}`. La vista de login no ofrece un botón que lleve a un error |
+| `GET` | `/auth/oidc/{proveedor}/start` | Arranca el flujo OpenID Connect y redirige al proveedor. Guarda `state`, `nonce` y el verificador PKCE en una cookie efímera de 10 minutos |
+| `GET` | `/auth/oidc/{proveedor}/callback` | Canjea el código, verifica el `id_token` (firma, `aud`, `iss`, `nonce`) y decide quién entra. Ante cualquier fallo redirige al login con el motivo en la query |
 | `POST` | `/auth/logout` | Cierra la sesión, borra la cookie |
 | `GET` | `/auth/me` | Devuelve el usuario de la sesión actual |
+| `POST` | `/auth/login` | **Solo desarrollo.** Login por contraseña. Sin `ALLOW_PASSWORD_LOGIN=true` responde `404` y no se siembra ningún usuario |
+
+**Quién entra, y por qué está escrito así:**
+
+| Proveedor | Regla | Variable |
+|---|---|---|
+| `microsoft` | El `tid` del token (el directorio que lo emitió) está en la lista | `AUTH_MS_TENANTS` |
+| `google` | El correo está en la lista | `AUTH_EMAILS_PERMITIDOS` |
+
+El cliente entra **por su directorio**, no por una lista de correos: un funcionario nuevo de la municipalidad entra el día que su TI le crea la cuenta, y deja de entrar el día que se la cierran, sin tocar nada acá. Google va por lista nominal porque del otro lado no hay directorio que signifique algo: aceptar "cualquier cuenta de Google" sería aceptar a todo el planeta. Es la puerta del equipo de desarrollo.
+
+**Toda la API exige sesión.** `orquestador.py` la pide con una dependencia global (`exigir_sesion`), no endpoint por endpoint. Las únicas excepciones son `/auth/*`, y las lecturas `GET` de `/result/` y `/task-images/`, que sirven imágenes a etiquetas `<img>`.
 
 ### Pipeline (`orquestador.py`)
 
@@ -161,7 +201,49 @@ Todos los endpoints salvo `POST /auth/login` requieren una sesión válida (cook
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| `POST` | `/routes/generate` | Resuelve la capacidad real de los puntos activos contra Mongo y devuelve una ruta óptima. **El algoritmo de optimización todavía no está implementado** (`TODO(HDU5/AC2)`), siempre responde `{"status": "infeasible", "message": "..."}` mientras tanto, nunca inventa una ruta falsa |
+| `POST` | `/routes/generate` | Resuelve contra Mongo la capacidad de los puntos activos y la geometría de cada parada, y devuelve el plan. **El algoritmo está implementado**: elige origen por capacidad, reparte paradas por cercanía, ordena contra una matriz real de OSRM y rutea `base → zonas → relleno sanitario → base` |
+
+El plan **ya no se rinde entero**. Tres de las cinco situaciones que antes devolvían `infeasible` son hoy planes parciales (AC6 de HDU5.1): falta de capacidad total, un reparto que desborda un punto, y un recorrido que excede las horas. Cada zona descartada viaja en `unassignedZones` con su motivo **como texto**, porque el conjunto de motivos crece con cada restricción nueva y un enumerado obligaría a los dos lados a sincronizarse por cada una.
+
+Solo quedan dos salidas `infeasible`: ningún punto activo y ninguna zona ubicable, donde no hay nada que construir.
+
+### Recursos y flota: HDU6 + HDU8 (`resources.py`)
+
+Además del CRUD de puntos, expone el de **unidades individuales** (`/resources/units`), las fotos de la flota (`/resources/photo`), la foto de Street View de cada punto, y el autocompletado de direcciones contra Google (`/resources/direcciones/*`), que el frontend usa sin saber que pasa por acá: la clave nunca viaja al navegador.
+
+### Itinerario semanal: HDU14 (`itinerario.py`)
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| `GET` | `/itinerario?semana=2026-W44` | La grilla de una semana. Siempre devuelve los seis días, aunque estén vacíos: el frontend dibuja seis columnas pase lo que pase |
+| `PUT` | `/itinerario/{dia}?semana=2026-W44` | Reemplaza la lista **ordenada** de un día. El orden es la secuencia del recorrido, no un conjunto |
+| `POST` | `/itinerario/copiar?desde=...&hacia=...` | Copia el reparto de una semana a otra. Reemplaza el destino y saltea los días ya pasados |
+
+**No hay colección de puntos permanentes.** Un punto permanente **es una zona** (`zones`, con `kind: "permanente"`), y eso no es un atajo: son el mismo objeto, un lugar de la comuna que hay que limpiar. Lo único que los distinguía era que el sistema solo sabía crear el lugar como efecto secundario de guardar un análisis.
+
+**El pasado no se planifica.** `_exigir_editable()` rechaza con `409` cualquier escritura sobre un día que ya terminó, comparando en hora de Chile. La regla vive acá y no solo en la vista: una pestaña abierta desde ayer sigue teniendo botones vivos, y el reparto de una jornada terminada es el registro de lo que se hizo.
+
+### Puntos diarios de retiro: HDU15 (`puntos_diarios.py`)
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| `GET` | `/puntos-diarios?fecha=2026-10-26` | Los retiros de una fecha. Sin parámetro, los de hoy en UTC |
+| `POST` | `/puntos-diarios` | Crea un retiro de clase `escombros` o `extras` |
+| `PUT` | `/puntos-diarios/{id}` | Edita uno |
+| `DELETE` | `/puntos-diarios/{id}` | Elimina uno |
+| `GET` | `/puntos-diarios/solicitudes` | Los 17 programas de la hoja `SOLICITUDES` más los agregados a mano |
+| `POST` | `/puntos-diarios/solicitudes` | Agrega un tipo de solicitud. Rechaza repetidos |
+| `DELETE` | `/puntos-diarios/solicitudes/{id}` | Elimina uno agregado a mano. Se niega con los 17 de la planilla y con los que algún punto esté usando |
+
+**Un punto diario NO es una zona**, a diferencia de uno permanente: una zona es un lugar que se sigue en el tiempo, un punto diario es un hecho de una fecha. Guardarlos como zonas llenaría Vista Principal de cientos de lugares de una sola visita.
+
+**Lo declarado no es lo retirado.** La planilla municipal trae las dos columnas y en sus hojas coinciden porque se llenan al final del día, pero son dos hechos distintos. Acá solo se captura el primero.
+
+### Bitácora y límite de peticiones (`auditoria.py`, `rate_limit.py`)
+
+`auditoria` registra quién borró o renombró qué, con actor, acción, recurso y fecha. No tiene endpoint de lectura: se consulta en Mongo. Nunca lanza, para que un fallo al registrar no tumbe la operación que estaba registrando.
+
+`rate_limit` es una ventana deslizante en memoria. Topes actuales: 20 inicios de sesión por hora, 120 subidas, 10 generaciones de mapa y 30 de ruta. Es **por proceso** y se reinicia con el backend: no reemplaza un WAF, acota el daño de un bucle.
 
 ### Análisis guardados: HDU4 + fusión de duplicados: HDU7 (`analyses.py`)
 
@@ -174,8 +256,14 @@ Todos los endpoints salvo `POST /auth/login` requieren una sesión válida (cook
 | `DELETE` | `/analyses/{analysis_id}` | Elimina un análisis guardado |
 | `POST` | `/analyses/{analysis_id}/confirm-duplicate` | HDU7/AC3, confirma que es la misma zona que `possibleDuplicateOf`: el análisis **anterior** pasa a `historical: true` + `supersededBy: <id nuevo>`, este queda como `duplicateStatus: "confirmed_same"` |
 | `POST` | `/analyses/{analysis_id}/reject-duplicate` | HDU7/AC4, indica que son zonas distintas: ambos registros se mantienen por separado, solo se cierra el aviso (`duplicateStatus: "confirmed_different"`) |
-| `GET` | `/analyses/zones/all` | Lista las zonas. La ruta lleva `/all` porque `/analyses/{analysis_id}` ya captura cualquier segmento suelto |
-| `PUT` | `/analyses/zones/{zone_id}` | Renombra una zona |
+| `GET` | `/analyses/zones/all` | Lista las zonas con su resumen: `analysisCount` y la miniatura del mapa unificado de su captura más reciente, ambos de una sola agregación. La ruta lleva `/all` porque `/analyses/{analysis_id}` ya captura cualquier segmento suelto |
+| `POST` | `/analyses/zones` | **Alta a mano de una zona, sin vuelo** (HDU14). Es el camino que no existía: hasta acá una zona solo aparecía como efecto secundario de guardar un análisis |
+| `PUT` | `/analyses/zones/{zone_id}` | Edita una zona. Escribe con `exclude_unset`, así que un cuerpo que solo trae `{name}` no le borra la dirección |
+| `DELETE` | `/analyses/zones/{zone_id}` | Elimina una zona. Se niega con `409` si tiene análisis guardados o si está programada en algún día del itinerario |
+
+**La zona ganó campos propios** (todos opcionales): `kind` (`basural` o `permanente`), `address`, `comuna`, `barrio`, `lat`, `lng`, `tipo` (`Microbasural` o `VIRS`), `frecuencia` y `active`. Las zonas anteriores no traen `kind`, y ausente significa `basural`: no hay nada que migrar.
+
+Los dos juegos de campos son **disjuntos**: el alta a mano escribe dirección, barrio, tipo y frecuencia; el vuelo escribe `orthoCenter`, `orthoBounds`, versiones y análisis. Una zona puede ir completándose por los dos lados sin que haya nada que reconciliar.
 | `POST` | `/analyses/versions/{sourceTaskId}/reassign` | Separa una versión completa en una zona nueva. Existe porque agrupar por HDU7 es una heurística y, con el modelo de zonas, una confirmación equivocada fusionaría dos historias de forma permanente |
 
 ---

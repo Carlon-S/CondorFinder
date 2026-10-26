@@ -25,8 +25,11 @@ Todo lo que sigue en este documento (Requisitos, Instalación, Ejecución) descr
 | Docker | cualquiera | WSL (Ubuntu) |
 | Git | cualquiera | Windows + WSL |
 | MongoDB Atlas | cuenta gratuita (M0) | servicio externo, no requiere instalación local |
+| Cliente OAuth de Google | gratuito | servicio externo, necesario para poder iniciar sesión |
 
-> El frontend se levanta en **Windows**. El backend y Docker se ejecutan en **WSL (Ubuntu)**. El backend usa MongoDB Atlas para persistir usuarios, tareas del pipeline, puntos y análisis, crea un cluster gratuito en https://www.mongodb.com/cloud/atlas antes de continuar.
+> El frontend se levanta en **Windows**. El backend y Docker se ejecutan en **WSL (Ubuntu)**. El backend usa MongoDB Atlas para persistir usuarios, tareas del pipeline, zonas, puntos, recursos, itinerario y análisis: crea un cluster gratuito en https://www.mongodb.com/cloud/atlas antes de continuar.
+
+> **El sistema no tiene usuarios propios.** La identidad la emite un proveedor externo por OpenID Connect, así que para entrar hace falta al menos un cliente OAuth configurado. Para desarrollo local existe una salida sin eso (`ALLOW_PASSWORD_LOGIN`), descrita más abajo.
 
 ### Instalar Node.js y pnpm (Windows)
 
@@ -116,12 +119,39 @@ cp backendModel/.env.example backendModel/.env
 
 Edita `backendModel/.env` y completa:
 
+**Obligatorias**, sin ellas el backend no arranca:
+
 | Variable | Descripción |
 |---|---|
 | `MONGODB_URI` | Connection string del cluster de Atlas (Database → Connect → Drivers) |
 | `MONGODB_DB_NAME` | Nombre de la base dentro del cluster (se crea sola en el primer insert, ej. `condorfinder`) |
 | `JWT_SECRET` | Secreto para firmar la sesión, genera uno con `python -c "import secrets; print(secrets.token_hex(32))"` |
-| `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD` | Credenciales del usuario admin que el backend siembra automáticamente al arrancar (solo si no existe ya en Mongo) |
+
+**Para poder iniciar sesión.** Cada proveedor necesita sus **dos** credenciales: con una sola, ese botón no se ofrece, para que un `.env` a medio llenar no deje el login en un estado que nadie quiso.
+
+| Variable | Descripción |
+|---|---|
+| `GOOGLE_OIDC_CLIENT_ID` / `GOOGLE_OIDC_CLIENT_SECRET` | Cliente OAuth de tipo **Aplicación web** (console.cloud.google.com → Google Auth Platform → Clientes) |
+| `AUTH_EMAILS_PERMITIDOS` | Correos autorizados a entrar por Google, separados por coma |
+| `MS_CLIENT_ID` / `MS_CLIENT_SECRET` | Registro **multiinquilino** en Microsoft Entra ID (opcional en desarrollo) |
+| `AUTH_MS_TENANTS` | Identificadores de directorio (`tid`) autorizados, separados por coma |
+
+En la consola de cada proveedor hay que registrar la URI de retorno, y tiene que coincidir **exacta**:
+
+```
+http://localhost:8000/auth/oidc/google/callback
+http://localhost:8000/auth/oidc/microsoft/callback
+```
+
+**Alternativa sin cuentas externas.** Para levantar el proyecto sin configurar nada de esto:
+
+```
+ALLOW_PASSWORD_LOGIN=true
+SEED_ADMIN_USERNAME=admin
+SEED_ADMIN_PASSWORD=<una contraseña>
+```
+
+Devuelve el login por contraseña y siembra ese usuario al arrancar. **Sin esa bandera, `/auth/login` responde 404 y no se siembra nada.** No se usa en producción: ahí está SSH, que es mejor puerta de emergencia que un usuario con contraseña expuesto en internet.
 
 > `backendModel/.env` está en `.gitignore`, nunca se sube al repositorio. Solo `.env.example` (con placeholders) se versiona.
 
@@ -264,11 +294,24 @@ Ninguna de estas existe en tu `backendModel/.env` local, todas tienen un valor p
 ### Inicio de sesión (`/login`)
 
 1. Abre http://localhost:8080, sin sesión activa, redirige automáticamente a `/login`
-2. Ingresa el usuario y contraseña sembrados en `backendModel/.env` (`SEED_ADMIN_USERNAME`/`SEED_ADMIN_PASSWORD`). La sesión se guarda en una cookie httpOnly y persiste aunque se reinicie el backend
+2. **Nadie escribe una contraseña en este sistema.** La identidad la emite un proveedor externo por OpenID Connect y el backend solo decide quién entra:
+   - **Microsoft**, la entrada del cliente: se acepta a quien venga del directorio de la Municipalidad de Maipú, comparando el `tid` del token. Un funcionario nuevo entra el día que su TI le crea la cuenta, y deja de entrar el día que se la cierran, sin que nadie toque el sistema
+   - **Google**, la entrada del equipo de desarrollo, por lista nominal de correos. Está detrás de un enlace discreto al pie: el funcionario municipal tiene que ver **un** camino, y con los dos botones a la vista el de Google es el que no le sirve y el que reconoce
+3. La sesión se guarda en una cookie httpOnly y persiste aunque se reinicie el backend
+
+> La pantalla no nombra al cliente ni explica cómo está organizado el acceso: eso le contaría a cualquiera que abra la página quién es el cliente y por dónde se entra.
 
 ### Vista Principal (`/`)
 
-Dashboard con las zonas guardadas, las tareas del pipeline en curso o pendientes de análisis (consultadas directo al backend, ya no dependen de que el mismo navegador las haya iniciado), y el panel **"Recursos disponibles"** con el resumen de tolvas/retroexcavadoras/camiones/puntos/personal. Las zonas reemplazadas por un análisis más reciente de la misma zona física (HDU7) no aparecen en los filtros normales ni se cuentan en los totales, quedan disponibles aparte bajo el filtro **"Historial"**, con un subtítulo indicando por cuál análisis fueron reemplazadas.
+Dashboard con todo lo que la municipalidad administra: las zonas con análisis guardado, las tareas del pipeline en curso o pendientes (consultadas directo al backend, ya no dependen de que el mismo navegador las haya iniciado), y **los puntos permanentes todavía sin vuelo**, bajo el filtro "Sin vuelo".
+
+Cada fila muestra el mapa, el nombre de la zona, su **dirección**, la **fecha y hora** de creación, y volumen, peso y área cuando hay medición. Una zona sin vuelo muestra `-` en las tres cifras y no suma a los totales, pero sí cuenta como zona registrada: hasta HDU14 la tabla decía que la municipalidad administra dos lugares, cuando conoce 54 microbasurales y le voló el dron a dos.
+
+El lápiz del nombre abre el **formulario completo** de la zona (nombre, dirección, barrio, tipo, frecuencia), que es el mismo de la vista de itinerario.
+
+Las zonas reemplazadas por un análisis más reciente de la misma zona física (HDU7) no aparecen en los filtros normales ni se cuentan en los totales, quedan aparte bajo el filtro **"Historial"**, con un subtítulo indicando por cuál análisis fueron reemplazadas.
+
+> El panel **"Recursos disponibles"** ya no está acá, ni como columna ni como panel deslizante: HDU6 tiene su propia página completa y este resumen era una tercera copia de las mismas cifras compitiendo con lo único que esta vista tiene que mostrar.
 
 ### Vista de Carga (`/carga`)
 
@@ -293,12 +336,15 @@ Dashboard con las zonas guardadas, las tareas del pipeline en curso o pendientes
 12. **Guardar análisis** le pide un nombre y lo agrega al listado de análisis disponibles del sistema (pide confirmación antes de sobrescribir si el nombre ya existe)
 13. **Fusión de duplicados (HDU7)**: si el análisis recién guardado (o uno reabierto desde el listado) se superpone más de un 50% en área con un análisis guardado anteriormente, aparece un aviso comparando el volumen de ambos, "Es la misma zona" vincula ambos registros y envía el anterior al historial de Vista Principal; "Son zonas distintas" cierra el aviso y mantiene ambos registros por separado
 
-### Vista de Recursos Disponibles (`/recursos`): HDU6
+### Vista de Recursos (`/planificacion/recursos`): HDU6 + HDU8
 
-13. **Definir punto**: clickea un punto en el mapa (o escribe una dirección) para ubicar un punto que el sistema usará como origen o destino de vehículos y maquinaria, dirección y comuna se completan solas vía geocodificación (Nominatim/OpenStreetMap), o puedes escribirlas a mano y el punto se reubica en el mapa automáticamente
-14. Configura cantidad y capacidad individual de tolvas y camiones (no un valor agregado), y cantidad de retroexcavadoras y personal disponible
-15. **Modificar puntos** lista todos los puntos guardados con opciones para editar o eliminar (con confirmación)
-16. Cada punto tiene un switch de **punto activo**, solo los puntos activos participan en la generación de ruta (HDU5)
+13. El formulario de alta está **abierto desde el principio**: ubicar el punto es un campo más, no un modo detrás de un botón. Clickea en el mapa o escribe la dirección con el autocompletado, y la comuna y la coordenada se completan solas
+14. El mapa dibuja además **las zonas guardadas** como círculos violeta: un punto de origen no se ubica en el vacío sino respecto de los basurales que hay que ir a retirar
+15. La **tabla de puntos al pie** reemplazó el modo "Modificar puntos": un punto se compara con otro por sus cifras, y eso necesita filas
+16. Cada punto tiene un switch de **punto activo**, y es el único lugar del sistema donde ese interruptor cambia un resultado: un punto inactivo no participa en la generación de ruta
+17. Entrando a un punto se abre **su flota** (HDU8): las unidades individuales con tipo, patente, capacidad, dotación requerida y disponibilidad, con acciones para poner todas disponibles o ninguna de una vez
+
+> Los contadores agregados de HDU6 (tolvas, retroexcavadoras, camiones) **ya no existen**: eran otra forma de declarar lo mismo que los recursos individuales, sin manera de saber cuál mandaba.
 
 ### Vista de Generación de Ruta (`/rutas`): HDU5
 
@@ -309,7 +355,31 @@ Dashboard con las zonas guardadas, las tareas del pipeline en curso o pendientes
 21. Al presionar, se pide confirmar los puntos activos, las horas disponibles y el tipo de basura prioritario, "Cancelar" cierra la confirmación sin tocar el mapa
 22. El sistema genera la ruta óptima, o informa que no fue posible generarla y sugiere revisar los recursos disponibles (`/recursos`)
 
-> El algoritmo real de optimización de ruta todavía no está implementado (`backendModel/routing.py`), hoy `/rutas` siempre reporta que no fue posible generar una ruta. El resto del flujo (confirmación, carga de análisis, validaciones) está completo y verificado.
+23. El plan se muestra como una **línea de tiempo** por recorrido: salida, cada parada con su volumen, peso y tipos de residuo, el tramo cargado hacia el relleno sanitario, y el regreso vacío. Cada vehículo del tramo aparece con su patente, capacidad, dotación y foto
+
+> **El algoritmo está implementado** (`backendModel/routing.py` + `osrm_client.py`): elige origen por capacidad, reparte paradas por cercanía, ordena contra una matriz real de OSRM y rutea `base → zonas → relleno sanitario → base`. El relleno es el Relleno Sanitario Santiago Poniente, confirmado por escrito por la municipalidad.
+>
+> Desde HDU5.1 el plan **no se rinde entero**: una zona que no cabe se retira a medias, y las que quedan fuera viajan con su motivo en texto. La estrella de cada zona cargada la marca como prioritaria, que es el único lugar donde una persona puede decirle al algoritmo algo que él no puede saber (una denuncia, un colegio al lado, un riesgo sanitario).
+
+### Vista de Itinerario (`/planificacion/itinerario`): HDU14
+
+24. Un **calendario semanal** de lunes a sábado, con el mes a la izquierda para elegir qué semana se planifica
+25. **Crear punto permanente** abre el formulario con nombre, dirección, barrio, tipo (Microbasural o VIRS) y frecuencia de atención
+26. El `+` de cada columna abre el catálogo de puntos, con buscador y selección múltiple; también se puede **arrastrar** una fila de la tabla del pie a un día, o una tarjeta de un día a otro
+27. El orden dentro de la columna es la **secuencia del recorrido**, y se reordena arrastrando
+28. **Copiar semana anterior** trae el reparto de la semana previa, mostrando antes qué llega y qué se pierde
+29. La tabla del pie lista todos los puntos con sus campos y **en cuántos días está cada uno esta semana**, que es lo que permite contrastar el reparto contra la frecuencia declarada
+
+> **Un día que ya pasó no se planifica**: se dibuja atenuado, sin `+` ni arrastre, y el backend además rechaza la escritura. Una semana cuyo sábado quedó atrás se marca como "Cerrada". El reparto de una jornada terminada es el registro de lo que se hizo, no un plan.
+
+### Puntos diarios de retiro (`/planificacion/rutas`): HDU15
+
+30. **Crear punto diario** pide primero el tipo: **escombros** (fono escombros, con tipo de residuo y cantidad declarada) o **extras** (retiros a requerimiento, con el programa y el solicitante)
+31. Los 17 programas vienen de la hoja `SOLICITUDES` de la planilla municipal, y se pueden agregar más
+32. Aparecen en el mapa como círculos ámbar, fuera de la escala de las zonas y del navy de los puntos de origen
+33. **Editar puntos** lista los del día y permite modificarlos o eliminarlos
+
+> La cantidad que declara quien llama **no** es el volumen retirado. La planilla trae las dos columnas y en sus hojas coinciden porque se llenan al final del día, pero son dos hechos distintos: acá solo se captura el primero.
 
 ---
 
@@ -323,7 +393,15 @@ CondorFinder/
 │   │   ├── AppSidebar.tsx          ← Navegación colapsable + logout
 │   │   ├── GeoMap.tsx              ← Wrapper SSR-safe (lazy-carga Leaflet solo en cliente)
 │   │   ├── GeoMapImpl.tsx          ← Mapa Leaflet real (puntos, polígonos, overlays de imagen)
-│   │   ├── ResourcesSummaryPanel.tsx ← Panel "Recursos disponibles" (compartido / y /recursos)
+│   │   ├── GoogleMapImpl.tsx       ← Mapa de Google (misma interfaz que el de Leaflet)
+│   │   ├── ResourcesSummaryPanel.tsx ← Panel "Recursos disponibles" (/recursos y /rutas)
+│   │   ├── PuntoPermanenteDialog.tsx ← HDU14: alta y edición de un punto permanente
+│   │   ├── PuntoDiarioDialog.tsx   ← HDU15: alta y edición de un retiro del día
+│   │   ├── ConfirmarBorrado.tsx    ← Confirmación compartida de las acciones que no se deshacen
+│   │   ├── Obligatorio.tsx         ← El asterisco de campo obligatorio, con su texto para lectores
+│   │   ├── RenameDialog.tsx        ← Renombrar una zona o una versión
+│   │   ├── RouteTimeline.tsx       ← HDU5: el recorrido como secuencia de tramos y paradas
+│   │   ├── ZoneZoomDialog.tsx      ← Vista ampliada de una zona, compartida entre vistas
 │   │   └── ui/                     ← Componentes shadcn/ui
 │   ├── lib/                        ← Servicios y utilidades del frontend
 │   │   ├── unify.ts                ← Cliente del pipeline de generación + tareas pendientes
@@ -335,8 +413,13 @@ CondorFinder/
 │   │   ├── mapState.ts             ← Handoff de la URL del mapa entre vistas
 │   │   ├── notify.tsx              ← Wrapper de toasts (sonner)
 │   │   ├── projection.ts           ← Reproyección UTM → WGS84 (proj4)
-│   │   ├── resources.ts            ← Cliente de puntos (HDU6)
-│   │   └── routePlan.ts            ← Contrato de generación de ruta (HDU5)
+│   │   ├── resources.ts            ← Cliente de puntos y flota (HDU6 + HDU8)
+│   │   ├── routePlan.ts            ← Contrato de generación de ruta (HDU5)
+│   │   ├── itinerario.ts           ← Cliente del itinerario semanal (HDU14)
+│   │   ├── puntosDiarios.ts        ← Cliente de retiros del día (HDU15)
+│   │   ├── crewState.ts            ← La cuadrilla declarada al generar (HDU5.1, localStorage)
+│   │   ├── volumeReport.ts         ← Aritmética compartida del informe y la evolución
+│   │   └── pdfReport.ts            ← Informe PDF con gráficos vectoriales (HDU9)
 │   ├── routes/                     ← Vistas principales (file-based routing)
 │   │   ├── __root.tsx              ← Shell de la app (layout, temas, anti-flash)
 │   │   ├── login.tsx               ← Login (única ruta sin sesión)
@@ -344,15 +427,27 @@ CondorFinder/
 │   │       ├── index.tsx           ← Vista Principal
 │   │       ├── carga.tsx           ← HDU1: Carga de imágenes + pipeline
 │   │       ├── analysis.tsx        ← HDU2/HDU3/HDU4: Análisis de volumen + guardado
-│   │       ├── recursos.tsx        ← HDU6: Recursos disponibles
-│   │       └── rutas.tsx           ← HDU5: Generación de ruta óptima
-│   └── styles.css                  ← Estilos globales, tokens de los 4 temas, overlays de mapa
+│   │       ├── planificacion.recursos.tsx          ← HDU6: puntos de origen
+│   │       ├── planificacion.recursos_.$pointId.tsx ← HDU8: la flota de un punto
+│   │       ├── planificacion.itinerario.tsx        ← HDU14: itinerario semanal
+│   │       └── planificacion.rutas.tsx             ← HDU5 + HDU15: ruta óptima y retiros del día
+│   └── styles.css                  ← Estilos globales, tokens del tema, overlays de mapa
 ├── backendModel/
 │   ├── orquestador.py       ← API FastAPI principal (pipeline + wiring de routers)
 │   ├── auth.py               ← Login/sesión (JWT en cookie httpOnly)
 │   ├── resources.py          ← Puntos y recursos (HDU6)
-│   ├── routing.py            ← Base de generación de ruta (HDU5), algoritmo pendiente
-│   ├── analyses.py           ← Análisis guardados (HDU4) + fusión de duplicados (HDU7)
+│   ├── routing.py            ← Generación de ruta (HDU5 + HDU5.1)
+│   ├── osrm_client.py        ← Matriz de tiempos y geometría de calles (OSRM)
+│   ├── routes_provider.py    ← Elige entre OSRM y Google Routes sin que routing.py lo sepa
+│   ├── google_routes_client.py ← Tiempos con tráfico (HDU5.1/AC5, apagado por omisión)
+│   ├── google_places.py      ← Autocompletado y geocodificación, con la clave del lado servidor
+│   ├── street_view.py        ← La foto real del lugar de cada punto de origen
+│   ├── analyses.py           ← Zonas y análisis guardados (HDU4 + HDU14) + duplicados (HDU7)
+│   ├── itinerario.py         ← Itinerario semanal de puntos permanentes (HDU14)
+│   ├── puntos_diarios.py     ← Retiros de escombros y extras del día (HDU15)
+│   ├── oidc.py               ← Protocolo OpenID Connect, común a los dos proveedores
+│   ├── auditoria.py          ← Bitácora de acciones destructivas
+│   ├── rate_limit.py         ← Límite de peticiones por ventana deslizante
 │   ├── task_store.py         ← Persistencia de tareas del pipeline en MongoDB
 │   ├── storage.py            ← Cliente de Google Cloud Storage (resultados guardados en producción)
 │   ├── requirements.txt      ← Dependencias Python
@@ -367,6 +462,10 @@ CondorFinder/
 │       ├── volumeCalc.py     ← Cálculo de volumen/peso/área usando nDSM de ODM
 │       ├── model/best.pt     ← Pesos del modelo entrenado
 │       └── output/           ← PNG del mapa y JSON de detecciones por tarea
+├── docs/
+│   └── unificacion-puntos-zonas.md  ← Plan de entrada a HDU5.2 (ver Sprint 3)
+├── docker-compose.yml        ← Despliegue en la VM: backend, NodeODM y Caddy
+├── Caddyfile                 ← TLS real en el origen (Let's Encrypt)
 ├── package.json
 └── README.MD
 ```
@@ -401,7 +500,7 @@ CondorFinder/
 | HDU4 | Si el guardado falla, se notifica al usuario y el modal permite reintentar sin perder los datos ingresados | ✅ Cumplido (verificado simulando corte de red vía DevTools, con video) |
 | HDU4 | Si el nombre ingresado ya existe, el sistema pide confirmar antes de sobrescribir el análisis existente | ✅ Cumplido |
 | HDU5 | Dado un mapa interactivo con polígonos georreferenciados, cuando presione el botón de generar ruta, entonces aparecerá una pantalla de confirmación pidiendo el estado de los puntos de referencia, las horas disponibles y el tipo de basura prioritario, y preguntando si desea continuar o no | ✅ Cumplido |
-| HDU5 | Dada una pantalla de confirmación, cuando se presione el botón de generar ruta, entonces el sistema generará una ruta óptima | 🔲 Pendiente (falta el algoritmo real de optimización en `backendModel/routing.py`) |
+| HDU5 | Dada una pantalla de confirmación, cuando se presione el botón de generar ruta, entonces el sistema generará una ruta óptima | ✅ Cumplido (`routing.py` + `osrm_client.py`: ruta real por calles, `base → zonas → relleno → base`) |
 | HDU5 | Dado un mapa georreferenciado sin polígonos, cuando se esté visualizando el mapa, entonces el botón de generar ruta se encontrará deshabilitado | ✅ Cumplido |
 | HDU5 | Dado un mapa georreferenciado, cuando se presione el botón de cargar archivo de análisis y se seleccione uno de los archivos guardados (HDU4), entonces el sistema cargará los polígonos asociados en el mapa junto con su metadata | ✅ Cumplido (el botón se llama **"Cargar zona"**, no "Cargar archivo de análisis": ver nota abajo) |
 | HDU5 | Dada una pantalla de confirmación, cuando el trabajador presione "No" o cancele, entonces el sistema cerrará la pantalla de confirmación sin generar la ruta y sin perder el estado actual del mapa | ✅ Cumplido |
@@ -651,26 +750,72 @@ Se suman dos cosas más: **AC1 y AC2 seguirían siendo nuestros igual** (que dos
 
 ---
 
+## Estado de Sprint 3
+
+Historias comprometidas: **HDU14** (itinerario semanal de puntos permanentes), **HDU15** (puntos diarios de retiro) y el **inicio de sesión federado**, que no es una historia con criterios sino la corrección de un riesgo de seguridad.
+
+### Inicio de sesión federado
+
+El sistema tenía un único usuario sembrado desde el `.env`, con contraseña compartida por el equipo, y **buena parte de la API del pipeline estaba abierta sin sesión**. Las dos cosas se cerraron:
+
+- La identidad la emite ahora un proveedor externo por OpenID Connect con PKCE. **Nadie escribe una contraseña en este sistema**, así que no hay ninguna que se pueda robar.
+- El cliente entra por su **directorio** (el `tid` del token), no por una lista de correos: un funcionario nuevo entra el día que su TI le crea la cuenta y deja de entrar el día que se la cierran, sin tocar el sistema.
+- `orquestador.py` exige sesión con una **dependencia global**, no endpoint por endpoint. Las únicas excepciones son `/auth/*` y las lecturas de imágenes.
+- Se agregaron **bitácora** de acciones destructivas y **límite de peticiones**.
+- En MongoDB Atlas se cerró la regla `0.0.0.0/0`: solo la IP de la VM y las de desarrollo.
+
+> **Un defecto que esto introdujo y conviene dejar escrito.** Al exigir sesión en toda la API, `/carga` dejó de funcionar en producción: ninguno de los 14 `fetch` de `src/lib/unify.ts` mandaba `credentials: "include"`, ni el `XMLHttpRequest` de la subida llevaba `withCredentials`. Funcionaba porque esa parte de la API estaba abierta. El síntoma visible era un `401` aislado en `/tasks/pending`, que el frontend se tragaba en silencio.
+
+### HDU14 y HDU15
+
+| Historia | Criterio de aceptación | Estado |
+|---|---|---|
+| HDU14 | Al presionar el botón con signo de suma de una columna, el sistema muestra el listado de puntos permanentes y permite escoger y añadir puntos | ✅ Cumplido |
+| HDU14 | Si no hay ningún punto permanente creado, el listado muestra "no se encontraron puntos permanentes" | ✅ Cumplido |
+| HDU14 | Al presionar "crear punto permanente", se muestra una pantalla de configuración con nombre, dirección y opcionalmente una imagen | ✅ Cumplido (ver nota abajo) |
+| HDU14 | Al presionar el botón de edición en la esquina de un punto, se permite editar su información | ✅ Cumplido |
+| HDU14 | Cuando no haya puntos en un día, se muestra "no hay puntos permanentes asociados" | ✅ Cumplido |
+| HDU15 | Al presionar "crear punto diario", se muestra una pantalla de selección entre "escombros" y "extras" | ✅ Cumplido |
+| HDU15 | Al escoger "escombros", se muestra una configuración con la información pertinente a escombros | ✅ Cumplido |
+| HDU15 | Al escoger "extras", se muestra una configuración con la información pertinente a extras | ✅ Cumplido |
+| HDU15 | Con puntos diarios en el mapa, "editar puntos" permite modificar la información de todos los puntos actuales | ✅ Cumplido |
+
+> **Dos divergencias respecto de la letra de los criterios, deliberadas y anotadas acá en vez de dejarlas pasar en silencio:**
+>
+> - **El formulario de un punto permanente pide más que nombre, dirección e imagen**: también barrio, tipo (Microbasural o VIRS) y frecuencia de atención, que son los campos de la planilla municipal y lo que después permite ordenar el catálogo.
+> - **El campo de imagen se quitó.** El AC habla de "opcionalmente una imagen", pero la imagen que de verdad le corresponde a un lugar en este sistema es su **mapa unificado**, que sale del vuelo y no de la galería de alguien. Dos imágenes para lo mismo dejaban la pregunta de cuál manda. La tabla muestra la del vuelo cuando existe, y un hueco cuando no, que es información: dice que falta volarlo.
+
+### Lo que estas historias dejaron planteado y no resuelven
+
+Los puntos permanentes y los diarios **no entran todavía a la ruta generada**: se ven en el mapa y se editan, que es lo que piden sus criterios, pero `_load_route_stops` resuelve paradas solo desde análisis guardados. Un punto sin vuelo no tiene volumen, peso ni clases de residuo, y todo el reparto por capacidad de HDU5.1 descansa en esas tres cosas.
+
+Tampoco existe el **registro de lo retirado** (cuántos m³ y con qué camión), que es la primera tabla de cada hoja diaria de la planilla municipal.
+
+Las dos cosas, más la unificación completa de puntos y zonas, están desarrolladas en [`docs/unificacion-puntos-zonas.md`](docs/unificacion-puntos-zonas.md) como entrada a **HDU5.2**.
+
+---
+
 ## Tecnologías
 
 | Capa | Tecnología |
 |---|---|
 | Frontend | React 19 + TanStack Start (SSR) + TanStack Router |
 | Lenguaje frontend | TypeScript |
-| Estilos | Tailwind CSS v4 + sistema de 4 temas (Verde tierra, Negro clásico, Azul oscuro, Modo claro) |
+| Estilos | Tailwind CSS v4, un solo tema (cuerpo claro, barra lateral navy) con el login en tratamiento oscuro |
 | Componentes UI | shadcn/ui + Radix UI |
-| Mapas geográficos | Leaflet + react-leaflet |
+| Mapas geográficos | Leaflet + react-leaflet, o Maps JavaScript de Google si hay clave (los dos detrás del mismo contrato) |
+| Ruteo por calles | OSRM (matriz y geometría), con Google Routes opcional para tiempos con tráfico |
 | Bundler / servidor SSR | Vinxi + Nitro |
 | Gestor de paquetes | pnpm |
 | Backend API | FastAPI + Uvicorn |
 | Base de datos | MongoDB Atlas (pymongo, cliente async + sync) |
-| Autenticación | JWT en cookie httpOnly (PyJWT + pwdlib) |
+| Autenticación | OpenID Connect con PKCE contra Microsoft Entra ID y Google; sesión en JWT en cookie httpOnly (PyJWT con RS256) |
 | Unificación de imágenes | OpenDroneMap (NodeODM vía Docker) |
 | Detección de basura | YOLOv8 (Ultralytics) + SAHI |
 | Cálculo de volumen | RasterStats + GeoPandas sobre nDSM de ODM |
 | Detección de duplicados (HDU7) | Shapely (IoU real entre huellas de ortomosaico georreferenciadas, backend) |
 | Geodesia / reproyección | proj4 (UTM → WGS84, cliente) |
-| Geocodificación | Nominatim (OpenStreetMap) |
+| Geocodificación | Google Places y Geocoding por el backend si hay clave, con Nominatim (OpenStreetMap) de respaldo |
 | Despliegue frontend | Cloudflare Workers (dominio propio, deploy automático por push) |
 | Despliegue backend | Docker Compose sobre GCP Compute Engine (deploy manual) |
 | Almacenamiento de resultados | Google Cloud Storage |
