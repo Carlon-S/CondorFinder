@@ -21,7 +21,7 @@ secuencia del recorrido y no un conjunto.
 """
 
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -46,6 +46,29 @@ def get_db() -> AsyncDatabase:
 
 
 async def create_index() -> None:
+    """Índices y limpieza de la versión anterior del itinerario.
+
+    **El índice viejo hay que BORRARLO, no basta con crear el nuevo.** La
+    primera versión guardaba un documento por día, con `dia` único, porque el
+    reparto era una plantilla que se repetía sola. Al pasar a un reparto por
+    semana, dos documentos comparten `dia` legítimamente, y ese índice los
+    rechaza con `DuplicateKeyError`: el segundo día que alguien programaba de
+    la semana siguiente reventaba con un 500 que el navegador reporta como
+    "Failed to fetch", porque una excepción sin manejar responde sin cabeceras
+    CORS.
+
+    `create_index` es idempotente para CREAR, pero no quita lo que ya estaba.
+    """
+    nombres = await get_db().itinerario_dias.index_information()
+    for nombre, info in nombres.items():
+        if info.get("key") == [("dia", 1)]:
+            await get_db().itinerario_dias.drop_index(nombre)
+
+    # Los documentos de la versión anterior no tienen `semana`, así que no
+    # pertenecen a ninguna y no se pueden mostrar ni editar: son huérfanos que
+    # solo sirven para chocar contra el índice. Se eliminan una vez.
+    await get_db().itinerario_dias.delete_many({"semana": {"$exists": False}})
+
     # La clave es la SEMANA más el día: un documento por casilla de la grilla.
     await get_db().itinerario_dias.create_index([("semana", 1), ("dia", 1)], unique=True)
 
@@ -65,6 +88,45 @@ def semana_actual() -> str:
     hoy = datetime.now(timezone.utc).date()
     anio, num, _ = hoy.isocalendar()
     return f"{anio}-W{num:02d}"
+
+
+# La semana del retiro se planifica con la comuna, no en UTC: a las 21:00 de un
+# sábado en Chile ya es domingo en UTC y la semana se daría por cerrada un día
+# antes de tiempo.
+_TZ_CHILE = timezone(timedelta(hours=-3))
+
+
+def _hoy_local() -> date:
+    return datetime.now(_TZ_CHILE).date()
+
+
+def _lunes_de(d: date) -> date:
+    return d - timedelta(days=d.weekday())
+
+
+def _fecha_del_dia(semana: str, dia: str) -> date:
+    """La fecha concreta de una casilla de la grilla."""
+    anio, num = int(semana[:4]), int(semana[6:])
+    # `fromisocalendar` toma el día ISO, donde el lunes es 1.
+    return date.fromisocalendar(anio, num, DIAS.index(dia) + 1)
+
+
+def _exigir_editable(semana: str, dia: str) -> None:
+    """Un día que ya pasó no se planifica.
+
+    **La regla vive acá y no solo en la vista.** La interfaz deshabilita lo que
+    no corresponde, pero una pestaña abierta desde ayer sigue teniendo botones
+    vivos, y el reparto de una jornada terminada es un registro de lo que se
+    hizo: dejarlo reescribir lo convierte en otra cosa.
+
+    Se compara contra el día, no contra la semana, porque la semana en curso es
+    mitad pasado y mitad futuro: el martes se sigue planificando el jueves.
+    """
+    if _fecha_del_dia(semana, dia) < _hoy_local():
+        raise HTTPException(
+            status_code=409,
+            detail="Ese día ya pasó. Solo se puede planificar desde hoy en adelante.",
+        )
 
 
 def _validar_semana(semana: str | None) -> str:
@@ -205,12 +267,23 @@ async def copiar_semana(
     destino = _validar_semana(hacia)
     if origen == destino:
         raise HTTPException(status_code=400, detail="El origen y el destino son la misma semana")
+    # El sábado es el último día que se trabaja, así que una semana está
+    # cerrada cuando ya pasó: copiar sobre ella reescribiría lo que se hizo.
+    if _fecha_del_dia(destino, "sabado") < _hoy_local():
+        raise HTTPException(
+            status_code=409, detail="Esa semana ya terminó y no se puede planificar."
+        )
 
     docs = await get_db().itinerario_dias.find({"semana": origen}).to_list(length=None)
     por_dia = {d["dia"]: d.get("puntos", []) for d in docs}
 
     ahora = datetime.now(timezone.utc)
+    hoy = _hoy_local()
     for dia in DIAS:
+        # Dentro de la semana en curso, los días ya pasados se dejan como
+        # están: copiar sobre ellos reescribiría la jornada de ayer.
+        if _fecha_del_dia(destino, dia) < hoy:
+            continue
         await get_db().itinerario_dias.update_one(
             {"semana": destino, "dia": dia},
             {
@@ -236,6 +309,7 @@ async def set_dia(
     """Reemplaza la lista ordenada de un día de una semana."""
     d = _validar_dia(dia)
     sem = _validar_semana(semana)
+    _exigir_editable(sem, d)
 
     # Duplicados dentro del MISMO día se colapsan, conservando la primera
     # aparición. En la planilla una columna nunca repite un punto, y repetirlo

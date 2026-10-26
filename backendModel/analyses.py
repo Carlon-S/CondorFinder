@@ -122,6 +122,10 @@ class ZoneOut(BaseModel):
     # de verdad sobre cuántos análisis tiene una zona, y la de Mongo ya es
     # autoritativa. Mismo criterio que `_resumen_por_punto()` en resources.py.
     analysisCount: int = 0
+    # La miniatura del mapa unificado de su captura más reciente, o None si
+    # todavía no se le voló el dron. Sale de la misma agregación que el conteo,
+    # así que no cuesta una consulta extra.
+    thumbnailUrl: str | None = None
 
 
 class ZoneIn(BaseModel):
@@ -720,7 +724,7 @@ async def list_analyses(
 # siempre junto a ellos, igual que HDU7 vive acá y no en su propio módulo.
 # =============================================================================
 
-def _zone_out(doc: dict, analysis_count: int = 0) -> ZoneOut:
+def _zone_out(doc: dict, resumen: dict | None = None) -> ZoneOut:
     """Un documento de `zones` como lo ve el frontend.
 
     Centralizado porque lo arman cuatro endpoints, y cada campo nuevo que se
@@ -742,7 +746,8 @@ def _zone_out(doc: dict, analysis_count: int = 0) -> ZoneOut:
         tipo=doc.get("tipo"),
         frecuencia=doc.get("frecuencia"),
         active=doc.get("active", True),
-        analysisCount=analysis_count,
+        analysisCount=(resumen or {}).get("n", 0),
+        thumbnailUrl=(resumen or {}).get("thumb"),
     )
 
 
@@ -762,19 +767,35 @@ def _validar_zona(campos: dict) -> None:
         raise HTTPException(status_code=400, detail="La latitud y la longitud van juntas o ninguna")
 
 
-async def _conteo_de_analisis(zone_ids: list[str]) -> dict[str, int]:
-    """Cuántos análisis tiene cada zona, en UNA consulta.
+async def _resumen_de_analisis(zone_ids: list[str]) -> dict[str, dict]:
+    """Cuántos análisis tiene cada zona y la miniatura de su captura más
+    reciente, en UNA consulta.
 
     Agregación y no un `count_documents` por zona: con 54 puntos permanentes
-    eso serían 54 viajes a Mongo cada vez que se abre Vista Principal.
+    eso serían 54 viajes a Mongo cada vez que se abre Vista Principal. La
+    miniatura entra en la misma pasada ordenando antes de agrupar, así que
+    tenerla no cuesta nada: es el `$first` de un grupo ya ordenado.
     """
     if not zone_ids:
         return {}
     cursor = await get_db().analyses.aggregate([
         {"$match": {"zoneId": {"$in": zone_ids}}},
-        {"$group": {"_id": "$zoneId", "n": {"$sum": 1}}},
+        {"$sort": {"captureDate": -1, "savedAt": -1}},
+        {
+            "$group": {
+                "_id": "$zoneId",
+                "n": {"$sum": 1},
+                "thumb": {"$first": "$thumbnailUrl"},
+                "mapa": {"$first": "$mapUrl"},
+            }
+        },
     ])
-    return {d["_id"]: d["n"] async for d in cursor}
+    # Cae a mapUrl cuando el análisis es anterior a que existieran las
+    # miniaturas, igual que hace el frontend en el resto del sistema.
+    return {
+        d["_id"]: {"n": d["n"], "thumb": d.get("thumb") or d.get("mapa")}
+        async for d in cursor
+    }
 
 
 @router.get("/zones/all", response_model=list[ZoneOut])
@@ -785,8 +806,8 @@ async def list_zones(
     cualquier segmento suelto: sin el segundo tramo, FastAPI resolvería
     /analyses/zones como "el análisis con id 'zones'"."""
     docs = await get_db().zones.find().to_list(length=None)
-    conteos = await _conteo_de_analisis([str(d["_id"]) for d in docs])
-    return [_zone_out(d, conteos.get(str(d["_id"]), 0)) for d in docs]
+    resumen = await _resumen_de_analisis([str(d["_id"]) for d in docs])
+    return [_zone_out(d, resumen.get(str(d["_id"]))) for d in docs]
 
 
 @router.post("/zones", response_model=ZoneOut)
@@ -853,8 +874,8 @@ async def rename_zone(
     await auditoria.registrar(
         current_user.username, "editar", "zona", zone_id, {"nombre": nombre}
     )
-    conteos = await _conteo_de_analisis([zone_id])
-    return _zone_out(doc, conteos.get(zone_id, 0))
+    resumen = await _resumen_de_analisis([zone_id])
+    return _zone_out(doc, resumen.get(zone_id))
 
 
 @router.delete("/zones/{zone_id}")

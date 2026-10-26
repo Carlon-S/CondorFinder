@@ -5,36 +5,27 @@
 // La grilla de LUNES a SÁBADO donde se reparten los puntos permanentes. Es la
 // hoja `PERMANENTES` de la planilla municipal, que hoy mantienen a mano.
 //
-// ── El itinerario es POR SEMANA, no una plantilla única ──
-// Empezó siendo un reparto fijo que se repetía solo, como la hoja del Excel.
-// Pero planificar significa poder armar la semana que viene sin pisar la de
-// esta, así que cada semana tiene su propio reparto, identificado en formato
-// ISO (`2026-W44`).
-//
-// Que se repitan es cierto y por eso existe "Copiar semana anterior", como
-// BOTÓN y no como copia automática: copiar solo cuando alguien lo pide deja
-// distinguir "esta semana no se planificó" de "esta semana es igual a la
-// anterior", que no es lo mismo cuando hay que explicar por qué no se pasó por
-// un punto.
-//
-// ── Por qué parece un calendario ──
-// Un itinerario semanal SE LEE como un calendario: un mes chico a la izquierda
-// para elegir semana, columnas por día, y el gesto de mover una tarjeta de un
-// día a otro.
+// ── Una sola grilla, no seis tarjetas ──
+// Las columnas estuvieron como seis paneles independientes y se revirtió: un
+// calendario se lee como UNA superficie continua con divisiones, no como seis
+// objetos puestos uno al lado del otro. Con tarjetas separadas, el ojo cuenta
+// seis cosas antes de ver una semana. Ahora es un solo marco con una fila de
+// cabeceras arriba y líneas divisorias entre columnas.
 //
 // Lo que NO se toma de las referencias es el eje horario. Un punto permanente
 // no tiene hora: tiene ORDEN de visita, y por eso las tarjetas se apilan y se
 // reordenan arrastrando, en vez de ubicarse contra una regla de horas que
 // nadie llenaría.
 //
-// El color sale del TIPO (Microbasural o VIRS), que es la categoría con la que
-// la municipalidad clasifica sus puntos, no de una paleta decorativa.
+// ── El pasado no se planifica ──
+// Un día terminado es el registro de lo que se hizo, no un plan. Los días
+// pasados se dibujan atenuados, sin `+` y sin arrastre, y el backend además lo
+// rechaza: una pestaña abierta desde ayer sigue teniendo botones vivos.
 //
 // ── Dos formas de agregar, no una ──
 // El AC1 pide textualmente el botón con signo de suma que abre un listado. Eso
-// está, y además se puede arrastrar desde la tabla del pie a una columna. El
-// arrastre no reemplaza al botón: la API nativa no funciona con el dedo ni con
-// el teclado, y el `+` es el camino que sirve siempre.
+// está, y además se puede arrastrar desde la tabla del pie. El arrastre no
+// reemplaza al botón: la API nativa no funciona con el dedo ni con el teclado.
 //
 // ── El orden es dato, no presentación ──
 // La posición dentro de la columna es la secuencia del recorrido, así que cada
@@ -64,6 +55,7 @@ import {
 } from "@/components/ui/table";
 import {
   ArrowLeft,
+  ImageIcon,
   Layers,
   Loader2,
   MapPin,
@@ -85,6 +77,7 @@ import {
   lunesDe,
   semanaDe,
   setDia,
+  yaPaso,
   type DiaItinerario,
   type DiaSemana,
   type PuntoDelDia,
@@ -134,6 +127,11 @@ const MESES = [
   "diciembre",
 ];
 
+/** Filas por página de la tabla del pie. Fija y no "lo que entre": con una
+ *  cantidad variable la tabla cambia de alto al filtrar, y el resto de la
+ *  página salta. Mismo criterio que la tabla de recursos. */
+const POR_PAGINA = 6;
+
 function ItinerarioPage() {
   /** El lunes de la semana que se está mirando. Se guarda la FECHA y no el
    *  texto de la semana porque de ella salen también los números de cada
@@ -168,6 +166,18 @@ function ItinerarioPage() {
     void cargar();
   }, [cargar]);
 
+  const fechaDe = useCallback(
+    (i: number) => {
+      const d = new Date(lunes);
+      d.setDate(d.getDate() + i);
+      return d;
+    },
+    [lunes],
+  );
+
+  /** La semana entera terminó cuando su sábado quedó atrás. */
+  const semanaCerrada = useMemo(() => yaPaso(fechaDe(5)), [fechaDe]);
+
   const puntosDe = useCallback(
     (dia: DiaSemana) => grilla?.find((d) => d.dia === dia)?.puntos ?? [],
     [grilla],
@@ -178,9 +188,7 @@ function ItinerarioPage() {
    *  **La pintura va primero y para TODOS los días del gesto.** Antes se
    *  persistía el destino, se esperaba la respuesta y recién entonces se
    *  tocaba el origen, así que al mover una tarjeta de lunes a miércoles
-   *  aparecía en los dos hasta que volviera la red. Pintar los dos de una vez
-   *  hace que el movimiento se vea instantáneo, que es lo único que se le pide
-   *  a un arrastre.
+   *  aparecía en los dos hasta que volviera la red.
    *
    *  Si el servidor rechaza, se recarga todo: revertir solo una columna
    *  dejaría el resto de la grilla con lo que el servidor ya no tiene. */
@@ -295,14 +303,15 @@ function ItinerarioPage() {
     [grilla],
   );
 
-  const fechaDe = (i: number) => {
-    const d = new Date(lunes);
-    d.setDate(d.getDate() + i);
-    return d;
-  };
-
   const cargando = grilla === null || catalogo === null;
   const hoyISO = new Date().toDateString();
+  const fin = fechaDe(5);
+
+  const moverSemana = (semanas: number) => {
+    const d = new Date(lunes);
+    d.setDate(d.getDate() + semanas * 7);
+    setLunes(d);
+  };
 
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
@@ -329,36 +338,79 @@ function ItinerarioPage() {
         </div>
       ) : (
         <main className="flex flex-1 flex-col gap-5 p-6">
-          {/* Mes chico a la izquierda y semana a la derecha, como en la
-              referencia. Bajo 80rem el calendario pasa arriba a ancho
-              completo: con menos de eso, seis columnas y un mes no entran sin
-              que las columnas queden más angostas que una tarjeta. */}
-          <div className="grid gap-5 xl:grid-cols-[16rem_minmax(0,1fr)]">
+          {/* Barra de semana: flechas, rango y número, y a la derecha la acción
+              principal. Es el patrón de cualquier calendario y va ARRIBA de la
+              grilla, no adentro de ella. */}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="flex gap-1">
+                <button
+                  type="button"
+                  onClick={() => moverSemana(-1)}
+                  className="cursor-pointer rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  aria-label="Semana anterior"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => moverSemana(1)}
+                  className="cursor-pointer rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  aria-label="Semana siguiente"
+                >
+                  <ArrowLeft className="h-4 w-4 rotate-180" />
+                </button>
+              </div>
+              <h2 className="font-rubik text-xl font-semibold text-foreground">
+                {lunes.getDate()} {MESES[lunes.getMonth()]}
+                {lunes.getMonth() !== fin.getMonth() ? "" : ""} - {fin.getDate()}{" "}
+                {MESES[fin.getMonth()]}, {fin.getFullYear()}
+              </h2>
+              <span className="rounded-full border border-border bg-card px-3 py-1 text-xs font-medium text-muted-foreground">
+                Semana {semana.slice(6)}
+              </span>
+              {semanaCerrada && (
+                <span className="rounded-full bg-muted px-3 py-1 text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Cerrada
+                </span>
+              )}
+            </div>
+
+            <Button
+              onClick={() => {
+                setEditando(null);
+                setFormAbierto(true);
+              }}
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              Crear punto permanente
+            </Button>
+          </div>
+
+          {/* El mes chico gana ancho y la semana lo cede: el mes tenía los
+              números apretados en 16rem y la semana sobraba de espacio
+              horizontal con poco alto. Las dos columnas comparten alto. */}
+          <div className="grid items-stretch gap-5 xl:grid-cols-[21rem_minmax(0,1fr)]">
             <MesChico
               lunes={lunes}
               onElegirSemana={setLunes}
               onCopiarAnterior={copiarAnterior}
               copiando={copiando}
+              semanaCerrada={semanaCerrada}
               esSemanaActual={semana === semanaDeHoy}
               onHoy={() => setLunes(lunesDe(new Date()))}
             />
 
-            <section className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
-              {DIAS.map((dia, i) => (
-                <ColumnaDia
-                  key={dia}
-                  dia={dia}
-                  fecha={fechaDe(i)}
-                  esHoy={fechaDe(i).toDateString() === hoyISO}
-                  puntos={puntosDe(dia)}
-                  guardando={guardando === dia}
-                  onAgregar={() => setDiaAbierto(dia)}
-                  onQuitar={(id) => void quitarDelDia(dia, id)}
-                  onSoltar={(carga, destino) => void soltar(dia, carga, destino)}
-                  onEditar={abrirEdicion}
-                />
-              ))}
-            </section>
+            <CalendarioSemanal
+              fechaDe={fechaDe}
+              hoyISO={hoyISO}
+              puntosDe={puntosDe}
+              guardando={guardando}
+              onAgregar={setDiaAbierto}
+              onQuitar={(dia, id) => void quitarDelDia(dia, id)}
+              onSoltar={(dia, carga, destino) => void soltar(dia, carga, destino)}
+              onEditar={abrirEdicion}
+            />
           </div>
 
           <TablaPuntos
@@ -369,10 +421,6 @@ function ItinerarioPage() {
               setFormAbierto(true);
             }}
             onEliminar={setABorrar}
-            onCrear={() => {
-              setEditando(null);
-              setFormAbierto(true);
-            }}
           />
         </main>
       )}
@@ -467,6 +515,269 @@ function comoPunto(z: ZoneRecord): PuntoDelDia {
 }
 
 // =============================================================================
+// EL CALENDARIO SEMANAL: UNA grilla, no seis tarjetas
+// =============================================================================
+
+function CalendarioSemanal({
+  fechaDe,
+  hoyISO,
+  puntosDe,
+  guardando,
+  onAgregar,
+  onQuitar,
+  onSoltar,
+  onEditar,
+}: {
+  fechaDe: (i: number) => Date;
+  hoyISO: string;
+  puntosDe: (dia: DiaSemana) => PuntoDelDia[];
+  guardando: DiaSemana | null;
+  onAgregar: (dia: DiaSemana) => void;
+  onQuitar: (dia: DiaSemana, id: string) => void;
+  onSoltar: (dia: DiaSemana, carga: string, destino: number) => void;
+  onEditar: (id: string) => void;
+}) {
+  return (
+    // Un solo marco, con las columnas separadas por divisores internos en vez
+    // de por el aire entre tarjetas. `overflow-hidden` es lo que recorta las
+    // cabeceras contra el radio del marco.
+    <section className="panel flex min-h-[32rem] flex-col overflow-hidden">
+      <div className="grid flex-1 grid-cols-2 divide-x divide-border sm:grid-cols-3 2xl:grid-cols-6">
+        {DIAS.map((dia, i) => (
+          <ColumnaDia
+            key={dia}
+            dia={dia}
+            fecha={fechaDe(i)}
+            esHoy={fechaDe(i).toDateString() === hoyISO}
+            pasado={yaPaso(fechaDe(i))}
+            puntos={puntosDe(dia)}
+            guardando={guardando === dia}
+            onAgregar={() => onAgregar(dia)}
+            onQuitar={(id) => onQuitar(dia, id)}
+            onSoltar={(carga, destino) => onSoltar(dia, carga, destino)}
+            onEditar={onEditar}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ColumnaDia({
+  dia,
+  fecha,
+  esHoy,
+  pasado,
+  puntos,
+  guardando,
+  onAgregar,
+  onQuitar,
+  onSoltar,
+  onEditar,
+}: {
+  dia: DiaSemana;
+  fecha: Date;
+  esHoy: boolean;
+  pasado: boolean;
+  puntos: PuntoDelDia[];
+  guardando: boolean;
+  onAgregar: () => void;
+  onQuitar: (id: string) => void;
+  /** `carga` es `"<diaDeOrigen>|<id>"`, vacío el origen si vino de la tabla. */
+  onSoltar: (carga: string, destino: number) => void;
+  onEditar: (id: string) => void;
+}) {
+  const [encima, setEncima] = useState(false);
+
+  const aceptar = (e: React.DragEvent) => {
+    // Un día que pasó no recibe nada. La vista lo impide acá y el backend lo
+    // vuelve a rechazar: esto solo evita el gesto, no lo garantiza.
+    if (pasado || !e.dataTransfer.types.includes(MIME)) return false;
+    e.preventDefault();
+    return true;
+  };
+
+  return (
+    <div
+      className={`flex min-w-0 flex-col transition-colors ${
+        encima ? "bg-cta/10" : pasado ? "bg-muted/30" : ""
+      }`}
+      onDragOver={(e) => {
+        if (aceptar(e)) setEncima(true);
+      }}
+      onDragLeave={() => setEncima(false)}
+      onDrop={(e) => {
+        setEncima(false);
+        if (!aceptar(e)) return;
+        onSoltar(e.dataTransfer.getData(MIME), -1);
+      }}
+    >
+      {/* Cabecera al estilo de un calendario: el día arriba en versales y el
+          número abajo grande, que es como se lee una semana. */}
+      <header
+        className={`border-b px-2.5 py-2 ${
+          esHoy ? "border-cta bg-cta/10" : "border-border bg-muted/40"
+        }`}
+      >
+        <div className="flex items-start justify-between gap-1">
+          <div className={pasado ? "opacity-50" : ""}>
+            <p className="text-[0.5625rem] uppercase tracking-wide text-muted-foreground">
+              {ROTULO_DIA[dia]}
+            </p>
+            <p className="mono text-xl font-semibold leading-none tabular-nums text-foreground">
+              {fecha.getDate()}
+            </p>
+          </div>
+          {/* Un día pasado no ofrece el `+`: un botón que el servidor va a
+              rechazar es peor que ninguno. */}
+          {!pasado && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={onAgregar}
+              aria-label={`Agregar puntos al ${ROTULO_DIA[dia]}`}
+              title={`Agregar puntos al ${ROTULO_DIA[dia]}`}
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
+        <p className="mt-0.5 flex h-3 items-center text-[0.5625rem] text-muted-foreground">
+          {guardando ? (
+            <Loader2 className="h-2.5 w-2.5 animate-spin" />
+          ) : puntos.length > 0 ? (
+            `${puntos.length} parada${puntos.length === 1 ? "" : "s"}`
+          ) : (
+            ""
+          )}
+        </p>
+      </header>
+
+      <div className="flex flex-1 flex-col gap-1.5 p-2">
+        {puntos.length === 0 ? (
+          // AC5, literal.
+          <p className="m-auto max-w-[11rem] text-center text-[0.625rem] leading-relaxed text-muted-foreground">
+            No hay puntos permanentes asociados
+          </p>
+        ) : (
+          puntos.map((p, i) => (
+            <TarjetaPunto
+              key={p.id}
+              punto={p}
+              dia={dia}
+              orden={i + 1}
+              pasado={pasado}
+              onDropAntes={(carga) => onSoltar(carga, i)}
+              onQuitar={() => onQuitar(p.id)}
+              onEditar={() => onEditar(p.id)}
+            />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TarjetaPunto({
+  punto,
+  dia,
+  orden,
+  pasado,
+  onDropAntes,
+  onQuitar,
+  onEditar,
+}: {
+  punto: PuntoDelDia;
+  dia: DiaSemana;
+  orden: number;
+  pasado: boolean;
+  onDropAntes: (carga: string) => void;
+  onQuitar: () => void;
+  onEditar: () => void;
+}) {
+  const [encima, setEncima] = useState(false);
+
+  return (
+    <article
+      draggable={!pasado}
+      onDragStart={(e) => {
+        e.dataTransfer.setData(MIME, `${dia}|${punto.id}`);
+        e.dataTransfer.effectAllowed = "move";
+      }}
+      onDragOver={(e) => {
+        if (pasado || !e.dataTransfer.types.includes(MIME)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setEncima(true);
+      }}
+      onDragLeave={() => setEncima(false)}
+      onDrop={(e) => {
+        setEncima(false);
+        if (pasado || !e.dataTransfer.types.includes(MIME)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        onDropAntes(e.dataTransfer.getData(MIME));
+      }}
+      // La barra de color a la izquierda es el gesto de las tarjetas de
+      // calendario, y acá además dice el tipo de punto.
+      className={`group rounded border border-l-[3px] bg-card px-2 py-1.5 transition-colors ${
+        encima ? "border-cta" : "border-border"
+      } ${pasado ? "opacity-60" : "cursor-grab active:cursor-grabbing"} ${
+        punto.active ? "" : "opacity-55"
+      }`}
+      style={{ borderLeftColor: colorDe(punto.tipo) }}
+    >
+      <div className="flex items-start justify-between gap-1">
+        <div className="flex min-w-0 items-start gap-1">
+          <span className="mono mt-px shrink-0 text-[0.5625rem] text-muted-foreground">
+            {orden}
+          </span>
+          <p className="min-w-0 text-[0.6875rem] font-medium leading-snug text-foreground">
+            {punto.name}
+          </p>
+        </div>
+        {/* Los controles aparecen al pasar el puntero, pero siguen existiendo
+            para el teclado: `opacity-0` no los saca del foco, a diferencia de
+            `hidden`. En un día pasado no existen. */}
+        {!pasado && (
+          <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+            <button
+              type="button"
+              onClick={onEditar}
+              className="cursor-pointer rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+              aria-label={`Editar ${punto.name}`}
+            >
+              <Pencil className="h-3 w-3" />
+            </button>
+            <button
+              type="button"
+              onClick={onQuitar}
+              className="cursor-pointer rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-destructive-strong"
+              aria-label={`Quitar ${punto.name} de este día`}
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        )}
+      </div>
+
+      {punto.address && (
+        <p className="mt-0.5 line-clamp-2 pl-3 text-[0.5625rem] leading-snug text-muted-foreground">
+          {punto.address}
+        </p>
+      )}
+      {punto.lat == null && (
+        <span className="mt-0.5 flex items-center gap-0.5 pl-3 text-[0.5625rem] text-warning-strong">
+          <MapPin className="h-2.5 w-2.5" />
+          Sin ubicar
+        </span>
+      )}
+    </article>
+  );
+}
+
+// =============================================================================
 // EL MES CHICO: elegir qué semana se planifica
 // =============================================================================
 
@@ -475,6 +786,7 @@ function MesChico({
   onElegirSemana,
   onCopiarAnterior,
   copiando,
+  semanaCerrada,
   esSemanaActual,
   onHoy,
 }: {
@@ -482,6 +794,7 @@ function MesChico({
   onElegirSemana: (lunes: Date) => void;
   onCopiarAnterior: () => void;
   copiando: boolean;
+  semanaCerrada: boolean;
   esSemanaActual: boolean;
   onHoy: () => void;
 }) {
@@ -514,42 +827,42 @@ function MesChico({
   fin.setDate(fin.getDate() + 5);
 
   return (
-    <aside className="panel flex flex-col gap-4 p-4 xl:sticky xl:top-6 xl:self-start">
+    <aside className="panel flex flex-col gap-4 p-5">
       <div className="flex items-center justify-between">
-        <span className="text-sm font-medium capitalize text-foreground">
+        <span className="text-base font-medium capitalize text-foreground">
           {MESES[mes.getMonth()]} {mes.getFullYear()}
         </span>
         <div className="flex gap-0.5">
           <button
             type="button"
             onClick={() => setMes(new Date(mes.getFullYear(), mes.getMonth() - 1, 1))}
-            className="cursor-pointer rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="cursor-pointer rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
             aria-label="Mes anterior"
           >
-            <ArrowLeft className="h-3.5 w-3.5" />
+            <ArrowLeft className="h-4 w-4" />
           </button>
           <button
             type="button"
             onClick={() => setMes(new Date(mes.getFullYear(), mes.getMonth() + 1, 1))}
-            className="cursor-pointer rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="cursor-pointer rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
             aria-label="Mes siguiente"
           >
-            <ArrowLeft className="h-3.5 w-3.5 rotate-180" />
+            <ArrowLeft className="h-4 w-4 rotate-180" />
           </button>
         </div>
       </div>
 
       <div>
-        <div className="grid grid-cols-7 gap-0.5 text-center">
+        <div className="grid grid-cols-7 gap-1 text-center">
           {["L", "M", "M", "J", "V", "S", "D"].map((d, i) => (
-            <span key={i} className="text-[0.5625rem] uppercase text-muted-foreground">
+            <span key={i} className="text-[0.625rem] uppercase text-muted-foreground">
               {d}
             </span>
           ))}
         </div>
         {/* Se elige la SEMANA, no el día: cualquier celda carga su semana
             completa, porque es la unidad que se planifica. */}
-        <div className="mt-1 grid grid-cols-7 gap-0.5">
+        <div className="mt-1.5 grid grid-cols-7 gap-1">
           {celdas.map((d) => {
             const suLunes = lunesDe(d).toDateString();
             const enLaSemana = suLunes === lunesElegido;
@@ -559,7 +872,7 @@ function MesChico({
                 key={d.toISOString()}
                 type="button"
                 onClick={() => onElegirSemana(lunesDe(d))}
-                className={`cursor-pointer rounded py-1 text-[0.625rem] tabular-nums transition-colors ${
+                className={`cursor-pointer rounded py-1.5 text-xs tabular-nums transition-colors ${
                   enLaSemana
                     ? "bg-primary/15 font-semibold text-primary"
                     : otroMes
@@ -578,19 +891,28 @@ function MesChico({
         <p className="text-[0.5625rem] uppercase tracking-wide text-muted-foreground">
           Semana cargada
         </p>
-        <p className="mono mt-0.5 text-xs text-foreground">
+        <p className="mono mt-0.5 text-sm text-foreground">
           {lunes.getDate()} {MESES[lunes.getMonth()].slice(0, 3)} al {fin.getDate()}{" "}
           {MESES[fin.getMonth()].slice(0, 3)}
         </p>
       </div>
 
-      <div className="flex flex-col gap-2">
+      {/* El aire de abajo empuja los botones al pie, que es lo que hace que
+          esta tarjeta mida lo mismo que el calendario de al lado sin fijarle
+          una altura a mano. */}
+      <div className="mt-auto flex flex-col gap-2">
         {!esSemanaActual && (
           <Button variant="outline" size="sm" onClick={onHoy}>
             Ir a la semana actual
           </Button>
         )}
-        <Button variant="secondary" size="sm" onClick={onCopiarAnterior} disabled={copiando}>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={onCopiarAnterior}
+          disabled={copiando || semanaCerrada}
+          title={semanaCerrada ? "Esa semana ya terminó y no se puede planificar" : undefined}
+        >
           {copiando ? (
             <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
           ) : (
@@ -599,7 +921,9 @@ function MesChico({
           Copiar semana anterior
         </Button>
         <p className="text-[0.5625rem] leading-relaxed text-muted-foreground">
-          Reemplaza el reparto de esta semana con el de la anterior.
+          {semanaCerrada
+            ? "Esta semana ya terminó. Solo se puede planificar desde hoy en adelante."
+            : "Reemplaza el reparto de esta semana con el de la anterior."}
         </p>
       </div>
     </aside>
@@ -607,225 +931,12 @@ function MesChico({
 }
 
 // =============================================================================
-// UNA COLUMNA DEL CALENDARIO
-// =============================================================================
-
-function ColumnaDia({
-  dia,
-  fecha,
-  esHoy,
-  puntos,
-  guardando,
-  onAgregar,
-  onQuitar,
-  onSoltar,
-  onEditar,
-}: {
-  dia: DiaSemana;
-  fecha: Date;
-  esHoy: boolean;
-  puntos: PuntoDelDia[];
-  guardando: boolean;
-  onAgregar: () => void;
-  onQuitar: (id: string) => void;
-  /** `carga` es `"<diaDeOrigen>|<id>"`, vacío el origen si vino de la tabla. */
-  onSoltar: (carga: string, destino: number) => void;
-  onEditar: (id: string) => void;
-}) {
-  const [encima, setEncima] = useState(false);
-
-  const aceptar = (e: React.DragEvent) => {
-    if (!e.dataTransfer.types.includes(MIME)) return false;
-    e.preventDefault();
-    return true;
-  };
-
-  return (
-    <section
-      className={`panel flex min-h-[20rem] flex-col transition-colors ${
-        encima ? "ring-2 ring-cta" : ""
-      }`}
-      onDragOver={(e) => {
-        if (aceptar(e)) setEncima(true);
-      }}
-      onDragLeave={() => setEncima(false)}
-      onDrop={(e) => {
-        setEncima(false);
-        if (!aceptar(e)) return;
-        onSoltar(e.dataTransfer.getData(MIME), -1);
-      }}
-    >
-      {/* Cabecera al estilo de un calendario: el día arriba en versales y el
-          número abajo grande, que es como se lee una semana. */}
-      <header
-        className={`border-b px-3 py-2 ${
-          esHoy ? "border-cta bg-cta/10" : "border-border bg-muted/40"
-        }`}
-      >
-        <div className="flex items-start justify-between">
-          <div>
-            <p className="text-[0.5625rem] uppercase tracking-wide text-muted-foreground">
-              {ROTULO_DIA[dia]}
-            </p>
-            <p
-              className={`mono text-xl font-semibold leading-none tabular-nums ${
-                esHoy ? "text-cta-foreground" : "text-foreground"
-              }`}
-            >
-              {fecha.getDate()}
-            </p>
-          </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7"
-            onClick={onAgregar}
-            aria-label={`Agregar puntos al ${ROTULO_DIA[dia]}`}
-            title={`Agregar puntos al ${ROTULO_DIA[dia]}`}
-          >
-            <Plus className="h-4 w-4" />
-          </Button>
-        </div>
-        <p className="mt-0.5 flex h-3 items-center text-[0.5625rem] text-muted-foreground">
-          {guardando ? (
-            <Loader2 className="h-2.5 w-2.5 animate-spin" />
-          ) : puntos.length > 0 ? (
-            `${puntos.length} parada${puntos.length === 1 ? "" : "s"}`
-          ) : (
-            ""
-          )}
-        </p>
-      </header>
-
-      <div className="flex flex-1 flex-col gap-2 p-2.5">
-        {puntos.length === 0 ? (
-          // AC5, literal.
-          <p className="m-auto max-w-[13rem] text-center text-[0.6875rem] leading-relaxed text-muted-foreground">
-            No hay puntos permanentes asociados
-          </p>
-        ) : (
-          puntos.map((p, i) => (
-            <TarjetaPunto
-              key={p.id}
-              punto={p}
-              dia={dia}
-              orden={i + 1}
-              onDropAntes={(carga) => onSoltar(carga, i)}
-              onQuitar={() => onQuitar(p.id)}
-              onEditar={() => onEditar(p.id)}
-            />
-          ))
-        )}
-      </div>
-    </section>
-  );
-}
-
-function TarjetaPunto({
-  punto,
-  dia,
-  orden,
-  onDropAntes,
-  onQuitar,
-  onEditar,
-}: {
-  punto: PuntoDelDia;
-  dia: DiaSemana;
-  orden: number;
-  onDropAntes: (carga: string) => void;
-  onQuitar: () => void;
-  onEditar: () => void;
-}) {
-  const [encima, setEncima] = useState(false);
-
-  return (
-    <article
-      draggable
-      onDragStart={(e) => {
-        e.dataTransfer.setData(MIME, `${dia}|${punto.id}`);
-        e.dataTransfer.effectAllowed = "move";
-      }}
-      onDragOver={(e) => {
-        if (!e.dataTransfer.types.includes(MIME)) return;
-        e.preventDefault();
-        e.stopPropagation();
-        setEncima(true);
-      }}
-      onDragLeave={() => setEncima(false)}
-      onDrop={(e) => {
-        setEncima(false);
-        if (!e.dataTransfer.types.includes(MIME)) return;
-        e.preventDefault();
-        e.stopPropagation();
-        onDropAntes(e.dataTransfer.getData(MIME));
-      }}
-      // La barra de color a la izquierda es el gesto de las tarjetas de
-      // calendario, y acá además dice el tipo de punto.
-      className={`group cursor-grab rounded-md border border-l-[3px] bg-card px-2.5 py-2 transition-colors active:cursor-grabbing ${
-        encima ? "border-cta" : "border-border"
-      } ${punto.active ? "" : "opacity-55"}`}
-      style={{ borderLeftColor: colorDe(punto.tipo) }}
-    >
-      <div className="flex items-start justify-between gap-1.5">
-        <div className="flex min-w-0 items-start gap-1.5">
-          <span className="mono mt-px shrink-0 text-[0.5625rem] text-muted-foreground">
-            {orden}
-          </span>
-          <p className="min-w-0 text-xs font-medium leading-snug text-foreground">{punto.name}</p>
-        </div>
-        {/* Los dos controles aparecen al pasar el puntero, pero siguen
-            existiendo para el teclado: `opacity-0` no los saca del foco, a
-            diferencia de `hidden`. */}
-        <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
-          <button
-            type="button"
-            onClick={onEditar}
-            className="cursor-pointer rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-            aria-label={`Editar ${punto.name}`}
-          >
-            <Pencil className="h-3 w-3" />
-          </button>
-          <button
-            type="button"
-            onClick={onQuitar}
-            className="cursor-pointer rounded p-1 text-muted-foreground hover:bg-accent hover:text-destructive-strong"
-            aria-label={`Quitar ${punto.name} de este día`}
-          >
-            <X className="h-3 w-3" />
-          </button>
-        </div>
-      </div>
-
-      {punto.address && (
-        <p className="mt-1 line-clamp-2 pl-3.5 text-[0.625rem] leading-snug text-muted-foreground">
-          {punto.address}
-        </p>
-      )}
-      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-3.5 text-[0.625rem] text-muted-foreground">
-        {punto.barrio && <span>{punto.barrio}</span>}
-        {!punto.active && <span className="text-warning-strong">Inactivo</span>}
-        {punto.lat == null && (
-          <span className="flex items-center gap-0.5 text-warning-strong">
-            <MapPin className="h-2.5 w-2.5" />
-            Sin ubicar
-          </span>
-        )}
-      </div>
-    </article>
-  );
-}
-
-// =============================================================================
 // LA TABLA DEL PIE: todos los puntos permanentes, con todos sus campos
-//
-// Crear un punto no lo agrega a ningún día, así que sin esta tabla el catálogo
-// solo era visible desde adentro del diálogo del `+`, o sea escondido detrás
-// de un gesto que sirve para otra cosa.
 //
 // Es una TABLA y no una lista, y va a lo ancho, porque un punto se compara con
 // otro por sus campos: dirección, barrio, tipo y frecuencia en columnas
 // alineadas se leen de un vistazo, apilados en tarjetas no. Mismo criterio y
-// mismo tratamiento que la tabla de recursos.
+// mismo tratamiento que la tabla de recursos, paginación incluida.
 // =============================================================================
 
 function TablaPuntos({
@@ -833,16 +944,26 @@ function TablaPuntos({
   diasPorPunto,
   onEditar,
   onEliminar,
-  onCrear,
 }: {
   catalogo: ZoneRecord[];
   diasPorPunto: Map<string, number>;
   onEditar: (z: ZoneRecord) => void;
   onEliminar: (z: ZoneRecord) => void;
-  onCrear: () => void;
 }) {
   const [busqueda, setBusqueda] = useState("");
+  const [pagina, setPagina] = useState(0);
+
   const filtrados = useMemo(() => filtrar(catalogo, busqueda), [catalogo, busqueda]);
+  const paginas = Math.max(1, Math.ceil(filtrados.length / POR_PAGINA));
+
+  // Filtrar puede dejar la página actual fuera de rango. Se corrige al
+  // calcular y no con un efecto, que provocaría un render de más.
+  const paginaActual = Math.min(pagina, paginas - 1);
+  const visibles = filtrados.slice(paginaActual * POR_PAGINA, (paginaActual + 1) * POR_PAGINA);
+
+  // Alto fijo: la tabla no cambia de tamaño al filtrar ni al cambiar de
+  // página, así que nada de lo que está alrededor salta.
+  const relleno = POR_PAGINA - visibles.length;
 
   return (
     <section className="panel flex flex-col">
@@ -853,20 +974,17 @@ function TablaPuntos({
             Arrastra una fila a un día para programarla.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={busqueda}
-              onChange={(e) => setBusqueda(e.target.value)}
-              placeholder="Buscar punto"
-              className="h-8 w-56 pl-8 text-xs"
-            />
-          </div>
-          <Button size="sm" onClick={onCrear}>
-            <Plus className="mr-1.5 h-3.5 w-3.5" />
-            Crear punto permanente
-          </Button>
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={busqueda}
+            onChange={(e) => {
+              setBusqueda(e.target.value);
+              setPagina(0);
+            }}
+            placeholder="Buscar punto"
+            className="h-8 w-56 pl-8 text-xs"
+          />
         </div>
       </header>
 
@@ -875,115 +993,183 @@ function TablaPuntos({
           Todavía no hay puntos permanentes.
         </p>
       ) : (
-        <div className="max-h-[22rem] overflow-y-auto px-4 pb-4 pt-2">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-muted/50 hover:bg-muted/50">
-                <TableHead className="w-[2rem]"></TableHead>
-                <TableHead>Nombre</TableHead>
-                <TableHead className="hidden md:table-cell">Dirección</TableHead>
-                <TableHead className="hidden lg:table-cell">Barrio</TableHead>
-                <TableHead className="hidden lg:table-cell">Tipo</TableHead>
-                <TableHead className="hidden xl:table-cell">Frecuencia</TableHead>
-                <TableHead className="text-right">En la semana</TableHead>
-                <TableHead className="w-[4.5rem]"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filtrados.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={8} className="py-8 text-center text-xs text-muted-foreground">
-                    Ningún punto coincide con la búsqueda.
-                  </TableCell>
+        <>
+          <div className="px-4 pb-2 pt-2">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/50 hover:bg-muted/50">
+                  <TableHead className="w-[5.5rem]">Mapa</TableHead>
+                  <TableHead>Nombre</TableHead>
+                  <TableHead className="hidden md:table-cell">Dirección</TableHead>
+                  <TableHead className="hidden lg:table-cell">Barrio</TableHead>
+                  <TableHead className="hidden lg:table-cell">Tipo</TableHead>
+                  <TableHead className="hidden xl:table-cell">Frecuencia</TableHead>
+                  <TableHead className="text-right">En la semana</TableHead>
+                  <TableHead className="w-[4.5rem]"></TableHead>
                 </TableRow>
-              )}
-              {filtrados.map((z) => {
-                const veces = diasPorPunto.get(z.id) ?? 0;
-                return (
-                  <TableRow
-                    key={z.id}
-                    draggable
-                    onDragStart={(e) => {
-                      // Sin día de origen: viene de la tabla, no de una columna.
-                      e.dataTransfer.setData(MIME, `|${z.id}`);
-                      e.dataTransfer.effectAllowed = "copy";
-                    }}
-                    className="cursor-grab active:cursor-grabbing"
-                  >
-                    <TableCell>
-                      <span
-                        aria-hidden="true"
-                        className="block h-2.5 w-2.5 rounded-full"
-                        style={{ backgroundColor: colorDe(z.tipo) }}
-                      />
-                    </TableCell>
-                    <TableCell className="font-medium">
-                      <span className="text-xs text-foreground">{z.name}</span>
-                      {!z.active && (
-                        <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[0.5625rem] uppercase tracking-wide text-muted-foreground">
-                          Inactivo
-                        </span>
-                      )}
-                    </TableCell>
-                    <TableCell className="hidden max-w-[18rem] md:table-cell">
-                      {z.address ? (
-                        <span className="line-clamp-1 text-xs text-muted-foreground">
-                          {z.address}
-                        </span>
-                      ) : (
-                        <span className="flex items-center gap-1 text-xs text-warning-strong">
-                          <MapPin className="h-3 w-3" />
-                          Sin ubicar
-                        </span>
-                      )}
-                    </TableCell>
-                    <TableCell className="hidden text-xs text-muted-foreground lg:table-cell">
-                      {z.barrio || "-"}
-                    </TableCell>
-                    <TableCell className="hidden text-xs text-muted-foreground lg:table-cell">
-                      {z.tipo || "-"}
-                    </TableCell>
-                    <TableCell className="hidden text-xs text-muted-foreground xl:table-cell">
-                      {z.frecuencia || "-"}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {/* Contrastar esto con la frecuencia es la razón de ser
-                          de la columna: un punto de "2 veces por semana" con
-                          una sola visita está mal repartido. */}
-                      <span
-                        className={`mono text-xs tabular-nums ${
-                          veces === 0 ? "text-warning-strong" : "text-foreground"
-                        }`}
-                      >
-                        {veces === 0 ? "Sin programar" : `${veces} día${veces === 1 ? "" : "s"}`}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex justify-end gap-0.5">
-                        <button
-                          type="button"
-                          onClick={() => onEditar(z)}
-                          className="cursor-pointer rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-                          aria-label={`Editar ${z.name}`}
+              </TableHeader>
+              <TableBody>
+                {visibles.map((z) => {
+                  const veces = diasPorPunto.get(z.id) ?? 0;
+                  return (
+                    <TableRow
+                      key={z.id}
+                      draggable
+                      onDragStart={(e) => {
+                        // Sin día de origen: viene de la tabla, no de una columna.
+                        e.dataTransfer.setData(MIME, `|${z.id}`);
+                        e.dataTransfer.effectAllowed = "copy";
+                      }}
+                      className="cursor-grab active:cursor-grabbing"
+                    >
+                      <TableCell>
+                        {/* La imagen del lugar es su MAPA UNIFICADO, no una
+                            foto subida a mano. La columna existe aunque
+                            todavía no haya vuelo: el hueco dice que falta
+                            volarlo, que es información. */}
+                        {z.thumbnailUrl ? (
+                          <div className="detect-frame detect-frame-sm h-10 w-16 overflow-hidden rounded bg-muted">
+                            <span className="detect-corners" aria-hidden="true" />
+                            <img
+                              src={z.thumbnailUrl}
+                              alt={`Mapa de ${z.name}`}
+                              className="h-full w-full object-cover"
+                            />
+                          </div>
+                        ) : (
+                          <div
+                            className="flex h-10 w-16 items-center justify-center rounded border border-dashed border-border/60 bg-background/30"
+                            title="Todavía no se le ha volado el dron"
+                          >
+                            <ImageIcon className="h-3.5 w-3.5 text-muted-foreground/50" />
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell className="font-medium">
+                        <div className="flex items-center gap-2">
+                          <span
+                            aria-hidden="true"
+                            className="h-2.5 w-2.5 shrink-0 rounded-full"
+                            style={{ backgroundColor: colorDe(z.tipo) }}
+                          />
+                          <span className="text-xs text-foreground">{z.name}</span>
+                          {!z.active && (
+                            <span className="rounded bg-muted px-1.5 py-0.5 text-[0.5625rem] uppercase tracking-wide text-muted-foreground">
+                              Inactivo
+                            </span>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="hidden max-w-[18rem] md:table-cell">
+                        {z.address ? (
+                          <span className="line-clamp-1 text-xs text-muted-foreground">
+                            {z.address}
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-xs text-warning-strong">
+                            <MapPin className="h-3 w-3" />
+                            Sin ubicar
+                          </span>
+                        )}
+                      </TableCell>
+                      <TableCell className="hidden text-xs text-muted-foreground lg:table-cell">
+                        {z.barrio || "-"}
+                      </TableCell>
+                      <TableCell className="hidden text-xs text-muted-foreground lg:table-cell">
+                        {z.tipo || "-"}
+                      </TableCell>
+                      <TableCell className="hidden text-xs text-muted-foreground xl:table-cell">
+                        {z.frecuencia || "-"}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {/* Contrastar esto con la frecuencia es la razón de ser
+                            de la columna: un punto de "2 veces por semana" con
+                            una sola visita está mal repartido. */}
+                        <span
+                          className={`mono text-xs tabular-nums ${
+                            veces === 0 ? "text-warning-strong" : "text-foreground"
+                          }`}
                         >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => onEliminar(z)}
-                          className="cursor-pointer rounded p-1.5 text-muted-foreground hover:bg-destructive/15 hover:text-destructive-strong"
-                          aria-label={`Eliminar ${z.name}`}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </div>
+                          {veces === 0 ? "Sin programar" : `${veces} día${veces === 1 ? "" : "s"}`}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex justify-end gap-0.5">
+                          <button
+                            type="button"
+                            onClick={() => onEditar(z)}
+                            className="cursor-pointer rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                            aria-label={`Editar ${z.name}`}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onEliminar(z)}
+                            className="cursor-pointer rounded p-1.5 text-muted-foreground hover:bg-destructive/15 hover:text-destructive-strong"
+                            aria-label={`Eliminar ${z.name}`}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+                {/* Filas vacías para mantener el alto. Sin ellas, la última
+                    página o un filtro con pocos resultados encoge la tarjeta y
+                    la página salta. */}
+                {relleno > 0 &&
+                  Array.from({ length: relleno }).map((_, i) => (
+                    <TableRow key={`relleno-${i}`} className="hover:bg-transparent">
+                      <TableCell colSpan={8} className="h-[3.25rem]">
+                        {i === 0 && visibles.length === 0 && (
+                          <span className="block text-center text-xs text-muted-foreground">
+                            Ningún punto coincide con la búsqueda.
+                          </span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+              </TableBody>
+            </Table>
+          </div>
+
+          {/* La barra se dibuja SIEMPRE, aunque haya una sola página:
+              apareciendo y desapareciendo movería la tarjeta justo al filtrar.
+              Mismo criterio que la tabla de recursos. */}
+          <footer className="flex items-center justify-between border-t border-border px-4 py-2.5">
+            <span className="text-[0.625rem] text-muted-foreground">
+              {filtrados.length} punto{filtrados.length === 1 ? "" : "s"}
+              {busqueda && ` de ${catalogo.length}`}
+            </span>
+            <div className="flex items-center gap-2">
+              <span className="mono text-[0.625rem] tabular-nums text-muted-foreground">
+                {paginaActual + 1} / {paginas}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 w-7 p-0"
+                disabled={paginaActual === 0}
+                onClick={() => setPagina(paginaActual - 1)}
+                aria-label="Página anterior"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 w-7 p-0"
+                disabled={paginaActual >= paginas - 1}
+                onClick={() => setPagina(paginaActual + 1)}
+                aria-label="Página siguiente"
+              >
+                <ArrowLeft className="h-3.5 w-3.5 rotate-180" />
+              </Button>
+            </div>
+          </footer>
+        </>
       )}
     </section>
   );

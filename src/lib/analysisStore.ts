@@ -152,6 +152,10 @@ export interface ZoneRecord {
   /** Cuántos análisis cuelgan de esta zona. Lo calcula el backend en cada
    *  lectura; cero significa que todavía no se le voló el dron. */
   analysisCount: number;
+  /** La miniatura del mapa unificado de la captura más reciente, o `null` si
+   *  todavía no hay vuelo. Es la imagen que de verdad le corresponde al lugar,
+   *  a diferencia de una foto subida a mano. */
+  thumbnailUrl?: string | null;
 }
 
 export type ZoneKind = "basural" | "permanente";

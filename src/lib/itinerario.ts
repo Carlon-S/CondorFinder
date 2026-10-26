@@ -122,3 +122,15 @@ export async function copiarSemana(desde: string, hacia: string): Promise<DiaIti
   if (!res.ok) throw new Error(await mensajeDeError(res, "No se pudo copiar la semana."));
   return res.json();
 }
+
+/** Si esa fecha ya pasó, en días completos.
+ *
+ *  Se compara a medianoche local: un día se planifica hasta que termina, no
+ *  hasta la hora en que alguien mire la pantalla. */
+export function yaPaso(fecha: Date): boolean {
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+  const d = new Date(fecha);
+  d.setHours(0, 0, 0, 0);
+  return d < hoy;
+}

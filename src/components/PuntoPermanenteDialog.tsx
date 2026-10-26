@@ -37,7 +37,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ImageIcon, Loader2, MapPin, Trash2 } from "@/components/icons/Icons";
+import { Loader2, MapPin } from "@/components/icons/Icons";
 import { Obligatorio } from "@/components/Obligatorio";
 import { notify } from "@/lib/notify";
 import {
@@ -46,7 +46,6 @@ import {
   sugerirDirecciones,
   type SugerenciaDireccion,
 } from "@/lib/geocoding";
-import { resourcePhotoUrl, uploadResourcePhoto } from "@/lib/resources";
 import {
   createZone,
   updateZone,
@@ -63,6 +62,12 @@ const ANTIRREBOTE_MS = 350;
  *  Radix no admite un `SelectItem` con valor vacío, así que el centinela viaja
  *  por la interfaz y se traduce a `null` al guardar. */
 const SIN_VALOR = "__sin__";
+
+// **El punto ya no lleva una foto subida a mano.** La tenía porque el AC3 habla
+// de "opcionalmente una imagen", pero la imagen que de verdad le corresponde a
+// un lugar en este sistema es su MAPA UNIFICADO, que sale del vuelo y no de la
+// galería de alguien. Dos imágenes para lo mismo habrían dejado la pregunta de
+// cuál manda. La columna de la tabla muestra la del vuelo cuando existe.
 
 export function PuntoPermanenteDialog({
   open,
@@ -81,19 +86,16 @@ export function PuntoPermanenteDialog({
   const [barrio, setBarrio] = useState("");
   const [tipo, setTipo] = useState<string>(SIN_VALOR);
   const [frecuencia, setFrecuencia] = useState<string>(SIN_VALOR);
-  const [foto, setFoto] = useState<string | null>(null);
   const [coord, setCoord] = useState<{ lat: number; lng: number } | null>(null);
 
   const [sugerencias, setSugerencias] = useState<SugerenciaDireccion[]>([]);
   const [guardando, setGuardando] = useState(false);
-  const [subiendo, setSubiendo] = useState(false);
 
   // Solo se piden sugerencias cuando escribió una persona. Rellenar el campo
   // desde el punto que se está editando también lo cambia, y pedir
   // sugerencias ahí sería gastar una solicitud para ofrecerle corregir una
   // dirección que el sistema acaba de cargar.
   const escribioRef = useRef(false);
-  const archivoRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -104,7 +106,6 @@ export function PuntoPermanenteDialog({
     setBarrio(punto?.barrio ?? "");
     setTipo(punto?.tipo ?? SIN_VALOR);
     setFrecuencia(punto?.frecuencia ?? SIN_VALOR);
-    setFoto(punto?.photoUrl ?? null);
     setCoord(punto?.lat != null && punto?.lng != null ? { lat: punto.lat, lng: punto.lng } : null);
   }, [open, punto]);
 
@@ -123,17 +124,6 @@ export function PuntoPermanenteDialog({
     if (!detalle) return;
     setDireccion(detalle.address);
     setCoord({ lat: detalle.lat, lng: detalle.lng });
-  };
-
-  const subirImagen = async (file: File) => {
-    setSubiendo(true);
-    try {
-      setFoto(await uploadResourcePhoto(file));
-    } catch (e) {
-      notify.error("No se pudo subir la imagen", (e as Error).message);
-    } finally {
-      setSubiendo(false);
-    }
   };
 
   const guardar = async () => {
@@ -168,7 +158,6 @@ export function PuntoPermanenteDialog({
         barrio: barrio.trim() || null,
         tipo: tipo === SIN_VALOR ? null : tipo,
         frecuencia: frecuencia === SIN_VALOR ? null : frecuencia,
-        photoUrl: foto,
         lat: destino?.lat ?? null,
         lng: destino?.lng ?? null,
       };
@@ -312,55 +301,13 @@ export function PuntoPermanenteDialog({
               </SelectContent>
             </Select>
           </div>
-
-          <div className="grid gap-1.5">
-            <Label>Imagen (opcional)</Label>
-            {foto ? (
-              <div className="flex items-center gap-3">
-                <img
-                  src={resourcePhotoUrl(foto)}
-                  alt=""
-                  className="h-16 w-24 rounded-md border border-border object-cover"
-                />
-                <Button variant="ghost" size="sm" onClick={() => setFoto(null)}>
-                  <Trash2 className="mr-1.5 h-3.5 w-3.5" />
-                  Quitar
-                </Button>
-              </div>
-            ) : (
-              <Button
-                variant="outline"
-                onClick={() => archivoRef.current?.click()}
-                disabled={subiendo}
-                className="justify-start"
-              >
-                {subiendo ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <ImageIcon className="mr-2 h-4 w-4" />
-                )}
-                Subir una foto del lugar
-              </Button>
-            )}
-            <input
-              ref={archivoRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) void subirImagen(f);
-                e.target.value = "";
-              }}
-            />
-          </div>
         </div>
 
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={guardando}>
             Cancelar
           </Button>
-          <Button onClick={guardar} disabled={guardando || subiendo}>
+          <Button onClick={guardar} disabled={guardando}>
             {guardando && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             {punto ? "Guardar cambios" : "Crear punto"}
           </Button>

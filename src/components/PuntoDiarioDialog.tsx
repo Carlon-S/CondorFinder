@@ -407,7 +407,7 @@ export function PuntoDiarioDialog({
                       </PopoverTrigger>
                       <PopoverContent
                         align="start"
-                        className="w-[var(--radix-popover-trigger-width)] p-0"
+                        className="z-[60] w-[var(--radix-popover-trigger-width)] p-0"
                       >
                         <div className="relative border-b border-border">
                           <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
