@@ -131,6 +131,7 @@ import { RouteLegend } from "@/components/RouteLegend";
 import { PuntoDiarioDialog } from "@/components/PuntoDiarioDialog";
 import {
   eliminarPuntoDiario,
+  hoy,
   listarPuntosDiarios,
   type PuntoDiario,
 } from "@/lib/puntosDiarios";
@@ -411,7 +412,13 @@ function RutasPage() {
   const recargarPuntosDiarios = useCallback(() => {
     // Degrada en silencio, igual que el resto de las cargas de esta vista: sin
     // los puntos del día la generación de rutas sigue sirviendo.
-    listarPuntosDiarios().then(setPuntosDiarios).catch(() => {});
+    // La fecha va SIEMPRE explícita y en hora local.
+    //
+    // Sin ella el backend asume "hoy en UTC", y el alta guarda "hoy en hora
+    // local". En Chile son tres horas de diferencia, así que desde las 21:00 un
+    // punto se guardaba bajo un día y se consultaba bajo el siguiente: se
+    // creaba bien, decía "Punto creado", y no aparecía en ninguna parte.
+    listarPuntosDiarios(hoy()).then(setPuntosDiarios).catch(() => {});
   }, []);
 
   useEffect(() => {

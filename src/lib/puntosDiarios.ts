@@ -119,6 +119,19 @@ export async function crearSolicitud(nombre: string, area = "CONTROL"): Promise<
   return res.json();
 }
 
+/** Elimina una solicitud agregada a mano.
+ *
+ *  El backend rechaza con 409 las 17 de la planilla municipal y las que algún
+ *  punto diario esté usando. Ese mensaje es el que hay que mostrar: dice
+ *  cuántos la usan. */
+export async function eliminarSolicitud(id: string): Promise<void> {
+  const res = await fetch(`${BACKEND_URL}/puntos-diarios/solicitudes/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!res.ok) throw new Error(await mensajeDeError(res, "No se pudo eliminar la solicitud."));
+}
+
 /** La fecha de hoy como `YYYY-MM-DD`, en la zona horaria del navegador.
  *
  *  A mano y no con `toISOString()`, que convierte a UTC: en Chile eso devuelve

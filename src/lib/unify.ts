@@ -91,6 +91,7 @@ export async function unifyImages(
   // Inicia el pipeline en el backend y obtiene task_id
   const startRes = await fetch(`${BACKEND_URL}/generate`, {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ opc: options.precise ? 1 : 0 }),
   });
@@ -141,7 +142,7 @@ export interface RawTaskStatus {
  */
 export async function getTaskStatus(taskId: string): Promise<RawTaskStatus | null> {
   try {
-    const res = await fetch(`${BACKEND_URL}/status/${taskId}`);
+    const res = await fetch(`${BACKEND_URL}/status/${taskId}`, { credentials: "include" });
     if (!res.ok) return null;
     return await res.json();
   } catch {
@@ -170,7 +171,7 @@ export interface PendingTask {
  * Lanza en caso de error — el caller decide si degrada en silencio o avisa.
  */
 export async function listPendingTasks(): Promise<PendingTask[]> {
-  const res = await fetch(`${BACKEND_URL}/tasks/pending`);
+  const res = await fetch(`${BACKEND_URL}/tasks/pending`, { credentials: "include" });
   if (!res.ok) {
     throw new Error("No se pudieron cargar las tareas pendientes.");
   }
@@ -211,7 +212,10 @@ export async function pollTask(
   while (true) {
     if (signal?.aborted) throw new DOMException("aborted", "AbortError");
 
-    const statusRes = await fetch(`${BACKEND_URL}/status/${taskId}`, { signal });
+    const statusRes = await fetch(`${BACKEND_URL}/status/${taskId}`, {
+      signal,
+      credentials: "include",
+    });
     const statusData = await statusRes.json();
 
     if (statusData.status === "done") {
@@ -319,6 +323,10 @@ function subirTanda(tanda: File[], onBytes: (enviados: number) => void): Promise
 
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${BACKEND_URL}/upload`);
+    // El equivalente de `credentials: "include"` de fetch. Sin esto el
+    // navegador no manda la cookie de sesión en producción, donde el backend
+    // está en otro origen, y la subida responde 401.
+    xhr.withCredentials = true;
 
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onBytes(e.loaded);
@@ -423,7 +431,7 @@ export async function uploadImages(
  */
 export async function getPipelineStatus(): Promise<{ busy: boolean } | null> {
   try {
-    const res = await fetch(`${BACKEND_URL}/pipeline-status`);
+    const res = await fetch(`${BACKEND_URL}/pipeline-status`, { credentials: "include" });
     if (!res.ok) return null;
     return await res.json();
   } catch {
@@ -437,7 +445,7 @@ export async function getPipelineStatus(): Promise<{ busy: boolean } | null> {
  */
 export async function listUploadedImages(): Promise<string[] | null> {
   try {
-    const res = await fetch(`${BACKEND_URL}/upload`);
+    const res = await fetch(`${BACKEND_URL}/upload`, { credentials: "include" });
     if (!res.ok) return null;
     const data = await res.json();
     return data.archivos ?? [];
@@ -452,7 +460,9 @@ export async function listUploadedImages(): Promise<string[] | null> {
  * curso) — ver comentario en orquestador.py::run_pipeline.
  */
 export async function cancelTask(taskId: string): Promise<void> {
-  await fetch(`${BACKEND_URL}/cancel/${taskId}`, { method: "POST" }).catch(() => {});
+  await fetch(`${BACKEND_URL}/cancel/${taskId}`, { method: "POST", credentials: "include" }).catch(
+    () => {},
+  );
 }
 
 /**
@@ -462,6 +472,7 @@ export async function cancelTask(taskId: string): Promise<void> {
 export async function deleteImage(filename: string): Promise<void> {
   await fetch(`${BACKEND_URL}/upload/${encodeURIComponent(filename)}`, {
     method: "DELETE",
+    credentials: "include",
   });
 }
 
@@ -470,7 +481,7 @@ export async function deleteImage(filename: string): Promise<void> {
  * Se llama cuando el usuario limpia todas las imágenes del frontend.
  */
 export async function deleteAllImages(): Promise<void> {
-  await fetch(`${BACKEND_URL}/upload`, { method: "DELETE" });
+  await fetch(`${BACKEND_URL}/upload`, { method: "DELETE", credentials: "include" });
 }
 
 /**
@@ -497,6 +508,7 @@ export function getUploadedImageUrl(filename: string): string {
 export async function deleteResultFile(filename: string): Promise<void> {
   await fetch(`${BACKEND_URL}/result/${encodeURIComponent(filename)}`, {
     method: "DELETE",
+    credentials: "include",
   }).catch(() => {});
 }
 
@@ -509,6 +521,7 @@ export async function deleteResultFile(filename: string): Promise<void> {
 export async function deleteFinalsFile(filename: string): Promise<void> {
   await fetch(`${BACKEND_URL}/finals/${encodeURIComponent(filename)}`, {
     method: "DELETE",
+    credentials: "include",
   }).catch(() => {});
 }
 
@@ -527,7 +540,9 @@ export async function deleteFinalsFile(filename: string): Promise<void> {
  */
 export async function listTaskImages(taskId: string): Promise<string[] | null> {
   try {
-    const res = await fetch(`${BACKEND_URL}/task-images/${encodeURIComponent(taskId)}`);
+    const res = await fetch(`${BACKEND_URL}/task-images/${encodeURIComponent(taskId)}`, {
+      credentials: "include",
+    });
     if (!res.ok) return null;
     const data = await res.json();
     return data.archivos ?? [];
@@ -550,6 +565,7 @@ export function getTaskImageUrl(taskId: string, filename: string): string {
 export async function deleteTaskImages(taskId: string): Promise<void> {
   await fetch(`${BACKEND_URL}/task-images/${encodeURIComponent(taskId)}`, {
     method: "DELETE",
+    credentials: "include",
   }).catch(() => {});
 }
 
@@ -562,5 +578,6 @@ export async function deleteTaskImages(taskId: string): Promise<void> {
 export async function deleteTask(taskId: string): Promise<void> {
   await fetch(`${BACKEND_URL}/status/${encodeURIComponent(taskId)}`, {
     method: "DELETE",
+    credentials: "include",
   }).catch(() => {});
 }

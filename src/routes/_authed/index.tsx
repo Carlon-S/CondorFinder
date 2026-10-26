@@ -23,6 +23,7 @@
 
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Suspense, lazy, useEffect, useMemo, useState } from "react";
+import { PuntoPermanenteDialog } from "@/components/PuntoPermanenteDialog";
 import { notify } from "@/lib/notify";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import {
@@ -169,12 +170,13 @@ interface ZoneRow {
    *  contra las demás filas ya cargadas (ver loadZoneRows), no hace falta
    *  pedirle nada extra al backend para esto. */
   supersededByName?: string;
-  /** Solo en filas `no_flight`: la zona a la que corresponde la fila. La fila
-   *  ES la zona, así que no hay un análisis del que sacar el id. */
+  /** La zona a la que corresponde la fila. En `no_flight` la fila ES la zona;
+   *  en `done` sale del análisis. Ausente en tareas en curso, que todavía no
+   *  tienen una. */
   zoneId?: string;
-  /** Lo que va bajo el nombre cuando no hay una versión que nombrar: la
-   *  dirección del punto permanente. */
-  subtitle?: string;
+  /** La dirección de la zona. Un punto permanente la trae de su alta; una zona
+   *  nacida de un vuelo solo si alguien se la completó después. */
+  address?: string;
 }
 
 function fromRecord(r: SavedAnalysisRecord): ZoneRow {
@@ -206,6 +208,20 @@ async function loadZoneRows(): Promise<ZoneRow[]> {
   // Ambas listas pueden fallar (sesión perdida, red caída), se degradan en
   // silencio en vez de romper el resto del listado: una lista incompleta es
   // mucho mejor que una vista que no carga.
+  // Las zonas se traen PRIMERO porque hacen falta dos veces: para las filas
+  // sin vuelo, y para ponerle su dirección a las que sí tienen análisis. Una
+  // zona nacida de un vuelo puede tener dirección si alguien se la completó.
+  //
+  // `analysisCount` lo calcula el backend en una sola agregación; contar acá
+  // habría significado recorrer todos los análisis por cada zona.
+  let zonas: ZoneRecord[] = [];
+  try {
+    zonas = await listZones();
+  } catch {
+    // ver comentario de arriba
+  }
+  const zonaPorId = new Map(zonas.map((z) => [z.id, z]));
+
   let doneRows: ZoneRow[] = [];
   try {
     const records = await listAnalyses();
@@ -215,6 +231,8 @@ async function loadZoneRows(): Promise<ZoneRow[]> {
     doneRows = records.map((r) => ({
       ...fromRecord(r),
       supersededByName: r.supersededBy ? nameById.get(r.supersededBy) : undefined,
+      address: r.zoneId ? (zonaPorId.get(r.zoneId)?.address ?? undefined) : undefined,
+      zoneId: r.zoneId ?? undefined,
     }));
   } catch {
     // ver comentario de arriba
@@ -223,29 +241,20 @@ async function loadZoneRows(): Promise<ZoneRow[]> {
   // Las zonas SIN ningún análisis. No salen de `listAnalyses()` por
   // definición, así que sin esta consulta serían invisibles en la vista que
   // justamente lista lo que la municipalidad administra.
-  //
-  // `analysisCount` lo calcula el backend en una sola agregación; contar acá
-  // habría significado recorrer todos los análisis por cada zona.
-  let sinVuelo: ZoneRow[] = [];
-  try {
-    const zonas = await listZones();
-    sinVuelo = zonas
-      .filter((z) => z.analysisCount === 0)
-      .map((z) => ({
-        state: "no_flight" as const,
-        key: `zona-${z.id}`,
-        name: z.name,
-        subtitle: z.address ?? undefined,
-        // Se ordenan junto a las demás por esta fecha, que para una zona a
-        // mano es cuándo se registró el lugar.
-        savedAt: z.createdAt,
-        mapUrl: null,
-        summary: null,
-        zoneId: z.id,
-      }));
-  } catch {
-    // ver comentario de arriba
-  }
+  const sinVuelo: ZoneRow[] = zonas
+    .filter((z) => z.analysisCount === 0)
+    .map((z) => ({
+      state: "no_flight" as const,
+      key: `zona-${z.id}`,
+      name: z.name,
+      address: z.address ?? undefined,
+      // Se ordenan junto a las demás por esta fecha, que para una zona a
+      // mano es cuándo se registró el lugar.
+      savedAt: z.createdAt,
+      mapUrl: null,
+      summary: null,
+      zoneId: z.id,
+    }));
 
   let pending: PendingTask[] = [];
   try {
@@ -380,6 +389,8 @@ function MainPage() {
   /** Zona que se está renombrando, o null. Guarda la zona entera y no su id
    *  porque el diálogo necesita además el nombre actual para sembrar el campo. */
   const [renombrarZona, setRenombrarZona] = useState<ZoneRecord | null>(null);
+  /** Punto permanente que se esta editando con el formulario completo, o null. */
+  const [editarPunto, setEditarPunto] = useState<ZoneRecord | null>(null);
 
   useEffect(() => {
     // Degrada en silencio: si falla, los botones de informe y evolución
@@ -591,8 +602,9 @@ function MainPage() {
         borrarArchivosDeVersion(a.mapUrl, a.sourceTaskId);
       }
 
-      setDeletingRowKey(null);
       await refreshZones();
+
+      setDeletingRowKey(null);
       notify.success(
         "Zona eliminada",
         `"${deletedName}" y sus ${deLaZona.length} captura(s) ya no aparecen en tu listado.`,
@@ -610,8 +622,8 @@ function MainPage() {
       } catch (e) {
         notify.error("No se pudo eliminar", (e as Error).message);
       }
-      setDeletingRowKey(null);
       await refreshZones();
+      setDeletingRowKey(null);
       return;
     }
 
@@ -631,8 +643,9 @@ function MainPage() {
         borrarArchivosDeVersion(target.mapUrl, target.taskId);
       }
 
-      setDeletingRowKey(null);
       await refreshZones();
+
+      setDeletingRowKey(null);
       notify.success("Captura eliminada", `"${deletedName}" ya no aparece en tu listado.`);
       return;
     }
@@ -658,8 +671,8 @@ function MainPage() {
         if (jsonName) deleteResultFile(jsonName);
       }
     }
-    setDeletingRowKey(null);
     await refreshZones();
+    setDeletingRowKey(null);
     notify.success("Zona eliminada", `"${deletedName}" ya no aparece en tu listado.`);
   };
 
@@ -886,6 +899,9 @@ function MainPage() {
                         y se aplica cuando llegan las filas. */}
                     <TableHead className="w-[7.5rem]"></TableHead>
                     <TableHead>Zona</TableHead>
+                    {/* La direccion es como el trabajador reconoce el lugar
+                        en la calle; el nombre es como lo llama el sistema. */}
+                    <TableHead className="hidden lg:table-cell">Dirección</TableHead>
                     <SortableHead field="fecha" label="Fecha" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} />
                     <SortableHead field="volumen" label="Volumen" unit="m³" className="w-[7rem]" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="right" />
                     <SortableHead field="peso" label="Peso" unit="kg" className="w-[7rem]" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="right" />
@@ -899,6 +915,7 @@ function MainPage() {
                     <TableRow key={i} className="hover:bg-transparent">
                       <TableCell><Skeleton className="h-16 w-24" /></TableCell>
                       <TableCell><Skeleton className="h-4 w-32" /></TableCell>
+                      <TableCell className="hidden lg:table-cell"><Skeleton className="h-4 w-40" /></TableCell>
                       <TableCell><Skeleton className="h-4 w-20" /></TableCell>
                       <TableCell className="text-right"><Skeleton className="ml-auto h-4 w-14" /></TableCell>
                       <TableCell className="text-right"><Skeleton className="ml-auto h-4 w-14" /></TableCell>
@@ -917,6 +934,7 @@ function MainPage() {
                   <TableRow className="bg-muted/50 hover:bg-muted/50">
                     <TableHead className="w-[7.5rem]"></TableHead>
                     <TableHead>Zona</TableHead>
+                    <TableHead className="hidden lg:table-cell">Dirección</TableHead>
                     <SortableHead field="fecha" label="Fecha" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} />
                     <SortableHead field="volumen" label="Volumen" unit="m³" className="w-[7rem]" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="right" />
                     <SortableHead field="peso" label="Peso" unit="kg" className="w-[7rem]" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="right" />
@@ -972,6 +990,31 @@ function MainPage() {
                             tareas en curso todavía no tienen una, y los
                             análisis anteriores a la migración de zonas tampoco. */}
                         {(() => {
+                          // Un punto permanente ES la zona, no tiene análisis
+                          // del que sacarla, y su lápiz abre la EDICIÓN
+                          // completa (dirección, barrio, tipo, frecuencia,
+                          // foto) y no solo el renombrado: renombrar es lo
+                          // único que se puede hacer sobre una zona nacida de
+                          // un vuelo, pero acá hay un formulario detrás.
+                          if (z.state === "no_flight" && z.zoneId) {
+                            const permanente = zoneRecords.find((r) => r.id === z.zoneId);
+                            return (
+                              <span className="inline-flex items-center gap-1.5">
+                                {z.name}
+                                {permanente && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditarPunto(permanente)}
+                                    title="Editar el punto"
+                                    aria-label={`Editar el punto ${z.name}`}
+                                    className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                  >
+                                    <Pencil className="h-3 w-3" />
+                                  </button>
+                                )}
+                              </span>
+                            );
+                          }
                           const zona = zoneOf(z.recordId);
                           if (!zona) return z.name;
                           return (
@@ -1016,14 +1059,6 @@ function MainPage() {
                                 : "Pendiente"}
                           </span>
                         )}
-                        {/* Para un punto permanente no hay versión que nombrar
-                            debajo, así que ese renglón lo ocupa su dirección,
-                            que es lo que permite reconocer el lugar. */}
-                        {z.subtitle && (
-                          <p className="mt-0.5 text-[0.625rem] font-normal text-muted-foreground">
-                            {z.subtitle}
-                          </p>
-                        )}
                         {z.historical && (
                           <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[0.5625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                             Histórico
@@ -1037,8 +1072,27 @@ function MainPage() {
                           </p>
                         )}
                       </TableCell>
+                      <TableCell className="hidden max-w-[16rem] lg:table-cell">
+                        {z.address ? (
+                          <span className="line-clamp-2 text-xs text-muted-foreground">
+                            {z.address}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground/60">-</span>
+                        )}
+                      </TableCell>
+                      {/* Fecha arriba y hora debajo: ordenar por fecha con
+                          varias zonas del mismo día no decía cuál fue antes. */}
                       <TableCell className="text-muted-foreground">
-                        {new Date(z.savedAt).toLocaleDateString("es-CL")}
+                        <span className="block text-xs">
+                          {new Date(z.savedAt).toLocaleDateString("es-CL")}
+                        </span>
+                        <span className="mono block text-[0.625rem] text-muted-foreground/70">
+                          {new Date(z.savedAt).toLocaleTimeString("es-CL", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </span>
                       </TableCell>
                       {/* Solo la cifra: la unidad la dice el encabezado de la
                           columna. El respaldo es un guion y no ", ": una zona
@@ -1323,6 +1377,20 @@ function MainPage() {
       {/* Renombrar la zona desde el listado. El nombre de cada versión se
           cambia en la vista de análisis, donde se ve de qué captura se trata;
           acá lo que se compara entre filas es el terreno. */}
+      {/* HDU14: la edición completa de un punto permanente, el mismo
+          formulario que usa la vista de itinerario. Compartirlo y no escribir
+          una segunda copia es lo que impide que las dos pantallas pidan campos
+          distintos para lo mismo. */}
+      <PuntoPermanenteDialog
+        open={editarPunto !== null}
+        onOpenChange={(abierto) => !abierto && setEditarPunto(null)}
+        punto={editarPunto}
+        onGuardado={() => {
+          void refreshZones();
+          void listZones().then(setZoneRecords).catch(() => {});
+        }}
+      />
+
       <RenameDialog
         open={renombrarZona !== null}
         onOpenChange={(abierto) => !abierto && setRenombrarZona(null)}

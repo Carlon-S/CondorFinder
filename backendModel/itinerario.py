@@ -183,7 +183,7 @@ async def set_dia(
     if desconocidos:
         raise HTTPException(
             status_code=400,
-            detail=f"Hay {len(desconocidos)} punto(s) que ya no existen. Recargá la vista.",
+            detail=f"Hay {len(desconocidos)} punto(s) que ya no existen. Recarga la vista.",
         )
 
     await get_db().itinerario_dias.update_one(

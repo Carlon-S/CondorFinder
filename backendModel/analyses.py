@@ -883,7 +883,7 @@ async def delete_zone(
             status_code=409,
             detail=(
                 f"La zona tiene {n} análisis guardado{'s' if n != 1 else ''}. "
-                "Borralos primero si de verdad querés eliminarla."
+                "Elimina esos análisis primero."
             ),
         )
 

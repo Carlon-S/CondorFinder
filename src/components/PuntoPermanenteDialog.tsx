@@ -38,6 +38,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ImageIcon, Loader2, MapPin, Trash2 } from "@/components/icons/Icons";
+import { Obligatorio } from "@/components/Obligatorio";
 import { notify } from "@/lib/notify";
 import {
   detalleDeSugerencia,
@@ -168,7 +169,17 @@ export function PuntoPermanenteDialog({
       const zona = punto ? await updateZone(punto.id, datos) : await createZone(datos);
       onGuardado(zona);
       onOpenChange(false);
-      notify.success(punto ? "Punto actualizado" : "Punto creado", zona.name);
+
+      // Un punto sin coordenada se registra igual, pero no se puede dibujar en
+      // ningún mapa. Vale avisarlo en el momento, no cuando alguien lo busque.
+      if (datos.lat == null) {
+        notify.warning(
+          "Punto guardado, pero sin ubicar",
+          "No se encontró esa dirección en el mapa. El punto queda registrado y se puede usar en el itinerario, pero no se dibuja hasta que tenga una ubicación.",
+        );
+      } else {
+        notify.success(punto ? "Punto actualizado" : "Punto creado", zona.name);
+      }
     } catch (e) {
       // El diálogo queda abierto con lo escrito: cerrarlo perdería el
       // formulario justo cuando hay que reintentar.
@@ -184,14 +195,15 @@ export function PuntoPermanenteDialog({
         <DialogHeader>
           <DialogTitle>{punto ? "Editar punto permanente" : "Crear punto permanente"}</DialogTitle>
           <DialogDescription>
-            Un punto permanente es un lugar que se visita de forma periódica. Si más adelante se le
-            vuela el dron, sus mediciones se le agregan a este mismo punto.
+            Los campos con <span className="text-destructive-strong">*</span> son obligatorios.
           </DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-4">
           <div className="grid gap-1.5">
-            <Label htmlFor="pp-nombre">Nombre</Label>
+            <Label htmlFor="pp-nombre">
+              Nombre <Obligatorio />
+            </Label>
             <Input
               id="pp-nombre"
               value={nombre}

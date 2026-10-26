@@ -227,6 +227,44 @@ async def crear_solicitud(
     return SolicitudOut(id=str(res.inserted_id), nombre=nombre, area=payload.area, base=False)
 
 
+@router.delete("/solicitudes/{solicitud_id}")
+async def eliminar_solicitud(
+    solicitud_id: str,
+    current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
+):
+    """Elimina una solicitud agregada a mano.
+
+    **Las 17 de la planilla no se borran.** Son el vocabulario que la
+    municipalidad entregó por escrito, y un punto diario guardado puede estar
+    referenciándolas: borrarlas dejaría registros apuntando a un programa que
+    ya no existe. Las que alguien agregó después sí, porque son suyas y recién
+    creadas.
+    """
+    doc = await get_db().solicitudes.find_one({"_id": analyses_module._object_id(solicitud_id)})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Solicitud no encontrada")
+    if doc.get("base"):
+        raise HTTPException(
+            status_code=409,
+            detail="Las solicitudes de la planilla municipal no se pueden eliminar.",
+        )
+
+    # Si algún punto del día la está usando, se avisa en vez de dejar el
+    # registro apuntando a un nombre que ya no existe.
+    en_uso = await get_db().puntos_diarios.count_documents({"solicitud": doc["nombre"]})
+    if en_uso:
+        raise HTTPException(
+            status_code=409,
+            detail=f"La usan {en_uso} punto(s) diario(s). Cámbiales la solicitud primero.",
+        )
+
+    await get_db().solicitudes.delete_one({"_id": analyses_module._object_id(solicitud_id)})
+    await auditoria.registrar(
+        current_user.username, "eliminar", "solicitud", solicitud_id, {"nombre": doc["nombre"]}
+    )
+    return {"ok": True}
+
+
 # =============================================================================
 # PUNTOS DEL DÍA
 # =============================================================================
