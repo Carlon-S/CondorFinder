@@ -15,7 +15,7 @@
 // camino seguro y por eso es el que lo recibe.
 // =============================================================================
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -39,8 +39,11 @@ export function ConfirmarBorrado({
   onOpenChange: (abierto: boolean) => void;
   titulo: string;
   /** Qué se va a eliminar, con su nombre. Sin el nombre, quien abre el diálogo
-   *  por error no tiene cómo darse cuenta de cuál apretó. */
-  descripcion: string;
+   *  por error no tiene cómo darse cuenta de cuál apretó.
+   *
+   *  Acepta nodos y no solo texto porque algunas confirmaciones necesitan
+   *  mostrar un desglose de lo que está en juego, no una frase. */
+  descripcion: ReactNode;
   etiquetaConfirmar?: string;
   /** Hace el borrado. Si lanza, el diálogo queda abierto: cerrarlo escondería
    *  el motivo justo cuando hay que leerlo. */

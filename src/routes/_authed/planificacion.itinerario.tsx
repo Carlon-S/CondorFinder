@@ -150,6 +150,10 @@ function ItinerarioPage() {
   const [formAbierto, setFormAbierto] = useState(false);
   const [aBorrar, setABorrar] = useState<ZoneRecord | null>(null);
   const [confirmarCopia, setConfirmarCopia] = useState(false);
+  /** El reparto de la semana anterior, traído al abrir la confirmación.
+   *  `null` mientras carga. Confirmar un reemplazo sin ver con qué se
+   *  reemplaza es pedir un sí a ciegas. */
+  const [previaCopia, setPreviaCopia] = useState<DiaItinerario[] | null>(null);
 
   const cargar = useCallback(async () => {
     try {
@@ -274,12 +278,28 @@ function ItinerarioPage() {
     }
   };
 
+  const lunesAnterior = useCallback(() => {
+    const d = new Date(lunes);
+    d.setDate(d.getDate() - 7);
+    return d;
+  }, [lunes]);
+
+  const pedirCopia = async () => {
+    setPreviaCopia(null);
+    setConfirmarCopia(true);
+    try {
+      setPreviaCopia(await getItinerario(semanaDe(lunesAnterior())));
+    } catch {
+      // Sin la previa el diálogo igual sirve: dice qué se pierde, aunque no
+      // qué llega. Es mejor que bloquear la acción por una consulta caída.
+      setPreviaCopia([]);
+    }
+  };
+
   const copiarAnterior = async () => {
-    const anterior = new Date(lunes);
-    anterior.setDate(anterior.getDate() - 7);
     setCopiando(true);
     try {
-      setGrilla(await copiarSemana(semanaDe(anterior), semana));
+      setGrilla(await copiarSemana(semanaDe(lunesAnterior()), semana));
       notify.success("Semana copiada", "Se trajo el reparto de la semana anterior.");
     } catch (e) {
       notify.error("No se pudo copiar", (e as Error).message);
@@ -395,7 +415,7 @@ function ItinerarioPage() {
             <MesChico
               lunes={lunes}
               onElegirSemana={setLunes}
-              onCopiarAnterior={() => setConfirmarCopia(true)}
+              onCopiarAnterior={pedirCopia}
               copiando={copiando}
               semanaCerrada={semanaCerrada}
               esSemanaActual={semana === semanaDeHoy}
@@ -472,11 +492,7 @@ function ItinerarioPage() {
         abierto={confirmarCopia}
         onOpenChange={setConfirmarCopia}
         titulo="Copiar la semana anterior"
-        descripcion={
-          totalAsignados > 0
-            ? `Esta semana tiene ${totalAsignados} visita${totalAsignados === 1 ? "" : "s"} programada${totalAsignados === 1 ? "" : "s"}. Se reemplazarán por el reparto de la semana anterior y no se pueden recuperar.`
-            : "Se traerá el reparto de la semana anterior a esta semana."
-        }
+        descripcion={<DetalleCopia previa={previaCopia} enEstaSemana={totalAsignados} />}
         etiquetaConfirmar="Copiar"
         onConfirmar={copiarAnterior}
       />
@@ -502,6 +518,66 @@ function ItinerarioPage() {
         }}
       />
     </div>
+  );
+}
+
+/** Qué llega y qué se pierde al copiar.
+ *
+ *  Un "esto no se puede deshacer" sin decir con qué se reemplaza obliga a
+ *  confirmar a ciegas. Acá se ve el reparto que viene, día por día. */
+function DetalleCopia({
+  previa,
+  enEstaSemana,
+}: {
+  previa: DiaItinerario[] | null;
+  enEstaSemana: number;
+}) {
+  if (previa === null) {
+    return (
+      <span className="flex items-center gap-2 text-xs text-muted-foreground">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        Leyendo la semana anterior...
+      </span>
+    );
+  }
+
+  const total = previa.reduce((n, d) => n + d.puntos.length, 0);
+
+  return (
+    <span className="block space-y-3">
+      {enEstaSemana > 0 && (
+        <span className="block text-xs text-warning-strong">
+          Esta semana tiene {enEstaSemana} visita{enEstaSemana === 1 ? "" : "s"} programada
+          {enEstaSemana === 1 ? "" : "s"}. Se reemplazan y no se pueden recuperar.
+        </span>
+      )}
+
+      {total === 0 ? (
+        <span className="block text-xs text-muted-foreground">
+          La semana anterior no tiene ningún punto programado, así que esta quedaría vacía.
+        </span>
+      ) : (
+        <>
+          <span className="block text-xs text-muted-foreground">
+            Llegan {total} visita{total === 1 ? "" : "s"} desde la semana anterior:
+          </span>
+          <span className="block space-y-0.5 rounded-md border border-border bg-muted/40 p-2">
+            {previa.map((d) => (
+              <span key={d.dia} className="flex items-baseline justify-between gap-3 text-xs">
+                <span className="text-muted-foreground">{ROTULO_DIA[d.dia]}</span>
+                <span
+                  className={`mono tabular-nums ${d.puntos.length ? "text-foreground" : "text-muted-foreground/50"}`}
+                >
+                  {d.puntos.length === 0
+                    ? "-"
+                    : `${d.puntos.length} parada${d.puntos.length === 1 ? "" : "s"}`}
+                </span>
+              </span>
+            ))}
+          </span>
+        </>
+      )}
+    </span>
   );
 }
 
