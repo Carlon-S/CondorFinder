@@ -41,6 +41,7 @@ import {
 } from "@/components/ui/select";
 import {
   ArrowLeft,
+  ChevronDown,
   Construction,
   Loader2,
   MapPin,
@@ -48,6 +49,8 @@ import {
   Search,
   Trash2,
 } from "@/components/icons/Icons";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ConfirmarBorrado } from "@/components/ConfirmarBorrado";
 import { Obligatorio } from "@/components/Obligatorio";
 import { notify } from "@/lib/notify";
 import {
@@ -98,6 +101,9 @@ export function PuntoDiarioDialog({
   const [solicitudes, setSolicitudes] = useState<Solicitud[]>([]);
   const [nuevaSolicitud, setNuevaSolicitud] = useState("");
   const [filtroSolicitud, setFiltroSolicitud] = useState("");
+  const [solicitudAbierta, setSolicitudAbierta] = useState(false);
+  /** Solicitud en espera de confirmación de borrado, o null. */
+  const [solicitudABorrar, setSolicitudABorrar] = useState<Solicitud | null>(null);
   const [agregandoSolicitud, setAgregandoSolicitud] = useState(false);
   const [sugerencias, setSugerencias] = useState<SugerenciaDireccion[]>([]);
   const [guardando, setGuardando] = useState(false);
@@ -192,7 +198,11 @@ export function PuntoDiarioDialog({
       let destino = coord;
       if (!destino) {
         const g = await forwardGeocode(`${direccion}, Maipú, Chile`);
-        if (g) destino = { lat: g.lat, lng: g.lng };
+        // `preciso === false` es Google devolviendo el centroide de la comuna
+        // porque no encontró la dirección. Aceptarlo ubicaría el punto en el
+        // medio de Maipú, que es peor que dejarlo sin ubicar: parecería
+        // correcto. `undefined` es Nominatim, que no manda la señal.
+        if (g && g.preciso !== false) destino = { lat: g.lat, lng: g.lng };
       }
 
       const datos = {
@@ -371,67 +381,97 @@ export function PuntoDiarioDialog({
                 <>
                   <div className="grid gap-1.5">
                     <Label>Solicitud</Label>
-                    {/* Una LISTA CON BUSCADOR, no un desplegable.
-                        Son 17 programas de nombre largo, y un `Select` los
-                        apila en una lista que tapa el formulario entero y
-                        obliga a recorrerla con la vista. Con filtro, escribir
-                        "esc" deja una. Además así entra la eliminación, que en
-                        un `SelectItem` no cabe sin romper su propio clic. */}
-                    <div className="rounded-md border border-border">
-                      <div className="relative border-b border-border">
-                        <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                        <Input
-                          value={filtroSolicitud}
-                          onChange={(e) => setFiltroSolicitud(e.target.value)}
-                          placeholder="Buscar solicitud"
-                          className="h-8 border-0 pl-8 text-xs focus-visible:ring-0"
-                        />
-                      </div>
-                      <ul className="max-h-40 overflow-y-auto p-1">
-                        <li>
-                          <button
-                            type="button"
-                            onClick={() => setSolicitud(SIN_VALOR)}
-                            className={`w-full cursor-pointer rounded px-2 py-1.5 text-left text-xs hover:bg-accent ${
-                              solicitud === SIN_VALOR ? "bg-accent font-medium" : ""
-                            }`}
+                    {/* UN DESPLEGABLE, con buscador y scroll adentro.
+                        Estuvo un momento como lista siempre abierta y se
+                        revirtió: ocupaba alto fijo en un formulario que ya es
+                        largo, y el campo dejaba de parecerse a los otros dos
+                        desplegables de la misma pantalla.
+
+                        Popover más lista en vez de `Select` de Radix porque un
+                        `SelectItem` captura el clic de todo lo que tenga
+                        adentro, así que la papelera no se puede apretar sin
+                        elegir la solicitud al mismo tiempo. */}
+                    <Popover open={solicitudAbierta} onOpenChange={setSolicitudAbierta}>
+                      <PopoverTrigger asChild>
+                        <button
+                          type="button"
+                          className="flex h-9 w-full cursor-pointer items-center justify-between rounded-md border border-input bg-transparent px-3 text-sm"
+                        >
+                          <span
+                            className={`truncate ${solicitud === SIN_VALOR ? "text-muted-foreground" : "text-foreground"}`}
                           >
-                            Sin definir
-                          </button>
-                        </li>
-                        {solicitudesFiltradas.map((s) => (
-                          <li key={s.id} className="group flex items-center gap-1">
+                            {solicitud === SIN_VALOR ? "Sin definir" : solicitud}
+                          </span>
+                          <ChevronDown className="ml-2 h-4 w-4 shrink-0 text-muted-foreground" />
+                        </button>
+                      </PopoverTrigger>
+                      <PopoverContent
+                        align="start"
+                        className="w-[var(--radix-popover-trigger-width)] p-0"
+                      >
+                        <div className="relative border-b border-border">
+                          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                          <Input
+                            value={filtroSolicitud}
+                            onChange={(e) => setFiltroSolicitud(e.target.value)}
+                            placeholder="Buscar solicitud"
+                            className="h-9 border-0 pl-8 text-xs focus-visible:ring-0"
+                          />
+                        </div>
+                        <ul className="max-h-56 overflow-y-auto p-1">
+                          <li>
                             <button
                               type="button"
-                              onClick={() => setSolicitud(s.nombre)}
-                              className={`min-w-0 flex-1 cursor-pointer truncate rounded px-2 py-1.5 text-left text-xs hover:bg-accent ${
-                                solicitud === s.nombre ? "bg-accent font-medium" : ""
+                              onClick={() => {
+                                setSolicitud(SIN_VALOR);
+                                setSolicitudAbierta(false);
+                              }}
+                              className={`w-full cursor-pointer rounded px-2 py-1.5 text-left text-xs hover:bg-accent ${
+                                solicitud === SIN_VALOR ? "bg-accent font-medium" : ""
                               }`}
                             >
-                              {s.nombre}
+                              Sin definir
                             </button>
-                            {/* Las 17 de la planilla no se borran: son el
-                                vocabulario que entregó la municipalidad. Solo
-                                las agregadas acá muestran la papelera. */}
-                            {!s.base && (
+                          </li>
+                          {solicitudesFiltradas.map((s) => (
+                            <li key={s.id} className="flex items-center gap-1">
                               <button
                                 type="button"
-                                onClick={() => void borrarSolicitud(s)}
-                                className="shrink-0 cursor-pointer rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:text-destructive-strong focus-visible:opacity-100 group-hover:opacity-100"
-                                aria-label={`Eliminar ${s.nombre}`}
+                                onClick={() => {
+                                  setSolicitud(s.nombre);
+                                  setSolicitudAbierta(false);
+                                }}
+                                className={`min-w-0 flex-1 cursor-pointer truncate rounded px-2 py-1.5 text-left text-xs hover:bg-accent ${
+                                  solicitud === s.nombre ? "bg-accent font-medium" : ""
+                                }`}
                               >
-                                <Trash2 className="h-3 w-3" />
+                                {s.nombre}
                               </button>
-                            )}
-                          </li>
-                        ))}
-                        {solicitudesFiltradas.length === 0 && (
-                          <li className="px-2 py-3 text-center text-[0.625rem] text-muted-foreground">
-                            Ninguna coincide.
-                          </li>
-                        )}
-                      </ul>
-                    </div>
+                              {/* Las 17 de la planilla no se borran: son el
+                                  vocabulario que entregó la municipalidad.
+                                  La papelera va SIEMPRE visible y no al pasar
+                                  el puntero: escondida, nadie sabe que la
+                                  solicitud se puede eliminar. */}
+                              {!s.base && (
+                                <button
+                                  type="button"
+                                  onClick={() => setSolicitudABorrar(s)}
+                                  className="shrink-0 cursor-pointer rounded p-1 text-muted-foreground hover:text-destructive-strong"
+                                  aria-label={`Eliminar ${s.nombre}`}
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </button>
+                              )}
+                            </li>
+                          ))}
+                          {solicitudesFiltradas.length === 0 && (
+                            <li className="px-2 py-3 text-center text-[0.625rem] text-muted-foreground">
+                              Ninguna coincide.
+                            </li>
+                          )}
+                        </ul>
+                      </PopoverContent>
+                    </Popover>
                     {/* El vocabulario es de la municipalidad, no del sistema:
                         se puede ampliar sin un despliegue. */}
                     <div className="mt-1 flex gap-2">
@@ -489,6 +529,22 @@ export function PuntoDiarioDialog({
           </>
         )}
       </DialogContent>
+
+      {/* Va como hermano del contenido y no adentro: anidado, cerrarlo
+          arrastraría el foco del diálogo que lo contiene. */}
+      <ConfirmarBorrado
+        abierto={solicitudABorrar !== null}
+        onOpenChange={(a) => !a && setSolicitudABorrar(null)}
+        titulo="Eliminar tipo de solicitud"
+        descripcion={
+          solicitudABorrar
+            ? `Se eliminará "${solicitudABorrar.nombre}" de la lista. Esto no se puede deshacer.`
+            : ""
+        }
+        onConfirmar={async () => {
+          if (solicitudABorrar) await borrarSolicitud(solicitudABorrar);
+        }}
+      />
     </Dialog>
   );
 }

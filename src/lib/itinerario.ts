@@ -59,9 +59,32 @@ async function mensajeDeError(res: Response, respaldo: string): Promise<string> 
   return respaldo;
 }
 
-/** La grilla completa. Siempre vuelven los seis días, aunque estén vacíos. */
-export async function getItinerario(): Promise<DiaItinerario[]> {
-  const res = await fetch(`${BACKEND_URL}/itinerario`, { credentials: "include" });
+/** La semana ISO de una fecha, como `2026-W44`.
+ *
+ *  Formato ISO 8601 porque es el que entiende el backend y porque se ordena
+ *  alfabéticamente igual que cronológicamente. El jueves es el día que decide
+ *  a qué año pertenece una semana a caballo entre dos, que es la regla de la
+ *  norma y el motivo del desplazamiento de abajo. */
+export function semanaDe(fecha: Date): string {
+  const d = new Date(Date.UTC(fecha.getFullYear(), fecha.getMonth(), fecha.getDate()));
+  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+  const inicioAnio = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const num = Math.ceil(((d.getTime() - inicioAnio.getTime()) / 86400000 + 1) / 7);
+  return `${d.getUTCFullYear()}-W${String(num).padStart(2, "0")}`;
+}
+
+/** El lunes de la semana que contiene esa fecha. */
+export function lunesDe(fecha: Date): Date {
+  const d = new Date(fecha.getFullYear(), fecha.getMonth(), fecha.getDate());
+  const desplazamiento = (d.getDay() + 6) % 7;
+  d.setDate(d.getDate() - desplazamiento);
+  return d;
+}
+
+/** La grilla de una semana. Siempre vuelven los seis días, aunque estén vacíos. */
+export async function getItinerario(semana?: string): Promise<DiaItinerario[]> {
+  const q = semana ? `?semana=${encodeURIComponent(semana)}` : "";
+  const res = await fetch(`${BACKEND_URL}/itinerario${q}`, { credentials: "include" });
   if (!res.ok) throw new Error(await mensajeDeError(res, "No se pudo cargar el itinerario."));
   return res.json();
 }
@@ -71,13 +94,31 @@ export async function getItinerario(): Promise<DiaItinerario[]> {
  *  Se manda la lista final y no un alta o una baja: la vista arrastra y
  *  reordena, así que después de cada gesto lo que tiene es el resultado. Mandar
  *  diferencias obligaría a los dos lados a coincidir en cómo se calculan. */
-export async function setDia(dia: DiaSemana, puntos: string[]): Promise<DiaItinerario> {
-  const res = await fetch(`${BACKEND_URL}/itinerario/${dia}`, {
+export async function setDia(
+  dia: DiaSemana,
+  puntos: string[],
+  semana?: string,
+): Promise<DiaItinerario> {
+  const q = semana ? `?semana=${encodeURIComponent(semana)}` : "";
+  const res = await fetch(`${BACKEND_URL}/itinerario/${dia}${q}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
     body: JSON.stringify({ puntos }),
   });
   if (!res.ok) throw new Error(await mensajeDeError(res, "No se pudo guardar el día."));
+  return res.json();
+}
+
+/** Copia el reparto de una semana a otra, reemplazando el destino.
+ *
+ *  El itinerario municipal se repite semana tras semana, así que sin esto
+ *  planificar la siguiente significa rearmar cuarenta asignaciones a mano. */
+export async function copiarSemana(desde: string, hacia: string): Promise<DiaItinerario[]> {
+  const res = await fetch(
+    `${BACKEND_URL}/itinerario/copiar?desde=${encodeURIComponent(desde)}&hacia=${encodeURIComponent(hacia)}`,
+    { method: "POST", credentials: "include" },
+  );
+  if (!res.ok) throw new Error(await mensajeDeError(res, "No se pudo copiar la semana."));
   return res.json();
 }

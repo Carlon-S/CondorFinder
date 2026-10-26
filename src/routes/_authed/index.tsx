@@ -386,9 +386,6 @@ function MainPage() {
   const [previewOpen, setPreviewOpen] = useState(false);
   /** Zona cuya evolución se está viendo, o null si el diálogo está cerrado. */
   const [evolutionZone, setEvolutionZone] = useState<ZoneRecord | null>(null);
-  /** Zona que se está renombrando, o null. Guarda la zona entera y no su id
-   *  porque el diálogo necesita además el nombre actual para sembrar el campo. */
-  const [renombrarZona, setRenombrarZona] = useState<ZoneRecord | null>(null);
   /** Punto permanente que se esta editando con el formulario completo, o null. */
   const [editarPunto, setEditarPunto] = useState<ZoneRecord | null>(null);
 
@@ -1023,9 +1020,9 @@ function MainPage() {
                                 {zona.name}
                                 <button
                                   type="button"
-                                  onClick={() => setRenombrarZona(zona)}
-                                  title="Renombrar la zona"
-                                  aria-label={`Renombrar la zona ${zona.name}`}
+                                  onClick={() => setEditarPunto(zona)}
+                                  title="Editar la zona"
+                                  aria-label={`Editar la zona ${zona.name}`}
                                   className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                                 >
                                   <Pencil className="h-3 w-3" />
@@ -1388,25 +1385,6 @@ function MainPage() {
         onGuardado={() => {
           void refreshZones();
           void listZones().then(setZoneRecords).catch(() => {});
-        }}
-      />
-
-      <RenameDialog
-        open={renombrarZona !== null}
-        onOpenChange={(abierto) => !abierto && setRenombrarZona(null)}
-        titulo="Renombrar la zona"
-        descripcion="El nombre del terreno, el que se mantiene entre vuelos. No cambia el nombre de ninguna de sus capturas."
-        etiqueta="Nombre de la zona"
-        valorInicial={renombrarZona?.name ?? ""}
-        onGuardar={async (nombre) => {
-          if (!renombrarZona) return;
-          await renameZone(renombrarZona.id, nombre);
-          // Se recarga la lista de zonas y no solo esta: el diálogo de informe y
-          // el de evolución leen de `zoneRecords`, y con una copia parchada a
-          // mano quedaría el nombre nuevo en la tabla y el viejo en los dos
-          // diálogos.
-          await listZones().then(setZoneRecords).catch(() => {});
-          notify.success("Zona renombrada", `Ahora se llama "${nombre}".`);
         }}
       />
 

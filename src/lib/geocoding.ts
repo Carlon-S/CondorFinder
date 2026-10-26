@@ -97,6 +97,14 @@ export interface ForwardGeocodeResult {
    *  el comportamiento que había antes de que esto existiera. */
   address?: string;
   comuna?: string;
+  /** Si la coordenada corresponde de verdad a lo que se escribió.
+   *
+   *  Google responde SIEMPRE: una dirección inventada devuelve el centroide de
+   *  la comuna. Con `preciso: false`, quien llama tiene que tratarlo como "no
+   *  se encontró" en vez de ubicar el punto en el medio de Maipú.
+   *
+   *  Ausente cuando respondió Nominatim, que no entrega esta señal. */
+  preciso?: boolean;
 }
 
 export async function forwardGeocode(query: string): Promise<ForwardGeocodeResult | null> {

@@ -151,12 +151,19 @@ export function PuntoPermanenteDialog({
       let destino = coord;
       if (!destino && direccion.trim()) {
         const g = await forwardGeocode(`${direccion}, Maipú, Chile`);
-        if (g) destino = { lat: g.lat, lng: g.lng };
+        // `preciso === false` es Google devolviendo el centroide de la comuna
+        // porque no encontró la dirección. Aceptarlo ubicaría el punto en el
+        // medio de Maipú, que es peor que dejarlo sin ubicar: parecería
+        // correcto. `undefined` es Nominatim, que no manda la señal.
+        if (g && g.preciso !== false) destino = { lat: g.lat, lng: g.lng };
       }
 
       const datos: ZoneInput = {
         name: n,
-        kind: "permanente",
+        // Al EDITAR se conserva el tipo que la zona ya tenía: este mismo
+        // formulario sirve para completarle la dirección a una zona nacida de
+        // un vuelo, y forzar "permanente" la convertiría en otra cosa.
+        kind: punto ? punto.kind : "permanente",
         address: direccion.trim() || null,
         barrio: barrio.trim() || null,
         tipo: tipo === SIN_VALOR ? null : tipo,
@@ -193,7 +200,13 @@ export function PuntoPermanenteDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{punto ? "Editar punto permanente" : "Crear punto permanente"}</DialogTitle>
+          <DialogTitle>
+            {!punto
+              ? "Crear punto permanente"
+              : punto.kind === "permanente"
+                ? "Editar punto permanente"
+                : "Editar zona"}
+          </DialogTitle>
           <DialogDescription>
             Los campos con <span className="text-destructive-strong">*</span> son obligatorios.
           </DialogDescription>

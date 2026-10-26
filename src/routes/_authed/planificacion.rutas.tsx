@@ -129,6 +129,7 @@ import { RouteTimeline, type DatosDeParada } from "@/components/RouteTimeline";
 import { ZoneZoomDialog } from "@/components/ZoneZoomDialog";
 import { RouteLegend } from "@/components/RouteLegend";
 import { PuntoDiarioDialog } from "@/components/PuntoDiarioDialog";
+import { ConfirmarBorrado } from "@/components/ConfirmarBorrado";
 import {
   eliminarPuntoDiario,
   hoy,
@@ -408,6 +409,8 @@ function RutasPage() {
   const [puntoDiarioAbierto, setPuntoDiarioAbierto] = useState(false);
   const [puntoDiarioEditando, setPuntoDiarioEditando] = useState<PuntoDiario | null>(null);
   const [editarPuntosAbierto, setEditarPuntosAbierto] = useState(false);
+  /** Punto diario en espera de confirmación de borrado, o null. */
+  const [puntoDiarioABorrar, setPuntoDiarioABorrar] = useState<PuntoDiario | null>(null);
 
   const recargarPuntosDiarios = useCallback(() => {
     // Degrada en silencio, igual que el resto de las cargas de esta vista: sin
@@ -2117,6 +2120,26 @@ function RutasPage() {
           precisión de píxel. El visor vive en ZoneZoomDialog porque el mapa de
           recursos abre el mismo: con una copia por vista, el de allá nació como
           una versión pobre de este. */}
+      <ConfirmarBorrado
+        abierto={puntoDiarioABorrar !== null}
+        onOpenChange={(a) => !a && setPuntoDiarioABorrar(null)}
+        titulo="Eliminar punto diario"
+        descripcion={
+          puntoDiarioABorrar
+            ? `Se eliminará el retiro de "${puntoDiarioABorrar.address}". Esto no se puede deshacer.`
+            : ""
+        }
+        onConfirmar={async () => {
+          if (!puntoDiarioABorrar) return;
+          try {
+            await eliminarPuntoDiario(puntoDiarioABorrar.id);
+            recargarPuntosDiarios();
+          } catch (e) {
+            notify.error("No se pudo eliminar", (e as Error).message);
+          }
+        }}
+      />
+
       {/* HDU15: alta (AC1 a AC3) y edición de un punto suelto. */}
       <PuntoDiarioDialog
         open={puntoDiarioAbierto}
@@ -2134,7 +2157,7 @@ function RutasPage() {
               Los retiros de escombros y extras cargados para la jornada.
             </DialogDescription>
           </DialogHeader>
-          <ul className="-mx-1 flex-1 space-y-1.5 overflow-y-auto px-1">
+          <ul className="-mx-1 max-h-[22rem] flex-1 space-y-1.5 overflow-y-auto px-1">
             {puntosDiarios.map((p) => (
               <li
                 key={p.id}
@@ -2169,14 +2192,7 @@ function RutasPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={async () => {
-                    try {
-                      await eliminarPuntoDiario(p.id);
-                      recargarPuntosDiarios();
-                    } catch (e) {
-                      notify.error("No se pudo eliminar", (e as Error).message);
-                    }
-                  }}
+                  onClick={() => setPuntoDiarioABorrar(p)}
                   className="shrink-0 cursor-pointer rounded p-1 text-muted-foreground hover:bg-accent hover:text-destructive-strong"
                   aria-label={`Eliminar ${p.address}`}
                 >

@@ -222,11 +222,26 @@ def coordenada_de(direccion: str) -> dict | None:
         if "lat" not in loc or "lng" not in loc:
             return None
         comps = primero.get("address_components") or []
+        # **Google siempre responde algo, aunque la dirección no exista.**
+        # "Calle Que No Existe 9999" devuelve el centroide de Maipú con
+        # `location_type: APPROXIMATE`, así que sin esta comprobación una
+        # dirección inventada quedaba "ubicada" en el centro de la comuna y el
+        # punto aparecía en un lugar donde no hay nada.
+        #
+        # Las dos señales que lo delatan vienen en la misma respuesta:
+        # `partial_match` dice que no encontró lo pedido sino algo parecido, y
+        # `location_type` dice qué tan fino es el resultado. ROOFTOP es el
+        # edificio, RANGE_INTERPOLATED es la altura interpolada en la cuadra y
+        # GEOMETRIC_CENTER es el centro de la calle: los tres sirven para ir a
+        # retirar. APPROXIMATE es la comuna entera y no sirve para nada.
+        tipo = (primero.get("geometry") or {}).get("location_type")
+        preciso = not primero.get("partial_match") and tipo != "APPROXIMATE"
         return {
             "lat": loc["lat"],
             "lng": loc["lng"],
             "address": _calle_de(comps, "types", "long_name"),
             "comuna": _comuna_de(comps, "types", "long_name"),
+            "preciso": preciso,
         }
     except Exception:
         return None

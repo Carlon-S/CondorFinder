@@ -887,10 +887,24 @@ async def delete_zone(
             ),
         )
 
-    # Escritura directa sobre la colección del itinerario en vez de importar
+    # **Un punto programado no se borra por accidente.** Antes se sacaba del
+    # itinerario con un `$pull` y se eliminaba, así que un clic deshacía un
+    # reparto semanal completo sin decir que lo estaba haciendo. Quien de
+    # verdad quiere eliminarlo, primero lo saca de los días: ese gesto se ve.
+    #
+    # Consulta directa sobre la colección del itinerario en vez de importar
     # `itinerario.py`: ese módulo importa modelos de acá, y el import cruzado
-    # sería circular. Es un `$pull` de un id, no lógica de negocio prestada.
-    await get_db().itinerario_dias.update_many({}, {"$pull": {"puntos": zone_id}})
+    # sería circular.
+    dias = await get_db().itinerario_dias.count_documents({"puntos": zone_id})
+    if dias:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"El punto está programado en {dias} día(s) del itinerario. "
+                "Quítalo de esos días antes de eliminarlo."
+            ),
+        )
+
     await get_db().zones.delete_one({"_id": _object_id(zone_id)})
     await auditoria.registrar(
         current_user.username, "eliminar", "zona", zone_id, {"nombre": doc.get("name")}

@@ -20,6 +20,7 @@ un arreglo ORDENADO de ids de zona, porque el orden dentro de la columna es la
 secuencia del recorrido y no un conjunto.
 """
 
+import re
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -45,13 +46,34 @@ def get_db() -> AsyncDatabase:
 
 
 async def create_index() -> None:
-    await get_db().itinerario_dias.create_index("dia", unique=True)
+    # La clave es la SEMANA más el día: un documento por casilla de la grilla.
+    await get_db().itinerario_dias.create_index([("semana", 1), ("dia", 1)], unique=True)
 
 
 # Los seis días que trae la planilla. Es una tupla de TEXTO y no un enumerado
 # de Pydantic a propósito: el día que la municipalidad trabaje domingo, eso es
 # agregar un elemento acá y no tocar el modelo ni la base.
 DIAS = ("lunes", "martes", "miercoles", "jueves", "viernes", "sabado")
+
+# Formato de la semana: ISO 8601, "2026-W44". Es texto y no un par de enteros
+# porque viaja en la URL, se ordena alfabéticamente igual que cronológicamente,
+# y no hay que decidir si la semana 4 se escribe "4" o "04" en cada lugar.
+_SEMANA_RE = re.compile(r"^\d{4}-W\d{2}$")
+
+
+def semana_actual() -> str:
+    hoy = datetime.now(timezone.utc).date()
+    anio, num, _ = hoy.isocalendar()
+    return f"{anio}-W{num:02d}"
+
+
+def _validar_semana(semana: str | None) -> str:
+    if not semana:
+        return semana_actual()
+    s = semana.strip().upper()
+    if not _SEMANA_RE.match(s):
+        raise HTTPException(status_code=400, detail=f"Semana mal formada: {semana}")
+    return s
 
 
 class DiaIn(BaseModel):
@@ -131,6 +153,7 @@ async def _zonas_por_id(ids: list[str]) -> dict[str, dict]:
 
 @router.get("", response_model=list[DiaOut])
 async def get_itinerario(
+    semana: str | None = None,
     current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
 ):
     """La grilla completa, siempre con los seis días.
@@ -139,7 +162,8 @@ async def get_itinerario(
     columnas pase lo que pase, y hacerle inventar las que faltan sería ponerle a
     él la lista de días que ya está acá.
     """
-    docs = await get_db().itinerario_dias.find().to_list(length=None)
+    sem = _validar_semana(semana)
+    docs = await get_db().itinerario_dias.find({"semana": sem}).to_list(length=None)
     por_dia = {d["dia"]: d.get("puntos", []) for d in docs}
 
     todos = [p for lista in por_dia.values() for p in lista]
@@ -157,14 +181,61 @@ async def get_itinerario(
     return salida
 
 
+@router.post("/copiar", response_model=list[DiaOut])
+async def copiar_semana(
+    desde: str,
+    hacia: str,
+    current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
+):
+    """Copia el reparto de una semana a otra.
+
+    Existe porque el itinerario de la municipalidad **se repite**: los mismos
+    puntos, los mismos días, semana tras semana. Sin esto, planificar la semana
+    que viene significa rearmar cuarenta asignaciones a mano.
+
+    Es un botón y no una copia automática al abrir una semana vacía: copiar
+    solo cuando alguien lo pide deja ver la diferencia entre "esta semana no se
+    planificó" y "esta semana es igual a la anterior", que no son lo mismo
+    cuando hay que rendir cuentas de por qué no se pasó por un punto.
+
+    **Reemplaza la semana de destino.** Mezclar las dos listas dejaría puntos
+    duplicados en el mismo día o un orden que nadie decidió.
+    """
+    origen = _validar_semana(desde)
+    destino = _validar_semana(hacia)
+    if origen == destino:
+        raise HTTPException(status_code=400, detail="El origen y el destino son la misma semana")
+
+    docs = await get_db().itinerario_dias.find({"semana": origen}).to_list(length=None)
+    por_dia = {d["dia"]: d.get("puntos", []) for d in docs}
+
+    ahora = datetime.now(timezone.utc)
+    for dia in DIAS:
+        await get_db().itinerario_dias.update_one(
+            {"semana": destino, "dia": dia},
+            {
+                "$set": {"puntos": por_dia.get(dia, []), "updatedAt": ahora},
+                "$setOnInsert": {"semana": destino, "dia": dia, "owner": current_user.username},
+            },
+            upsert=True,
+        )
+
+    await auditoria.registrar(
+        current_user.username, "copiar", "itinerario", destino, {"desde": origen}
+    )
+    return await get_itinerario(semana=destino, current_user=current_user)
+
+
 @router.put("/{dia}", response_model=DiaOut)
 async def set_dia(
     dia: str,
     payload: DiaIn,
+    semana: str | None = None,
     current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
 ):
-    """Reemplaza la lista ordenada de un día."""
+    """Reemplaza la lista ordenada de un día de una semana."""
     d = _validar_dia(dia)
+    sem = _validar_semana(semana)
 
     # Duplicados dentro del MISMO día se colapsan, conservando la primera
     # aparición. En la planilla una columna nunca repite un punto, y repetirlo
@@ -187,14 +258,14 @@ async def set_dia(
         )
 
     await get_db().itinerario_dias.update_one(
-        {"dia": d},
+        {"semana": sem, "dia": d},
         {
             "$set": {"puntos": limpios, "updatedAt": datetime.now(timezone.utc)},
-            "$setOnInsert": {"dia": d, "owner": current_user.username},
+            "$setOnInsert": {"semana": sem, "dia": d, "owner": current_user.username},
         },
         upsert=True,
     )
     await auditoria.registrar(
-        current_user.username, "editar", "itinerario", d, {"puntos": len(limpios)}
+        current_user.username, "editar", "itinerario", f"{sem}/{d}", {"puntos": len(limpios)}
     )
     return DiaOut(dia=d, puntos=[_como_punto(zonas[p]) for p in limpios])

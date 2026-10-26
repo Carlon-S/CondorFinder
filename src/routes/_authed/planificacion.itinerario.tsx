@@ -5,39 +5,40 @@
 // La grilla de LUNES a SÁBADO donde se reparten los puntos permanentes. Es la
 // hoja `PERMANENTES` de la planilla municipal, que hoy mantienen a mano.
 //
-// ── Por qué parece un calendario y no una tabla ──
-// Un itinerario semanal SE LEE como un calendario: columnas por día, tarjetas
-// dentro, y el gesto de mover una tarjeta de un día a otro. Las referencias de
-// las que sale este diseño (Google Calendar y similares) comparten tres cosas
-// que acá sí aplican: cabecera de día destacada, color por categoría, y un
-// panel lateral con la lista completa y sus filtros.
+// ── El itinerario es POR SEMANA, no una plantilla única ──
+// Empezó siendo un reparto fijo que se repetía solo, como la hoja del Excel.
+// Pero planificar significa poder armar la semana que viene sin pisar la de
+// esta, así que cada semana tiene su propio reparto, identificado en formato
+// ISO (`2026-W44`).
 //
-// Lo que NO se toma es el eje horario. Un punto permanente no tiene hora: lo
-// que tiene es ORDEN de visita dentro del día, y por eso las tarjetas se
-// apilan y se reordenan arrastrando, en vez de ubicarse contra una regla de
-// horas que nadie llenaría.
+// Que se repitan es cierto y por eso existe "Copiar semana anterior", como
+// BOTÓN y no como copia automática: copiar solo cuando alguien lo pide deja
+// distinguir "esta semana no se planificó" de "esta semana es igual a la
+// anterior", que no es lo mismo cuando hay que explicar por qué no se pasó por
+// un punto.
 //
-// El color de la tarjeta sale del TIPO (Microbasural o VIRS), que es la
-// categoría con la que la municipalidad clasifica sus puntos, no de una paleta
-// decorativa.
+// ── Por qué parece un calendario ──
+// Un itinerario semanal SE LEE como un calendario: un mes chico a la izquierda
+// para elegir semana, columnas por día, y el gesto de mover una tarjeta de un
+// día a otro.
+//
+// Lo que NO se toma de las referencias es el eje horario. Un punto permanente
+// no tiene hora: tiene ORDEN de visita, y por eso las tarjetas se apilan y se
+// reordenan arrastrando, en vez de ubicarse contra una regla de horas que
+// nadie llenaría.
+//
+// El color sale del TIPO (Microbasural o VIRS), que es la categoría con la que
+// la municipalidad clasifica sus puntos, no de una paleta decorativa.
 //
 // ── Dos formas de agregar, no una ──
 // El AC1 pide textualmente el botón con signo de suma que abre un listado. Eso
-// está, y además se puede arrastrar desde el panel lateral a una columna y
-// reordenar dentro de ella. El arrastre no reemplaza al botón: la API nativa
-// no funciona con el dedo ni con el teclado, y el `+` es el camino que sirve
-// siempre.
-//
-// ── Sin dependencia de arrastre ──
-// API nativa de HTML5 y no `@dnd-kit`, que son unos 30 kB para mover tarjetas
-// entre listas. Este proyecto ya carga recharts y jsPDF de forma diferida
-// justo para no engordar el paquete inicial.
+// está, y además se puede arrastrar desde la tabla del pie a una columna. El
+// arrastre no reemplaza al botón: la API nativa no funciona con el dedo ni con
+// el teclado, y el `+` es el camino que sirve siempre.
 //
 // ── El orden es dato, no presentación ──
 // La posición dentro de la columna es la secuencia del recorrido, así que cada
-// gesto persiste la lista completa del día. Por eso el endpoint reemplaza en
-// vez de dar de alta: después de arrastrar, lo que la vista tiene es el
-// resultado final, no una diferencia.
+// gesto persiste la lista completa del día.
 // =============================================================================
 
 import { createFileRoute } from "@tanstack/react-router";
@@ -53,14 +54,36 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, MapPin, Pencil, Plus, Search, Trash2, X } from "@/components/icons/Icons";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  ArrowLeft,
+  Layers,
+  Loader2,
+  MapPin,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
+  X,
+} from "@/components/icons/Icons";
 import { notify } from "@/lib/notify";
 import { PuntoPermanenteDialog } from "@/components/PuntoPermanenteDialog";
+import { ConfirmarBorrado } from "@/components/ConfirmarBorrado";
 import { deleteZone, listZones, type ZoneRecord } from "@/lib/analysisStore";
 import {
   DIAS,
   ROTULO_DIA,
+  copiarSemana,
   getItinerario,
+  lunesDe,
+  semanaDe,
   setDia,
   type DiaItinerario,
   type DiaSemana,
@@ -96,19 +119,42 @@ function colorDe(tipo: string | null | undefined): string {
   return (tipo && COLOR_TIPO[tipo]) || COLOR_SIN_TIPO;
 }
 
+const MESES = [
+  "enero",
+  "febrero",
+  "marzo",
+  "abril",
+  "mayo",
+  "junio",
+  "julio",
+  "agosto",
+  "septiembre",
+  "octubre",
+  "noviembre",
+  "diciembre",
+];
+
 function ItinerarioPage() {
+  /** El lunes de la semana que se está mirando. Se guarda la FECHA y no el
+   *  texto de la semana porque de ella salen también los números de cada
+   *  columna y el mes que resalta el calendario chico. */
+  const [lunes, setLunes] = useState(() => lunesDe(new Date()));
+  const semana = useMemo(() => semanaDe(lunes), [lunes]);
+  const semanaDeHoy = useMemo(() => semanaDe(new Date()), []);
+
   const [grilla, setGrilla] = useState<DiaItinerario[] | null>(null);
   const [catalogo, setCatalogo] = useState<ZoneRecord[] | null>(null);
   const [guardando, setGuardando] = useState<DiaSemana | null>(null);
+  const [copiando, setCopiando] = useState(false);
 
   const [diaAbierto, setDiaAbierto] = useState<DiaSemana | null>(null);
   const [editando, setEditando] = useState<ZoneRecord | null>(null);
   const [formAbierto, setFormAbierto] = useState(false);
-  const [borrando, setBorrando] = useState<string | null>(null);
+  const [aBorrar, setABorrar] = useState<ZoneRecord | null>(null);
 
   const cargar = useCallback(async () => {
     try {
-      const [g, zonas] = await Promise.all([getItinerario(), listZones()]);
+      const [g, zonas] = await Promise.all([getItinerario(semana), listZones()]);
       setGrilla(g);
       setCatalogo(zonas.filter((z) => z.kind === "permanente"));
     } catch (e) {
@@ -116,7 +162,7 @@ function ItinerarioPage() {
       setGrilla([]);
       setCatalogo([]);
     }
-  }, []);
+  }, [semana]);
 
   useEffect(() => {
     void cargar();
@@ -127,20 +173,33 @@ function ItinerarioPage() {
     [grilla],
   );
 
-  /** Persiste un día y deja la grilla como quedó.
+  /** Pinta uno o más días en pantalla y después los manda al servidor.
    *
-   *  Optimista: la columna se actualiza en pantalla antes de la respuesta,
-   *  porque arrastrar algo que tarda medio segundo en moverse se siente roto.
-   *  Si el servidor rechaza, se recarga todo y se avisa: revertir solo esa
-   *  columna dejaría el resto de la grilla con lo que el servidor ya no tiene. */
-  const persistir = async (dia: DiaSemana, puntos: PuntoDelDia[]) => {
-    setGrilla((prev) => (prev ?? []).map((d) => (d.dia === dia ? { ...d, puntos } : d)));
-    setGuardando(dia);
+   *  **La pintura va primero y para TODOS los días del gesto.** Antes se
+   *  persistía el destino, se esperaba la respuesta y recién entonces se
+   *  tocaba el origen, así que al mover una tarjeta de lunes a miércoles
+   *  aparecía en los dos hasta que volviera la red. Pintar los dos de una vez
+   *  hace que el movimiento se vea instantáneo, que es lo único que se le pide
+   *  a un arrastre.
+   *
+   *  Si el servidor rechaza, se recarga todo: revertir solo una columna
+   *  dejaría el resto de la grilla con lo que el servidor ya no tiene. */
+  const persistir = async (cambios: Array<{ dia: DiaSemana; puntos: PuntoDelDia[] }>) => {
+    setGrilla((prev) =>
+      (prev ?? []).map((d) => {
+        const cambio = cambios.find((c) => c.dia === d.dia);
+        return cambio ? { ...d, puntos: cambio.puntos } : d;
+      }),
+    );
+    setGuardando(cambios[0]?.dia ?? null);
     try {
-      await setDia(
-        dia,
-        puntos.map((p) => p.id),
-      );
+      for (const c of cambios) {
+        await setDia(
+          c.dia,
+          c.puntos.map((p) => p.id),
+          semana,
+        );
+      }
     } catch (e) {
       notify.error("No se pudo guardar el día", (e as Error).message);
       await cargar();
@@ -149,22 +208,8 @@ function ItinerarioPage() {
     }
   };
 
-  const agregarAlDia = async (dia: DiaSemana, ids: string[]) => {
-    const actuales = puntosDe(dia);
-    const yaEstan = new Set(actuales.map((p) => p.id));
-    const nuevos = (catalogo ?? [])
-      .filter((z) => ids.includes(z.id) && !yaEstan.has(z.id))
-      .map(comoPunto);
-    if (nuevos.length === 0) return;
-    await persistir(dia, [...actuales, ...nuevos]);
-  };
-
-  const quitarDelDia = async (dia: DiaSemana, id: string) => {
-    await persistir(
-      dia,
-      puntosDe(dia).filter((p) => p.id !== id),
-    );
-  };
+  const quitarDelDia = (dia: DiaSemana, id: string) =>
+    persistir([{ dia, puntos: puntosDe(dia).filter((p) => p.id !== id) }]);
 
   /** Suelta un punto en un día. Ver el comentario de `MIME` sobre `carga`.
    *  `destino` es el índice donde cae; `-1` significa al final de la columna. */
@@ -183,19 +228,19 @@ function ItinerarioPage() {
       // el elemento primero lo corre un lugar cuando venía de más arriba.
       const ajustado = destino < 0 ? lista.length : destino > desde ? destino - 1 : destino;
       lista.splice(ajustado, 0, movido);
-      await persistir(dia, lista);
+      await persistir([{ dia, puntos: lista }]);
       return;
     }
 
     const enDestino = puntosDe(dia);
+    const sacarDelOrigen = origen
+      ? [{ dia: origen, puntos: puntosDe(origen).filter((p) => p.id !== id) }]
+      : [];
+
     if (enDestino.some((p) => p.id === id)) {
-      // Ya estaba en el destino, pero el gesto fue MOVER: igual hay que sacarlo
-      // del origen, o queda en los dos lados.
-      if (origen)
-        await persistir(
-          origen,
-          puntosDe(origen).filter((p) => p.id !== id),
-        );
+      // Ya estaba en el destino, pero el gesto fue MOVER: igual hay que
+      // sacarlo del origen, o queda en los dos lados.
+      if (sacarDelOrigen.length) await persistir(sacarDelOrigen);
       return;
     }
 
@@ -209,27 +254,7 @@ function ItinerarioPage() {
 
     const lista = [...enDestino];
     lista.splice(destino < 0 ? lista.length : destino, 0, punto);
-
-    // Las dos listas se calculan ANTES de persistir ninguna: `persistir`
-    // actualiza el estado de forma optimista, y leer `puntosDe` entre las dos
-    // llamadas devolvería lo que React todavía no aplicó.
-    const listaOrigen = origen ? puntosDe(origen).filter((p) => p.id !== id) : null;
-
-    await persistir(dia, lista);
-    if (origen && listaOrigen) await persistir(origen, listaOrigen);
-  };
-
-  const eliminarPunto = async (z: ZoneRecord) => {
-    setBorrando(z.id);
-    try {
-      await deleteZone(z.id);
-      notify.success("Punto eliminado", z.name);
-      await cargar();
-    } catch (e) {
-      notify.error("No se pudo eliminar", (e as Error).message);
-    } finally {
-      setBorrando(null);
-    }
+    await persistir([{ dia, puntos: lista }, ...sacarDelOrigen]);
   };
 
   const abrirEdicion = (id: string) => {
@@ -240,10 +265,23 @@ function ItinerarioPage() {
     }
   };
 
-  /** En cuántos días está cada punto. Es lo que deja contrastar el reparto
-   *  contra la frecuencia declarada: un punto de "2 veces por semana" que
-   *  aparece una sola vez está mal repartido, y hoy eso no se ve en ningún
-   *  lado. */
+  const copiarAnterior = async () => {
+    const anterior = new Date(lunes);
+    anterior.setDate(anterior.getDate() - 7);
+    setCopiando(true);
+    try {
+      setGrilla(await copiarSemana(semanaDe(anterior), semana));
+      notify.success("Semana copiada", "Se trajo el reparto de la semana anterior.");
+    } catch (e) {
+      notify.error("No se pudo copiar", (e as Error).message);
+    } finally {
+      setCopiando(false);
+    }
+  };
+
+  /** En cuántos días de ESTA semana está cada punto. Es lo que deja contrastar
+   *  el reparto contra la frecuencia declarada: un punto de "2 veces por
+   *  semana" que aparece una sola vez está mal repartido. */
   const diasPorPunto = useMemo(() => {
     const m = new Map<string, number>();
     for (const d of grilla ?? []) {
@@ -257,7 +295,14 @@ function ItinerarioPage() {
     [grilla],
   );
 
+  const fechaDe = (i: number) => {
+    const d = new Date(lunes);
+    d.setDate(d.getDate() + i);
+    return d;
+  };
+
   const cargando = grilla === null || catalogo === null;
+  const hoyISO = new Date().toDateString();
 
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
@@ -268,25 +313,14 @@ function ItinerarioPage() {
             Itinerario semanal
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Arrastra un punto del panel a un día, o usa el botón con el signo de suma de cada
+            Arrastra un punto de la tabla a un día, o usa el botón con el signo de suma de cada
             columna.
           </p>
         </div>
-        <div className="flex items-center gap-4">
-          <dl className="flex items-center gap-5">
-            <Resumen etiqueta="Puntos" valor={String(catalogo?.length ?? 0)} />
-            <Resumen etiqueta="Visitas en la semana" valor={String(totalAsignados)} />
-          </dl>
-          <Button
-            onClick={() => {
-              setEditando(null);
-              setFormAbierto(true);
-            }}
-          >
-            <Plus className="mr-2 h-4 w-4" />
-            Crear punto permanente
-          </Button>
-        </div>
+        <dl className="flex items-center gap-5">
+          <Resumen etiqueta="Puntos" valor={String(catalogo?.length ?? 0)} />
+          <Resumen etiqueta="Visitas esta semana" valor={String(totalAsignados)} />
+        </dl>
       </header>
 
       {cargando ? (
@@ -294,40 +328,52 @@ function ItinerarioPage() {
           <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
         </div>
       ) : (
-        // Panel a la izquierda y calendario a la derecha, como en las
-        // referencias. Bajo 80rem el panel pasa arriba a ancho completo: con
-        // menos de eso, seis columnas y un panel no entran sin que las
-        // columnas queden más angostas que una tarjeta.
-        <main className="grid flex-1 gap-5 p-6 xl:grid-cols-[19rem_minmax(0,1fr)]">
-          <PanelPuntos
+        <main className="flex flex-1 flex-col gap-5 p-6">
+          {/* Mes chico a la izquierda y semana a la derecha, como en la
+              referencia. Bajo 80rem el calendario pasa arriba a ancho
+              completo: con menos de eso, seis columnas y un mes no entran sin
+              que las columnas queden más angostas que una tarjeta. */}
+          <div className="grid gap-5 xl:grid-cols-[16rem_minmax(0,1fr)]">
+            <MesChico
+              lunes={lunes}
+              onElegirSemana={setLunes}
+              onCopiarAnterior={copiarAnterior}
+              copiando={copiando}
+              esSemanaActual={semana === semanaDeHoy}
+              onHoy={() => setLunes(lunesDe(new Date()))}
+            />
+
+            <section className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+              {DIAS.map((dia, i) => (
+                <ColumnaDia
+                  key={dia}
+                  dia={dia}
+                  fecha={fechaDe(i)}
+                  esHoy={fechaDe(i).toDateString() === hoyISO}
+                  puntos={puntosDe(dia)}
+                  guardando={guardando === dia}
+                  onAgregar={() => setDiaAbierto(dia)}
+                  onQuitar={(id) => void quitarDelDia(dia, id)}
+                  onSoltar={(carga, destino) => void soltar(dia, carga, destino)}
+                  onEditar={abrirEdicion}
+                />
+              ))}
+            </section>
+          </div>
+
+          <TablaPuntos
             catalogo={catalogo ?? []}
             diasPorPunto={diasPorPunto}
-            borrando={borrando}
             onEditar={(z) => {
               setEditando(z);
               setFormAbierto(true);
             }}
-            onEliminar={eliminarPunto}
+            onEliminar={setABorrar}
             onCrear={() => {
               setEditando(null);
               setFormAbierto(true);
             }}
           />
-
-          <section className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
-            {DIAS.map((dia) => (
-              <ColumnaDia
-                key={dia}
-                dia={dia}
-                puntos={puntosDe(dia)}
-                guardando={guardando === dia}
-                onAgregar={() => setDiaAbierto(dia)}
-                onQuitar={(id) => void quitarDelDia(dia, id)}
-                onSoltar={(carga, destino) => void soltar(dia, carga, destino)}
-                onEditar={abrirEdicion}
-              />
-            ))}
-          </section>
         </main>
       )}
 
@@ -348,7 +394,7 @@ function ItinerarioPage() {
           const agregados = (catalogo ?? [])
             .filter((z) => elegidos.has(z.id) && !actuales.some((p) => p.id === z.id))
             .map(comoPunto);
-          await persistir(diaAbierto, [...conservados, ...agregados]);
+          await persistir([{ dia: diaAbierto, puntos: [...conservados, ...agregados] }]);
           setDiaAbierto(null);
         }}
         onCrear={() => {
@@ -368,6 +414,27 @@ function ItinerarioPage() {
         onOpenChange={setFormAbierto}
         punto={editando}
         onGuardado={() => void cargar()}
+      />
+
+      <ConfirmarBorrado
+        abierto={aBorrar !== null}
+        onOpenChange={(abierto) => !abierto && setABorrar(null)}
+        titulo="Eliminar punto permanente"
+        descripcion={
+          aBorrar ? `Se eliminará "${aBorrar.name}" del sistema. Esto no se puede deshacer.` : ""
+        }
+        onConfirmar={async () => {
+          if (!aBorrar) return;
+          try {
+            await deleteZone(aBorrar.id);
+            notify.success("Punto eliminado", aBorrar.name);
+            await cargar();
+          } catch (e) {
+            // El backend se niega si el punto está programado en algún día, y
+            // ese mensaje dice en cuántos.
+            notify.error("No se pudo eliminar", (e as Error).message);
+          }
+        }}
       />
     </div>
   );
@@ -400,145 +467,142 @@ function comoPunto(z: ZoneRecord): PuntoDelDia {
 }
 
 // =============================================================================
-// PANEL LATERAL: el listado de puntos permanentes
-//
-// Crear un punto no lo agrega a ningún día, así que sin este panel el catálogo
-// solo era visible desde adentro del diálogo del `+`, o sea escondido detrás
-// de un gesto que sirve para otra cosa. Acá se ve, se busca, se edita y se
-// elimina, igual que la tabla de recursos.
-//
-// Y muestra en cuántos días está cada punto, que es lo que deja contrastar el
-// reparto contra la frecuencia declarada.
+// EL MES CHICO: elegir qué semana se planifica
 // =============================================================================
 
-function PanelPuntos({
-  catalogo,
-  diasPorPunto,
-  borrando,
-  onEditar,
-  onEliminar,
-  onCrear,
+function MesChico({
+  lunes,
+  onElegirSemana,
+  onCopiarAnterior,
+  copiando,
+  esSemanaActual,
+  onHoy,
 }: {
-  catalogo: ZoneRecord[];
-  diasPorPunto: Map<string, number>;
-  borrando: string | null;
-  onEditar: (z: ZoneRecord) => void;
-  onEliminar: (z: ZoneRecord) => void;
-  onCrear: () => void;
+  lunes: Date;
+  onElegirSemana: (lunes: Date) => void;
+  onCopiarAnterior: () => void;
+  copiando: boolean;
+  esSemanaActual: boolean;
+  onHoy: () => void;
 }) {
-  const [busqueda, setBusqueda] = useState("");
+  /** El mes que se está mirando, que no tiene por qué ser el de la semana
+   *  elegida: se puede hojear noviembre con la semana de octubre cargada. */
+  const [mes, setMes] = useState(() => new Date(lunes.getFullYear(), lunes.getMonth(), 1));
 
-  const filtrados = useMemo(() => filtrar(catalogo, busqueda), [catalogo, busqueda]);
+  const celdas = useMemo(() => {
+    // La grilla arranca el lunes de la semana del día 1 y termina el domingo
+    // de la del último, así que siempre son semanas completas y cada fila es
+    // una semana que se puede elegir entera.
+    const primero = new Date(mes.getFullYear(), mes.getMonth(), 1);
+    const inicio = lunesDe(primero);
+    const ultimo = new Date(mes.getFullYear(), mes.getMonth() + 1, 0);
+    const dias: Date[] = [];
+    for (
+      let d = new Date(inicio);
+      d <= ultimo || dias.length % 7 !== 0;
+      d.setDate(d.getDate() + 1)
+    ) {
+      dias.push(new Date(d));
+    }
+    return dias;
+  }, [mes]);
+
+  const lunesElegido = lunes.toDateString();
+  const hoy = new Date().toDateString();
+
+  const fin = new Date(lunes);
+  fin.setDate(fin.getDate() + 5);
 
   return (
-    <aside className="panel flex max-h-[calc(100vh-11rem)] min-h-[20rem] flex-col xl:sticky xl:top-6">
-      <header className="border-b border-border px-4 py-3">
-        <h2 className="text-sm font-medium text-foreground">Puntos permanentes</h2>
-        <p className="mt-0.5 text-[0.625rem] text-muted-foreground">
-          Arrastra uno a un día para programarlo.
-        </p>
-      </header>
-
-      {catalogo.length === 0 ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
-          <p className="text-xs text-muted-foreground">Todavía no hay puntos permanentes.</p>
-          <Button size="sm" onClick={onCrear}>
-            <Plus className="mr-1.5 h-3.5 w-3.5" />
-            Crear el primero
-          </Button>
+    <aside className="panel flex flex-col gap-4 p-4 xl:sticky xl:top-6 xl:self-start">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium capitalize text-foreground">
+          {MESES[mes.getMonth()]} {mes.getFullYear()}
+        </span>
+        <div className="flex gap-0.5">
+          <button
+            type="button"
+            onClick={() => setMes(new Date(mes.getFullYear(), mes.getMonth() - 1, 1))}
+            className="cursor-pointer rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            aria-label="Mes anterior"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setMes(new Date(mes.getFullYear(), mes.getMonth() + 1, 1))}
+            className="cursor-pointer rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            aria-label="Mes siguiente"
+          >
+            <ArrowLeft className="h-3.5 w-3.5 rotate-180" />
+          </button>
         </div>
-      ) : (
-        <>
-          <div className="relative px-4 py-3">
-            <Search className="absolute left-6 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={busqueda}
-              onChange={(e) => setBusqueda(e.target.value)}
-              placeholder="Buscar punto"
-              className="h-8 pl-7 text-xs"
-            />
-          </div>
+      </div>
 
-          <ul className="flex-1 space-y-1.5 overflow-y-auto px-4 pb-4">
-            {filtrados.length === 0 && (
-              <li className="py-6 text-center text-[0.6875rem] text-muted-foreground">
-                Ningún punto coincide.
-              </li>
-            )}
-            {filtrados.map((z) => {
-              const veces = diasPorPunto.get(z.id) ?? 0;
-              return (
-                <li
-                  key={z.id}
-                  draggable
-                  onDragStart={(e) => {
-                    // Sin día de origen: viene del panel, no de una columna.
-                    e.dataTransfer.setData(MIME, `|${z.id}`);
-                    e.dataTransfer.effectAllowed = "copy";
-                  }}
-                  className={`group cursor-grab rounded-md border border-border bg-card/60 px-2.5 py-2 transition-colors hover:border-border/80 active:cursor-grabbing ${
-                    borrando === z.id ? "pointer-events-none opacity-40" : ""
-                  }`}
-                >
-                  <div className="flex items-start gap-2">
-                    <span
-                      aria-hidden="true"
-                      className="mt-1 h-2 w-2 shrink-0 rounded-full"
-                      style={{ backgroundColor: colorDe(z.tipo) }}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-xs font-medium text-foreground">{z.name}</p>
-                      <p className="truncate text-[0.625rem] text-muted-foreground">
-                        {z.address || "Sin dirección"}
-                      </p>
-                    </div>
-                    <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
-                      <button
-                        type="button"
-                        onClick={() => onEditar(z)}
-                        className="cursor-pointer rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-                        aria-label={`Editar ${z.name}`}
-                      >
-                        <Pencil className="h-3 w-3" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onEliminar(z)}
-                        className="cursor-pointer rounded p-1 text-muted-foreground hover:bg-accent hover:text-destructive-strong"
-                        aria-label={`Eliminar ${z.name}`}
-                      >
-                        {borrando === z.id ? (
-                          <Loader2 className="h-3 w-3 animate-spin" />
-                        ) : (
-                          <Trash2 className="h-3 w-3" />
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-x-2 text-[0.5625rem] uppercase tracking-wide text-muted-foreground">
-                    {z.frecuencia && <span>{z.frecuencia}</span>}
-                    <span className={veces === 0 ? "text-warning-strong" : "text-primary"}>
-                      {veces === 0 ? "Sin programar" : `${veces} día${veces === 1 ? "" : "s"}`}
-                    </span>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        </>
-      )}
+      <div>
+        <div className="grid grid-cols-7 gap-0.5 text-center">
+          {["L", "M", "M", "J", "V", "S", "D"].map((d, i) => (
+            <span key={i} className="text-[0.5625rem] uppercase text-muted-foreground">
+              {d}
+            </span>
+          ))}
+        </div>
+        {/* Se elige la SEMANA, no el día: cualquier celda carga su semana
+            completa, porque es la unidad que se planifica. */}
+        <div className="mt-1 grid grid-cols-7 gap-0.5">
+          {celdas.map((d) => {
+            const suLunes = lunesDe(d).toDateString();
+            const enLaSemana = suLunes === lunesElegido;
+            const otroMes = d.getMonth() !== mes.getMonth();
+            return (
+              <button
+                key={d.toISOString()}
+                type="button"
+                onClick={() => onElegirSemana(lunesDe(d))}
+                className={`cursor-pointer rounded py-1 text-[0.625rem] tabular-nums transition-colors ${
+                  enLaSemana
+                    ? "bg-primary/15 font-semibold text-primary"
+                    : otroMes
+                      ? "text-muted-foreground/40 hover:bg-accent"
+                      : "text-foreground hover:bg-accent"
+                } ${d.toDateString() === hoy ? "ring-1 ring-cta" : ""}`}
+              >
+                {d.getDate()}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="border-t border-border pt-3">
+        <p className="text-[0.5625rem] uppercase tracking-wide text-muted-foreground">
+          Semana cargada
+        </p>
+        <p className="mono mt-0.5 text-xs text-foreground">
+          {lunes.getDate()} {MESES[lunes.getMonth()].slice(0, 3)} al {fin.getDate()}{" "}
+          {MESES[fin.getMonth()].slice(0, 3)}
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        {!esSemanaActual && (
+          <Button variant="outline" size="sm" onClick={onHoy}>
+            Ir a la semana actual
+          </Button>
+        )}
+        <Button variant="secondary" size="sm" onClick={onCopiarAnterior} disabled={copiando}>
+          {copiando ? (
+            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Layers className="mr-1.5 h-3.5 w-3.5" />
+          )}
+          Copiar semana anterior
+        </Button>
+        <p className="text-[0.5625rem] leading-relaxed text-muted-foreground">
+          Reemplaza el reparto de esta semana con el de la anterior.
+        </p>
+      </div>
     </aside>
-  );
-}
-
-function filtrar(lista: ZoneRecord[], busqueda: string): ZoneRecord[] {
-  const q = busqueda.trim().toLowerCase();
-  if (!q) return lista;
-  return lista.filter(
-    (z) =>
-      z.name.toLowerCase().includes(q) ||
-      (z.address ?? "").toLowerCase().includes(q) ||
-      (z.barrio ?? "").toLowerCase().includes(q),
   );
 }
 
@@ -548,6 +612,8 @@ function filtrar(lista: ZoneRecord[], busqueda: string): ZoneRecord[] {
 
 function ColumnaDia({
   dia,
+  fecha,
+  esHoy,
   puntos,
   guardando,
   onAgregar,
@@ -556,11 +622,13 @@ function ColumnaDia({
   onEditar,
 }: {
   dia: DiaSemana;
+  fecha: Date;
+  esHoy: boolean;
   puntos: PuntoDelDia[];
   guardando: boolean;
   onAgregar: () => void;
   onQuitar: (id: string) => void;
-  /** `carga` es `"<diaDeOrigen>|<id>"`, vacío el origen si vino del panel. */
+  /** `carga` es `"<diaDeOrigen>|<id>"`, vacío el origen si vino de la tabla. */
   onSoltar: (carga: string, destino: number) => void;
   onEditar: (id: string) => void;
 }) {
@@ -574,7 +642,7 @@ function ColumnaDia({
 
   return (
     <section
-      className={`panel flex min-h-[22rem] flex-col transition-colors ${
+      className={`panel flex min-h-[20rem] flex-col transition-colors ${
         encima ? "ring-2 ring-cta" : ""
       }`}
       onDragOver={(e) => {
@@ -587,29 +655,46 @@ function ColumnaDia({
         onSoltar(e.dataTransfer.getData(MIME), -1);
       }}
     >
-      {/* Cabecera de día al estilo de un calendario: el rótulo pesa, y el
-          contador va al lado como dato secundario. */}
-      <header className="flex items-center justify-between border-b border-border bg-muted/40 px-3 py-2.5">
-        <div className="flex items-baseline gap-2">
-          <h2 className="font-rubik text-sm font-semibold text-foreground">{ROTULO_DIA[dia]}</h2>
-          {guardando ? (
-            <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
-          ) : (
-            <span className="mono text-[0.625rem] text-muted-foreground">
-              {puntos.length > 0 ? `${puntos.length} parada${puntos.length === 1 ? "" : "s"}` : ""}
-            </span>
-          )}
+      {/* Cabecera al estilo de un calendario: el día arriba en versales y el
+          número abajo grande, que es como se lee una semana. */}
+      <header
+        className={`border-b px-3 py-2 ${
+          esHoy ? "border-cta bg-cta/10" : "border-border bg-muted/40"
+        }`}
+      >
+        <div className="flex items-start justify-between">
+          <div>
+            <p className="text-[0.5625rem] uppercase tracking-wide text-muted-foreground">
+              {ROTULO_DIA[dia]}
+            </p>
+            <p
+              className={`mono text-xl font-semibold leading-none tabular-nums ${
+                esHoy ? "text-cta-foreground" : "text-foreground"
+              }`}
+            >
+              {fecha.getDate()}
+            </p>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={onAgregar}
+            aria-label={`Agregar puntos al ${ROTULO_DIA[dia]}`}
+            title={`Agregar puntos al ${ROTULO_DIA[dia]}`}
+          >
+            <Plus className="h-4 w-4" />
+          </Button>
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7"
-          onClick={onAgregar}
-          aria-label={`Agregar puntos al ${ROTULO_DIA[dia]}`}
-          title={`Agregar puntos al ${ROTULO_DIA[dia]}`}
-        >
-          <Plus className="h-4 w-4" />
-        </Button>
+        <p className="mt-0.5 flex h-3 items-center text-[0.5625rem] text-muted-foreground">
+          {guardando ? (
+            <Loader2 className="h-2.5 w-2.5 animate-spin" />
+          ) : puntos.length > 0 ? (
+            `${puntos.length} parada${puntos.length === 1 ? "" : "s"}`
+          ) : (
+            ""
+          )}
+        </p>
       </header>
 
       <div className="flex flex-1 flex-col gap-2 p-2.5">
@@ -657,9 +742,6 @@ function TarjetaPunto({
     <article
       draggable
       onDragStart={(e) => {
-        // El día de origen viaja junto al id: la columna que recibe el soltar
-        // no tiene forma de saber de dónde salió, y sin eso mover entre
-        // columnas deja el punto en las dos.
         e.dataTransfer.setData(MIME, `${dia}|${punto.id}`);
         e.dataTransfer.effectAllowed = "move";
       }}
@@ -723,9 +805,6 @@ function TarjetaPunto({
         {punto.barrio && <span>{punto.barrio}</span>}
         {!punto.active && <span className="text-warning-strong">Inactivo</span>}
         {punto.lat == null && (
-          // Sin coordenada el punto no se puede dibujar ni meter en una ruta.
-          // Se dice acá y no al guardar, porque es un estado del punto y no un
-          // error de ese momento.
           <span className="flex items-center gap-0.5 text-warning-strong">
             <MapPin className="h-2.5 w-2.5" />
             Sin ubicar
@@ -737,13 +816,196 @@ function TarjetaPunto({
 }
 
 // =============================================================================
+// LA TABLA DEL PIE: todos los puntos permanentes, con todos sus campos
+//
+// Crear un punto no lo agrega a ningún día, así que sin esta tabla el catálogo
+// solo era visible desde adentro del diálogo del `+`, o sea escondido detrás
+// de un gesto que sirve para otra cosa.
+//
+// Es una TABLA y no una lista, y va a lo ancho, porque un punto se compara con
+// otro por sus campos: dirección, barrio, tipo y frecuencia en columnas
+// alineadas se leen de un vistazo, apilados en tarjetas no. Mismo criterio y
+// mismo tratamiento que la tabla de recursos.
+// =============================================================================
+
+function TablaPuntos({
+  catalogo,
+  diasPorPunto,
+  onEditar,
+  onEliminar,
+  onCrear,
+}: {
+  catalogo: ZoneRecord[];
+  diasPorPunto: Map<string, number>;
+  onEditar: (z: ZoneRecord) => void;
+  onEliminar: (z: ZoneRecord) => void;
+  onCrear: () => void;
+}) {
+  const [busqueda, setBusqueda] = useState("");
+  const filtrados = useMemo(() => filtrar(catalogo, busqueda), [catalogo, busqueda]);
+
+  return (
+    <section className="panel flex flex-col">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+        <div>
+          <h2 className="text-sm font-medium text-foreground">Puntos permanentes</h2>
+          <p className="mt-0.5 text-[0.625rem] text-muted-foreground">
+            Arrastra una fila a un día para programarla.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+              placeholder="Buscar punto"
+              className="h-8 w-56 pl-8 text-xs"
+            />
+          </div>
+          <Button size="sm" onClick={onCrear}>
+            <Plus className="mr-1.5 h-3.5 w-3.5" />
+            Crear punto permanente
+          </Button>
+        </div>
+      </header>
+
+      {catalogo.length === 0 ? (
+        <p className="px-4 py-10 text-center text-xs text-muted-foreground">
+          Todavía no hay puntos permanentes.
+        </p>
+      ) : (
+        <div className="max-h-[22rem] overflow-y-auto px-4 pb-4 pt-2">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/50 hover:bg-muted/50">
+                <TableHead className="w-[2rem]"></TableHead>
+                <TableHead>Nombre</TableHead>
+                <TableHead className="hidden md:table-cell">Dirección</TableHead>
+                <TableHead className="hidden lg:table-cell">Barrio</TableHead>
+                <TableHead className="hidden lg:table-cell">Tipo</TableHead>
+                <TableHead className="hidden xl:table-cell">Frecuencia</TableHead>
+                <TableHead className="text-right">En la semana</TableHead>
+                <TableHead className="w-[4.5rem]"></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filtrados.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={8} className="py-8 text-center text-xs text-muted-foreground">
+                    Ningún punto coincide con la búsqueda.
+                  </TableCell>
+                </TableRow>
+              )}
+              {filtrados.map((z) => {
+                const veces = diasPorPunto.get(z.id) ?? 0;
+                return (
+                  <TableRow
+                    key={z.id}
+                    draggable
+                    onDragStart={(e) => {
+                      // Sin día de origen: viene de la tabla, no de una columna.
+                      e.dataTransfer.setData(MIME, `|${z.id}`);
+                      e.dataTransfer.effectAllowed = "copy";
+                    }}
+                    className="cursor-grab active:cursor-grabbing"
+                  >
+                    <TableCell>
+                      <span
+                        aria-hidden="true"
+                        className="block h-2.5 w-2.5 rounded-full"
+                        style={{ backgroundColor: colorDe(z.tipo) }}
+                      />
+                    </TableCell>
+                    <TableCell className="font-medium">
+                      <span className="text-xs text-foreground">{z.name}</span>
+                      {!z.active && (
+                        <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[0.5625rem] uppercase tracking-wide text-muted-foreground">
+                          Inactivo
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell className="hidden max-w-[18rem] md:table-cell">
+                      {z.address ? (
+                        <span className="line-clamp-1 text-xs text-muted-foreground">
+                          {z.address}
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 text-xs text-warning-strong">
+                          <MapPin className="h-3 w-3" />
+                          Sin ubicar
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell className="hidden text-xs text-muted-foreground lg:table-cell">
+                      {z.barrio || "-"}
+                    </TableCell>
+                    <TableCell className="hidden text-xs text-muted-foreground lg:table-cell">
+                      {z.tipo || "-"}
+                    </TableCell>
+                    <TableCell className="hidden text-xs text-muted-foreground xl:table-cell">
+                      {z.frecuencia || "-"}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {/* Contrastar esto con la frecuencia es la razón de ser
+                          de la columna: un punto de "2 veces por semana" con
+                          una sola visita está mal repartido. */}
+                      <span
+                        className={`mono text-xs tabular-nums ${
+                          veces === 0 ? "text-warning-strong" : "text-foreground"
+                        }`}
+                      >
+                        {veces === 0 ? "Sin programar" : `${veces} día${veces === 1 ? "" : "s"}`}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex justify-end gap-0.5">
+                        <button
+                          type="button"
+                          onClick={() => onEditar(z)}
+                          className="cursor-pointer rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                          aria-label={`Editar ${z.name}`}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onEliminar(z)}
+                          className="cursor-pointer rounded p-1.5 text-muted-foreground hover:bg-destructive/15 hover:text-destructive-strong"
+                          aria-label={`Eliminar ${z.name}`}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function filtrar(lista: ZoneRecord[], busqueda: string): ZoneRecord[] {
+  const q = busqueda.trim().toLowerCase();
+  if (!q) return lista;
+  return lista.filter(
+    (z) =>
+      z.name.toLowerCase().includes(q) ||
+      (z.address ?? "").toLowerCase().includes(q) ||
+      (z.barrio ?? "").toLowerCase().includes(q),
+  );
+}
+
+// =============================================================================
 // EL CATÁLOGO DEL BOTÓN "+" (AC1, AC2, AC3, AC4)
 //
 // Muestra el día COMPLETO, no solo lo que falta: los que ya están vienen
 // marcados y se pueden desmarcar, así que este diálogo también sirve para
-// sacar puntos de un día. Antes aparecían bloqueados con la leyenda "Ya está",
-// y desmarcar uno obligaba a cerrar el diálogo y buscar su equis en la
-// columna.
+// sacar puntos de un día.
 // =============================================================================
 
 function CatalogoDialog({
@@ -791,8 +1053,7 @@ function CatalogoDialog({
   };
 
   // Seleccionar todos actúa sobre lo FILTRADO, no sobre el catálogo entero:
-  // con un buscador arriba, "todos" significa lo que se está viendo. Marcar
-  // 54 puntos invisibles sería lo contrario de lo que alguien espera.
+  // con un buscador arriba, "todos" significa lo que se está viendo.
   const todosFiltradosMarcados = filtrados.length > 0 && filtrados.every((z) => elegidos.has(z.id));
 
   const alternarTodos = () => {
@@ -853,7 +1114,7 @@ function CatalogoDialog({
               {busqueda && ` · ${filtrados.length} coinciden con la búsqueda`}
             </p>
 
-            <ul className="-mx-1 flex-1 space-y-1 overflow-y-auto px-1">
+            <ul className="-mx-1 max-h-[22rem] flex-1 space-y-1 overflow-y-auto px-1">
               {filtrados.length === 0 && (
                 <li className="py-8 text-center text-xs text-muted-foreground">
                   Ningún punto coincide con la búsqueda.
