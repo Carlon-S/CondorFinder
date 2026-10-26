@@ -149,6 +149,7 @@ function ItinerarioPage() {
   const [editando, setEditando] = useState<ZoneRecord | null>(null);
   const [formAbierto, setFormAbierto] = useState(false);
   const [aBorrar, setABorrar] = useState<ZoneRecord | null>(null);
+  const [confirmarCopia, setConfirmarCopia] = useState(false);
 
   const cargar = useCallback(async () => {
     try {
@@ -394,7 +395,7 @@ function ItinerarioPage() {
             <MesChico
               lunes={lunes}
               onElegirSemana={setLunes}
-              onCopiarAnterior={copiarAnterior}
+              onCopiarAnterior={() => setConfirmarCopia(true)}
               copiando={copiando}
               semanaCerrada={semanaCerrada}
               esSemanaActual={semana === semanaDeHoy}
@@ -462,6 +463,22 @@ function ItinerarioPage() {
         onOpenChange={setFormAbierto}
         punto={editando}
         onGuardado={() => void cargar()}
+      />
+
+      {/* Copiar REEMPLAZA el reparto de la semana, así que puede borrar
+          trabajo ya hecho. Se reusa el mismo diálogo de confirmación: el gesto
+          es el mismo, perder algo que no se puede recuperar. */}
+      <ConfirmarBorrado
+        abierto={confirmarCopia}
+        onOpenChange={setConfirmarCopia}
+        titulo="Copiar la semana anterior"
+        descripcion={
+          totalAsignados > 0
+            ? `Esta semana tiene ${totalAsignados} visita${totalAsignados === 1 ? "" : "s"} programada${totalAsignados === 1 ? "" : "s"}. Se reemplazarán por el reparto de la semana anterior y no se pueden recuperar.`
+            : "Se traerá el reparto de la semana anterior a esta semana."
+        }
+        etiquetaConfirmar="Copiar"
+        onConfirmar={copiarAnterior}
       />
 
       <ConfirmarBorrado
