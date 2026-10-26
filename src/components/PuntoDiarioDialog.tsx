@@ -434,7 +434,24 @@ export function PuntoDiarioDialog({
                             className="h-9 border-0 pl-8 text-xs focus-visible:ring-0"
                           />
                         </div>
-                        <ul className="max-h-64 overflow-y-auto p-1">
+                        {/* La rueda se aplica A MANO.
+
+                            Con un dialogo modal abierto, `react-remove-scroll`
+                            escucha `wheel` sobre `document` en CAPTURA y llama
+                            `preventDefault` para todo lo que no sea su propia
+                            area de scroll. El panel del Popover se portaliza,
+                            asi que cae del lado bloqueado: la barra responde al
+                            arrastre pero la rueda no hace nada.
+
+                            `preventDefault` corta el desplazamiento del
+                            navegador, no la propagacion, asi que el evento
+                            igual llega aca y basta con mover `scrollTop`. */}
+                        <ul
+                          className="max-h-64 overflow-y-auto p-1"
+                          onWheel={(e) => {
+                            e.currentTarget.scrollTop += e.deltaY;
+                          }}
+                        >
                           <li>
                             <button
                               type="button"
