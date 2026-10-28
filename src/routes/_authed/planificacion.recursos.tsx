@@ -74,6 +74,7 @@ import {
 import { listAnalyses, listZones, setPendingOpenId } from "@/lib/analysisStore";
 import { projectPolygonToWgs84 } from "@/lib/projection";
 import { ZoneZoomDialog, type ZoneZoomData } from "@/components/ZoneZoomDialog";
+import { FiltroDropdown } from "@/components/FiltroDropdown";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 export const Route = createFileRoute("/_authed/planificacion/recursos")({
@@ -499,28 +500,25 @@ function RecursosPage() {
               />
             </div>
 
-            <div className="flex items-center gap-1 rounded-md bg-background/60 p-0.5">
-              {(
-                [
-                  ["todos", `Todos (${points.length})`],
-                  ["activos", `Activos (${points.length - inactivos})`],
-                  ["inactivos", `Inactivos (${inactivos})`],
-                ] as const
-              ).map(([valor, etiqueta]) => (
-                <button
-                  key={valor}
-                  type="button"
-                  onClick={() => setFiltroEstado(valor)}
-                  className={`cursor-pointer rounded px-2.5 py-1 text-xs font-medium transition-colors ${
-                    filtroEstado === valor
-                      ? "bg-card text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {etiqueta}
-                </button>
-              ))}
-            </div>
+            {/* El mismo filtro que Vista Principal y que la tabla de la flota.
+                Eran tres implementaciones del mismo control, cada una con sus
+                colores de activo, o sea tres lugares donde el siguiente
+                arreglo se aplicaba en dos. */}
+            <FiltroDropdown
+              etiqueta="Estado"
+              valor={filtroEstado}
+              opciones={[
+                { valor: "todos", etiqueta: "Todos", conteo: points.length },
+                { valor: "activos", etiqueta: "Activos", conteo: points.length - inactivos },
+                { valor: "inactivos", etiqueta: "Inactivos", conteo: inactivos },
+              ]}
+              onCambio={(v) => {
+                setFiltroEstado(v);
+                // Acá las páginas se cuentan desde 1, no desde 0 como en Vista
+                // Principal.
+                setPagina(1);
+              }}
+            />
           </div>
 
           {/* Alto FIJO, calculado para cinco filas más el encabezado, haya dos

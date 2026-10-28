@@ -131,7 +131,10 @@ import { RouteLegend } from "@/components/RouteLegend";
 import { PuntoDiarioDialog } from "@/components/PuntoDiarioDialog";
 import { ConfirmarBorrado } from "@/components/ConfirmarBorrado";
 import {
+  copiarPuntosDiarios,
   eliminarPuntoDiario,
+  fechasConPuntos,
+  type DiaConPuntos,
   hoy,
   listarPuntosDiarios,
   type PuntoDiario,
@@ -139,6 +142,7 @@ import {
 import { classColor } from "@/components/zone-colors";
 import { reverseGeocode } from "@/lib/geocoding";
 import { notify } from "@/lib/notify";
+import { cifra, peso, volumen } from "@/lib/formato";
 // Aca se importaban ROUTE_OUTBOUND_COLOR/RETURN_COLOR/RETURN_OPACITY para
 // armar la leyenda de colores del trazo. La leyenda se elimino junto con las
 // burbujas sobre el mapa, y los imports quedaron sin uso: afirmaban que esta
@@ -458,6 +462,96 @@ function RutasPage() {
   useEffect(() => {
     if (editarPuntosAbierto) cargarPuntosDelDia(fechaHistorial);
   }, [editarPuntosAbierto, fechaHistorial, cargarPuntosDelDia]);
+
+  /** Qué días tienen puntos guardados, para poder saltar a uno con datos.
+   *
+   *  **Son atajos y no un calendario**, a propósito: lo que hace falta es ver
+   *  qué jornadas tienen algo, y un calendario dentro de un diálogo arrastra
+   *  los problemas de recorte y de z-index que ya costaron tres intentos con el
+   *  desplegable de solicitudes. Una tira de días con su conteo responde la
+   *  misma pregunta sin capa flotante. El campo de fecha sigue ahí para ir a
+   *  cualquier día. */
+  const [diasConPuntos, setDiasConPuntos] = useState<DiaConPuntos[]>([]);
+
+  /** Los puntos marcados en la lista, para borrarlos de una vez.
+   *
+   *  Se vacía al cambiar de día: con la selección viva entre días, el botón
+   *  "Eliminar seleccionados" borraría puntos de una jornada que ya no está en
+   *  pantalla. */
+  const [seleccionados, setSeleccionados] = useState<Set<string>>(new Set());
+  const [confirmarBorradoMasivo, setConfirmarBorradoMasivo] = useState(false);
+  const [confirmarCopia, setConfirmarCopia] = useState(false);
+
+  useEffect(() => {
+    setSeleccionados(new Set());
+  }, [fechaHistorial]);
+
+  const recargarDiasConPuntos = useCallback(() => {
+    fechasConPuntos().then(setDiasConPuntos).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (editarPuntosAbierto) recargarDiasConPuntos();
+  }, [editarPuntosAbierto, recargarDiasConPuntos]);
+
+  const alternarSeleccion = (id: string) => {
+    setSeleccionados((previo) => {
+      const siguiente = new Set(previo);
+      if (siguiente.has(id)) siguiente.delete(id);
+      else siguiente.add(id);
+      return siguiente;
+    });
+  };
+
+  /** Borra los marcados, en serie y tolerando que uno falle.
+   *
+   *  En serie y no en paralelo por el mismo criterio que el "todos
+   *  disponibles" de la flota: si falla a mitad de camino, lo ya aplicado se
+   *  refleja igual, porque dejar la lista mostrando el estado anterior después
+   *  de ocho borrados reales sería mentir. */
+  const borrarSeleccionados = async () => {
+    let fallidos = 0;
+    for (const id of seleccionados) {
+      try {
+        await eliminarPuntoDiario(id);
+      } catch {
+        fallidos += 1;
+      }
+    }
+    const borrados = seleccionados.size - fallidos;
+    setSeleccionados(new Set());
+    recargarPuntosDiarios();
+    cargarPuntosDelDia(fechaHistorial);
+    recargarDiasConPuntos();
+    if (fallidos === 0) {
+      notify.success(
+        "Puntos eliminados",
+        `Se eliminaron ${borrados} punto${borrados === 1 ? "" : "s"} del día.`,
+      );
+    } else {
+      notify.error(
+        "Algunos no se pudieron eliminar",
+        `Se eliminaron ${borrados} y fallaron ${fallidos}.`,
+      );
+    }
+  };
+
+  const copiarAHoy = async () => {
+    try {
+      const { copiados, omitidos } = await copiarPuntosDiarios(fechaHistorial, hoy());
+      recargarPuntosDiarios();
+      recargarDiasConPuntos();
+      setFechaHistorial(hoy());
+      notify.success(
+        copiados > 0 ? "Puntos copiados a hoy" : "No había nada nuevo que copiar",
+        omitidos > 0
+          ? `${copiados} copiado(s), ${omitidos} ya estaban en hoy con la misma dirección.`
+          : `${copiados} punto(s) agregados al día de hoy.`,
+      );
+    } catch (e) {
+      notify.error("No se pudo copiar", (e as Error).message);
+    }
+  };
 
   const [loadDialogOpen, setLoadDialogOpen] = useState(false);
   const [savedAnalyses, setSavedAnalyses] = useState<SavedAnalysisRecord[]>([]);
@@ -1109,7 +1203,7 @@ function RutasPage() {
       color: ZONE_COLORS[i % ZONE_COLORS.length],
       muted: false,
       previewImageUrl: a.mapUrl,
-      previewSubtitle: `${a.summary.totalVolumeM3} m³, ${a.summary.totalWeightKg} kg, ${a.detections.length} zona${
+      previewSubtitle: `${cifra(a.summary.totalVolumeM3)} m³, ${peso(a.summary.totalWeightKg)} kg, ${a.detections.length} zona${
         a.detections.length === 1 ? "" : "s"
       }`,
       previewImageSize: a.imgSize ?? undefined,
@@ -1128,7 +1222,7 @@ function RutasPage() {
     // número: la pantalla podía decir una cifra y la ruta armarse con otra.
     // Es lo que de verdad limita si una ruta es factible desde acá, así que
     // vale la pena verlo sin abrir la ficha completa del punto.
-    const capacityLabel = `${p.capacity_m3} m³ disponibles`;
+    const capacityLabel = `${cifra(p.capacity_m3)} m³ disponibles`;
     return {
       id: p.id,
       position: [p.lat, p.lng] as [number, number],
@@ -1147,7 +1241,7 @@ function RutasPage() {
       id: `${PREFIJO_DIARIO}${p.id}`,
       position: [p.lat as number, p.lng as number],
       label: `${p.address} (${p.clase === "escombros" ? "escombros" : "extra"}${
-        p.volumenM3 ? `, ${p.volumenM3} m³` : ""
+        p.volumenM3 ? `, ${cifra(p.volumenM3)} m³` : ""
       })`,
       color: COLOR_PUNTO_DIARIO,
       muted: false,
@@ -1378,7 +1472,7 @@ function RutasPage() {
           <CifraCabecera
             icono={<Boxes className="h-4 w-4" />}
             etiqueta="Capacidad"
-            valor={`${totalesCabecera.capacidad} m³`}
+            valor={`${cifra(totalesCabecera.capacidad)} m³`}
           />
           <CifraCabecera
             icono={<Layers className="h-4 w-4" />}
@@ -1388,7 +1482,7 @@ function RutasPage() {
           <CifraCabecera
             icono={<Construction className="h-4 w-4" />}
             etiqueta="Volumen a retirar"
-            valor={`${totalesCabecera.volumen.toFixed(2)} m³`}
+            valor={`${volumen(totalesCabecera.volumen)} m³`}
           />
           {/* La holgura, que es la lectura que las dos cifras de m³ piden y
               que nadie debería tener que hacer de cabeza. Solo aparece cuando
@@ -1403,8 +1497,8 @@ function RutasPage() {
                 }`}
               >
                 {totalesCabecera.volumen <= totalesCabecera.capacidad
-                  ? `Alcanza, sobran ${(totalesCabecera.capacidad - totalesCabecera.volumen).toFixed(1)} m³`
-                  : `Faltan ${(totalesCabecera.volumen - totalesCabecera.capacidad).toFixed(1)} m³ de capacidad`}
+                  ? `Alcanza, sobran ${cifra(totalesCabecera.capacidad - totalesCabecera.volumen)} m³`
+                  : `Faltan ${cifra(totalesCabecera.volumen - totalesCabecera.capacidad)} m³ de capacidad`}
               </span>
             </div>
           )}
@@ -1628,7 +1722,7 @@ function RutasPage() {
                             Volumen total
                           </span>
                           <span className="mono text-xs font-semibold tabular-nums text-foreground">
-                            {volumenCargado.toFixed(2)} m³
+                            {volumen(volumenCargado)} m³
                           </span>
                         </span>
                       )}
@@ -1711,7 +1805,7 @@ function RutasPage() {
                                           className="flex flex-shrink-0 items-center gap-1"
                                           title={tipos
                                             .slice(1)
-                                            .map(([clase, vol]) => `${clase}: ${vol.toFixed(2)} m³`)
+                                            .map(([clase, vol]) => `${clase}: ${cifra(vol)} m³`)
                                             .join("\n")}
                                         >
                                           {tipos.slice(1).map(([clase]) => (
@@ -1841,7 +1935,7 @@ function RutasPage() {
                               mismo número dos veces no informa nada. */}
                           {routeTotals?.volumeM3 != null && (
                             <span className="mono block text-[0.625rem] tabular-nums text-muted-foreground">
-                              {routeTotals.volumeM3.toFixed(2)} m³
+                              {volumen(routeTotals.volumeM3)} m³
                               {Math.abs(routeTotals.volumeM3 - volumenCargado) > 0.005 && (
                                 <span className="text-warning-strong">
                                   {" "}
@@ -2126,7 +2220,7 @@ function RutasPage() {
                       </p>
                       <p className="text-[0.625rem] text-muted-foreground">
                         {new Date(record.savedAt).toLocaleDateString("es-CL")}
-                        {record.summary && `, ${record.summary.totalVolumeM3} m³`}
+                        {record.summary && `, ${cifra(record.summary.totalVolumeM3)} m³`}
                       </p>
                     </div>
                     {alreadyLoaded ? (
@@ -2179,6 +2273,52 @@ function RutasPage() {
         }}
       />
 
+      <ConfirmarBorrado
+        abierto={confirmarBorradoMasivo}
+        onOpenChange={(a) => !a && setConfirmarBorradoMasivo(false)}
+        titulo="Eliminar puntos seleccionados"
+        descripcion={
+          <>
+            Se eliminarán <strong>{seleccionados.size}</strong> punto
+            {seleccionados.size === 1 ? "" : "s"} del día. Esto no se puede deshacer.
+          </>
+        }
+        onConfirmar={borrarSeleccionados}
+      />
+
+      {/* Confirmación del copiado. Dice las dos cifras porque el copiado SUMA
+          a lo que ya hay en hoy y se saltea lo repetido: sin eso, "copiar" no
+          deja claro si reemplaza el día o lo completa.
+
+          Un diálogo normal y NO `ConfirmarBorrado`: ese pinta su botón como
+          destructivo, y acá nada se pierde. Reusarlo habría teñido de rojo una
+          acción que solo agrega. */}
+      <Dialog open={confirmarCopia} onOpenChange={setConfirmarCopia}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Copiar los puntos a hoy</DialogTitle>
+            <DialogDescription>
+              Se agregarán al día de hoy los {puntosDelDia.length} punto
+              {puntosDelDia.length === 1 ? "" : "s"} de esta fecha. Los que ya existan hoy con la
+              misma dirección se omiten, así que se puede repetir sin duplicar nada.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end">
+            <Button variant="outline" onClick={() => setConfirmarCopia(false)}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => {
+                setConfirmarCopia(false);
+                void copiarAHoy();
+              }}
+            >
+              <Layers className="mr-1.5 h-3.5 w-3.5" /> Copiar
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* HDU15: alta (AC1 a AC3) y edición de un punto suelto. */}
       <PuntoDiarioDialog
         open={puntoDiarioAbierto}
@@ -2217,25 +2357,88 @@ function RutasPage() {
               className="h-8 w-40 text-xs"
             />
             {fechaHistorial !== hoy() && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 text-xs"
-                onClick={() => setFechaHistorial(hoy())}
-              >
-                Volver a hoy
-              </Button>
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 text-xs"
+                  onClick={() => setFechaHistorial(hoy())}
+                >
+                  Volver a hoy
+                </Button>
+                {/* Copiar a hoy solo tiene sentido mirando otro día, y solo si
+                    ese día tiene algo. El itinerario ya tenía este gesto por el
+                    mismo motivo: el trabajo se repite, y reescribir a mano los
+                    mismos retiros es donde se pierden. */}
+                {puntosDelDia.length > 0 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs"
+                    onClick={() => setConfirmarCopia(true)}
+                  >
+                    <Layers className="mr-1.5 h-3.5 w-3.5" /> Copiar a hoy
+                  </Button>
+                )}
+              </>
             )}
           </div>
 
+          {/* Los días que tienen puntos, del más reciente al más antiguo.
+              Responde "qué jornadas quedaron guardadas", que con solo el campo
+              de fecha obligaba a probar día por día. */}
+          {diasConPuntos.length > 0 && (
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+              <span className="flex-shrink-0 text-[0.625rem] uppercase tracking-wide text-muted-foreground">
+                Con puntos
+              </span>
+              {diasConPuntos.slice(0, 12).map((d) => (
+                <button
+                  key={d.fecha}
+                  type="button"
+                  onClick={() => setFechaHistorial(d.fecha)}
+                  className={`flex flex-shrink-0 cursor-pointer items-center gap-1 rounded-full border px-2 py-0.5 text-[0.625rem] transition-colors ${
+                    d.fecha === fechaHistorial
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-border text-muted-foreground hover:bg-accent hover:text-foreground"
+                  }`}
+                  title={d.fecha === hoy() ? "Hoy" : undefined}
+                >
+                  <span className="mono tabular-nums">
+                    {new Date(`${d.fecha}T12:00:00`).toLocaleDateString("es-CL", {
+                      day: "2-digit",
+                      month: "2-digit",
+                    })}
+                  </span>
+                  <span
+                    className={
+                      d.fecha === fechaHistorial
+                        ? "opacity-80"
+                        : "mono tabular-nums text-muted-foreground/70"
+                    }
+                  >
+                    {d.cantidad}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+
           {/* Mirar un día pasado es consultar, no planificar: esos puntos ya se
               retiraron y no se dibujan en el mapa ni entran a una ruta.
-              Decirlo acá evita que alguien crea que está armando la jornada con
-              ellos. */}
+
+              Va como ADVERTENCIA y no como nota gris: lo que dice cambia lo que
+              se puede esperar de la pantalla, y en gris apagado se leía como una
+              explicación opcional. El color es `--warning-strong` y no `--cta`,
+              que no tiene contraste suficiente como texto sobre el cuerpo
+              claro. */}
           {fechaHistorial !== hoy() && (
-            <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-[0.6875rem] text-muted-foreground">
-              Estás viendo un día pasado. Estos puntos no se dibujan en el mapa ni entran a una
-              ruta.
+            <p className="flex items-start gap-2 rounded-md border border-warning-strong/40 bg-warning/10 px-3 py-2 text-[0.6875rem] text-warning-strong">
+              <TriangleAlert className="mt-px h-3.5 w-3.5 flex-shrink-0" />
+              <span>
+                Estás viendo un día pasado. Estos puntos no se dibujan en el mapa ni entran a una
+                ruta.
+              </span>
             </p>
           )}
 
@@ -2247,6 +2450,41 @@ function RutasPage() {
               No hay puntos diarios en esta fecha.
             </p>
           )}
+          {/* Barra de selección. Se dibuja solo con puntos en pantalla, y el
+              botón de borrado solo con algo marcado: un botón destructivo
+              siempre visible y casi siempre deshabilitado es ruido al lado de
+              la lista que hay que leer. */}
+          {puntosDelDia.length > 0 && (
+            <div className="flex items-center justify-between gap-3 border-b border-border pb-2">
+              <label className="flex cursor-pointer items-center gap-2 text-[0.6875rem] text-muted-foreground">
+                <Checkbox
+                  checked={
+                    seleccionados.size > 0 && seleccionados.size === puntosDelDia.length
+                  }
+                  onCheckedChange={(marcado) =>
+                    setSeleccionados(
+                      marcado ? new Set(puntosDelDia.map((p) => p.id)) : new Set(),
+                    )
+                  }
+                  aria-label="Seleccionar todos los puntos del día"
+                />
+                {seleccionados.size > 0
+                  ? `${seleccionados.size} de ${puntosDelDia.length} seleccionado${seleccionados.size === 1 ? "" : "s"}`
+                  : "Seleccionar todos"}
+              </label>
+              {seleccionados.size > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 border-destructive-strong/40 text-xs text-destructive-strong hover:bg-destructive/10"
+                  onClick={() => setConfirmarBorradoMasivo(true)}
+                >
+                  <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Eliminar seleccionados
+                </Button>
+              )}
+            </div>
+          )}
+
           {/* La lista se renderiza siempre: con el arreglo vacío no dibuja
               nada, y envolverla en un condicional obligaría a indentar sus
               cuarenta líneas sin que eso cambie lo que se ve. */}
@@ -2254,8 +2492,18 @@ function RutasPage() {
             {puntosDelDia.map((p) => (
               <li
                 key={p.id}
-                className="flex items-center gap-3 rounded-md border border-border px-3 py-2"
+                className={`flex items-center gap-3 rounded-md border px-3 py-2 ${
+                  seleccionados.has(p.id) ? "border-primary bg-primary/5" : "border-border"
+                }`}
               >
+                {/* La fila marcada se distingue por BORDE y fondo, no solo por
+                    la casilla: con 20 puntos, repasar qué quedó marcado leyendo
+                    casillas de 14 px es donde se cuela el borrado equivocado. */}
+                <Checkbox
+                  checked={seleccionados.has(p.id)}
+                  onCheckedChange={() => alternarSeleccion(p.id)}
+                  aria-label={`Seleccionar ${p.address}`}
+                />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-xs font-medium text-foreground">{p.address}</p>
                   <p className="truncate text-[0.625rem] text-muted-foreground">
@@ -2264,7 +2512,7 @@ function RutasPage() {
                       p.tipoResiduo,
                       p.solicitud,
                       p.solicitante,
-                      p.volumenM3 != null ? `${p.volumenM3} m³` : null,
+                      p.volumenM3 != null ? `${cifra(p.volumenM3)} m³` : null,
                       p.lat == null ? "Sin ubicar" : null,
                     ]
                       .filter(Boolean)
@@ -2361,7 +2609,7 @@ function RutasPage() {
                   etiqueta="Capacidad"
                   valor={
                     vehiculoEnFoto.capacityM3 != null
-                      ? `${vehiculoEnFoto.capacityM3} m³`
+                      ? `${cifra(vehiculoEnFoto.capacityM3)} m³`
                       : "Sin declarar"
                   }
                 />
@@ -2375,7 +2623,7 @@ function RutasPage() {
                   etiqueta="Peso máximo"
                   valor={
                     vehiculoEnFoto.capacityTon != null
-                      ? `${(vehiculoEnFoto.capacityTon * 1000).toLocaleString("es-CL")} kg`
+                      ? `${peso(vehiculoEnFoto.capacityTon * 1000)} kg`
                       : "Sin límite"
                   }
                 />
@@ -2487,7 +2735,7 @@ function RutasPage() {
                       <Boxes className="h-4 w-4 flex-shrink-0 text-primary/70" /> Capacidad
                     </span>
                     <p className="mono mt-1.5 text-sm font-semibold tabular-nums">
-                      {zoomPoint.capacity_m3} m³
+                      {cifra(zoomPoint.capacity_m3)} m³
                     </p>
                   </div>
                   <div className="rounded-md bg-background/40 p-2.5">
@@ -2621,7 +2869,7 @@ function RutasPage() {
                       >
                         <span className="truncate">{p.name}</span>
                         <span className="mono flex-shrink-0 tabular-nums text-muted-foreground">
-                          {resumen.suman.length} de {p.resource_count} suman {resumen.capacidad} m³
+                          {resumen.suman.length} de {p.resource_count} suman {cifra(resumen.capacidad)} m³
                         </span>
                       </li>
                     );

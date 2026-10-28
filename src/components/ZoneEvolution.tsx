@@ -31,6 +31,7 @@ import {
   versionLabel,
   versionTime,
 } from "@/lib/volumeReport";
+import { volumen } from "@/lib/formato";
 
 const chartConfig = {
   volumeM3: { label: "Volumen m³", color: "var(--chart-1)" },
@@ -120,11 +121,11 @@ export function ZoneEvolution({
       <div className="grid grid-cols-3 gap-2">
         <ResumenEvolucion
           etiqueta="Volumen actual"
-          valor={`${volumenActual.toLocaleString("es-CL")} m³`}
+          valor={`${volumen(volumenActual)} m³`}
         />
         <ResumenEvolucion
           etiqueta="Cambio total"
-          valor={`${delta >= 0 ? "+" : ""}${delta.toFixed(2)} m³`}
+          valor={`${delta >= 0 ? "+" : ""}${volumen(delta)} m³`}
           // Más volumen de basura es peor, no mejor: el rojo va con el
           // aumento y el verde con la disminución, al revés de lo que haría
           // una métrica de negocio.
@@ -217,7 +218,7 @@ export function ZoneEvolution({
                 </div>
                 <p className="text-[0.63rem] text-muted-foreground">
                   <span className="mono tabular-nums">
-                    {total.volumeM3.toLocaleString("es-CL")} m³
+                    {volumen(total.volumeM3)} m³
                   </span>
                   {" · "}
                   <span className="mono tabular-nums">{version.analyses.length}</span> análisis

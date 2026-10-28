@@ -61,6 +61,7 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { SortableHead } from "@/components/SortableHead";
 import { ResourceFormDialog } from "@/components/ResourceFormDialog";
+import { FiltroDropdown } from "@/components/FiltroDropdown";
 import { notify } from "@/lib/notify";
 import {
   deleteResource,
@@ -600,29 +601,23 @@ function RecursosDelPuntoPage() {
 
             {/* Tres estados y no un interruptor: "ver solo las no disponibles"
                 es una pregunta tan frecuente como "ver las que puedo usar", y
-                con un interruptor una de las dos queda sin atajo. */}
-            <div className="flex items-center gap-1 rounded-md bg-background/60 p-0.5">
-              {(
-                [
-                  ["todos", `Todos (${recursos.length})`],
-                  ["disponibles", `Disponibles (${recursos.length - noDisponibles})`],
-                  ["no", `No disponibles (${noDisponibles})`],
-                ] as const
-              ).map(([valor, etiqueta]) => (
-                <button
-                  key={valor}
-                  type="button"
-                  onClick={() => setFiltroEstado(valor)}
-                  className={`cursor-pointer rounded px-2.5 py-1 text-xs font-medium transition-colors ${
-                    filtroEstado === valor
-                      ? "bg-card text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {etiqueta}
-                </button>
-              ))}
-            </div>
+                con un interruptor una de las dos queda sin atajo.
+                El control es el mismo que en Vista Principal y en la tabla de
+                puntos, por consistencia entre las cuatro tablas. */}
+            <FiltroDropdown
+              etiqueta="Disponibilidad"
+              valor={filtroEstado}
+              opciones={[
+                { valor: "todos", etiqueta: "Todos", conteo: recursos.length },
+                {
+                  valor: "disponibles",
+                  etiqueta: "Disponibles",
+                  conteo: recursos.length - noDisponibles,
+                },
+                { valor: "no", etiqueta: "No disponibles", conteo: noDisponibles },
+              ]}
+              onCambio={setFiltroEstado}
+            />
           </div>
 
           {/* min-h-0 + flex-1: la caja mide siempre lo mismo, tenga 3 filas o

@@ -42,6 +42,7 @@ import type {
   RoutePlanStop,
   RoutePlanVehicle,
 } from "@/lib/routePlan";
+import { cifra, peso, volumen } from "@/lib/formato";
 
 /** Lo que la vista sabe de cada zona y el timeline no: dónde queda, cuánto
  *  hay y de qué es. */
@@ -209,7 +210,7 @@ function Vehiculo({
         </span>
         {vehiculo.capacityM3 != null && (
           <span className="mono flex-shrink-0 text-[0.625rem] tabular-nums text-muted-foreground">
-            {vehiculo.capacityM3} m³
+            {cifra(vehiculo.capacityM3)} m³
           </span>
         )}
         {/* El ícono de imagen avisa que la fila se puede apretar. Sin él, que
@@ -372,7 +373,7 @@ export function RouteTimeline({
                 <span className="mono tabular-nums text-muted-foreground">
                   {datos.weightKg >= 1000
                     ? `${(datos.weightKg / 1000).toFixed(2)} t`
-                    : `${Math.round(datos.weightKg)} kg`}
+                    : `${peso(datos.weightKg)} kg`}
                 </span>
               )}
             </span>
@@ -384,7 +385,7 @@ export function RouteTimeline({
               <span className="mt-1 block text-[0.6875rem] text-warning-strong">
                 Quedan{" "}
                 <span className="mono font-semibold tabular-nums">
-                  {datos.pendingM3.toFixed(2)} m³
+                  {volumen(datos.pendingM3)} m³
                 </span>{" "}
                 en la zona
               </span>
@@ -398,7 +399,7 @@ export function RouteTimeline({
                   <span
                     key={clase}
                     className="flex min-w-0 items-center gap-1.5 rounded-full bg-muted/70 py-0.5 pl-1.5 pr-2"
-                    title={`${clase}: ${vol.toFixed(2)} m³`}
+                    title={`${clase}: ${cifra(vol)} m³`}
                   >
                     <span
                       className="h-2 w-2 flex-shrink-0 rounded-full"

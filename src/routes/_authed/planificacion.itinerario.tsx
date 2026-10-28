@@ -76,6 +76,8 @@ import {
   type ZoneRecord,
 } from "@/lib/analysisStore";
 import { zoneTotals } from "@/lib/volumeReport";
+import { area, peso, volumen } from "@/lib/formato";
+import { FiltroDropdown } from "@/components/FiltroDropdown";
 import {
   DIAS,
   ROTULO_DIA,
@@ -185,7 +187,18 @@ function ItinerarioPage() {
     try {
       const [g, zonas] = await Promise.all([getItinerario(semana), listZones()]);
       setGrilla(g);
-      setCatalogo(zonas.filter((z) => z.kind === "permanente"));
+      // **Todas las zonas, no solo las de `kind: "permanente"`.**
+      //
+      // Filtraba por `kind`, que es el ORIGEN de la zona (nació a mano o como
+      // efecto de guardar un análisis), y eso dejaba fuera del itinerario
+      // justamente a los lugares que ya se volaron. Con la unificación un
+      // punto y una zona con vuelo son el mismo objeto: un lugar de la comuna
+      // que hay que ir a limpiar, y volarle el dron no puede ser el motivo por
+      // el que deja de poder programarse.
+      //
+      // `kind` se conserva en los documentos (no hay nada que migrar) pero ya
+      // no decide quién entra acá.
+      setCatalogo(zonas);
     } catch (e) {
       notify.error("No se pudo cargar el itinerario", (e as Error).message);
       setGrilla([]);
@@ -1127,8 +1140,34 @@ function TablaPuntos({
 }) {
   const [busqueda, setBusqueda] = useState("");
   const [pagina, setPagina] = useState(0);
+  /** Filtro por estado del punto, el mismo control que las otras tres tablas.
+   *
+   *  Los cuatro estados son las preguntas que se hacen al repartir la semana:
+   *  cuáles ya están medidos, a cuáles falta volarles el dron, y cuáles quedaron
+   *  sin programar, que es el que delata un olvido. */
+  const [filtroEstado, setFiltroEstado] = useState<
+    "todos" | "con_vuelo" | "sin_vuelo" | "sin_programar"
+  >("todos");
 
-  const filtrados = useMemo(() => filtrar(catalogo, busqueda), [catalogo, busqueda]);
+  const conteos = useMemo(
+    () => ({
+      todos: catalogo.length,
+      con_vuelo: catalogo.filter((z) => cifras.has(z.id)).length,
+      sin_vuelo: catalogo.filter((z) => !cifras.has(z.id)).length,
+      sin_programar: catalogo.filter((z) => (diasPorPunto.get(z.id) ?? 0) === 0).length,
+    }),
+    [catalogo, cifras, diasPorPunto],
+  );
+
+  const filtrados = useMemo(() => {
+    const porEstado = catalogo.filter((z) => {
+      if (filtroEstado === "con_vuelo") return cifras.has(z.id);
+      if (filtroEstado === "sin_vuelo") return !cifras.has(z.id);
+      if (filtroEstado === "sin_programar") return (diasPorPunto.get(z.id) ?? 0) === 0;
+      return true;
+    });
+    return filtrar(porEstado, busqueda);
+  }, [catalogo, busqueda, filtroEstado, cifras, diasPorPunto]);
   const paginas = Math.max(1, Math.ceil(filtrados.length / POR_PAGINA));
 
   // Filtrar puede dejar la página actual fuera de rango. Se corrige al
@@ -1149,16 +1188,36 @@ function TablaPuntos({
             Arrastra una fila a un día para programarla.
           </p>
         </div>
-        <div className="relative">
-          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={busqueda}
-            onChange={(e) => {
-              setBusqueda(e.target.value);
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={busqueda}
+              onChange={(e) => {
+                setBusqueda(e.target.value);
+                setPagina(0);
+              }}
+              placeholder="Buscar punto"
+              className="h-8 w-56 pl-8 text-xs"
+            />
+          </div>
+          <FiltroDropdown
+            etiqueta="Estado"
+            valor={filtroEstado}
+            opciones={[
+              { valor: "todos", etiqueta: "Todos", conteo: conteos.todos },
+              { valor: "con_vuelo", etiqueta: "Con vuelo", conteo: conteos.con_vuelo },
+              { valor: "sin_vuelo", etiqueta: "Sin vuelo", conteo: conteos.sin_vuelo },
+              {
+                valor: "sin_programar",
+                etiqueta: "Sin programar",
+                conteo: conteos.sin_programar,
+              },
+            ]}
+            onCambio={(v) => {
+              setFiltroEstado(v);
               setPagina(0);
             }}
-            placeholder="Buscar punto"
-            className="h-8 w-56 pl-8 text-xs"
           />
         </div>
       </header>
@@ -1187,13 +1246,15 @@ function TablaPuntos({
                       La unidad va en el encabezado y nunca en las celdas,
                       porque repetida por fila saca las cifras de alineación
                       vertical, que es la razón por la que esto es una tabla. */}
-                  <TableHead className="hidden w-[6rem] text-right 2xl:table-cell">
+                  {/* `whitespace-nowrap` y 7rem: "Volumen (m³)" se partía en
+                      dos líneas y descuadraba el alto de todo el encabezado. */}
+                  <TableHead className="hidden w-[7rem] whitespace-nowrap text-right 2xl:table-cell">
                     Volumen (m³)
                   </TableHead>
-                  <TableHead className="hidden w-[6rem] text-right 2xl:table-cell">
+                  <TableHead className="hidden w-[6rem] whitespace-nowrap text-right 2xl:table-cell">
                     Peso (kg)
                   </TableHead>
-                  <TableHead className="hidden w-[6rem] text-right 2xl:table-cell">
+                  <TableHead className="hidden w-[6rem] whitespace-nowrap text-right 2xl:table-cell">
                     Área (m²)
                   </TableHead>
                   {/* "Medición" y no "Fecha": en una vista de calendario, una
@@ -1281,7 +1342,7 @@ function TablaPuntos({
                       <TableCell className="hidden text-right 2xl:table-cell">
                         <span className="mono text-xs tabular-nums text-foreground">
                           {cifra ? (
-                            cifra.volumeM3
+                            volumen(cifra.volumeM3)
                           ) : (
                             <span className="text-muted-foreground/60">-</span>
                           )}
@@ -1290,7 +1351,7 @@ function TablaPuntos({
                       <TableCell className="hidden text-right 2xl:table-cell">
                         <span className="mono text-xs tabular-nums text-foreground">
                           {cifra ? (
-                            cifra.weightKg
+                            peso(cifra.weightKg)
                           ) : (
                             <span className="text-muted-foreground/60">-</span>
                           )}
@@ -1299,7 +1360,7 @@ function TablaPuntos({
                       <TableCell className="hidden text-right 2xl:table-cell">
                         <span className="mono text-xs tabular-nums text-foreground">
                           {cifra ? (
-                            cifra.areaM2
+                            area(cifra.areaM2)
                           ) : (
                             <span className="text-muted-foreground/60">-</span>
                           )}

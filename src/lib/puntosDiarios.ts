@@ -99,6 +99,45 @@ export async function eliminarPuntoDiario(id: string): Promise<void> {
   if (!res.ok) throw new Error(await mensajeDeError(res, "No se pudo eliminar el punto."));
 }
 
+/** Un día que tiene puntos guardados, con cuántos. */
+export interface DiaConPuntos {
+  fecha: string;
+  cantidad: number;
+}
+
+/**
+ * Qué días tienen puntos guardados.
+ *
+ * Es lo que permite marcarlos en el calendario: sin esto, encontrar una
+ * jornada con datos era probar fecha por fecha.
+ */
+export async function fechasConPuntos(): Promise<DiaConPuntos[]> {
+  const res = await fetch(`${BACKEND_URL}/puntos-diarios/fechas`, { credentials: "include" });
+  if (!res.ok) throw new Error(await mensajeDeError(res, "No se pudieron cargar las fechas."));
+  return res.json();
+}
+
+/**
+ * Copia los puntos de un día a otro, por omisión a hoy.
+ *
+ * Suma a lo que ya hay en el destino y se saltea los que ya existen con la
+ * misma dirección y clase, así que apretarlo dos veces no duplica nada.
+ * Devuelve cuántos copió y cuántos omitió por estar ya.
+ */
+export async function copiarPuntosDiarios(
+  desde: string,
+  hacia?: string,
+): Promise<{ copiados: number; omitidos: number }> {
+  const q = new URLSearchParams({ desde });
+  if (hacia) q.set("hacia", hacia);
+  const res = await fetch(`${BACKEND_URL}/puntos-diarios/copiar?${q}`, {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!res.ok) throw new Error(await mensajeDeError(res, "No se pudieron copiar los puntos."));
+  return res.json();
+}
+
 /** Los 17 programas de la hoja SOLICITUDES más los que haya agregado el
  *  usuario. Es vocabulario de la municipalidad, no una constante del sistema,
  *  por eso vive en la base y se puede ampliar. */

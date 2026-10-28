@@ -26,6 +26,7 @@ import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 import { Loader2, Trash2 } from "@/components/icons/Icons";
 import type { ZoneVersion } from "@/lib/volumeReport";
 import { versionLabel, zoneTotals } from "@/lib/volumeReport";
+import { volumen } from "@/lib/formato";
 
 // Ver versionLabel() en volumeReport.ts: la etiqueta de una captura se arma en
 // un solo lugar, compartida con el grafico de evolucion y el informe.
@@ -179,7 +180,7 @@ export function VersionBar({
 
                       <div className="flex items-center justify-between gap-1">
                         <span className="mono text-[0.63rem] tabular-nums text-muted-foreground">
-                          {total.volumeM3.toLocaleString("es-CL")} m³
+                          {volumen(total.volumeM3)} m³
                         </span>
                         {/* Ninguna foto traía fecha y se usó la de carga. Sin
                             decirlo, una fecha inventada se lee como real. */}

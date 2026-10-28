@@ -4,7 +4,6 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   LayoutDashboard,
-  UploadCloud,
   Truck,
   Route,
   ListChecks,
@@ -32,9 +31,23 @@ import { logout } from "@/lib/auth";
 // pantalla, la configuración se quedaba permanentemente con un tercio del
 // espacio de la operación. El grupo conserva la relación entre ambas sin
 // obligarlas a compartir pantalla.
+/**
+ * El menú.
+ *
+ * **`/carga` ya no está acá, y la ruta sigue existiendo.** Es el mismo criterio
+ * por el que `/analysis` nunca estuvo: las dos vistas hablan siempre de UN
+ * lugar concreto, y la forma de llegar es elegir ese lugar, no entrar por el
+ * menú. Desde que un vuelo se cuelga de un punto, abrir "Carga de imágenes" a
+ * secas significa subir un set de fotos sin saber a qué lugar va a pertenecer,
+ * que es exactamente el huérfano que la unificación vino a eliminar.
+ *
+ * Los dos caminos de entrada quedan en Vista Principal, donde el lugar ya está
+ * elegido: "Generar mapa" en la fila de un punto, y el paso opcional del alta
+ * de un punto nuevo. Una generación a medio terminar sigue teniendo su "Ir a
+ * Carga" en la fila correspondiente, así que no queda nada inalcanzable.
+ */
 const NAV_ITEMS = [
   { to: "/", label: "Zonas Monitoreadas", icon: LayoutDashboard },
-  { to: "/carga", label: "Carga De Imágenes", icon: UploadCloud },
   {
     label: "Planificación",
     icon: Route,

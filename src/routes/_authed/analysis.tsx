@@ -97,6 +97,7 @@ import {
   deleteTaskImages,
   deleteTask,
 } from "@/lib/unify";
+import { area, peso, volumen } from "@/lib/formato";
 
 // Acá vivía WEIGHT_LIMIT_KG = 5000, que descartaba toda detección de más de 5
 // toneladas antes de mostrarla. Se eliminó, y conviene saber por qué para no
@@ -1488,17 +1489,17 @@ function AnalysisPage() {
                   <div className="grid grid-cols-2 gap-2">
                     <Metric
                       label="Volumen total"
-                      value={status === "done" ? `${activeSummary.totalVolumeM3} m³` : "-"}
+                      value={status === "done" ? `${volumen(activeSummary.totalVolumeM3)} m³` : "-"}
                       icon={<Boxes className="h-4 w-4" />}
                     />
                     <Metric
                       label="Peso total"
-                      value={status === "done" ? `${activeSummary.totalWeightKg} kg` : "-"}
+                      value={status === "done" ? `${peso(activeSummary.totalWeightKg)} kg` : "-"}
                       icon={<Scale className="h-4 w-4" />}
                     />
                     <Metric
                       label="Área total"
-                      value={status === "done" ? `${activeSummary.totalAreaM2} m²` : "-"}
+                      value={status === "done" ? `${area(activeSummary.totalAreaM2)} m²` : "-"}
                       icon={<Crosshair className="h-4 w-4" />}
                     />
                     <Metric
@@ -1824,7 +1825,7 @@ function AnalysisPage() {
                         </span>
                         <span className="mono flex-shrink-0 text-xs font-semibold tabular-nums text-foreground">
                           {status === "done" && hasData
-                            ? `${(d.volume_m3 ?? 0).toFixed(2)} m³`
+                            ? `${volumen(d.volume_m3 ?? 0)} m³`
                             : "-"}
                         </span>
                       </div>
@@ -1835,7 +1836,7 @@ function AnalysisPage() {
                         {status === "done" && hasData ? (
                           <>
                             <span className="mono min-w-0 flex-1 truncate tabular-nums">
-                              {(d.area_m2 ?? 0).toFixed(2)} m² · {Math.round(d.weight_kg ?? 0)} kg
+                              {area(d.area_m2 ?? 0)} m² · {peso(d.weight_kg ?? 0)} kg
                             </span>
                             {/* Que la cifra de una zona fusionada sea el
                                 promedio (o el máximo) del grupo y no la suma es
@@ -1874,12 +1875,12 @@ function AnalysisPage() {
                                   {b.class}
                                 </span>
                                 <span className="mono flex-shrink-0 tabular-nums text-foreground">
-                                  {b.volume_m3 != null ? `${b.volume_m3.toFixed(2)} m³` : "-"}
+                                  {b.volume_m3 != null ? `${volumen(b.volume_m3)} m³` : "-"}
                                 </span>
                               </div>
                               <p className="mono pl-3.5 tabular-nums text-muted-foreground">
-                                {b.area_m2 != null ? `${b.area_m2.toFixed(2)} m²` : "-"} ·{" "}
-                                {b.weight_kg != null ? `${Math.round(b.weight_kg)} kg` : "-"}
+                                {b.area_m2 != null ? `${area(b.area_m2)} m²` : "-"} ·{" "}
+                                {b.weight_kg != null ? `${peso(b.weight_kg)} kg` : "-"}
                               </p>
                             </li>
                           ))}
@@ -1901,11 +1902,11 @@ function AnalysisPage() {
                       Total ({enabledIds.size} de {displayDetections.length} activas)
                     </span>
                     <span className="mono flex-shrink-0 text-xs font-semibold tabular-nums text-foreground">
-                      {activeSummary.totalVolumeM3} m³
+                      {volumen(activeSummary.totalVolumeM3)} m³
                     </span>
                   </div>
                   <p className="mono mt-0.5 text-[0.6875rem] tabular-nums text-muted-foreground">
-                    {activeSummary.totalAreaM2} m² · {activeSummary.totalWeightKg} kg
+                    {area(activeSummary.totalAreaM2)} m² · {peso(activeSummary.totalWeightKg)} kg
                   </p>
                 </div>
               )}
@@ -2198,11 +2199,11 @@ function AnalysisPage() {
                 </p>
                 {duplicateExisting.summary && (
                   <div className="mono flex gap-2 text-[0.625rem] tabular-nums text-muted-foreground">
-                    <span>{duplicateExisting.summary.totalVolumeM3} m³</span>
+                    <span>{volumen(duplicateExisting.summary.totalVolumeM3)} m³</span>
                     <span>·</span>
-                    <span>{duplicateExisting.summary.totalWeightKg} kg</span>
+                    <span>{peso(duplicateExisting.summary.totalWeightKg)} kg</span>
                     <span>·</span>
-                    <span>{duplicateExisting.summary.totalAreaM2} m²</span>
+                    <span>{area(duplicateExisting.summary.totalAreaM2)} m²</span>
                   </div>
                 )}
               </div>

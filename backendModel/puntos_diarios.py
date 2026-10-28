@@ -287,6 +287,114 @@ async def listar(
     return [_salida(d) for d in docs]
 
 
+def _hoy_utc() -> date:
+    """Hoy en UTC, el mismo respaldo que usa `listar()` sin parámetro.
+
+    **El frontend manda siempre la fecha en hora local y no depende de esto.**
+    En Chile son tres horas de diferencia, así que desde las 21:00 este "hoy"
+    ya es el día siguiente: solo sirve como tope grueso para rechazar una fecha
+    futura, nunca para decidir bajo qué día se guarda algo.
+    """
+    return datetime.now(timezone.utc).date()
+
+
+@router.get("/fechas")
+async def fechas_con_puntos(
+    current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
+):
+    """Qué días tienen puntos guardados, y cuántos.
+
+    **Existe porque el historial era invisible.** El selector de día aceptaba
+    cualquier fecha, así que para encontrar una jornada con datos había que
+    probar día por día; el calendario marca los que tienen algo y el problema
+    desaparece.
+
+    Una agregación y no una consulta por día: el rango que el calendario muestra
+    cambia al navegar de mes, y pedir 31 conteos por mes serían 31 viajes a
+    Mongo cada vez que alguien aprieta la flecha. Son pocos documentos y un solo
+    `$group`, así que se devuelven todas las fechas de una vez y el calendario
+    marca las que le toquen.
+
+    La ruta va antes de `/{punto_id}` para que ese parámetro no la capture.
+    """
+    cursor = await get_db().puntos_diarios.aggregate([
+        {"$group": {"_id": "$fecha", "n": {"$sum": 1}}},
+        {"$sort": {"_id": -1}},
+    ])
+    return [
+        {"fecha": d["_id"].date().isoformat(), "cantidad": d["n"]}
+        async for d in cursor
+        if d.get("_id") is not None
+    ]
+
+
+@router.post("/copiar")
+async def copiar(
+    desde: date,
+    hacia: date | None = None,
+    current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
+):
+    """Copia los puntos de un día a otro, por omisión a hoy.
+
+    **Suma, no reemplaza.** El copiado del itinerario sí reemplaza el día
+    destino, y acá eso sería destructivo de otra forma: los puntos del día en
+    curso los acaba de escribir alguien, y perderlos por traer los de ayer no
+    es lo que nadie pidió. Acá se agregan a lo que ya hay.
+
+    **Y es idempotente**, que es lo que lo vuelve seguro: se saltan los puntos
+    que ya existen en el destino con la misma dirección y la misma clase. Sin
+    eso, apretar el botón dos veces dejaba cada retiro duplicado, y el segundo
+    no se distingue del primero ni se puede deshacer en una sola acción. La
+    identidad es dirección + clase porque es lo que la planilla municipal usa
+    para nombrar un retiro; dos retiros distintos en la misma dirección el
+    mismo día son el caso raro, y para eso está el alta a mano.
+
+    Una fecha futura no se acepta: un punto diario pertenece al día en que se
+    pidió el retiro, y programar uno hacia adelante es el itinerario, no esto.
+    """
+    destino = hacia or _hoy_utc()
+    if destino > _hoy_utc():
+        raise HTTPException(
+            status_code=400,
+            detail="No se pueden copiar puntos a una fecha futura.",
+        )
+    if desde == destino:
+        raise HTTPException(status_code=400, detail="El origen y el destino son el mismo día.")
+
+    origen_dt = datetime(desde.year, desde.month, desde.day)
+    destino_dt = datetime(destino.year, destino.month, destino.day)
+
+    origen = await get_db().puntos_diarios.find({"fecha": origen_dt}).to_list(length=None)
+    if not origen:
+        raise HTTPException(status_code=404, detail="Ese día no tiene puntos para copiar.")
+
+    ya_estan = {
+        (d.get("address") or "", d.get("clase"))
+        for d in await get_db().puntos_diarios.find({"fecha": destino_dt}).to_list(length=None)
+    }
+
+    nuevos = []
+    for d in origen:
+        if (d.get("address") or "", d.get("clase")) in ya_estan:
+            continue
+        copia = {k: v for k, v in d.items() if k != "_id"}
+        copia["fecha"] = destino_dt
+        copia["owner"] = current_user.username
+        copia["createdAt"] = datetime.now(timezone.utc)
+        nuevos.append(copia)
+
+    if nuevos:
+        await get_db().puntos_diarios.insert_many(nuevos)
+    await auditoria.registrar(
+        current_user.username,
+        "copiar",
+        "puntos-diarios",
+        destino.isoformat(),
+        {"desde": desde.isoformat(), "copiados": len(nuevos), "omitidos": len(origen) - len(nuevos)},
+    )
+    return {"copiados": len(nuevos), "omitidos": len(origen) - len(nuevos)}
+
+
 @router.post("", response_model=PuntoDiarioOut)
 async def crear(
     payload: PuntoDiarioIn,

@@ -38,6 +38,7 @@ import {
   TriangleAlert,
 } from "@/components/icons/Icons";
 import { classColor } from "@/components/zone-colors";
+import { area, peso, volumen } from "@/lib/formato";
 
 /** Una detección ya lista para dibujar: su recuadro en píxeles de la imagen y
  *  sus tres magnitudes. */
@@ -201,7 +202,7 @@ export function ZoneZoomDialog({
                           strokeLinejoin="round"
                         >
                           {d.wasteClass}
-                          {d.volumeM3 ? ` — ${d.volumeM3} m³` : ""}
+                          {d.volumeM3 ? ` — ${volumen(d.volumeM3)} m³` : ""}
                         </text>
                       </g>
                     );
@@ -238,17 +239,17 @@ export function ZoneZoomDialog({
                 <Total
                   icono={<Boxes className="h-4 w-4 flex-shrink-0 text-primary/70" />}
                   etiqueta="Volumen total"
-                  valor={`${zona.summary.totalVolumeM3} m³`}
+                  valor={`${volumen(zona.summary.totalVolumeM3)} m³`}
                 />
                 <Total
                   icono={<Scale className="h-4 w-4 flex-shrink-0 text-primary/70" />}
                   etiqueta="Peso total"
-                  valor={`${zona.summary.totalWeightKg} kg`}
+                  valor={`${peso(zona.summary.totalWeightKg)} kg`}
                 />
                 <Total
                   icono={<Crosshair className="h-4 w-4 flex-shrink-0 text-primary/70" />}
                   etiqueta="Área total"
-                  valor={`${zona.summary.totalAreaM2} m²`}
+                  valor={`${area(zona.summary.totalAreaM2)} m²`}
                 />
               </div>
 
@@ -272,11 +273,11 @@ export function ZoneZoomDialog({
                         <span className="min-w-0 flex-1 truncate font-medium">{d.wasteClass}</span>
                       </div>
                       <p className="mt-1 pl-4.5 text-muted-foreground">
-                        {d.volumeM3 != null ? `${d.volumeM3} m³` : "—"}
+                        {d.volumeM3 != null ? `${volumen(d.volumeM3)} m³` : "—"}
                         {" · "}
-                        {d.weightKg != null ? `${d.weightKg} kg` : "—"}
+                        {d.weightKg != null ? `${peso(d.weightKg)} kg` : "—"}
                         {" · "}
-                        {d.areaM2 != null ? `${d.areaM2} m²` : "—"}
+                        {d.areaM2 != null ? `${area(d.areaM2)} m²` : "—"}
                       </p>
                     </li>
                   ))}
