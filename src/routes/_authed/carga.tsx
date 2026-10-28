@@ -33,6 +33,7 @@ import {
   ImageIcon,
   Lightning,
   Crosshair,
+  MapPin,
 } from "@/components/icons/Icons";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -48,8 +49,10 @@ import {
   saveNoWasteDetected, loadNoWasteDetected, clearNoWasteDetected,
   saveDetectionJsonUrl, loadDetectionJsonUrl, clearDetectionJsonUrl,
   saveCancelRequested, loadCancelRequested,
+  loadZonaDestino,
   clearImageState, type PersistedFileItem,
 } from "@/lib/imageState";
+import { listZones } from "@/lib/analysisStore";
 
 import { useNavigate } from "@tanstack/react-router";
 
@@ -230,6 +233,27 @@ function Page() {
 
   const itemNamesRef = useRef<Set<string>>(new Set());
   const [skippedCount, setSkippedCount] = useState(0);
+
+  /** Nombre del punto al que se DECLARÓ que pertenece esta carga, o null.
+   *
+   *  La zona se elige antes de entrar acá (desde la fila del punto en Vista
+   *  Principal, o desde el popup de "Agregar zona") y viaja en
+   *  `sessionStorage` hasta el guardado del análisis. Esta vista solo la
+   *  ANUNCIA: el trabajador tenía que acordarse de qué había elegido en la
+   *  pantalla anterior, y si volvía a la pestaña más tarde no había nada que
+   *  se lo dijera. El nombre se resuelve acá y no se arrastra junto al id para
+   *  que un renombrado hecho entre medio se vea. */
+  const [puntoDeclarado, setPuntoDeclarado] = useState<string | null>(null);
+
+  useEffect(() => {
+    const zoneId = loadZonaDestino();
+    if (!zoneId) return;
+    listZones()
+      .then((zonas) => setPuntoDeclarado(zonas.find((z) => z.id === zoneId)?.name ?? null))
+      // Sin nombre no se anuncia nada. La declaración sigue valiendo: vive en
+      // el id, no en este rótulo.
+      .catch(() => {});
+  }, []);
 
   /** Indica si el usuario está arrastrando archivos sobre la zona de drop */
   const [dragOver, setDragOver] = useState(false);
@@ -1121,6 +1145,22 @@ function Page() {
             </Tooltip>
           </TooltipProvider>
           </div>
+          {/* A qué LUGAR pertenece este vuelo, cuando se declaró antes de
+              entrar. Es el dato que vuelve innecesaria la detección de
+              duplicados: el análisis queda colgado de este punto y no crea una
+              zona nueva que después haya que reconocer como la misma.
+
+              Se anuncia y no se edita acá: cambiarlo significa empezar otra
+              carga, y ese gesto vive en Vista Principal. Sin esta línea el
+              trabajador tenía que acordarse de lo que eligió en la pantalla
+              anterior. */}
+          {puntoDeclarado && (
+            <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+              <MapPin className="h-3.5 w-3.5 flex-shrink-0 text-primary" />
+              Este vuelo se guardará en{" "}
+              <span className="font-medium text-foreground">{puntoDeclarado}</span>
+            </p>
+          )}
         </div>
 
         {/* Nav general de la página: 2 slices navegables en cualquier

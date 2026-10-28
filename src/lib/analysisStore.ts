@@ -324,16 +324,57 @@ export async function saveAnalysis(
  * Best-effort, igual que la limpieza de archivos huérfanos que ya hace
  * confirmDelete() en index.tsx justo después de llamar a esto, no hay
  * rollback si falla, solo se intenta.
+ *
+ * `zonaConservada` dice si la ZONA siguió existiendo después de perder este
+ * análisis. Es true cuando era su último análisis pero la zona es un lugar que
+ * alguien registró (un punto permanente, o una zona a la que le completaron la
+ * dirección): el lugar sobrevive a sus vuelos. La regla vive en el backend
+ * (`_zona_es_declarada`) y viaja en la respuesta justamente para no tener que
+ * escribirla dos veces; sin este dato, borrar el único vuelo de un punto
+ * anunciaba "zona eliminada" mientras el punto seguía en el listado.
  */
-export async function deleteAnalysis(id: string): Promise<void> {
+export async function deleteAnalysis(id: string): Promise<{ zonaConservada: boolean }> {
   try {
-    await fetch(`${BACKEND_URL}/analyses/${encodeURIComponent(id)}`, {
+    const res = await fetch(`${BACKEND_URL}/analyses/${encodeURIComponent(id)}`, {
       method: "DELETE",
       credentials: "include",
     });
+    const data = (await res.json()) as { zonaConservada?: boolean };
+    return { zonaConservada: data.zonaConservada === true };
   } catch {
-    // best-effort, ver docstring
+    // best-effort, ver docstring. Se asume que no se conservó: el aviso cae al
+    // texto de siempre en vez de afirmar algo que no se pudo comprobar.
+    return { zonaConservada: false };
   }
+}
+
+/**
+ * Elimina un VUELO completo: todos los análisis que comparten `sourceTaskId`.
+ *
+ * Una llamada en vez de una por análisis. Borrarlos de a uno funciona, pero
+ * reconcilia la vigencia de la zona una vez por cada medición y deja la
+ * bitácora con N entradas de "análisis" en vez de una de "vuelo", que es la
+ * unidad que el trabajador reconoce.
+ *
+ * No borra los archivos del vuelo: eso lo pide el llamador con
+ * `borrarArchivosDeVersion()`, igual que en el borrado de un análisis suelto.
+ *
+ * `zonaConservada` dice si el LUGAR siguió existiendo después de quedarse sin
+ * vuelos, ver `deleteAnalysis()`.
+ */
+export async function deleteVersion(
+  sourceTaskId: string,
+): Promise<{ zonaConservada: boolean; eliminados: number }> {
+  const res = await fetch(`${BACKEND_URL}/analyses/versions/${encodeURIComponent(sourceTaskId)}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!res.ok) throw new Error("No se pudo eliminar el vuelo");
+  const data = (await res.json()) as { zonaConservada?: boolean; eliminados?: number };
+  return {
+    zonaConservada: data.zonaConservada === true,
+    eliminados: data.eliminados ?? 0,
+  };
 }
 
 /**

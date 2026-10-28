@@ -68,7 +68,14 @@ import {
 import { notify } from "@/lib/notify";
 import { PuntoPermanenteDialog } from "@/components/PuntoPermanenteDialog";
 import { ConfirmarBorrado } from "@/components/ConfirmarBorrado";
-import { deleteZone, listZones, type ZoneRecord } from "@/lib/analysisStore";
+import {
+  deleteZone,
+  listAnalyses,
+  listZones,
+  type SavedAnalysisRecord,
+  type ZoneRecord,
+} from "@/lib/analysisStore";
+import { zoneTotals } from "@/lib/volumeReport";
 import {
   DIAS,
   ROTULO_DIA,
@@ -154,6 +161,25 @@ function ItinerarioPage() {
    *  `null` mientras carga. Confirmar un reemplazo sin ver con qué se
    *  reemplaza es pedir un sí a ciegas. */
   const [previaCopia, setPreviaCopia] = useState<DiaItinerario[] | null>(null);
+
+  /** Las cifras de la medición vigente de cada zona, para la tabla del pie.
+   *
+   *  Se cargan UNA vez al montar y no dentro de `cargar`: no dependen de la
+   *  semana que se esté mirando, y meterlas ahí las volvería a pedir en cada
+   *  cambio de semana. */
+  const [cifras, setCifras] = useState<Map<string, CifrasZona>>(new Map());
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        setCifras(cifrasPorZona(await listAnalyses()));
+      } catch {
+        // Sin cifras la tabla imprime "-", que es exactamente lo que
+        // corresponde a un punto sin vuelo. No vale la pena interrumpir el
+        // itinerario, que es para lo que se entra acá.
+      }
+    })();
+  }, []);
 
   const cargar = useCallback(async () => {
     try {
@@ -436,6 +462,7 @@ function ItinerarioPage() {
 
           <TablaPuntos
             catalogo={catalogo ?? []}
+            cifras={cifras}
             diasPorPunto={diasPorPunto}
             onEditar={(z) => {
               setEditando(z);
@@ -1032,13 +1059,68 @@ function MesChico({
 // mismo tratamiento que la tabla de recursos, paginación incluida.
 // =============================================================================
 
+/** Volumen, peso, área y fecha de la medición vigente de una zona. */
+interface CifrasZona {
+  volumeM3: number;
+  weightKg: number;
+  areaM2: number;
+  /** Fecha de CAPTURA del vuelo vigente, que es cuándo se midió el terreno,
+   *  no cuándo alguien se sentó a calcularlo. */
+  fecha: string;
+}
+
+/**
+ * Las cifras de la medición vigente de cada zona, indexadas por `zoneId`.
+ *
+ * Un punto permanente y una zona nacida de un vuelo son el mismo objeto, así
+ * que esta tabla tiene que poder mostrar las mismas cifras que Vista
+ * Principal; sin ellas, el mismo lugar se veía medido en una vista y sin datos
+ * en la otra.
+ *
+ * **Se calculan con `zoneTotals()` y no con una agregación en Mongo.**
+ * `volumeReport.ts` es la única aritmética del informe y de la evolución, y
+ * duplicarla en el backend daría dos respuestas para la misma pregunta: la
+ * suya cuenta todas las detecciones, la de `zoneTotals()` solo las activas.
+ *
+ * Vigente es la versión que `_reconciliar_vigencia()` dejó sin marcar
+ * `historical`; dentro de ella, la medición más reciente.
+ */
+function cifrasPorZona(analisis: SavedAnalysisRecord[]): Map<string, CifrasZona> {
+  const vigente = new Map<string, SavedAnalysisRecord>();
+  for (const a of analisis) {
+    if (a.historical || !a.zoneId) continue;
+    const previo = vigente.get(a.zoneId);
+    if (!previo || esPosterior(a, previo)) vigente.set(a.zoneId, a);
+  }
+
+  const cifras = new Map<string, CifrasZona>();
+  for (const [zoneId, a] of vigente) {
+    cifras.set(zoneId, { ...zoneTotals(a), fecha: a.captureDate ?? a.savedAt });
+  }
+  return cifras;
+}
+
+/** Si `a` es posterior a `b`, por fecha de captura y desempatando por guardado.
+ *
+ *  El desempate hace falta y no es defensivo: dos análisis del MISMO vuelo
+ *  comparten `captureDate` por definición, así que sin él la medición que se
+ *  mostrara dependería del orden en que Mongo devolvió los documentos. */
+function esPosterior(a: SavedAnalysisRecord, b: SavedAnalysisRecord): boolean {
+  const ca = new Date(a.captureDate ?? a.savedAt).getTime();
+  const cb = new Date(b.captureDate ?? b.savedAt).getTime();
+  if (ca !== cb) return ca > cb;
+  return new Date(a.savedAt).getTime() > new Date(b.savedAt).getTime();
+}
+
 function TablaPuntos({
   catalogo,
+  cifras,
   diasPorPunto,
   onEditar,
   onEliminar,
 }: {
   catalogo: ZoneRecord[];
+  cifras: Map<string, CifrasZona>;
   diasPorPunto: Map<string, number>;
   onEditar: (z: ZoneRecord) => void;
   onEliminar: (z: ZoneRecord) => void;
@@ -1097,6 +1179,26 @@ function TablaPuntos({
                   <TableHead className="hidden lg:table-cell">Barrio</TableHead>
                   <TableHead className="hidden lg:table-cell">Tipo</TableHead>
                   <TableHead className="hidden xl:table-cell">Frecuencia</TableHead>
+                  {/* Las cifras de la medición vigente, las mismas que muestra
+                      Vista Principal. Aparecen las cuatro juntas o ninguna: son
+                      un grupo que se lee en bloque, y escalonarlas por
+                      breakpoint dejaba un volumen suelto sin con qué
+                      compararlo.
+                      La unidad va en el encabezado y nunca en las celdas,
+                      porque repetida por fila saca las cifras de alineación
+                      vertical, que es la razón por la que esto es una tabla. */}
+                  <TableHead className="hidden w-[6rem] text-right 2xl:table-cell">
+                    Volumen (m³)
+                  </TableHead>
+                  <TableHead className="hidden w-[6rem] text-right 2xl:table-cell">
+                    Peso (kg)
+                  </TableHead>
+                  <TableHead className="hidden w-[6rem] text-right 2xl:table-cell">
+                    Área (m²)
+                  </TableHead>
+                  {/* "Medición" y no "Fecha": en una vista de calendario, una
+                      columna llamada Fecha se lee como el día programado. */}
+                  <TableHead className="hidden w-[6rem] 2xl:table-cell">Medición</TableHead>
                   <TableHead className="text-right">En la semana</TableHead>
                   <TableHead className="w-[4.5rem]"></TableHead>
                 </TableRow>
@@ -1104,6 +1206,8 @@ function TablaPuntos({
               <TableBody>
                 {visibles.map((z) => {
                   const veces = diasPorPunto.get(z.id) ?? 0;
+                  // Ausente significa que al punto no se le ha volado el dron.
+                  const cifra = cifras.get(z.id);
                   return (
                     <TableRow
                       key={z.id}
@@ -1174,6 +1278,42 @@ function TablaPuntos({
                       <TableCell className="hidden text-xs text-muted-foreground xl:table-cell">
                         {z.frecuencia || "-"}
                       </TableCell>
+                      <TableCell className="hidden text-right 2xl:table-cell">
+                        <span className="mono text-xs tabular-nums text-foreground">
+                          {cifra ? (
+                            cifra.volumeM3
+                          ) : (
+                            <span className="text-muted-foreground/60">-</span>
+                          )}
+                        </span>
+                      </TableCell>
+                      <TableCell className="hidden text-right 2xl:table-cell">
+                        <span className="mono text-xs tabular-nums text-foreground">
+                          {cifra ? (
+                            cifra.weightKg
+                          ) : (
+                            <span className="text-muted-foreground/60">-</span>
+                          )}
+                        </span>
+                      </TableCell>
+                      <TableCell className="hidden text-right 2xl:table-cell">
+                        <span className="mono text-xs tabular-nums text-foreground">
+                          {cifra ? (
+                            cifra.areaM2
+                          ) : (
+                            <span className="text-muted-foreground/60">-</span>
+                          )}
+                        </span>
+                      </TableCell>
+                      <TableCell className="hidden 2xl:table-cell">
+                        {cifra ? (
+                          <span className="mono text-xs tabular-nums text-muted-foreground">
+                            {new Date(cifra.fecha).toLocaleDateString("es-CL")}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground/60">Sin vuelo</span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-right">
                         {/* Contrastar esto con la frecuencia es la razón de ser
                             de la columna: un punto de "2 veces por semana" con
@@ -1215,7 +1355,7 @@ function TablaPuntos({
                 {relleno > 0 &&
                   Array.from({ length: relleno }).map((_, i) => (
                     <TableRow key={`relleno-${i}`} className="hover:bg-transparent">
-                      <TableCell colSpan={8} className="h-[3.25rem]">
+                      <TableCell colSpan={12} className="h-[3.25rem]">
                         {i === 0 && visibles.length === 0 && (
                           <span className="block text-center text-xs text-muted-foreground">
                             Ningún punto coincide con la búsqueda.

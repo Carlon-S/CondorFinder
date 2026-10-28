@@ -751,6 +751,47 @@ def _zone_out(doc: dict, resumen: dict | None = None) -> ZoneOut:
     )
 
 
+# Los campos que una PERSONA declara sobre un lugar (HDU14). Son disjuntos de
+# los que escribe un vuelo (`orthoCenter`, `orthoBounds`, análisis), así que su
+# presencia es exactamente la señal de que alguien registró el lugar, y no de
+# que la zona nació como contenedor de un ortomosaico.
+CAMPOS_DECLARADOS = (
+    "address",
+    "comuna",
+    "barrio",
+    "lat",
+    "lng",
+    "photoUrl",
+    "tipo",
+    "frecuencia",
+)
+
+
+def _zona_es_declarada(doc: dict) -> bool:
+    """Si esta zona es un LUGAR que alguien registró, y no solo el contenedor
+    que se creó al guardar el primer análisis de un vuelo.
+
+    **De esto depende que un punto sobreviva a sus vuelos**, que es la premisa
+    de la unificación: el lugar existe primero y el vuelo se le cuelga. Un
+    punto permanente lleva dirección, barrio, tipo y frecuencia, y puede estar
+    programado en el itinerario; borrar su última medición no puede llevárselo,
+    porque el lugar sigue existiendo en la comuna aunque nadie lo haya vuelto a
+    volar. El síntoma era exactamente ese: al punto se le borraba su único
+    vuelo y desaparecía con su dirección y su lugar en el reparto semanal.
+
+    Una zona nacida de un vuelo, en cambio, no es nada sin análisis: no tiene
+    capturas, ni volumen, ni mapa, y quedaba acumulándose como una fila
+    "0 capturas · 0 análisis" en el diálogo de informe. Esas sí se van.
+
+    **No alcanza con mirar `kind`.** A una zona nacida de un vuelo se le puede
+    completar la dirección desde Vista Principal, y esos datos los escribió una
+    persona igual que los de un punto permanente.
+    """
+    if (doc.get("kind") or KIND_BASURAL) == KIND_PERMANENTE:
+        return True
+    return any(doc.get(campo) not in (None, "") for campo in CAMPOS_DECLARADOS)
+
+
 def _validar_zona(campos: dict) -> None:
     """Rechaza el valor que no corresponde, en vez de guardarlo y olvidarlo."""
     kind = campos.get("kind")
@@ -1075,27 +1116,151 @@ async def update_analysis(
     return _to_out(result)
 
 
+async def _soltar_referencias(ids: list[str]) -> None:
+    """Deshace los punteros que quedaban apuntando a análisis ya borrados.
+
+    Dos clases de huérfano, las dos invisibles hasta que alguien abre la vista
+    equivocada:
+
+    1. El análisis al que uno de estos había REEMPLAZADO seguía marcado
+       `historical` con `supersededBy` contra un id inexistente. Esa captura
+       desaparecía de todos los filtros salvo "Historial", y ahí su
+       "Reemplazado por:" salía en blanco: quedaba inalcanzable.
+    2. El que lo tenía como POSIBLE duplicado se quedaba en
+       `duplicateStatus: "pending"` contra la nada. El aviso no aparecía y el
+       registro quedaba mal para siempre, en silencio.
+
+    Suelta los punteros y nada más. Esto por sí solo deja la zona con varias
+    vigentes a la vez; quién queda vigente lo decide
+    `_cerrar_zona_tras_borrado()`.
+    """
+    await get_db().analyses.update_many(
+        {"supersededBy": {"$in": ids}},
+        {"$set": {"historical": False, "supersededBy": None}},
+    )
+    await get_db().analyses.update_many(
+        {"possibleDuplicateOf": {"$in": ids}},
+        {"$set": {"possibleDuplicateOf": None, "duplicateStatus": None}},
+    )
+
+
+async def _cerrar_zona_tras_borrado(zone_id: str | None) -> bool:
+    """Deja la zona consistente después de que perdió análisis.
+
+    Devuelve si la zona quedó **sin ningún análisis y aun así se conservó**,
+    que es el único caso que la interfaz necesita distinguir: el punto sigue
+    registrado pero ahora aparece como sin vuelo. Con análisis restantes la
+    zona obviamente también existe, y ahí el aviso de siempre ya es correcto.
+    """
+    if not zone_id:
+        return False
+
+    quedan = await get_db().analyses.count_documents({"zoneId": zone_id})
+    if quedan:
+        # Volver a dejar UNA sola vigente.
+        #
+        # Soltar los punteros es necesario para no dejarlos colgando, pero se
+        # pasa: cuando varias capturas compartían sucesor (una zona con varias
+        # versiones, todas reemplazadas por la más nueva), borrar esa más nueva
+        # las promovía a TODAS y la zona aparecía repetida en Vista Principal,
+        # una fila por captura.
+        await _reconciliar_vigencia(zone_id)
+        return False
+
+    zona = await get_db().zones.find_one({"_id": _object_id(zone_id)})
+    if zona is None:
+        return False
+
+    # El itinerario se consulta acá y no dentro de `_zona_es_declarada()`: hoy
+    # solo se pueden programar puntos permanentes, así que `kind` ya lo cubre,
+    # pero un punto programado que se borrara dejaría el día apuntando a un id
+    # que no resuelve, y eso no puede depender de un filtro de la interfaz.
+    # Mismo criterio que delete_zone().
+    programado = await get_db().itinerario_dias.count_documents({"puntos": zone_id})
+    if _zona_es_declarada(zona) or programado:
+        return True
+
+    # Una zona que solo existía para contener ese ortomosaico no es nada sin
+    # análisis: no tiene capturas, ni volumen, ni mapa, y se iba acumulando
+    # como una fila "0 capturas · 0 análisis" en el diálogo de informe.
+    await get_db().zones.delete_one({"_id": _object_id(zone_id)})
+    return False
+
+
+@router.delete("/versions/{source_task_id}")
+async def delete_version(
+    source_task_id: str,
+    current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
+):
+    """Borra un VUELO completo: todos los análisis que comparten `sourceTaskId`.
+
+    **Es la operación que le faltaba a la unificación de puntos y zonas.** Un
+    vuelo es la unidad que el trabajador reconoce ("la captura del 26 de
+    mayo"); un análisis es una medición de ese vuelo, y puede haber varias del
+    mismo. Borrarlas de a una funciona, pero obliga a saber cuántas había y
+    reconcilia la vigencia de la zona una vez por cada una.
+
+    **La zona NO se borra si es un lugar declarado**, que es el punto de todo
+    esto: el lugar existe primero y el vuelo se le cuelga, así que sobrevive a
+    perderlo. Ver `_zona_es_declarada()`.
+
+    **No toca los archivos del vuelo** (mapa, miniatura, JSON de detecciones,
+    modelos de elevación, snapshot de imágenes). Eso lo pide el frontend a los
+    endpoints de `orquestador.py`, que es el mismo reparto que ya rige para el
+    borrado de un análisis suelto.
+    """
+    docs = await get_db().analyses.find({"sourceTaskId": source_task_id}).to_list(length=None)
+    if not docs:
+        raise HTTPException(status_code=404, detail="No hay análisis de ese vuelo")
+
+    ids = [str(d["_id"]) for d in docs]
+    # Todos los análisis de un vuelo pertenecen a la misma zona por
+    # construcción (`_resolve_zone()` hereda la zona de un hermano con el mismo
+    # sourceTaskId), así que basta con la del primero.
+    zone_id = docs[0].get("zoneId")
+
+    await get_db().analyses.delete_many({"sourceTaskId": source_task_id})
+
+    # Los nombres van DENTRO de la bitácora porque los documentos que los
+    # tenían acaban de dejar de existir. Sin eso, el registro diría que alguien
+    # borró unos ids y nadie podría saber nunca qué eran.
+    await auditoria.registrar(
+        current_user.username,
+        "eliminar",
+        "vuelo",
+        source_task_id,
+        {
+            "zoneId": zone_id,
+            "analisis": [{"id": i, "nombre": d.get("name")} for i, d in zip(ids, docs)],
+        },
+    )
+
+    await _soltar_referencias(ids)
+    zona_conservada = await _cerrar_zona_tras_borrado(zone_id)
+
+    return {
+        "message": "Vuelo eliminado",
+        "eliminados": len(ids),
+        "zonaConservada": zona_conservada,
+    }
+
+
 @router.delete("/{analysis_id}")
 async def delete_analysis(
     analysis_id: str,
     current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
 ):
-    """Borra un análisis y deshace las referencias que quedaban apuntándole.
+    """Borra UN análisis y deja consistente todo lo que lo referenciaba.
 
-    Antes esto era un delete_one pelado, y dejaba tres clases de huérfano:
+    Antes esto era un `delete_one` pelado y dejaba tres clases de huérfano: las
+    dos de punteros, que ahora resuelve `_soltar_referencias()`, y la zona que
+    se quedaba vacía en la colección para siempre, que ahora resuelve
+    `_cerrar_zona_tras_borrado()`. Los dos ayudantes son los mismos que usa
+    `delete_version()`, a propósito: la regla de cuándo una zona sobrevive a su
+    último análisis no puede estar escrita en dos lugares.
 
-    1. El análisis al que este había REEMPLAZADO seguía marcado `historical`
-       con `supersededBy` apuntando a un id que ya no existía. En la práctica
-       esa captura desaparecía de todos los filtros salvo "Historial", y ahí
-       su "Reemplazado por:" salía en blanco: quedaba inalcanzable.
-    2. El análisis que lo tenía como POSIBLE duplicado se quedaba en
-       `duplicateStatus: "pending"` contra la nada. El banner no aparecía
-       (loadAnalysisById devolvía null) y el registro quedaba mal para
-       siempre, en silencio.
-    3. Si era el último análisis de su zona, el documento de la zona quedaba
-       en la colección para siempre: no existe ningún otro borrado de zonas
-       en la API. Se veían como filas "0 capturas · 0 análisis" en el diálogo
-       de informe, y se iban acumulando con cada borrado.
+    Para borrar un vuelo entero (todas las mediciones de un mismo
+    `sourceTaskId`) está `DELETE /analyses/versions/{source_task_id}`.
     """
     doc = await get_db().analyses.find_one_and_delete({"_id": _object_id(analysis_id)})
     if not doc:
@@ -1112,43 +1277,15 @@ async def delete_analysis(
         {"nombre": doc.get("name"), "zoneId": doc.get("zoneId")},
     )
 
-    # (1) Se sueltan los punteros que apuntaban a este análisis, para no dejar
-    # capturas marcadas como reemplazadas por un id que ya no existe. Esto por
-    # sí solo deja la zona con varias vigentes a la vez; quién queda vigente de
-    # verdad lo decide (4) más abajo, con el mismo criterio de fecha que usa
-    # todo el resto.
-    await get_db().analyses.update_many(
-        {"supersededBy": analysis_id},
-        {"$set": {"historical": False, "supersededBy": None}},
-    )
+    await _soltar_referencias([analysis_id])
+    zona_conservada = await _cerrar_zona_tras_borrado(doc.get("zoneId"))
 
-    # (2) Quien lo tenía como posible duplicado se queda sin con qué comparar:
-    # se vuelve al estado inicial en vez de dejar una comparación pendiente
-    # contra un registro inexistente.
-    await get_db().analyses.update_many(
-        {"possibleDuplicateOf": analysis_id},
-        {"$set": {"possibleDuplicateOf": None, "duplicateStatus": None}},
-    )
-
-    # (3) Si era el último análisis de su zona, la zona se va con él. Una zona
-    # sin ningún análisis no es nada: no tiene capturas, ni volumen, ni mapa.
-    zone_id = doc.get("zoneId")
-    if zone_id:
-        quedan = await get_db().analyses.count_documents({"zoneId": zone_id})
-        if quedan == 0:
-            await get_db().zones.delete_one({"_id": _object_id(zone_id)})
-        else:
-            # (4) Volver a dejar UNA sola vigente.
-            #
-            # El paso (1) devolvió a vigente a todo lo que apuntaba al borrado,
-            # que es necesario para no dejar punteros colgando, pero se pasa:
-            # cuando varias capturas compartían sucesor (una zona con varias
-            # versiones, todas reemplazadas por la más nueva), borrar esa más
-            # nueva las promovía a TODAS y la zona aparecía repetida en Vista
-            # Principal, una fila por captura.
-            await _reconciliar_vigencia(zone_id)
-
-    return {"message": "Análisis eliminado"}
+    # `zonaConservada` existe para que la vista pueda decir la verdad sin
+    # repetir la regla de `_zona_es_declarada()` del lado del navegador. Quien
+    # elige "eliminar toda la zona" sobre un punto permanente borra sus vuelos
+    # y el punto queda; sin este dato el aviso diría "zona eliminada" y el
+    # punto seguiría ahí, listado como sin vuelo.
+    return {"message": "Análisis eliminado", "zonaConservada": zona_conservada}
 
 
 @router.post("/{analysis_id}/confirm-duplicate", response_model=SavedAnalysisOut)

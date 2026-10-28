@@ -428,6 +428,37 @@ function RutasPage() {
     recargarPuntosDiarios();
   }, [recargarPuntosDiarios]);
 
+  /** Día que se está mirando en el diálogo de puntos diarios. Arranca en hoy.
+   *
+   *  **Es estado del DIÁLOGO, no de la vista.** `puntosDiarios` (los de hoy)
+   *  sigue siendo lo único que se dibuja en el mapa y lo único que puede entrar
+   *  a una ruta: un punto de la semana pasada ya se retiró, y meterlo en un
+   *  plan sería mandar un camión a un lugar limpio. Mirar un día pasado es
+   *  consultar el historial, no planificar con él.
+   *
+   *  Los puntos diarios no se borran (no hay TTL ni limpieza automática), así
+   *  que el historial ya existía en la base: el endpoint acepta `?fecha=` desde
+   *  el principio y lo que faltaba era una forma de pedirlo. */
+  const [fechaHistorial, setFechaHistorial] = useState(() => hoy());
+  const [puntosDelDia, setPuntosDelDia] = useState<PuntoDiario[]>([]);
+  const [cargandoDia, setCargandoDia] = useState(false);
+
+  const cargarPuntosDelDia = useCallback((fecha: string) => {
+    setCargandoDia(true);
+    listarPuntosDiarios(fecha)
+      .then(setPuntosDelDia)
+      // Una lista vacía y un fallo de red se ven igual acá, pero el diálogo
+      // distingue "no hay puntos ese día" de "no se pudo cargar" por el
+      // indicador de carga: sin él, un error dejaría el día anterior en
+      // pantalla como si fuera el pedido.
+      .catch(() => setPuntosDelDia([]))
+      .finally(() => setCargandoDia(false));
+  }, []);
+
+  useEffect(() => {
+    if (editarPuntosAbierto) cargarPuntosDelDia(fechaHistorial);
+  }, [editarPuntosAbierto, fechaHistorial, cargarPuntosDelDia]);
+
   const [loadDialogOpen, setLoadDialogOpen] = useState(false);
   const [savedAnalyses, setSavedAnalyses] = useState<SavedAnalysisRecord[]>([]);
   /** zoneId -> nombre de la zona. Lo que esta vista carga y rotula es un
@@ -1523,21 +1554,25 @@ function RutasPage() {
                     >
                       <Plus className="mr-2 h-4 w-4" /> Crear punto diario
                     </Button>
-                    {/* HDU15/AC4: solo cuando hay algo que editar. Un botón que
-                        abre una lista vacía no dice qué falta para usarlo; el
-                        título sí. */}
+                    {/* HDU15/AC4, más el historial. **Ya no se deshabilita sin
+                        puntos de hoy**: estaba bien cuando el diálogo solo
+                        mostraba la jornada, porque abrir una lista vacía no
+                        dice qué falta para usarla, pero desde que el mismo
+                        diálogo permite elegir el día, un día sin puntos dejaba
+                        el historial completo inalcanzable. El contador sigue
+                        siendo el de HOY, que es lo que afecta a la ruta. */}
                     <Button
-                      onClick={() => setEditarPuntosAbierto(true)}
-                      disabled={puntosDiarios.length === 0}
+                      onClick={() => {
+                        // Siempre abre en hoy: reabrirlo en el día que se
+                        // consultó la vez anterior haría dudar de si lo que se
+                        // ve es la jornada o un día pasado.
+                        setFechaHistorial(hoy());
+                        setEditarPuntosAbierto(true);
+                      }}
                       variant="ghost"
                       className="w-full"
-                      title={
-                        puntosDiarios.length === 0
-                          ? "Todavía no hay puntos diarios creados hoy"
-                          : undefined
-                      }
                     >
-                      <Pencil className="mr-2 h-4 w-4" /> Editar puntos
+                      <Pencil className="mr-2 h-4 w-4" /> Puntos diarios
                       {puntosDiarios.length > 0 && ` (${puntosDiarios.length})`}
                     </Button>
                     <Button
@@ -2133,7 +2168,11 @@ function RutasPage() {
           if (!puntoDiarioABorrar) return;
           try {
             await eliminarPuntoDiario(puntoDiarioABorrar.id);
+            // Los dos: el de hoy mueve el mapa, el del día mirado mueve la
+            // lista que se tiene abierta. Cuando el día mirado ES hoy son la
+            // misma consulta dos veces, que es más barato que ramificar acá.
             recargarPuntosDiarios();
+            cargarPuntosDelDia(fechaHistorial);
           } catch (e) {
             notify.error("No se pudo eliminar", (e as Error).message);
           }
@@ -2145,20 +2184,74 @@ function RutasPage() {
         open={puntoDiarioAbierto}
         onOpenChange={setPuntoDiarioAbierto}
         punto={puntoDiarioEditando}
-        onGuardado={recargarPuntosDiarios}
+        onGuardado={() => {
+          recargarPuntosDiarios();
+          cargarPuntosDelDia(fechaHistorial);
+        }}
       />
 
       {/* HDU15/AC4: todos los puntos del día, editables de a uno. */}
       <Dialog open={editarPuntosAbierto} onOpenChange={setEditarPuntosAbierto}>
         <DialogContent className="flex max-h-[80vh] flex-col sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Puntos diarios de hoy</DialogTitle>
-            <DialogDescription>
-              Los retiros de escombros y extras cargados para la jornada.
-            </DialogDescription>
+            <DialogTitle>Puntos diarios</DialogTitle>
+            <DialogDescription>Los retiros de escombros y extras de una jornada.</DialogDescription>
           </DialogHeader>
+
+          {/* El selector de día. Un punto diario pertenece a una fecha y no se
+              borra nunca, así que la base ya tenía el historial completo y lo
+              único que faltaba era poder pedirlo.
+              `max` es hoy porque un punto diario se crea siempre en el día en
+              curso: ofrecer el futuro sería ofrecer un día que por
+              construcción está vacío. */}
+          <div className="flex flex-wrap items-center gap-2 border-b border-border pb-3">
+            <label htmlFor="fecha-puntos-diarios" className="text-xs text-muted-foreground">
+              Día
+            </label>
+            <Input
+              id="fecha-puntos-diarios"
+              type="date"
+              value={fechaHistorial}
+              max={hoy()}
+              onChange={(e) => e.target.value && setFechaHistorial(e.target.value)}
+              className="h-8 w-40 text-xs"
+            />
+            {fechaHistorial !== hoy() && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 text-xs"
+                onClick={() => setFechaHistorial(hoy())}
+              >
+                Volver a hoy
+              </Button>
+            )}
+          </div>
+
+          {/* Mirar un día pasado es consultar, no planificar: esos puntos ya se
+              retiraron y no se dibujan en el mapa ni entran a una ruta.
+              Decirlo acá evita que alguien crea que está armando la jornada con
+              ellos. */}
+          {fechaHistorial !== hoy() && (
+            <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-[0.6875rem] text-muted-foreground">
+              Estás viendo un día pasado. Estos puntos no se dibujan en el mapa ni entran a una
+              ruta.
+            </p>
+          )}
+
+          {cargandoDia && (
+            <p className="py-8 text-center text-xs text-muted-foreground">Cargando...</p>
+          )}
+          {!cargandoDia && puntosDelDia.length === 0 && (
+            <p className="py-8 text-center text-xs text-muted-foreground">
+              No hay puntos diarios en esta fecha.
+            </p>
+          )}
+          {/* La lista se renderiza siempre: con el arreglo vacío no dibuja
+              nada, y envolverla en un condicional obligaría a indentar sus
+              cuarenta líneas sin que eso cambie lo que se ve. */}
           <ul className="-mx-1 max-h-[22rem] flex-1 space-y-1.5 overflow-y-auto px-1">
-            {puntosDiarios.map((p) => (
+            {puntosDelDia.map((p) => (
               <li
                 key={p.id}
                 className="flex items-center gap-3 rounded-md border border-border px-3 py-2"

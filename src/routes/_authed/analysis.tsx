@@ -42,7 +42,7 @@ import {
   loadAnalysisById,
   listAnalyses,
   listZones,
-  deleteAnalysis,
+  deleteVersion,
   consumePendingOpenId,
   confirmDuplicate,
   rejectDuplicate,
@@ -914,24 +914,34 @@ function AnalysisPage() {
    * corresponde.
    *
    * Se borran TODOS los análisis de esa versión, no uno: todos miden el mismo
-   * vuelo, y dejar algunos sueltos deja la versión a medias. Los archivos se
+   * vuelo, y dejar algunos sueltos deja la versión a medias. Eso lo hace el
+   * backend en UNA operación (`deleteVersion`), en vez de una llamada por
+   * medición: así la vigencia de la zona se reconcilia una sola vez y la
+   * bitácora registra un vuelo en lugar de N análisis sueltos. Los archivos se
    * van con ella porque ya no queda nadie que los use.
    */
   const eliminarVersion = async (version: ZoneVersion) => {
     setEliminandoVersion(true);
     try {
-      for (const analisis of version.analyses) {
-        await deleteAnalysis(analisis.id);
-      }
+      const { zonaConservada } = await deleteVersion(version.sourceTaskId);
       borrarArchivosDeVersion(version.mapUrl, version.sourceTaskId);
 
       const restantes = versions.filter((v) => v.sourceTaskId !== version.sourceTaskId);
       setVersionAEliminar(null);
 
       if (restantes.length === 0) {
-        // Era la única captura: la zona entera se fue con ella (el backend
-        // borra la zona al quedarse sin análisis). No hay nada que mostrar.
-        notify.success("Captura eliminada", "La zona ya no tiene capturas guardadas.");
+        // Era la única captura, así que no queda nada que mostrar acá y se
+        // vuelve a Vista Principal. Pero el LUGAR puede seguir existiendo: un
+        // punto permanente, o una zona a la que alguien le completó la
+        // dirección, sobrevive a perder sus vuelos y vuelve a listarse como
+        // sin vuelo. Decir "la zona ya no tiene capturas" en ese caso sugería
+        // que el punto se había ido con ellas.
+        notify.success(
+          "Captura eliminada",
+          zonaConservada
+            ? "El punto sigue registrado, ahora sin vuelo."
+            : "La zona ya no tiene capturas guardadas.",
+        );
         navigate({ to: "/" });
         return;
       }

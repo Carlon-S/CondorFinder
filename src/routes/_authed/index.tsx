@@ -177,6 +177,13 @@ interface ZoneRow {
   /** La dirección de la zona. Un punto permanente la trae de su alta; una zona
    *  nacida de un vuelo solo si alguien se la completó después. */
   address?: string;
+  /** El barrio de la zona, del mismo juego de campos que `address`: ubica el
+   *  lugar más gruesamente que la calle y es como la municipalidad agrupa su
+   *  territorio en la planilla. */
+  barrio?: string;
+  /** Microbasural o VIRS, la categoría real del lugar en la planilla
+   *  municipal. Es del LUGAR, no del residuo que haya dentro. */
+  tipo?: string;
 }
 
 function fromRecord(r: SavedAnalysisRecord): ZoneRow {
@@ -228,12 +235,20 @@ async function loadZoneRows(): Promise<ZoneRow[]> {
     // HDU7/AC3, resuelve supersededByName cruzando contra las demás filas
     // ya traídas en esta misma llamada, sin pedirle nada extra al backend.
     const nameById = new Map(records.map((r) => [r.id, r.name]));
-    doneRows = records.map((r) => ({
-      ...fromRecord(r),
-      supersededByName: r.supersededBy ? nameById.get(r.supersededBy) : undefined,
-      address: r.zoneId ? (zonaPorId.get(r.zoneId)?.address ?? undefined) : undefined,
-      zoneId: r.zoneId ?? undefined,
-    }));
+    doneRows = records.map((r) => {
+      // Los tres campos salen de la MISMA zona, así que se resuelve una sola
+      // vez: repetir `zonaPorId.get(...)` por campo invita a que el siguiente
+      // que se agregue termine leyendo de otra.
+      const zona = r.zoneId ? zonaPorId.get(r.zoneId) : undefined;
+      return {
+        ...fromRecord(r),
+        supersededByName: r.supersededBy ? nameById.get(r.supersededBy) : undefined,
+        address: zona?.address ?? undefined,
+        barrio: zona?.barrio ?? undefined,
+        tipo: zona?.tipo ?? undefined,
+        zoneId: r.zoneId ?? undefined,
+      };
+    });
   } catch {
     // ver comentario de arriba
   }
@@ -248,6 +263,8 @@ async function loadZoneRows(): Promise<ZoneRow[]> {
       key: `zona-${z.id}`,
       name: z.name,
       address: z.address ?? undefined,
+      barrio: z.barrio ?? undefined,
+      tipo: z.tipo ?? undefined,
       // Se ordenan junto a las demás por esta fecha, que para una zona a
       // mano es cuándo se registró el lugar.
       savedAt: z.createdAt,
@@ -585,8 +602,13 @@ function MainPage() {
         ? savedAnalyses.filter((a) => a.zoneId === zonaId)
         : savedAnalyses.filter((a) => a.id === target.recordId);
 
+      // El que vacía la zona es el ÚLTIMO borrado, así que su respuesta es la
+      // que dice si el lugar sobrevivió. Los anteriores siempre dejan análisis
+      // atrás y por lo tanto nunca conservan nada.
+      let zonaConservada = false;
       for (const analisis of deLaZona) {
-        await deleteAnalysis(analisis.id);
+        const resultado = await deleteAnalysis(analisis.id);
+        zonaConservada = resultado.zonaConservada;
       }
       // Los archivos se borran por VERSIÓN, no por análisis: varios análisis
       // del mismo vuelo comparten mapa y modelos de elevación, y borrarlos una
@@ -602,9 +624,15 @@ function MainPage() {
       await refreshZones();
 
       setDeletingRowKey(null);
+      // Un punto permanente, o una zona a la que alguien le completó la
+      // dirección, sobrevive a sus vuelos: decir "zona eliminada" cuando el
+      // punto sigue en la tabla sería mentir justo después de la acción que lo
+      // dejó ahí.
       notify.success(
-        "Zona eliminada",
-        `"${deletedName}" y sus ${deLaZona.length} captura(s) ya no aparecen en tu listado.`,
+        zonaConservada ? "Vuelos eliminados" : "Zona eliminada",
+        zonaConservada
+          ? `Se eliminaron las ${deLaZona.length} captura(s) de "${deletedName}". El punto sigue registrado, ahora sin vuelo.`
+          : `"${deletedName}" y sus ${deLaZona.length} captura(s) ya no aparecen en tu listado.`,
       );
       return;
     }
@@ -625,7 +653,7 @@ function MainPage() {
     }
 
     if (target.state === "done" && target.recordId) {
-      await deleteAnalysis(target.recordId);
+      const { zonaConservada } = await deleteAnalysis(target.recordId);
 
       // Los archivos del vuelo solo se van si NINGÚN análisis los sigue
       // necesitando. Otro análisis del mismo vuelo comparte mapa y modelos de
@@ -643,7 +671,12 @@ function MainPage() {
       await refreshZones();
 
       setDeletingRowKey(null);
-      notify.success("Captura eliminada", `"${deletedName}" ya no aparece en tu listado.`);
+      notify.success(
+        "Captura eliminada",
+        zonaConservada
+          ? `"${deletedName}" ya no aparece. El punto sigue registrado, ahora sin vuelo.`
+          : `"${deletedName}" ya no aparece en tu listado.`,
+      );
       return;
     }
 
@@ -836,7 +869,11 @@ function MainPage() {
                   reemplazados; los otros 4 los excluyen siempre. */}
               <div className="flex items-center gap-1 rounded-full border border-border p-1">
                 <FilterChip active={stateFilter === "all"} onClick={() => setStateFilter("all")}>Todas</FilterChip>
-                <FilterChip active={stateFilter === "done"} onClick={() => setStateFilter("done")}>Terminadas</FilterChip>
+                {/* "Con análisis" y no "Terminadas": los cinco filtros
+                    describen el ESTADO del lugar y no qué se hizo con él, y
+                    tener una medición guardada es justo lo que distingue a un
+                    lugar que puede entrar a una ruta. */}
+                <FilterChip active={stateFilter === "done"} onClick={() => setStateFilter("done")}>Con análisis</FilterChip>
                 <FilterChip active={stateFilter === "in_progress"} onClick={() => setStateFilter("in_progress")}>En progreso</FilterChip>
                 <FilterChip active={stateFilter === "pending_analysis"} onClick={() => setStateFilter("pending_analysis")}>Pendientes</FilterChip>
                 {/* HDU14: los puntos permanentes registrados a los que todavía
@@ -899,6 +936,13 @@ function MainPage() {
                     {/* La direccion es como el trabajador reconoce el lugar
                         en la calle; el nombre es como lo llama el sistema. */}
                     <TableHead className="hidden lg:table-cell">Dirección</TableHead>
+                    {/* Barrio y Tipo son los campos con que la municipalidad
+                        agrupa y clasifica sus lugares. Antes solo se veían en
+                        el Itinerario, así que un punto y una zona nacida de un
+                        vuelo parecían dos cosas distintas según dónde se
+                        miraran. */}
+                    <TableHead className="hidden xl:table-cell">Barrio</TableHead>
+                    <TableHead className="hidden xl:table-cell">Tipo</TableHead>
                     <SortableHead field="fecha" label="Fecha" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} />
                     <SortableHead field="volumen" label="Volumen" unit="m³" className="w-[7rem]" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="right" />
                     <SortableHead field="peso" label="Peso" unit="kg" className="w-[7rem]" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="right" />
@@ -913,6 +957,8 @@ function MainPage() {
                       <TableCell><Skeleton className="h-16 w-24" /></TableCell>
                       <TableCell><Skeleton className="h-4 w-32" /></TableCell>
                       <TableCell className="hidden lg:table-cell"><Skeleton className="h-4 w-40" /></TableCell>
+                      <TableCell className="hidden xl:table-cell"><Skeleton className="h-4 w-20" /></TableCell>
+                      <TableCell className="hidden xl:table-cell"><Skeleton className="h-4 w-24" /></TableCell>
                       <TableCell><Skeleton className="h-4 w-20" /></TableCell>
                       <TableCell className="text-right"><Skeleton className="ml-auto h-4 w-14" /></TableCell>
                       <TableCell className="text-right"><Skeleton className="ml-auto h-4 w-14" /></TableCell>
@@ -932,6 +978,13 @@ function MainPage() {
                     <TableHead className="w-[7.5rem]"></TableHead>
                     <TableHead>Zona</TableHead>
                     <TableHead className="hidden lg:table-cell">Dirección</TableHead>
+                    {/* Barrio y Tipo son los campos con que la municipalidad
+                        agrupa y clasifica sus lugares. Antes solo se veían en
+                        el Itinerario, así que un punto y una zona nacida de un
+                        vuelo parecían dos cosas distintas según dónde se
+                        miraran. */}
+                    <TableHead className="hidden xl:table-cell">Barrio</TableHead>
+                    <TableHead className="hidden xl:table-cell">Tipo</TableHead>
                     <SortableHead field="fecha" label="Fecha" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} />
                     <SortableHead field="volumen" label="Volumen" unit="m³" className="w-[7rem]" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="right" />
                     <SortableHead field="peso" label="Peso" unit="kg" className="w-[7rem]" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="right" />
@@ -1078,6 +1131,16 @@ function MainPage() {
                           <span className="text-xs text-muted-foreground/60">-</span>
                         )}
                       </TableCell>
+                      <TableCell className="hidden xl:table-cell">
+                        <span className="text-xs text-muted-foreground">
+                          {z.barrio || <span className="text-muted-foreground/60">-</span>}
+                        </span>
+                      </TableCell>
+                      <TableCell className="hidden xl:table-cell">
+                        <span className="text-xs text-muted-foreground">
+                          {z.tipo || <span className="text-muted-foreground/60">-</span>}
+                        </span>
+                      </TableCell>
                       {/* Fecha arriba y hora debajo: ordenar por fecha con
                           varias zonas del mismo día no decía cuál fue antes. */}
                       <TableCell className="text-muted-foreground">
@@ -1141,6 +1204,26 @@ function MainPage() {
                         {z.state === "pending_analysis" && (
                           <Button size="sm" variant="secondary" onClick={() => reviewPending(z)}>
                             <ArrowRightCircle className="mr-1.5 h-3.5 w-3.5" /> Ir a Análisis
+                          </Button>
+                        )}
+                        {/* El lugar existe antes del vuelo, así que se le puede
+                            volar el dron desde su propia fila. El `zoneId`
+                            viaja a /carga y de ahí al guardado del análisis, de
+                            modo que la medición queda colgada de ESTE punto en
+                            vez de crear un lugar nuevo que después habría que
+                            reconocer como duplicado.
+
+                            Antes, la única forma de declarar la zona era el
+                            popup de "Agregar zona", o sea había que saber que
+                            el punto ya existía y buscarlo en una lista. */}
+                        {z.state === "no_flight" && z.zoneId && (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => goToCarga(z.zoneId)}
+                            title="Subir imágenes y generar el mapa unificado de este punto"
+                          >
+                            <ArrowRightCircle className="mr-1.5 h-3.5 w-3.5" /> Generar mapa
                           </Button>
                         )}
                       </TableCell>
@@ -1613,7 +1696,8 @@ function Kpi({ icon, label, value }: { icon: React.ReactNode; label: string; val
   );
 }
 
-/** Botón del grupo de filtro por estado ("Todas | Terminadas | En progreso | Pendientes"). */
+/** Botón del grupo de filtro por estado ("Todas | Con análisis | En progreso |
+ *  Pendientes | Sin vuelo | Historial"). */
 function FilterChip({
   active,
   onClick,
