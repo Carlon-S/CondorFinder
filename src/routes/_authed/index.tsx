@@ -367,6 +367,15 @@ function SinDato() {
   return <span className="block text-center text-muted-foreground/60">-</span>;
 }
 
+/** Ancho común de la acción única de una fila.
+ *
+ *  "Ir a Carga", "Ir a Análisis" y "Generar mapa" son excluyentes entre sí y
+ *  ocupan la MISMA celda según el estado de la fila, así que con el ancho
+ *  natural de cada texto la columna cambiaba de tamaño al filtrar o al avanzar
+ *  de página. Es el mismo motivo por el que las columnas de cifras llevan
+ *  ancho fijo. */
+const ACCION_FILA = "min-w-[9.5rem] justify-center";
+
 /** Filas por página de la tabla de zonas.
  *
  *  10 y no 5 como las tablas de recursos y del itinerario: esta es la vista de
@@ -1079,9 +1088,9 @@ function MainPage() {
                     <TableHead className="hidden xl:table-cell">Barrio</TableHead>
                     <TableHead className="hidden xl:table-cell">Tipo</TableHead>
                     <SortableHead field="fecha" label="Fecha" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} />
-                    <SortableHead field="volumen" label="Volumen" unit="m³" className="w-[7rem]" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="right" />
-                    <SortableHead field="peso" label="Peso" unit="kg" className="w-[7rem]" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="right" />
-                    <SortableHead field="area" label="Área" unit="m²" className="w-[7rem]" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="right" />
+                    <SortableHead field="volumen" label="Volumen" unit="m³" className="w-[7rem]" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="center" />
+                    <SortableHead field="peso" label="Peso" unit="kg" className="w-[7rem]" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="center" />
+                    <SortableHead field="area" label="Área" unit="m²" className="w-[7rem]" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="center" />
                     <TableHead className="text-right"></TableHead>
                     <TableHead className="w-[2.75rem]"></TableHead>
                   </TableRow>
@@ -1095,9 +1104,9 @@ function MainPage() {
                       <TableCell className="hidden xl:table-cell"><Skeleton className="h-4 w-20" /></TableCell>
                       <TableCell className="hidden xl:table-cell"><Skeleton className="h-4 w-24" /></TableCell>
                       <TableCell><Skeleton className="h-4 w-20" /></TableCell>
-                      <TableCell className="text-right"><Skeleton className="ml-auto h-4 w-14" /></TableCell>
-                      <TableCell className="text-right"><Skeleton className="ml-auto h-4 w-14" /></TableCell>
-                      <TableCell className="text-right"><Skeleton className="ml-auto h-4 w-14" /></TableCell>
+                      <TableCell className="text-center"><Skeleton className="mx-auto h-4 w-14" /></TableCell>
+                      <TableCell className="text-center"><Skeleton className="mx-auto h-4 w-14" /></TableCell>
+                      <TableCell className="text-center"><Skeleton className="mx-auto h-4 w-14" /></TableCell>
                       <TableCell className="text-right"><Skeleton className="ml-auto h-8 w-24" /></TableCell>
                       <TableCell><Skeleton className="h-8 w-8" /></TableCell>
                     </TableRow>
@@ -1123,9 +1132,9 @@ function MainPage() {
                     <TableHead className="hidden xl:table-cell">Barrio</TableHead>
                     <TableHead className="hidden xl:table-cell">Tipo</TableHead>
                     <SortableHead field="fecha" label="Fecha" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} />
-                    <SortableHead field="volumen" label="Volumen" unit="m³" className="w-[7rem]" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="right" />
-                    <SortableHead field="peso" label="Peso" unit="kg" className="w-[7rem]" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="right" />
-                    <SortableHead field="area" label="Área" unit="m²" className="w-[7rem]" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="right" />
+                    <SortableHead field="volumen" label="Volumen" unit="m³" className="w-[7rem]" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="center" />
+                    <SortableHead field="peso" label="Peso" unit="kg" className="w-[7rem]" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="center" />
+                    <SortableHead field="area" label="Área" unit="m²" className="w-[7rem]" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} align="center" />
                     <TableHead className="text-right"></TableHead>
                     <TableHead className="w-[2.75rem]"></TableHead>
                   </TableRow>
@@ -1300,13 +1309,13 @@ function MainPage() {
                           El guion de "sin dato" va CENTRADO y no alineado a la
                           derecha como las cifras: pegado al borde derecho
                           parecía un número cortado. */}
-                      <TableCell className="text-right mono tabular-nums">
+                      <TableCell className="text-center mono tabular-nums">
                         {z.summary ? entero(z.summary.totalVolumeM3) : <SinDato />}
                       </TableCell>
-                      <TableCell className="text-right mono tabular-nums">
+                      <TableCell className="text-center mono tabular-nums">
                         {z.summary ? entero(z.summary.totalWeightKg) : <SinDato />}
                       </TableCell>
-                      <TableCell className="text-right mono tabular-nums">
+                      <TableCell className="text-center mono tabular-nums">
                         {z.summary ? entero(z.summary.totalAreaM2) : <SinDato />}
                       </TableCell>
                       <TableCell className="text-right">
@@ -1360,12 +1369,12 @@ function MainPage() {
                           </div>
                         )}
                         {z.state === "in_progress" && (
-                          <Button size="sm" variant="secondary" onClick={() => resumeInCarga(z)}>
+                          <Button size="sm" variant="secondary" className={ACCION_FILA} onClick={() => resumeInCarga(z)}>
                             <ArrowRightCircle className="mr-1.5 h-3.5 w-3.5" /> Ir a Carga
                           </Button>
                         )}
                         {z.state === "pending_analysis" && (
-                          <Button size="sm" variant="secondary" onClick={() => reviewPending(z)}>
+                          <Button size="sm" variant="secondary" className={ACCION_FILA} onClick={() => reviewPending(z)}>
                             <ArrowRightCircle className="mr-1.5 h-3.5 w-3.5" /> Ir a Análisis
                           </Button>
                         )}
@@ -1383,6 +1392,7 @@ function MainPage() {
                           <Button
                             size="sm"
                             variant="secondary"
+                            className={ACCION_FILA}
                             onClick={() => goToCarga(z.zoneId)}
                             title="Subir imágenes y generar el mapa unificado de este punto"
                           >

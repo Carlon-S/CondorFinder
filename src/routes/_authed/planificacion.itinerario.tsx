@@ -1248,13 +1248,13 @@ function TablaPuntos({
                       vertical, que es la razón por la que esto es una tabla. */}
                   {/* `whitespace-nowrap` y 7rem: "Volumen (m³)" se partía en
                       dos líneas y descuadraba el alto de todo el encabezado. */}
-                  <TableHead className="hidden w-[7rem] whitespace-nowrap text-right 2xl:table-cell">
+                  <TableHead className="hidden w-[7rem] whitespace-nowrap text-center 2xl:table-cell">
                     Volumen (m³)
                   </TableHead>
-                  <TableHead className="hidden w-[6rem] whitespace-nowrap text-right 2xl:table-cell">
+                  <TableHead className="hidden w-[6rem] whitespace-nowrap text-center 2xl:table-cell">
                     Peso (kg)
                   </TableHead>
-                  <TableHead className="hidden w-[6rem] whitespace-nowrap text-right 2xl:table-cell">
+                  <TableHead className="hidden w-[6rem] whitespace-nowrap text-center 2xl:table-cell">
                     Área (m²)
                   </TableHead>
                   {/* "Medición" y no "Fecha": en una vista de calendario, una
@@ -1339,7 +1339,7 @@ function TablaPuntos({
                       <TableCell className="hidden text-xs text-muted-foreground xl:table-cell">
                         {z.frecuencia || "-"}
                       </TableCell>
-                      <TableCell className="hidden text-right 2xl:table-cell">
+                      <TableCell className="hidden text-center 2xl:table-cell">
                         <span className="mono text-xs tabular-nums text-foreground">
                           {cifra ? (
                             entero(cifra.volumeM3)
@@ -1348,7 +1348,7 @@ function TablaPuntos({
                           )}
                         </span>
                       </TableCell>
-                      <TableCell className="hidden text-right 2xl:table-cell">
+                      <TableCell className="hidden text-center 2xl:table-cell">
                         <span className="mono text-xs tabular-nums text-foreground">
                           {cifra ? (
                             entero(cifra.weightKg)
@@ -1357,7 +1357,7 @@ function TablaPuntos({
                           )}
                         </span>
                       </TableCell>
-                      <TableCell className="hidden text-right 2xl:table-cell">
+                      <TableCell className="hidden text-center 2xl:table-cell">
                         <span className="mono text-xs tabular-nums text-foreground">
                           {cifra ? (
                             entero(cifra.areaM2)

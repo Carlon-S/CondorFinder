@@ -231,6 +231,8 @@ Además del CRUD de puntos, expone el de **unidades individuales** (`/resources/
 | `POST` | `/puntos-diarios` | Crea un retiro de clase `escombros` o `extras` |
 | `PUT` | `/puntos-diarios/{id}` | Edita uno |
 | `DELETE` | `/puntos-diarios/{id}` | Elimina uno |
+| `GET` | `/puntos-diarios/fechas` | Qué días tienen puntos y cuántos, en **una** agregación. Es lo que permite marcar en la interfaz los días con datos en vez de obligar a probar fecha por fecha. Va declarada antes de `/{id}` o ese parámetro la captura |
+| `POST` | `/puntos-diarios/copiar?desde=&hacia=` | Copia los puntos de un día a otro, por omisión a hoy. **Suma, no reemplaza** (al revés que el copiado del itinerario: los puntos de hoy los acaba de escribir alguien) y **es idempotente**, porque se saltan los que ya existen en el destino con la misma dirección y clase. Rechaza una fecha futura y el día contra sí mismo |
 | `GET` | `/puntos-diarios/solicitudes` | Los 17 programas de la hoja `SOLICITUDES` más los agregados a mano |
 | `POST` | `/puntos-diarios/solicitudes` | Agrega un tipo de solicitud. Rechaza repetidos |
 | `DELETE` | `/puntos-diarios/solicitudes/{id}` | Elimina uno agregado a mano. Se niega con los 17 de la planilla y con los que algún punto esté usando |
@@ -263,7 +265,10 @@ Además del CRUD de puntos, expone el de **unidades individuales** (`/resources/
 
 **La zona ganó campos propios** (todos opcionales): `kind` (`basural` o `permanente`), `address`, `comuna`, `barrio`, `lat`, `lng`, `tipo` (`Microbasural` o `VIRS`), `frecuencia` y `active`. Las zonas anteriores no traen `kind`, y ausente significa `basural`: no hay nada que migrar.
 
+**Un LUGAR declarado sobrevive a sus vuelos.** Los dos borrados de análisis (`DELETE /analyses/{id}` y `DELETE /analyses/versions/{id}`) eliminan la zona cuando queda sin ningún análisis, **salvo que sea un lugar que alguien registró**: `_zona_es_declarada()` lo decide mirando `kind: "permanente"` o cualquier campo del alta a mano (`address`, `comuna`, `barrio`, `lat`, `lng`, `photoUrl`, `tipo`, `frecuencia`) no vacío, más una consulta aparte al itinerario. No alcanza con mirar `kind`, porque a una zona nacida de un vuelo se le puede completar la dirección después y esos datos los escribió una persona igual. El defecto que corrige era alcanzable: a un punto permanente se le guardaba un análisis, se borraba, y el punto desaparecía con su dirección y su lugar en el reparto semanal. Las dos respuestas llevan **`zonaConservada`** para que la interfaz no tenga que repetir la regla.
+
 Los dos juegos de campos son **disjuntos**: el alta a mano escribe dirección, barrio, tipo y frecuencia; el vuelo escribe `orthoCenter`, `orthoBounds`, versiones y análisis. Una zona puede ir completándose por los dos lados sin que haya nada que reconciliar.
+| `DELETE` | `/analyses/versions/{sourceTaskId}` | **Borra un VUELO completo**: todos los análisis que comparten ese `sourceTaskId`, en una operación. Un vuelo es la unidad que el trabajador reconoce; un análisis es una medición de ese vuelo y puede haber varias. Borrarlas de a una reconciliaba la vigencia de la zona una vez por medición y dejaba N entradas de "análisis" en la bitácora en vez de una de "vuelo". No toca los archivos: eso lo pide el frontend. Va declarada antes de `/{analysis_id}` |
 | `POST` | `/analyses/versions/{sourceTaskId}/reassign` | Separa una versión completa en una zona nueva. Existe porque agrupar por HDU7 es una heurística y, con el modelo de zonas, una confirmación equivocada fusionaría dos historias de forma permanente |
 
 ---
