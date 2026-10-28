@@ -53,18 +53,34 @@ export function area(n: number): string {
 /**
  * Una cifra para texto corrido: hasta dos decimales, sin ceros de relleno.
  *
- * **Cuándo usar esta y cuándo `volumen()`**, que es la única distinción que
- * hay que recordar:
- *
- * - `volumen()` fija dos decimales y va en las COLUMNAS de una tabla, donde lo
- *   que importa es que las cifras se alineen verticalmente. "10,00" sobre
- *   "6,94" se compara de un vistazo; "10" sobre "6,94" no.
- * - `cifra()` va en rótulos y frases, donde el relleno estorba: la capacidad de
- *   una tolva es "10 m³" y no "10,00 m³", pero el balde del minicargador sigue
- *   siendo "0,5 m³".
+ * Va en rótulos y frases, donde el relleno estorba: la capacidad de una tolva
+ * es "10 m³" y no "10,00 m³", pero el balde del minicargador sigue siendo
+ * "0,5 m³".
  */
 export function cifra(n: number): string {
   return n.toLocaleString(LOCALE, { maximumFractionDigits: 2 });
+}
+
+/**
+ * Una magnitud redondeada al entero, con separador de miles.
+ *
+ * **Es la que va en las columnas de los LISTADOS.** Ahí lo que se hace es
+ * barrer filas comparando órdenes de magnitud, y los decimales son ruido: en
+ * una columna de `7.498,67` / `53.176,59` / `2.169.169` lo único que se lee de
+ * un vistazo es cuántos dígitos tiene cada una, y los centímetros cúbicos no
+ * cambian ninguna decisión. El detalle con decimales está en la vista de
+ * análisis, que es donde se mira una zona de cerca.
+ *
+ * Las tres resumidas, para no tener que volver acá:
+ *
+ * | Dónde                         | Función              | 7498.67 sale como |
+ * |-------------------------------|----------------------|-------------------|
+ * | Columna de un listado, KPI    | `entero()`           | `7.499`           |
+ * | Métricas de la vista análisis | `volumen()`/`area()` | `7.498,67`        |
+ * | Un rótulo en una frase        | `cifra()`            | `7.498,67`        |
+ */
+export function entero(n: number): string {
+  return numero(n, 0);
 }
 
 /**

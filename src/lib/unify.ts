@@ -489,7 +489,14 @@ export async function deleteAllImages(): Promise<void> {
  * keepalive: true garantiza que el browser complete la petición aunque la página esté cerrando.
  */
 export function deleteAllImagesSync(): void {
-  fetch(`${BACKEND_URL}/upload`, { method: "DELETE", keepalive: true });
+  // `credentials` también acá: sin la cookie el backend responde 401 y la
+  // limpieza no ocurría, pero al correr en `beforeunload` nadie veía el error
+  // y las imágenes quedaban en UPLOAD_DIR hasta la siguiente subida.
+  fetch(`${BACKEND_URL}/upload`, {
+    method: "DELETE",
+    keepalive: true,
+    credentials: "include",
+  });
 }
 
 /**

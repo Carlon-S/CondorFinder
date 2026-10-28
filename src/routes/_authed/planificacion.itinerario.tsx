@@ -76,7 +76,7 @@ import {
   type ZoneRecord,
 } from "@/lib/analysisStore";
 import { zoneTotals } from "@/lib/volumeReport";
-import { area, peso, volumen } from "@/lib/formato";
+import { entero } from "@/lib/formato";
 import { FiltroDropdown } from "@/components/FiltroDropdown";
 import {
   DIAS,
@@ -1342,27 +1342,27 @@ function TablaPuntos({
                       <TableCell className="hidden text-right 2xl:table-cell">
                         <span className="mono text-xs tabular-nums text-foreground">
                           {cifra ? (
-                            volumen(cifra.volumeM3)
+                            entero(cifra.volumeM3)
                           ) : (
-                            <span className="text-muted-foreground/60">-</span>
+                            <span className="block text-center text-muted-foreground/60">-</span>
                           )}
                         </span>
                       </TableCell>
                       <TableCell className="hidden text-right 2xl:table-cell">
                         <span className="mono text-xs tabular-nums text-foreground">
                           {cifra ? (
-                            peso(cifra.weightKg)
+                            entero(cifra.weightKg)
                           ) : (
-                            <span className="text-muted-foreground/60">-</span>
+                            <span className="block text-center text-muted-foreground/60">-</span>
                           )}
                         </span>
                       </TableCell>
                       <TableCell className="hidden text-right 2xl:table-cell">
                         <span className="mono text-xs tabular-nums text-foreground">
                           {cifra ? (
-                            area(cifra.areaM2)
+                            entero(cifra.areaM2)
                           ) : (
-                            <span className="text-muted-foreground/60">-</span>
+                            <span className="block text-center text-muted-foreground/60">-</span>
                           )}
                         </span>
                       </TableCell>

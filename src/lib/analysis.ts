@@ -77,10 +77,30 @@ export interface WastePolygon {
   confidence: number;
 }
 
+/** Mensaje para un 401, que acá significa una cosa concreta. */
+const SESION_CAIDA =
+  "Tu sesión no está activa. Vuelve a iniciar sesión y reintenta el análisis.";
+
 export async function startVolumeAnalysis(
   taskId: string,
 ): Promise<{ status: string; message?: string }> {
-  const res = await fetch(`${BACKEND_URL}/analyze/${taskId}`, { method: "POST" });
+  const res = await fetch(`${BACKEND_URL}/analyze/${taskId}`, {
+    method: "POST",
+    // **Sin esto la petición sale sin la cookie de sesión.** Toda la API exige
+    // sesión con una dependencia global, así que en producción (donde el
+    // backend es otro origen) el backend respondía 401 y el análisis no
+    // arrancaba nunca. Este archivo quedó fuera del barrido que le puso
+    // `credentials` a los 14 fetch de unify.ts, y el síntoma era peor que un
+    // error: la barra se quedaba clavada en 88% para siempre, porque el
+    // sondeo de abajo tampoco miraba el código de estado.
+    credentials: "include",
+  });
+  if (!res.ok) {
+    return {
+      status: "error",
+      message: res.status === 401 ? SESION_CAIDA : `El servidor respondió ${res.status}.`,
+    };
+  }
   return res.json();
 }
 
@@ -95,14 +115,41 @@ export async function pollVolumeAnalysis(
   while (true) {
     if (signal?.aborted) throw new DOMException("aborted", "AbortError");
 
-    const res = await fetch(`${BACKEND_URL}/status/${taskId}`, { signal });
+    const res = await fetch(`${BACKEND_URL}/status/${taskId}`, {
+      signal,
+      credentials: "include",
+    });
+
+    // **El sondeo tiene que CORTAR ante un error HTTP.** Antes leía el cuerpo
+    // sin mirar el estado: con un 401, `data.analysis_status` venía undefined,
+    // ninguna de las dos salidas se cumplía y el bucle seguía para siempre
+    // pidiendo `/status` cada 3 segundos. La barra quedaba en 88% (el tope que
+    // fija `Math.min` más abajo) sin ningún mensaje, y en los logs del backend
+    // se veía una fila infinita de 401.
+    if (!res.ok) {
+      return {
+        status: "error",
+        message:
+          res.status === 401 ? SESION_CAIDA : `El servidor respondió ${res.status} al consultar el estado.`,
+      };
+    }
+
     const data = await res.json();
     const analysisStatus = data.analysis_status;
 
     if (analysisStatus === "done") {
       if (onProgress) onProgress(100);
 
-      const jsonRes = await fetch(detectionJsonUrl, { signal });
+      // `/result/` es una de las dos excepciones que no exigen sesión (sirve
+      // imágenes y JSON a etiquetas <img>), pero la cookie va igual: si algún
+      // día deja de ser excepción, esto no se rompe en silencio.
+      const jsonRes = await fetch(detectionJsonUrl, { signal, credentials: "include" });
+      if (!jsonRes.ok) {
+        return {
+          status: "error",
+          message: "El análisis terminó pero no se pudo leer su resultado. Reintenta.",
+        };
+      }
       const jsonData = await jsonRes.json();
       const detections: EnrichedDetection[] = jsonData.detections ?? [];
 

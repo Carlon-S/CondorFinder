@@ -91,7 +91,7 @@ import {
   deleteTask,
   type PendingTask,
 } from "@/lib/unify";
-import { area, cifraOGuion, peso, volumen } from "@/lib/formato";
+import { entero } from "@/lib/formato";
 import { FiltroDropdown } from "@/components/FiltroDropdown";
 import {
   clearImageState,
@@ -354,6 +354,17 @@ async function loadZoneRows(): Promise<ZoneRow[]> {
   // En progreso y pendientes de análisis van primero (necesitan atención). Las
   // zonas sin vuelo van al final: no piden nada, solo están registradas.
   return [...inProgress, ...pendingAnalysis, ...doneSorted, ...sinVueloSorted];
+}
+
+/** El guion de una celda numérica sin dato.
+ *
+ *  Centrado, no alineado a la derecha como las cifras: pegado al borde derecho
+ *  de la columna parecía el final de un número cortado. Componente y no un
+ *  `<span>` escrito en cada celda porque son seis celdas entre esta tabla y la
+ *  del itinerario, y es exactamente la clase de detalle que queda distinto en
+ *  una de ellas. */
+function SinDato() {
+  return <span className="block text-center text-muted-foreground/60">-</span>;
 }
 
 /** Filas por página de la tabla de zonas.
@@ -936,9 +947,9 @@ function MainPage() {
               // histórico (reemplazado) ya no cuenta como zona vigente.
               value={String(zones.filter((z) => !z.historical).length)}
             />
-            <Kpi icon={<Boxes className="h-4 w-4" />} label="Volumen total" value={`${volumen(totals.volume)} m³`} />
-            <Kpi icon={<Scale className="h-4 w-4" />} label="Peso total" value={`${peso(totals.weight)} kg`} />
-            <Kpi icon={<Crosshair className="h-4 w-4" />} label="Área total" value={`${area(totals.area)} m²`} />
+            <Kpi icon={<Boxes className="h-4 w-4" />} label="Volumen total" value={`${entero(totals.volume)} m³`} />
+            <Kpi icon={<Scale className="h-4 w-4" />} label="Peso total" value={`${entero(totals.weight)} kg`} />
+            <Kpi icon={<Crosshair className="h-4 w-4" />} label="Área total" value={`${entero(totals.area)} m²`} />
             {inProgressCount > 0 && (
               <div className="flex flex-shrink-0 items-center gap-2 px-5 py-3.5">
                 <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-primary" />
@@ -1095,7 +1106,9 @@ function MainPage() {
               </Table>
             </div>
           ) : visibleRows.length > 0 ? (
-            <div className="flex-1 overflow-y-auto px-5 pb-5 animate-in fade-in duration-300">
+            // `pb-2` y no `pb-5`: la barra de paginación ya aporta su propio
+            // espacio, y con los dos quedaba un hueco doble antes del pie.
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-2 animate-in fade-in duration-300">
               <Table>
                 <TableHeader>
                   <TableRow className="bg-muted/50 hover:bg-muted/50">
@@ -1279,18 +1292,22 @@ function MainPage() {
                         </span>
                       </TableCell>
                       {/* Solo la cifra: la unidad la dice el encabezado de la
-                          columna. El respaldo es un guion y no ", ": una zona
-                          sin análisis guardado imprimía una coma suelta.
-                          Formateadas en español (miles con punto): sin agrupar,
-                          2169169 y 216916 se ven casi iguales. */}
+                          columna. Redondeadas al entero y con miles separados
+                          por punto: acá se barren filas comparando órdenes de
+                          magnitud, y los decimales son ruido (el detalle fino
+                          está en la vista de análisis).
+
+                          El guion de "sin dato" va CENTRADO y no alineado a la
+                          derecha como las cifras: pegado al borde derecho
+                          parecía un número cortado. */}
                       <TableCell className="text-right mono tabular-nums">
-                        {cifraOGuion(z.summary?.totalVolumeM3, volumen)}
+                        {z.summary ? entero(z.summary.totalVolumeM3) : <SinDato />}
                       </TableCell>
                       <TableCell className="text-right mono tabular-nums">
-                        {cifraOGuion(z.summary?.totalWeightKg, peso)}
+                        {z.summary ? entero(z.summary.totalWeightKg) : <SinDato />}
                       </TableCell>
                       <TableCell className="text-right mono tabular-nums">
-                        {cifraOGuion(z.summary?.totalAreaM2, area)}
+                        {z.summary ? entero(z.summary.totalAreaM2) : <SinDato />}
                       </TableCell>
                       <TableCell className="text-right">
                         {z.state === "done" && (
@@ -1323,19 +1340,18 @@ function MainPage() {
                                 el lugar por su nombre en una lista; acá está en
                                 su propia fila, con su dirección y sus cifras a
                                 la vista.
-                                Solo ícono porque es la acción menos frecuente
-                                de las tres: una zona se consulta muchas más
-                                veces que las que se vuelve a volar. */}
+                                Con fondo y texto, igual que "Evolución" y "Ver
+                                Análisis": estuvo como ícono suelto sin fondo y
+                                era imperceptible al lado de ellos, o sea la
+                                acción existía y no se veía. */}
                             {z.zoneId && (
                               <Button
                                 size="sm"
-                                variant="ghost"
-                                className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+                                variant="secondary"
                                 onClick={() => goToCarga(z.zoneId)}
-                                title="Cargar un vuelo nuevo de esta zona"
-                                aria-label={`Cargar un vuelo nuevo de ${z.zoneName ?? z.name}`}
+                                title="Subir un set de imágenes nuevo y generar otro mapa de este punto"
                               >
-                                <Plus className="h-3.5 w-3.5" />
+                                <Plus className="mr-1.5 h-3.5 w-3.5" /> Nuevo vuelo
                               </Button>
                             )}
                             <Button size="sm" onClick={() => openZone(z.recordId!)}>
@@ -1397,11 +1413,30 @@ function MainPage() {
                 </TableBody>
               </Table>
 
-              {/* La barra se dibuja SIEMPRE, aunque haya una sola página:
-                  apareciendo y desapareciendo movería la tabla justo al
-                  filtrar. Mismo criterio que las tablas de recursos y del
-                  itinerario. */}
-              <div className="flex items-center justify-between border-t border-border pt-3">
+            </div>
+          ) : (
+            <div className="flex flex-1 flex-col items-center justify-center gap-2 p-10 text-center animate-in fade-in duration-300">
+              <FolderOpen className="h-8 w-8 text-muted-foreground/30" />
+              <p className="text-sm font-medium text-foreground">
+                {zones.length === 0 ? "No hay zonas guardadas todavía" : "Ninguna zona coincide con el filtro"}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {zones.length === 0
+                  ? 'Presiona "Agregar punto" para registrar tu primer lugar.'
+                  : "Ajusta el filtro para ver más resultados."}
+              </p>
+            </div>
+          )}
+
+          {/* **La barra va FUERA del contenedor que hace scroll**, así
+              queda pegada al pie de la tarjeta tenga la página 2 filas o
+              10. Estaba dentro, justo después de la última fila, así que
+              con pocas filas flotaba a media tarjeta y con muchas había que
+              desplazarse para encontrarla.
+              Se dibuja siempre que haya filas, aunque sea una sola página:
+              apareciendo y desapareciendo movería la tabla al filtrar. */}
+          {!loading && visibleRows.length > 0 && (
+            <div className="flex flex-shrink-0 items-center justify-between border-t border-border px-5 py-3">
                 <span className="text-[0.625rem] text-muted-foreground">
                   {visibleRows.length} zona{visibleRows.length === 1 ? "" : "s"}
                   {(nameQuery.trim() !== "" || stateFilter !== "all") && ` de ${zones.length}`}
@@ -1432,19 +1467,6 @@ function MainPage() {
                   </Button>
                 </div>
               </div>
-            </div>
-          ) : (
-            <div className="flex flex-1 flex-col items-center justify-center gap-2 p-10 text-center animate-in fade-in duration-300">
-              <FolderOpen className="h-8 w-8 text-muted-foreground/30" />
-              <p className="text-sm font-medium text-foreground">
-                {zones.length === 0 ? "No hay zonas guardadas todavía" : "Ninguna zona coincide con el filtro"}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {zones.length === 0
-                  ? 'Presiona "Agregar punto" para registrar tu primer lugar.'
-                  : "Ajusta el filtro para ver más resultados."}
-              </p>
-            </div>
           )}
           </div>
         </section>
