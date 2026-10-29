@@ -130,48 +130,38 @@ def _tramo(leg: dict) -> dict | None:
     }
 
 
-def _unir(tramos: list[dict]) -> dict:
-    """Varios legs consecutivos en uno. La ida son N legs (uno por parada) y el
-    mapa la pinta como un solo trazo, así que se concatenan las geometrías y se
-    suman las cifras. El primer punto de cada leg repite el último del anterior,
-    y se descarta para no dejar vértices duplicados en la línea."""
-    path: list[list[float]] = []
-    for t in tramos:
-        # El corte del primer vértice depende de si YA hay trazo acumulado, no
-        # de la posición del tramo en la lista: un salto nulo al principio deja
-        # el acumulado vacío, y ahí cortarle el primer punto al siguiente
-        # perdería el vértice donde empieza el recorrido.
-        path.extend(t["path"] if not path else t["path"][1:])
-    return {
-        "path": path,
-        "distanceKm": sum(t["distanceKm"] for t in tramos),
-        "durationHours": sum(t["durationHours"] for t in tramos),
-    }
+def route_saltos(waypoints: list[tuple[float, float]]) -> dict | None:
+    """Un tramo por SALTO del recorrido completo, con tiempos que consideran el
+    tráfico del momento (AC5).
 
+    `waypoints` es la secuencia entera, empezando y terminando en la base, con
+    el relleno repetido tantas veces como viajes tenga el recorrido:
 
-def route_tramos(
-    origin: tuple[float, float],
-    stops: list[tuple[float, float]],
-    disposal: tuple[float, float],
-) -> dict | None:
-    """Los tres tramos de `origen -> stops (en orden) -> relleno -> origen`, con
-    tiempos que consideran el tráfico del momento (AC5).
+        base, z1, z2, relleno, z3, relleno, base
 
-    Devuelve {"outbound": t, "disposal": t, "return": t} donde cada `t` tiene la
-    misma forma que osrm_client.route_geometry (path/distanceKm/durationHours),
-    o None si no se pudo. None significa "usá OSRM": no se reintenta."""
+    Devuelve `{"legs": [t, ...]}` con exactamente `len(waypoints) - 1` tramos,
+    cada uno con la misma forma que `osrm_client.route_geometry`
+    (path/distanceKm/durationHours), o None si no se pudo. None significa
+    "usá OSRM": no se reintenta.
+
+    **Sigue siendo UNA sola solicitud**, que es lo que sostiene el costo. La API
+    acepta paradas intermedias repetidas, así que el relleno puede aparecer
+    varias veces en la misma llamada: el recorrido de tres viajes cuesta lo
+    mismo que el de uno. Antes esta función devolvía tres tramos fijos
+    (ida/descarga/regreso) y fusionaba los saltos de la ida; agruparlos en
+    viajes es ahora trabajo de `routing.py`, que es el que sabe dónde cae cada
+    descarga."""
     clave = os.getenv("GOOGLE_ROUTES_API_KEY")
-    if not clave or not stops:
+    if not clave or len(waypoints) < 3:
         return None
 
-    # Las paradas más el relleno. El origen es también el destino.
-    intermedios = [*stops, disposal]
+    intermedios = waypoints[1:-1]
     if len(intermedios) > _MAX_INTERMEDIOS:
         return None
 
     cuerpo = {
-        "origin": _waypoint(origin),
-        "destination": _waypoint(origin),
+        "origin": _waypoint(waypoints[0]),
+        "destination": _waypoint(waypoints[-1]),
         "intermediates": [_waypoint(p) for p in intermedios],
         "travelMode": "DRIVE",
         # Lo que hace que los tiempos sean con tráfico. Sin esto la respuesta
@@ -216,32 +206,12 @@ def route_tramos(
         # quiere hacer contra una API que se cobra por llamada.
         return None
 
-    # origen -> stop1 .. stopN -> relleno -> origen son N+2 tramos.
-    if len(legs) != len(stops) + 2:
+    # Un leg por salto: con N waypoints son N-1.
+    if len(legs) != len(waypoints) - 1:
         return None
 
     tramos = [_tramo(leg) for leg in legs]
     if any(t is None for t in tramos):
         return None
 
-    return {
-        "outbound": _unir(tramos[: len(stops)]),
-        "disposal": tramos[len(stops)],
-        "return": tramos[len(stops) + 1],
-        # Los saltos de la ida SIN fusionar: origen->z1, z1->z2, ... Son los
-        # mismos legs que acaban de unirse para el trazo del mapa, pero la línea
-        # de tiempo necesita el detalle y venía en la misma respuesta. Fusionar
-        # sin conservarlos era tirar el dato por el que ya se pagó, y es lo que
-        # dejaba las conexiones entre zonas sin tiempo.
-        "hops": [
-            {
-                "distanceKm": t["distanceKm"],
-                "durationHours": t["durationHours"],
-                # La geometría del salto también, no solo sus cifras: el mapa
-                # pinta de distinto el primer tramo y las transiciones entre
-                # zonas, y ya está acá porque `_unir()` la acaba de concatenar.
-                "path": t["path"],
-            }
-            for t in tramos[: len(stops)]
-        ],
-    }
+    return {"legs": tramos}

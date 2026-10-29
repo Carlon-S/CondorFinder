@@ -45,6 +45,7 @@ import {
   Pencil,
   Plus,
   Clock,
+  ChevronDown,
   Construction,
   Crosshair,
   Layers,
@@ -67,6 +68,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
 import { GeoMap, type GeoMapPoint } from "@/components/GeoMap";
 import {
   Dialog,
@@ -89,6 +91,7 @@ import {
   setPendingOpenId,
   type AnalysisSummary,
   type SavedAnalysisRecord,
+  type ZoneRecord,
 } from "@/lib/analysisStore";
 import {
   createWorker,
@@ -96,6 +99,7 @@ import {
   listResourcePoints,
   listResources,
   listWorkers,
+  setResourceAvailability,
   nombresRepetidos,
   ROLES,
   updateWorker,
@@ -130,6 +134,7 @@ import { ZoneZoomDialog } from "@/components/ZoneZoomDialog";
 import { RouteLegend } from "@/components/RouteLegend";
 import { PuntoDiarioDialog } from "@/components/PuntoDiarioDialog";
 import { ConfirmarBorrado } from "@/components/ConfirmarBorrado";
+import { Obligatorio } from "@/components/Obligatorio";
 import {
   copiarPuntosDiarios,
   eliminarPuntoDiario,
@@ -561,6 +566,55 @@ function RutasPage() {
   const [loadingSaved, setLoadingSaved] = useState(false);
   // AC4 — selección múltiple: ids marcados en el diálogo, todavía no cargados.
   const [selectedToLoad, setSelectedToLoad] = useState<Set<string>>(new Set());
+  /** Puntos diarios cargados a la ruta, y los marcados en el diálogo.
+   *
+   *  Conjuntos APARTE de `loadedIds` y no un conjunto mezclado: un punto diario
+   *  y un análisis se resuelven contra colecciones distintas, y un id suelto no
+   *  dice en cuál buscarlo. Es la misma razón por la que la petición manda
+   *  paradas tipadas. */
+  const [loadedDiarioIds, setLoadedDiarioIds] = useState<Set<string>>(new Set());
+  /** Las zonas registradas que todavía no tienen vuelo. Se listan en el diálogo
+   *  deshabilitadas, con "Sin vuelo" como motivo. */
+  const [zonasSinVuelo, setZonasSinVuelo] = useState<ZoneRecord[]>([]);
+  const [selectedDiarios, setSelectedDiarios] = useState<Set<string>>(new Set());
+  /** Cuántas paradas hay cargadas, de las dos clases. El botón de generar
+   *  miraba solo las zonas analizadas, así que un plan hecho únicamente de
+   *  retiros del día quedaba imposible de generar. */
+  const paradasCargadas = loadedIds.size + loadedDiarioIds.size;
+
+  /** El volumen declarado de una parada, ya como número, o null si no hay uno
+   *  válido. Acepta coma decimal porque es lo que se teclea en español. */
+  const numeroDeclarado = (id: string): number | null => {
+    const bruto = (volumenARetirar[id] ?? "").trim().replace(",", ".");
+    if (bruto === "") return null;
+    const n = Number(bruto);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+
+  /** Las paradas cargadas con lo que hace falta para pedir su volumen: id,
+   *  nombre y cuánto hay medido (o declarado, para un punto diario). */
+  const paradasParaDeclarar = useMemo(() => {
+    const deZonas = loadedAnalyses.map((a) => ({
+      id: a.id,
+      nombre: a.name,
+      disponible: a.summary.totalVolumeM3,
+      origen: "Zona" as const,
+    }));
+    const deDiarios = puntosDiarios
+      .filter((p) => loadedDiarioIds.has(p.id))
+      .map((p) => ({
+        id: p.id,
+        nombre: p.address,
+        disponible: p.volumenM3 ?? 0,
+        origen: "Retiro del día" as const,
+      }));
+    return [...deZonas, ...deDiarios];
+  }, [loadedAnalyses, puntosDiarios, loadedDiarioIds]);
+
+  /** Las paradas a las que todavía no se les declaró un volumen válido. El
+   *  botón de generar se bloquea con ellas y el diálogo las señala, en vez de
+   *  dejar que el backend responda con el motivo después de la llamada. */
+  const sinVolumen = paradasParaDeclarar.filter((p) => numeroDeclarado(p.id) === null);
 
   // Puntos (HDU6) — se ven siempre en el mapa (atenuados si están
   // inactivos), y su subconjunto activo es lo que la confirmación (AC1)
@@ -648,6 +702,54 @@ function RutasPage() {
 
   // AC1 — confirmación.
   const [confirmOpen, setConfirmOpen] = useState(false);
+  /** Cuánto volumen retirar de cada parada cargada, por id, como TEXTO.
+   *
+   *  Texto y no número porque es lo que el campo tiene mientras se escribe: un
+   *  "1," a medio teclear no es un número, y guardarlo ya convertido obligaría a
+   *  decidir qué hacer con cada pulsación intermedia. Se convierte al generar.
+   *
+   *  **Es del PLAN, no de la zona**, igual que la marca de prioritaria: cuánto
+   *  se saca hoy de un basural no es un atributo del basural. Por eso no se
+   *  persiste y se limpia al descargar la parada. */
+  const [volumenARetirar, setVolumenARetirar] = useState<Record<string, string>>({});
+  /** El desglose de la flota abierto en el diálogo (AC7).
+   *
+   *  **Son dos listas distintas y mezclarlas es el error a evitar**: acá el
+   *  trabajador decide QUÉ HAY disponible, y después el plan informa QUÉ ELIGIÓ
+   *  `_trucks_used`. El usuario no elige los vehículos del recorrido.
+   *
+   *  La flota sale de `recursosPorPunto`, que `refreshOriginPoints()` ya trae
+   *  agrupada por punto en una sola petición: una segunda fuente para lo mismo
+   *  daría dos respuestas cuando una quede desactualizada.
+   *
+   *  **Colapsado por omisión.** Las 21 unidades con su foto abiertas de entrada
+   *  tapan el resto del formulario, que es justo lo que el diálogo viene a
+   *  confirmar. */
+  const [flotaAbierta, setFlotaAbierta] = useState(false);
+  /** El id de la unidad cuyo interruptor está en vuelo, para no dejar la fila
+   *  muda mientras se guarda. */
+  const [cambiandoUnidad, setCambiandoUnidad] = useState<string | null>(null);
+
+  /** Las unidades de los puntos activos, de `recursosPorPunto`. */
+  const flotaDeLosActivos = useMemo(
+    () => activePoints.flatMap((p) => recursosPorPunto[p.id] ?? []),
+    [activePoints, recursosPorPunto],
+  );
+
+  const alternarUnidad = async (r: Resource) => {
+    setCambiandoUnidad(r.id);
+    try {
+      await setResourceAvailability(r.id, !r.disponible);
+      // Se relee TODO en vez de parchear la fila: la capacidad de transporte de
+      // un punto la calcula el backend en cada lectura, así que sin esto el
+      // resumen de arriba seguiría mostrando los m³ de antes del cambio.
+      await refreshOriginPoints();
+    } catch (e) {
+      notify.error("No se pudo cambiar la disponibilidad", (e as Error).message);
+    } finally {
+      setCambiandoUnidad(null);
+    }
+  };
   const [loadingPoints, setLoadingPoints] = useState(false);
   const [availableHours, setAvailableHours] = useState("8");
   const [priorityWasteType, setPriorityWasteType] = useState<string>("none");
@@ -780,7 +882,7 @@ function RutasPage() {
 
   // AC2/AC6.
   const [generating, setGenerating] = useState(false);
-  // RoutePlanStop y no una forma propia: la parada trae ahora `analysisId`, que
+  // RoutePlanStop y no una forma propia: la parada trae ahora `stopId`, que
   // es lo que permite mostrar el volumen de cada zona en la línea de tiempo sin
   // volver a pedirlo por la red.
   const [routeStops, setRouteStops] = useState<RoutePlanStop[] | null>(null);
@@ -954,8 +1056,16 @@ function RutasPage() {
       // sesión) tiene que aparecer con su nombre nuevo al abrir el diálogo, que
       // es justo el momento en que alguien elige qué cargar.
       const [records, zonas] = await Promise.all([listAnalyses(), listZones().catch(() => [])]);
-      setSavedAnalyses(records.filter((r) => !r.historical));
+      const vigentes = records.filter((r) => !r.historical);
+      setSavedAnalyses(vigentes);
       if (zonas.length > 0) setZoneNames(new Map(zonas.map((z) => [z.id, z.name])));
+      // Las zonas SIN vuelo se listan igual, deshabilitadas y con su motivo.
+      // Omitirlas era peor que mostrarlas: el trabajador las busca acá (sabe
+      // que el punto existe, lo registró él) y al no encontrarlas no tenía
+      // forma de saber si el sistema las ignora o si se equivocó de nombre.
+      const conAnalisis = new Set(vigentes.map((r) => r.zoneId).filter(Boolean) as string[]);
+      setZonasSinVuelo(zonas.filter((z) => !conAnalisis.has(z.id)));
+      recargarPuntosDiarios();
     } catch (err) {
       notify.error(
         "No se pudieron cargar las zonas guardadas",
@@ -988,7 +1098,7 @@ function RutasPage() {
   // y dejaban de hacerlo en cuanto había otra actualización en vuelo.
   const handleLoadSelected = () => {
     const ids = Array.from(selectedToLoad);
-    if (ids.length === 0) return;
+    if (ids.length === 0 && selectedDiarios.size === 0) return;
 
     const ubicables = ids
       .map((id) => allAnalyses.find((a) => a.id === id))
@@ -1001,8 +1111,22 @@ function RutasPage() {
       return next;
     });
 
+    // Los puntos diarios marcados se confirman en la misma acción. No pasan
+    // por `ubicables` porque su filtro de carga es otro (volumen declarado y
+    // coordenadas, no un CRS reproyectable) y el diálogo ya lo aplicó: lo que
+    // llegó marcado es cargable por construcción.
+    const diarios = Array.from(selectedDiarios);
+    if (diarios.length > 0) {
+      setLoadedDiarioIds((prev) => {
+        const next = new Set(prev);
+        for (const id of diarios) next.add(id);
+        return next;
+      });
+    }
+
     setLoadDialogOpen(false);
     setSelectedToLoad(new Set());
+    setSelectedDiarios(new Set());
 
     // Acercarse a lo que se acaba de cargar, que es lo que se viene a mirar.
     //
@@ -1037,6 +1161,14 @@ function RutasPage() {
   // apareciendo en el mapa como círculo, solo que atenuado, igual que uno
   // que nunca se cargó.
   const handleUnload = (id: string) => {
+    // El volumen declarado se va con la parada: si se vuelve a cargar, se
+    // declara de nuevo. Dejarlo haría que reaparecer una zona trajera una cifra
+    // que nadie volvió a confirmar.
+    setVolumenARetirar((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
     setLoadedIds((prev) => {
       const next = new Set(prev);
       next.delete(id);
@@ -1106,6 +1238,10 @@ function RutasPage() {
 
   // AC1 — abre la confirmación, trae el estado real de los puntos.
   const openConfirm = async () => {
+    // La flota se pide al ABRIR y no al montar la vista: es la foto del momento
+    // en que se decide, y entre que se entró a la pantalla y se aprieta generar
+    // alguien pudo cambiar una disponibilidad desde /recursos.
+    setFlotaAbierta(false);
     setRouteError(null);
     setConfirmOpen(true);
     setLoadingPoints(true);
@@ -1119,13 +1255,25 @@ function RutasPage() {
   // AC2/AC6.
   const handleGenerateRoute = async () => {
     if (!hoursValid || activePoints.length === 0) return;
+    if (loadedIds.size === 0 && loadedDiarioIds.size === 0) return;
 
     setGenerating(true);
-    // Solo se mandan los ids de los análisis cargados — el backend resuelve
-    // el volumen/polígono real de cada uno contra Mongo (routing.py), nunca
-    // confía en los datos que arma el navegador.
+    // Solo se mandan las REFERENCIAS de lo cargado (origen + id) — el backend
+    // resuelve la geometría, el peso y las clases de cada parada contra Mongo
+    // (routing.py), nunca confía en los datos que arma el navegador.
     const result = await generateRoute({
-      analysisIds: Array.from(loadedIds),
+      stops: [
+        ...Array.from(loadedIds).map((id) => ({
+          kind: "analysis" as const,
+          id,
+          retirarM3: numeroDeclarado(id),
+        })),
+        ...Array.from(loadedDiarioIds).map((id) => ({
+          kind: "punto_diario" as const,
+          id,
+          retirarM3: numeroDeclarado(id),
+        })),
+      ],
       activePointIds: activePoints.map((p) => p.id),
       availableHours: hoursNum,
       priorityWasteType: priorityWasteType === "none" ? null : priorityWasteType,
@@ -1133,7 +1281,7 @@ function RutasPage() {
       // intersección por su cuenta (no confía en lo que mande el navegador),
       // pero mandar un id que no está en la ruta igual sería mandar una
       // contradicción, y el contrato se lee mejor sin ella.
-      priorityAnalysisIds: Array.from(prioritarias).filter((id) => loadedIds.has(id)),
+      priorityStopIds: Array.from(prioritarias).filter((id) => loadedIds.has(id)),
       // Solo las marcadas, y sin el id local ni la bandera, que son de la
       // vista. Lista vacía = el backend no restringe por personal.
       personal: cuadrillaDeHoy.map((p) => ({ nombre: p.nombre.trim(), rol: p.rol })),
@@ -1294,14 +1442,37 @@ function RutasPage() {
   /** Qué zona es cada parada de un recorrido, con lo que hace falta para
    *  dibujarla: dónde queda, cuánto hay y de qué es.
    *
-   *  Resuelve por `analysisId` cuando la parada lo trae, y cae a emparejar por
-   *  NOMBRE cuando no. El respaldo existe porque el backend todavía no manda
-   *  ese campo, y sin él la línea de tiempo muestra paradas mudas aunque la
-   *  vista tenga los datos a mano. Es deliberadamente estricto: solo empareja
-   *  si hay UNA zona cargada con ese nombre exacto, porque con dos zonas
-   *  homónimas adivinar cuál es sería peor que no mostrar nada. */
+   *  Resuelve por `stopId` cuando la parada lo trae, y cae a emparejar por
+   *  NOMBRE cuando no. El respaldo cubre un plan generado por una versión
+   *  anterior del backend, y sin él la línea de tiempo mostraría paradas mudas
+   *  aunque la vista tenga los datos a mano. Es deliberadamente estricto: solo
+   *  empareja si hay UNA zona cargada con ese nombre exacto, porque con dos
+   *  zonas homónimas adivinar cuál es sería peor que no mostrar nada. */
   const datosDeParada = (stop: RoutePlanStop): DatosDeParada | undefined => {
-    let zona = stop.analysisId ? loadedAnalyses.find((a) => a.id === stop.analysisId) : undefined;
+    // Un punto diario se resuelve contra su propia colección y tiene otra
+    // forma: su volumen lo declaró quien pidió el retiro, **no tiene peso**
+    // porque nadie lo midió, y su "tipo de residuo" es el de la planilla
+    // municipal y no una clase del detector. Devolverlo acá es lo que evita
+    // que la línea de tiempo lo muestre como una parada muda.
+    if (stop.kind === "punto_diario") {
+      const pd = puntosDiarios.find((x) => x.id === stop.stopId);
+      if (!pd) return undefined;
+      return {
+        volumeM3: stop.removedVolumeM3 ?? pd.volumenM3 ?? 0,
+        // `undefined` y no 0: el peso no está medido, y la línea de tiempo
+        // omite el dato en vez de afirmar "0 kg".
+        weightKg: stop.removedWeightKg ?? undefined,
+        // Mismo par [clase, volumen] que una zona medida: su tipo es el de
+        // la planilla municipal y todo su volumen es de esa clase.
+        wasteTypes: pd.tipoResiduo
+          ? ([[pd.tipoResiduo, pd.volumenM3 ?? 0]] as [string, number][])
+          : [],
+        wasteColor: classColor,
+        direccion: pd.address || undefined,
+      };
+    }
+
+    let zona = stop.stopId ? loadedAnalyses.find((a) => a.id === stop.stopId) : undefined;
     if (!zona) {
       const porNombre = loadedAnalyses.filter((a) => a.name === stop.label);
       if (porNombre.length === 1) zona = porNombre[0];
@@ -1671,11 +1842,11 @@ function RutasPage() {
                     </Button>
                     <Button
                       onClick={openConfirm}
-                      disabled={loadedAnalyses.length === 0}
+                      disabled={paradasCargadas === 0}
                       size="lg"
                       className="btn-cta w-full"
                       title={
-                        loadedAnalyses.length === 0
+                        paradasCargadas === 0
                           ? "Carga al menos una zona para poder generar una ruta"
                           : undefined
                       }
@@ -2026,6 +2197,18 @@ function RutasPage() {
                                     valor={String(seg.trucksUsed)}
                                     unidad=""
                                   />
+                                  {/* El criterio pide informar cuántos viajes
+                                      resultaron. Solo se muestra con más de
+                                      uno: "1 viaje" en todos los recorridos de
+                                      siempre sería una columna que nunca dice
+                                      nada. */}
+                                  {(seg.trips ?? 1) > 1 && (
+                                    <Medida
+                                      etiqueta="Viajes"
+                                      valor={String(seg.trips)}
+                                      unidad=""
+                                    />
+                                  )}
                                 </span>
                               </button>
                             </div>
@@ -2049,7 +2232,7 @@ function RutasPage() {
                       </p>
                       <ul className="mt-2 space-y-1.5">
                         {unassigned.map((z) => (
-                          <li key={z.analysisId}>
+                          <li key={z.stopId}>
                             <p className="text-xs font-medium text-foreground">{z.name}</p>
                             <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
                               {z.reason}
@@ -2147,9 +2330,10 @@ function RutasPage() {
       <Dialog open={loadDialogOpen} onOpenChange={setLoadDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Cargar zona</DialogTitle>
+            <DialogTitle>Cargar paradas</DialogTitle>
             <DialogDescription>
-              Marca una o más zonas guardadas para agregar sus basurales al mapa.
+              Marca las zonas y los retiros del día que entran a la ruta. Lo que no se puede
+              cargar aparece igual, con el motivo.
             </DialogDescription>
           </DialogHeader>
           {loadingSaved ? (
@@ -2237,9 +2421,154 @@ function RutasPage() {
               })}
             </ul>
           )}
+
+          {/* **AC2: lo que NO se puede cargar aparece igual, con su motivo.**
+              Omitirlo era peor que mostrarlo: el trabajador viene a buscar un
+              lugar que sabe que existe, porque lo registró él, y al no
+              encontrarlo no tiene forma de saber si el sistema lo ignora, si se
+              equivocó de nombre o si le falta un dato. */}
+          {zonasSinVuelo.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">
+                Zonas sin vuelo ({zonasSinVuelo.length})
+              </p>
+              <ul className="max-h-32 space-y-1 overflow-y-auto">
+                {zonasSinVuelo.map((z) => (
+                  <li
+                    key={z.id}
+                    className="flex items-center gap-2 rounded-md border border-dashed border-border/50 p-2 opacity-70"
+                  >
+                    <MapPin className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/60" />
+                    <p className="min-w-0 flex-1 truncate text-xs">{z.name}</p>
+                    <span className="flex-shrink-0 rounded-full bg-muted px-2 py-0.5 text-[0.625rem] font-medium text-muted-foreground">
+                      Sin vuelo
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-[0.625rem] leading-relaxed text-muted-foreground">
+                Una zona sin medición no tiene volumen, peso ni tipo de residuo, que es sobre lo
+                que descansa el reparto. Vuélale el dron desde Vista Principal.
+              </p>
+            </div>
+          )}
+
+          {/* Los retiros del día (HDU15). Entran con el volumen que declaró
+              quien los pidió y SIN peso, porque nadie lo midió. */}
+          <div className="space-y-1.5">
+            <p className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">
+              Retiros de hoy ({puntosDiarios.length})
+            </p>
+            {puntosDiarios.length === 0 ? (
+              <p className="rounded-md border border-dashed border-border/50 py-3 text-center text-[0.6875rem] text-muted-foreground">
+                No hay puntos diarios creados hoy.
+              </p>
+            ) : (
+              <ul className="max-h-40 space-y-1 overflow-y-auto">
+                {puntosDiarios.map((pd) => {
+                  // Los dos motivos por los que un punto de hoy no se puede
+                  // cargar: sin volumen no hay nada que repartir, y sin
+                  // coordenadas no se puede ubicar en un recorrido real.
+                  const motivo = !pd.volumenM3
+                    ? "Sin volumen declarado"
+                    : pd.lat == null || pd.lng == null
+                      ? "Sin ubicar"
+                      : null;
+                  const cargable = motivo === null;
+                  const yaEsta = loadedDiarioIds.has(pd.id);
+                  const marcado = yaEsta || selectedDiarios.has(pd.id);
+                  const alternar = () => {
+                    if (!cargable) return;
+                    if (yaEsta) {
+                      setLoadedDiarioIds((prev) => {
+                        const next = new Set(prev);
+                        next.delete(pd.id);
+                        return next;
+                      });
+                      return;
+                    }
+                    setSelectedDiarios((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(pd.id)) next.delete(pd.id);
+                      else next.add(pd.id);
+                      return next;
+                    });
+                  };
+                  return (
+                    <li
+                      key={pd.id}
+                      role="checkbox"
+                      aria-checked={marcado}
+                      aria-disabled={!cargable}
+                      tabIndex={cargable ? 0 : -1}
+                      onClick={alternar}
+                      onKeyDown={(e) => {
+                        if (!cargable) return;
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          alternar();
+                        }
+                      }}
+                      className={`flex items-center gap-2 rounded-md border p-2 ${
+                        cargable
+                          ? "cursor-pointer border-border/60 bg-background/60 transition-colors hover:bg-muted"
+                          : "border-dashed border-border/50 opacity-70"
+                      }`}
+                    >
+                      <Checkbox
+                        checked={marcado}
+                        disabled={!cargable}
+                        tabIndex={-1}
+                        className="pointer-events-none"
+                      />
+                      <Construction className="h-3.5 w-3.5 flex-shrink-0 text-primary/70" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-xs font-medium">{pd.address}</p>
+                        <p className="text-[0.625rem] text-muted-foreground">
+                          {[
+                            pd.clase === "escombros" ? "Escombros" : "Extra",
+                            pd.tipoResiduo,
+                            pd.volumenM3 != null ? `${cifra(pd.volumenM3)} m³` : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </p>
+                      </div>
+                      {yaEsta ? (
+                        <span className="flex-shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[0.625rem] font-medium text-primary">
+                          En la ruta
+                        </span>
+                      ) : motivo ? (
+                        <span className="flex-shrink-0 rounded-full bg-warning/15 px-2 py-0.5 text-[0.625rem] font-medium text-warning-strong">
+                          {motivo}
+                        </span>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {/* El cuarto motivo del criterio. No se listan los de otros días
+                porque serían cientos, pero la regla se dice: un punto de otra
+                fecha ya se retiró, y mandar un camión ahí sería ir a un lugar
+                limpio. */}
+            {diasConPuntos.some((d) => d.fecha !== hoy()) && (
+              <p className="text-[0.625rem] leading-relaxed text-muted-foreground">
+                Solo se ofrecen los de hoy. Los de otros días ya se retiraron y se consultan en el
+                diálogo de puntos diarios.
+              </p>
+            )}
+          </div>
+
           <DialogFooter>
-            <Button onClick={handleLoadSelected} disabled={selectedToLoad.size === 0}>
-              Cargar seleccionados{selectedToLoad.size > 0 ? ` (${selectedToLoad.size})` : ""}
+            <Button
+              onClick={handleLoadSelected}
+              disabled={selectedToLoad.size + selectedDiarios.size === 0}
+            >
+              Cargar seleccionados
+              {selectedToLoad.size + selectedDiarios.size > 0
+                ? ` (${selectedToLoad.size + selectedDiarios.size})`
+                : ""}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2843,6 +3172,173 @@ function RutasPage() {
           </DialogHeader>
 
           <div className="space-y-4">
+            {/* **Cuánto retirar de cada parada, obligatorio (AC4).**
+                Va PRIMERO, antes de los puntos activos y de la cuadrilla,
+                porque es la decisión que define el plan: sin estas cifras una
+                sola zona grande ocupa toda la capacidad y el plan termina
+                atendiendo un solo lugar.
+                Cada fila muestra cuánto hay disponible al lado del campo, que es
+                la referencia contra la que se decide; sin ella habría que ir a
+                buscarla al panel. */}
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground">
+                Volumen a retirar <Obligatorio />
+              </p>
+              {paradasParaDeclarar.length === 0 ? (
+                <p className="rounded-md border border-dashed border-border/50 py-3 text-center text-xs text-muted-foreground">
+                  No hay paradas cargadas.
+                </p>
+              ) : (
+                <ul className="max-h-56 space-y-1 overflow-y-auto">
+                  {paradasParaDeclarar.map((p) => {
+                    const declarado = numeroDeclarado(p.id);
+                    // Declarar más de lo que hay no es un error que haya que
+                    // bloquear: el backend lo acota a lo medido. Pero avisarlo
+                    // evita que alguien crea que va a sacar más de lo que existe.
+                    const excede = declarado !== null && declarado > p.disponible;
+                    return (
+                      <li
+                        key={p.id}
+                        className={`flex items-center gap-2 rounded-md border p-2 ${
+                          declarado === null
+                            ? "border-warning-strong/40 bg-warning/5"
+                            : "border-border/60"
+                        }`}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-xs font-medium text-foreground">{p.nombre}</p>
+                          <p className="text-[0.625rem] text-muted-foreground">
+                            {p.origen} · hay {cifra(p.disponible)} m³
+                          </p>
+                        </div>
+                        <Input
+                          value={volumenARetirar[p.id] ?? ""}
+                          onChange={(e) =>
+                            setVolumenARetirar((prev) => ({ ...prev, [p.id]: e.target.value }))
+                          }
+                          inputMode="decimal"
+                          placeholder="m³"
+                          aria-label={`Volumen a retirar de ${p.nombre}`}
+                          className="h-8 w-24 text-right text-xs"
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setVolumenARetirar((prev) => ({
+                              ...prev,
+                              [p.id]: String(p.disponible),
+                            }))
+                          }
+                          className="flex-shrink-0 cursor-pointer rounded px-1.5 py-1 text-[0.625rem] text-muted-foreground hover:bg-accent hover:text-foreground"
+                          title={`Retirar todo lo que hay (${cifra(p.disponible)} m³)`}
+                        >
+                          Todo
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              {sinVolumen.length > 0 && (
+                <p className="flex items-start gap-1.5 text-[0.6875rem] text-warning-strong">
+                  <TriangleAlert className="mt-px h-3.5 w-3.5 flex-shrink-0" />
+                  <span>
+                    Falta el volumen de {sinVolumen.length} parada
+                    {sinVolumen.length === 1 ? "" : "s"}. Cada parada se visita una sola vez y se
+                    retira exactamente lo que declares.
+                  </span>
+                </p>
+              )}
+            </div>
+
+            {/* **AC7: la disponibilidad de la flota se decide ACÁ, antes de
+                calcular.** Plegada por omisión y mostrando el resumen que el
+                backend ya calcula: 21 filas con foto abiertas de entrada tapan
+                el resto del formulario.
+                Cada unidad con su fotografía, porque la patente identifica el
+                vehículo en la planilla y no en el patio: lo que permite ir a
+                buscarlo es verlo. */}
+            <div className="space-y-1.5">
+              <button
+                type="button"
+                onClick={() => setFlotaAbierta((v) => !v)}
+                className="flex w-full cursor-pointer items-center justify-between rounded-md border border-border/60 px-2.5 py-2 text-left transition-colors hover:bg-accent"
+                aria-expanded={flotaAbierta}
+              >
+                <span className="text-xs font-medium text-foreground">
+                  Flota disponible
+                  <span className="ml-2 font-normal text-muted-foreground">
+                    {flotaDeLosActivos.filter((r) => r.disponible).length} de{" "}
+                    {flotaDeLosActivos.length} unidades
+                  </span>
+                </span>
+                <ChevronDown
+                  className={`h-3.5 w-3.5 flex-shrink-0 text-muted-foreground transition-transform duration-150 ${
+                    flotaAbierta ? "rotate-180" : ""
+                  }`}
+                />
+              </button>
+              {flotaAbierta && (
+                <ul className="max-h-64 space-y-1 overflow-y-auto">
+                  {flotaDeLosActivos.length === 0 ? (
+                    <li className="rounded-md border border-dashed border-border/50 py-3 text-center text-xs text-muted-foreground">
+                      Los puntos activos no tienen unidades cargadas.
+                    </li>
+                  ) : (
+                    flotaDeLosActivos.map((r) => (
+                      <li
+                        key={r.id}
+                        className={`flex items-center gap-2 rounded-md border p-2 ${
+                          r.disponible ? "border-border/60" : "border-dashed border-border/50"
+                        }`}
+                      >
+                        {r.foto ? (
+                          <img
+                            src={resourcePhotoUrl(r.foto)}
+                            alt=""
+                            loading="lazy"
+                            className={`h-9 w-12 flex-shrink-0 rounded object-cover ${
+                              r.disponible ? "" : "grayscale"
+                            }`}
+                          />
+                        ) : (
+                          <span className="flex h-9 w-12 flex-shrink-0 items-center justify-center rounded border border-dashed border-border/60">
+                            <Truck className="h-3.5 w-3.5 text-muted-foreground/50" />
+                          </span>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-xs font-medium text-foreground">
+                            {r.tipo}
+                            {r.numero_equipo ? ` ${r.numero_equipo}` : ""}
+                          </p>
+                          <p className="text-[0.625rem] text-muted-foreground">
+                            {[
+                              r.patente,
+                              r.capacidad_m3 != null ? `${cifra(r.capacidad_m3)} m³` : null,
+                              r.capacidad_ton != null
+                                ? `${peso(r.capacidad_ton * 1000)} kg`
+                                : null,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </p>
+                        </div>
+                        {cambiandoUnidad === r.id ? (
+                          <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-muted-foreground" />
+                        ) : (
+                          <Switch
+                            checked={r.disponible}
+                            onCheckedChange={() => void alternarUnidad(r)}
+                            aria-label={`${r.disponible ? "Marcar como no disponible" : "Marcar como disponible"}: ${r.tipo} ${r.patente ?? ""}`}
+                          />
+                        )}
+                      </li>
+                    ))
+                  )}
+                </ul>
+              )}
+            </div>
+
             <div className="space-y-1.5">
               <p className="text-xs font-medium text-muted-foreground">Puntos activos</p>
               {loadingPoints ? (
@@ -3136,9 +3632,23 @@ function RutasPage() {
             <Button variant="ghost" onClick={handleCancelConfirm} disabled={generating}>
               Cancelar
             </Button>
+            {/* `sinVolumen` bloquea el botón acá en vez de dejar que el backend
+                responda con el motivo después de la llamada: el dato falta en
+                este formulario y se arregla en este formulario, así que hacer
+                el viaje de ida y vuelta solo para que vuelva a decir lo que ya
+                se ve en pantalla sería gastar una generación (que además está
+                limitada a 30 por hora por costo). El backend valida igual, por
+                si la petición llega de otra parte. */}
             <Button
               onClick={handleGenerateRoute}
-              disabled={generating || !hoursValid || activePoints.length === 0}
+              disabled={
+                generating || !hoursValid || activePoints.length === 0 || sinVolumen.length > 0
+              }
+              title={
+                sinVolumen.length > 0
+                  ? `Falta el volumen a retirar de ${sinVolumen.length} parada(s)`
+                  : undefined
+              }
             >
               {generating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Generar ruta

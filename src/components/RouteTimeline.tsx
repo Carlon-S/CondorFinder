@@ -252,7 +252,7 @@ export function RouteTimeline({
   segment: RoutePlanSegment;
   stops: RoutePlanStop[];
   /** Resuelve qué zona es cada parada. Es una FUNCIÓN y no un mapa por id
-   *  porque hoy el backend todavía no manda `analysisId` en la parada, así que
+   *  porque un plan viejo puede no traer `stopId` en la parada, así que
    *  quien llama necesita poder caer a emparejar por nombre. Esa decisión es
    *  suya, no del timeline. */
   datosDeParada?: (stop: RoutePlanStop) => DatosDeParada | undefined;
@@ -317,7 +317,69 @@ export function RouteTimeline({
     ),
   });
 
+  // Las descargas con su detalle, y cuántos viajes tiene el recorrido.
+  //
+  // `descargas` viene vacía en un plan generado por una versión anterior del
+  // backend; en ese caso `viajes` queda en 1 y todo se comporta como antes.
+  const descargas = segment.disposals ?? [];
+  const viajes = segment.trips ?? 1;
+
   stops.forEach((stop, i) => {
+    // **El depósito intermedio va ANTES de la parada que abre el viaje nuevo.**
+    //
+    // Es el reflejo exacto de cómo el backend lo decidió: el convoy no puede
+    // con esta zona, así que pasa por el relleno y recién después viene acá.
+    // Insertarlo después de la parada anterior daría la misma secuencia, pero
+    // el separador quedaría del lado equivocado y el tiempo del depósito se
+    // sumaría a la llegada de la parada que ya ocurrió.
+    const viajeDeEsta = stop.trip ?? 1;
+    const viajeAnterior = i > 0 ? (stops[i - 1].trip ?? 1) : viajeDeEsta;
+    if (viajeDeEsta !== viajeAnterior) {
+      const descarga = descargas.find((d) => d.afterOrder === stops[i - 1].order);
+      filas.push({
+        marcador: null,
+        contenido: (
+          <Tramo
+            respaldo={
+              descarga
+                ? { distanceKm: descarga.distanceKm, durationHours: descarga.durationHours }
+                : undefined
+            }
+            etiqueta="cargado"
+          />
+        ),
+      });
+      transcurrido += descarga?.durationHours ?? 0;
+      filas.push({
+        hora: salida ? horaDeLlegada(salida, transcurrido) : undefined,
+        marcador: <Circulo icono={<Warehouse className="h-3.5 w-3.5" />} />,
+        contenido: (
+          <span className="block py-1">
+            <span className="block text-xs font-semibold text-foreground">
+              Descarga
+              <span className="ml-1.5 font-normal text-muted-foreground">
+                fin del viaje {viajeAnterior}
+              </span>
+            </span>
+            <span className="block truncate text-[0.6875rem] text-muted-foreground">
+              {segment.disposalName ?? "Relleno sanitario"}
+            </span>
+          </span>
+        ),
+      });
+      // El separador: la cuadrilla necesita saber cuántas veces vuelve, y un
+      // nodo de descarga repetido sin este rótulo se lee como si el recorrido
+      // se hubiera dibujado dos veces.
+      filas.push({
+        marcador: null,
+        contenido: (
+          <span className="mt-1 block border-t border-dashed border-border/60 pt-2 text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">
+            Viaje {viajeDeEsta} de {viajes}
+          </span>
+        ),
+      });
+    }
+
     const datos = datosDeParada?.(stop);
     const tramo = buscarTramo(legs, i === 0 ? null : stops[i - 1].order, stop.order);
     transcurrido += tramo?.durationHours ?? (i === 0 ? segment.outboundDurationHours : 0);
@@ -440,10 +502,14 @@ export function RouteTimeline({
     });
   });
 
-  // ── Descarga en el relleno sanitario ──
+  // ── La última descarga ──
   // El recorrido no vuelve cargado al patio: descarga primero. Es la geometría
   // que la municipalidad describió por escrito, y el nodo existe para que el
   // plan la diga en vez de dejar la vuelta como si fuera directa.
+  //
+  // Las descargas INTERMEDIAS (cuando el convoy se llena y vuelve a salir) se
+  // insertan arriba, dentro del recorrido de las paradas. Acá va solo la
+  // última, que es la que precede al regreso.
   //
   // Se dibuja solo si el backend mandó el tramo: un plan generado por una
   // versión anterior no lo trae, y fabricar el nodo con el relleno supuesto
@@ -451,25 +517,35 @@ export function RouteTimeline({
   const hayDescarga = segment.disposalDurationHours != null;
 
   if (hayDescarga) {
+    // Con el detalle por viaje, la última descarga trae su propio tiempo; sin
+    // él (plan viejo, un solo viaje) cae al total, que es lo mismo.
+    const ultima = descargas.length > 0 ? descargas[descargas.length - 1] : null;
     filas.push({
       marcador: null,
       contenido: (
         <Tramo
           respaldo={{
-            distanceKm: segment.disposalDistanceKm ?? 0,
-            durationHours: segment.disposalDurationHours ?? 0,
+            distanceKm: ultima?.distanceKm ?? segment.disposalDistanceKm ?? 0,
+            durationHours: ultima?.durationHours ?? segment.disposalDurationHours ?? 0,
           }}
           etiqueta="cargado"
         />
       ),
     });
-    transcurrido += segment.disposalDurationHours ?? 0;
+    transcurrido += ultima?.durationHours ?? segment.disposalDurationHours ?? 0;
     filas.push({
       hora: salida ? horaDeLlegada(salida, transcurrido) : undefined,
       marcador: <Circulo icono={<Warehouse className="h-3.5 w-3.5" />} />,
       contenido: (
         <span className="block py-1">
-          <span className="block text-xs font-semibold text-foreground">Descarga</span>
+          <span className="block text-xs font-semibold text-foreground">
+            Descarga
+            {viajes > 1 && (
+              <span className="ml-1.5 font-normal text-muted-foreground">
+                fin del viaje {viajes}
+              </span>
+            )}
+          </span>
           <span className="block truncate text-[0.6875rem] text-muted-foreground">
             {segment.disposalName ?? "Relleno sanitario"}
           </span>

@@ -107,8 +107,32 @@ class RoutePlanWorkerIn(BaseModel):
     rol: Literal["conductor", "peoneta", "operador"]
 
 
+class RouteStopIn(BaseModel):
+    """Una parada que el trabajador cargó al plan.
+
+    **Referencia TIPADA, y es la bisagra de HDU5.2.** Antes la petición traía
+    `analysisIds: list[str]` y `_load_route_stops` resolvía todo contra la
+    colección `analyses`. Con dos orígenes posibles (un análisis guardado y un
+    punto diario, que vive en otra colección y no es una zona) hacía falta
+    decir de dónde sale cada id.
+
+    Tipada y **no dos listas paralelas**: con listas hay que mantener la
+    sincronía en los dos lados en cada lectura, y el registro de retiros que
+    viene después hereda esta misma referencia en vez de inventar otra.
+    """
+    kind: Literal["analysis", "punto_diario"]
+    id: str
+    # Cuánto volumen retirar de esta parada, declarado por el trabajador.
+    #
+    # Obligatorio desde el AC4, pero opcional en el modelo a propósito: el
+    # handler lo valida y responde con el motivo nombrando la parada que falta,
+    # que es información útil, mientras que un 422 de Pydantic solo diría que
+    # el cuerpo no calza. Ver `_exigir_volumenes()`.
+    retirarM3: float | None = None
+
+
 class RoutePlanRequestIn(BaseModel):
-    analysisIds: list[str]
+    stops: list[RouteStopIn]
     activePointIds: list[str]
     availableHours: float
     priorityWasteType: str | None = None
@@ -124,10 +148,13 @@ class RoutePlanRequestIn(BaseModel):
     #
     # Es del PLAN y no de la zona, así que no se persiste: una zona urgente hoy
     # puede no serlo mañana, y guardarlo convertiría una decisión del día en un
-    # atributo permanente del basural. Los ids que no estén también en
-    # `analysisIds` se ignoran solos, porque la marca se cruza contra las zonas
+    # atributo permanente del basural. Los ids que no estén también en `stops`
+    # se ignoran solos, porque la marca se cruza contra las paradas
     # efectivamente cargadas.
-    priorityAnalysisIds: list[str] = []
+    #
+    # Se llamaba `priorityAnalysisIds`: con paradas tipadas, un id de acá puede
+    # ser el de un punto diario, y el nombre viejo afirmaba lo contrario.
+    priorityStopIds: list[str] = []
     # AC1 y AC2 de HDU5.1: quiénes están disponibles HOY, declarados al generar.
     #
     # No hay padrón de trabajadores en la base, y es deliberado. La municipalidad
@@ -148,11 +175,27 @@ class RoutePlanStopOut(BaseModel):
     lat: float
     lng: float
     label: str
-    # Qué análisis guardado es esta parada. El dato ya lo tenía _load_route_stops
-    # y el handler lo descartaba al armar la salida, así que la vista tenía que
-    # emparejar la parada con su zona POR NOMBRE para mostrarle el volumen y el
-    # tipo de residuo, cosa que se rompe con dos zonas que se llamen parecido.
-    analysisId: str | None = None
+    # Qué parada cargada es esta, con su origen. El dato ya lo tenía
+    # _load_route_stops y el handler lo descartaba al armar la salida, así que
+    # la vista tenía que emparejar la parada con su zona POR NOMBRE para
+    # mostrarle el volumen y el tipo de residuo, cosa que se rompe con dos
+    # zonas que se llamen parecido.
+    #
+    # Se llamaba `analysisId`. Con paradas tipadas puede ser el id de un punto
+    # diario, que no es un análisis ni una zona, así que el nombre mentía.
+    stopId: str | None = None
+    kind: Literal["analysis", "punto_diario"] | None = None
+    # A qué VIAJE de su recorrido pertenece esta parada, 1-based.
+    #
+    # **Un entero por parada en vez de una estructura anidada de viajes.** El
+    # mapa ya dibuja listas de trazos y los viajes se expresan agregando
+    # entradas a esas listas, así que lo único que necesita el agrupamiento es
+    # la línea de tiempo, para poner el separador "Viaje 2 de 3" y repetir el
+    # nodo de descarga. Con un entero alcanza, y los tres lugares que suman
+    # distancias no se tocan.
+    #
+    # Ausente (o 1 en todas) significa un solo viaje, que es el caso de siempre.
+    trip: int | None = None
     # ── RETIRO PARCIAL ──
     # Cuánto se retira DE VERDAD en esta parada, que no siempre es el volumen de
     # la zona. Antes una zona que no cabía en la capacidad despachada se
@@ -160,7 +203,7 @@ class RoutePlanStopOut(BaseModel):
     # lo que le entra y la zona queda con un resto para otra jornada.
     #
     # La vista no puede deducirlo por su cuenta. Empareja la parada con su zona
-    # por `analysisId` y toma las cifras de ahí, así que sin estos campos
+    # por `stopId` y toma las cifras de ahí, así que sin estos campos
     # imprimiría el volumen completo de la zona para una parada que retira la
     # mitad. `pendingVolumeM3` en cero (o ausente) significa que la zona se
     # retira completa, que es el caso normal.
@@ -212,6 +255,23 @@ class RoutePlanLegOut(BaseModel):
     durationHours: float
 
 
+class RoutePlanDisposalOut(BaseModel):
+    """Una pasada por el relleno, con después de qué parada ocurre.
+
+    **Existe porque sin ella las horas de llegada mienten.** La línea de tiempo
+    acumula el tiempo transcurrido parada por parada; con varios viajes, el
+    reloj se saltaba cada depósito intermedio y todas las llegadas posteriores
+    salían más temprano de lo real. El total (`disposalDurationHours`) no sirve
+    para eso: dice cuánto suman todas las descargas, no cuándo ocurre cada una.
+
+    `afterOrder` es el `order` de la última parada del viaje que se cierra, que
+    es donde el nodo tiene que insertarse.
+    """
+    afterOrder: int
+    distanceKm: float
+    durationHours: float
+
+
 class RouteSegmentOut(BaseModel):
     """Un resumen por sub-ruta/punto de origen usado — mismo índice que
     outboundPaths[i]/returnPaths[i] abajo, para que el frontend pueda
@@ -231,6 +291,14 @@ class RouteSegmentOut(BaseModel):
     # del algoritmo; nombrar a los dos que efectivamente recorren el tramo lo
     # cumple sin inventar un reparto de zonas que nadie decidió, y es verdad.
     vehicles: list[RoutePlanVehicleOut] = []
+    # Cuántos viajes resultaron. El criterio pide informarlo, y sin la cifra un
+    # nodo de descarga repetido se lee como si el recorrido se hubiera dibujado
+    # dos veces.
+    trips: int = 1
+    # Una entrada por viaje, en orden. Con un solo viaje es una sola y equivale
+    # a `disposalDistanceKm`/`disposalDurationHours`, que se conservan como el
+    # total. Vacía en un plan generado por una versión anterior del backend.
+    disposals: list[RoutePlanDisposalOut] = []
     outboundDistanceKm: float
     outboundDurationHours: float
     # Tramo de la última zona al relleno sanitario, el único que se recorre
@@ -254,7 +322,8 @@ class RoutePlanUnassignedOut(BaseModel):
     restricción que se implemente (personal incompleto, fuera de autonomía,
     ningún vehículo compatible). Un enum obligaría a sincronizar backend y
     frontend cada vez que aparece uno nuevo."""
-    analysisId: str
+    stopId: str
+    kind: Literal["analysis", "punto_diario"] | None = None
     name: str
     reason: str
 
@@ -449,32 +518,6 @@ def _point_truck_capacity(point: dict) -> float:
     return sum(t.get("capacity_m3", 0) for t in point.get("trucks", []))
 
 
-def _primer_salto(tramos: dict, outbound_geo: dict) -> list[list[float]]:
-    """El trazo del patio a la PRIMERA zona.
-
-    Cae a la ida completa cuando el proveedor no mandó geometría por salto: un
-    trazo entero de un solo color es peor que uno partido, pero infinitamente
-    mejor que un mapa sin ruta.
-    """
-    hops = tramos.get("hops") or []
-    if hops and hops[0].get("path"):
-        return hops[0]["path"]
-    return outbound_geo["path"]
-
-
-def _saltos_entre_zonas(tramos: dict) -> list[list[list[float]]]:
-    """Un trazo por transición entre dos zonas consecutivas.
-
-    Vacío con una sola parada (no hay transición que dibujar) y vacío también
-    cuando el proveedor no dio geometría por salto, porque en ese caso la ida
-    completa ya se dibujó entera como primer tramo y repetir pedazos encima la
-    pintaría dos veces.
-    """
-    hops = tramos.get("hops") or []
-    if not hops or not hops[0].get("path"):
-        return []
-    return [h["path"] for h in hops[1:] if h.get("path")]
-
 
 def _capacidad_con_personal(
     puntos: list[dict], personal: dict[str, list[str]] | None
@@ -525,6 +568,140 @@ def _capacidad_con_personal(
                     nombres.remove(persona["nombre"])
             total += camion.get("capacity_m3", 0) or 0
     return total
+
+
+def _faltan_volumenes(stops: list[dict]) -> list[str]:
+    """Los nombres de las paradas a las que no se les declaró cuánto retirar.
+
+    **El volumen es obligatorio por parada, y es el AC4.** Sin él, una sola
+    zona grande se come el plan entero: una de 7.498 m³ contra 100 de capacidad
+    ocupaba todo el reparto y el plan terminaba atendiendo un solo punto. Con la
+    cifra declarada, el trabajador decide que de esa zona saca 40 m³ y el resto
+    de la capacidad queda para otras tres.
+
+    Devuelve nombres y no un booleano porque el motivo tiene que nombrar **cuál**
+    falta: con cinco paradas cargadas, "falta un volumen" manda a revisarlas una
+    por una. Por eso tampoco se valida en el modelo de Pydantic, que solo diría
+    que el cuerpo no calza.
+    """
+    return [s["name"] for s in stops if not s.get("retirarM3")]
+
+
+def _aplicar_declarado(zona: dict) -> dict:
+    """La parada con el volumen que el trabajador declaró retirar.
+
+    **Escala el peso y el desglose por clase junto con el volumen**, por el
+    mismo motivo que `_parcializar()`: `_trucks_used` compara el peso del
+    conjunto contra el límite en toneladas de los vehículos, y con el peso
+    completo de la zona contra una carga declarada menor rechazaría camiones que
+    sí sirven, dejando la zona fuera por el motivo que esto vino a evitar. Lo
+    mismo con las clases, que deciden qué vehículo se prefiere.
+
+    La clase dominante no se recalcula porque no cambia: escalar todas por el
+    mismo factor no altera cuál es la mayor.
+
+    **Un peso ausente se conserva ausente.** Multiplicar por la fracción un dato
+    que nadie midió lo convertiría en un cero con pinta de medición, y el peso
+    de un punto diario no está medido.
+
+    `volumenZonaM3` guarda lo MEDIDO, que es la referencia que la vista imprime
+    al lado ("se retiran 40 de 7.498 m³"). `pendienteM3` es lo que queda para
+    otra jornada: no es un recorte del sistema sino la consecuencia de lo que se
+    declaró, y la cuadrilla necesita verlo igual.
+    """
+    medido = zona["volumeM3"]
+    declarado = min(zona["retirarM3"], medido)
+    fraccion = declarado / medido if medido > 0 else 0.0
+    peso = zona.get("weightTon")
+    return {
+        **zona,
+        "volumeM3": declarado,
+        "weightTon": None if peso is None else peso * fraccion,
+        "clasesPorVolumen": {
+            clase: vol * fraccion for clase, vol in (zona.get("clasesPorVolumen") or {}).items()
+        },
+        "volumenZonaM3": medido,
+        "pesoZonaKg": (peso or 0) * 1000,
+        "pendienteM3": medido - declarado,
+    }
+
+
+def _capacidad_del_convoy(camiones: list[dict]) -> float | None:
+    """Los m³ que el convoy despachado carga en UN viaje, o None si no se sabe.
+
+    Es el tope que decide dónde se inserta cada depósito: cuando la siguiente
+    parada no entra en lo que queda libre, el convoy va al relleno y vuelve.
+    """
+    if not camiones:
+        return None
+    return sum((c.get("capacity_m3") or 0) for c in camiones)
+
+
+def _peso_del_convoy(camiones: list[dict]) -> float | None:
+    """Las toneladas que el convoy aguanta en UN viaje, o None si alguna unidad
+    no declara su límite.
+
+    **None es "no medido", no cero**, la misma regla que `_capacidad_de_peso` y
+    `aguanta_el_peso`: basta que una unidad no traiga `capacity_ton` para que el
+    conjunto quede sin restricción de peso, porque no se puede afirmar que un
+    camión no aguanta un peso que nadie midió. Ese es el caso de la flota real:
+    solo los AMPLIROLL y los CAMION 3/4 PLANO traen la cifra.
+    """
+    if not camiones:
+        return None
+    limites = [c.get("capacity_ton") for c in camiones]
+    if any(l is None for l in limites):
+        return None
+    return sum(limites)
+
+
+def _mayor_parada(stops: list[dict]) -> tuple[float, float]:
+    """El volumen y el peso de la parada más grande del recorrido.
+
+    **Es lo que el convoy tiene que poder cargar en un viaje**, y no el total.
+    Antes `_trucks_used` se dimensionaba con el volumen completo de la sub-ruta,
+    así que el convoy siempre podía con todo de una vez y **nunca había un
+    segundo viaje**: los viajes múltiples quedaban escritos y muertos.
+
+    Con la zona más grande se despacha el conjunto más chico capaz de hacer el
+    recorrido, y el resto se resuelve volviendo al relleno. Menos dotación por
+    jornada (cada vehículo es una cuadrilla) a cambio de una jornada más larga,
+    que es el canje que el equipo eligió. El criterio fino lo sigue haciendo
+    `_trucks_used`, que enumera exacto: menos unidades primero y, a igual
+    cantidad, la de menor capacidad sobrante.
+
+    El peso va emparejado con esa misma parada y no es el máximo por separado:
+    lo que el convoy tiene que poder es cargar ESA zona, con sus dos magnitudes.
+    """
+    if not stops:
+        return 0.0, 0.0
+    mayor = max(stops, key=lambda s: s["volumeM3"])
+    return mayor["volumeM3"], (mayor.get("weightTon") or 0)
+
+
+def _peso_del_conjunto(stops: list[dict]) -> float:
+    """Toneladas de un conjunto de paradas, o 0 si a alguna le falta el dato.
+
+    **Cero acá significa "sin restricción por peso", NO "no pesa nada".** Es la
+    convención que ya usa `aguanta_el_peso` dentro de `_trucks_used`, cuya
+    primera guarda devuelve True con un peso <= 0, y la misma regla de
+    `_capacidad_de_peso` y de `autonomia_km`: un dato ausente es uno que nadie
+    midió, y restringir por él inventaría una restricción.
+
+    **Lo peligroso sería devolver la suma PARCIAL**, que es lo que hacía el
+    `sum(s.get("weightTon", 0) ...)` que había antes acá. Un punto diario no
+    tiene peso (su volumen lo declaró quien pidió el retiro por teléfono, nadie
+    pesó nada), así que un recorrido que mezcle una zona medida con un punto
+    diario sumaba solo la parte medida: comparaba el límite en toneladas de los
+    camiones contra un número que subestima la carga real, o sea aplicaba la
+    restricción a un dato equivocado en vez de no aplicarla.
+
+    Para un plan hecho solo de análisis no cambia nada, porque todos traen su
+    `weightTon`.
+    """
+    if any(s.get("weightTon") is None for s in stops):
+        return 0.0
+    return sum(s.get("weightTon") or 0 for s in stops)
 
 
 def _capacidad_de_peso(puntos: list[dict]) -> float | None:
@@ -856,15 +1033,59 @@ def _dotacion_de(camion: dict) -> list[str]:
 # PUENTE DE ENTRADA — basurales reales de los análisis guardados elegidos
 # =============================================================================
 
-async def _load_route_stops(analysis_ids: list[str]) -> list[dict]:
-    """Un stop por ANÁLISIS cargado (no por detección) — ubicación =
-    orthoCenter reproyectado a WGS84, volumen = suma de volume_m3 de todas
-    sus detecciones. Análisis sin crs/orthoCenter, o cuyo CRS no se puede
-    reproyectar, se omiten (no hay forma de ubicarlos en una ruta real)."""
+# Del vocabulario de la municipalidad a las clases del detector.
+#
+# `TIPOS_ESCOMBRO` (puntos_diarios.py) es como la municipalidad nombra lo que
+# retira; `WASTE_CLASSES` (planificacion.rutas.tsx) es lo que produce YOLO. Las
+# dos describen residuo, así que un punto diario puede participar de la
+# preferencia de vehículo del AC4 igual que una zona medida.
+#
+# **Es una DEDUCCIÓN nuestra, no un dato del cliente**, igual que la
+# clasificación de familias de vehículos antes de que la municipalidad la
+# confirmara por escrito. Ya no se puede repreguntar, así que queda anotado.
+#
+# De los cuatro, **solo VOLUMINOSOS cambia una ruta hoy**: Muebles es una de
+# las dos clases que el AMPLIROLL prefiere, y es el único tipo de vehículo con
+# preferencia declarada. Los otros tres son correctos y sin efecto observable.
+CLASE_POR_TIPO_ESCOMBRO: dict[str, str] = {
+    "ESC": "Residuo de construcción",
+    "RAMAS": "Residuo orgánico",
+    "VOLUMINOSOS": "Muebles",
+    "MIXTO": "Tipo de basura indefinido",
+}
+
+
+async def _load_route_stops(pedidas: list["RouteStopIn"]) -> list[dict]:
+    """Un stop por PARADA cargada, resolviendo cada una según su `kind`.
+
+    **Nunca confía en datos calculados por el frontend**: de la petición solo
+    toma el id, el origen y el volumen que el trabajador declaró; la geometría,
+    el peso y las clases de residuo salen de Mongo.
+
+    Un análisis aporta su `orthoCenter` reproyectado a WGS84 y la suma de sus
+    detecciones ACTIVAS. Un punto diario aporta sus coordenadas y el volumen
+    que alguien declaró al pedir el retiro, sin peso (ver `_stops_de_diarios`).
+
+    Las paradas que no se pueden ubicar en una ruta real se omiten: un análisis
+    sin `crs`/`orthoCenter` o con un CRS que no se puede reproyectar, y un punto
+    diario sin coordenadas. El handler informa después cuáles y por qué.
+    """
+    por_kind: dict[str, list[RouteStopIn]] = {"analysis": [], "punto_diario": []}
+    for parada in pedidas:
+        por_kind[parada.kind].append(parada)
+
+    stops = await _stops_de_analisis(por_kind["analysis"])
+    stops += await _stops_de_diarios(por_kind["punto_diario"])
+    return stops
+
+
+async def _stops_de_analisis(pedidas: list["RouteStopIn"]) -> list[dict]:
+    """Las paradas que vienen de un análisis guardado."""
+    volumen_pedido = {p.id: p.retirarM3 for p in pedidas}
     valid_ids: list[ObjectId] = []
-    for aid in analysis_ids:
+    for parada in pedidas:
         try:
-            valid_ids.append(ObjectId(aid))
+            valid_ids.append(ObjectId(parada.id))
         except Exception:
             continue
     if not valid_ids:
@@ -936,7 +1157,8 @@ async def _load_route_stops(analysis_ids: list[str]) -> list[dict]:
                 clase = d.get("class") or "Sin clasificar"
                 clases[clase] = clases.get(clase, 0) + vol
         stops.append({
-            "analysisId": str(doc["_id"]),
+            "stopId": str(doc["_id"]),
+            "kind": "analysis",
             # Respaldo al nombre de la medición: los análisis anteriores a la
             # migración de zonas no tienen `zoneId`, y una zona borrada a mano
             # dejaría la referencia colgando.
@@ -947,6 +1169,8 @@ async def _load_route_stops(analysis_ids: list[str]) -> list[dict]:
             ),
             "lat": lat,
             "lng": lng,
+            # Lo MEDIDO por el vuelo, que es la referencia contra la que se
+            # compara lo declarado. Se conserva aunque el plan retire menos.
             "volumeM3": total_volume,
             "weightTon": total_weight_kg / 1000,
             "clasesPorVolumen": clases,
@@ -954,6 +1178,72 @@ async def _load_route_stops(analysis_ids: list[str]) -> list[dict]:
             # clase que más volumen aporta. None si la zona no tiene ninguna
             # detección activa.
             "claseDominante": max(clases, key=clases.get) if clases else None,
+            # Lo que el trabajador DECLARÓ retirar de acá. El handler lo valida
+            # y lo aplica; acá solo viaja.
+            "retirarM3": volumen_pedido.get(str(doc["_id"])),
+        })
+    return stops
+
+
+async def _stops_de_diarios(pedidas: list["RouteStopIn"]) -> list[dict]:
+    """Las paradas que vienen de un punto diario (HDU15).
+
+    **Un punto diario no es una zona** y no tiene `zoneId`: vive en su propia
+    colección porque es un hecho de una fecha y no un lugar que se sigue en el
+    tiempo. Guardarlos como zonas llenaría Vista Principal de cientos de
+    lugares de una sola visita.
+
+    **No tiene PESO, y eso no es un hueco que haya que rellenar.** Su volumen
+    lo declaró quien pidió el retiro por teléfono; nadie midió cuánto pesa. Por
+    eso `weightTon` queda ausente y no en cero: ausente significa "no medido" y
+    hace que el recorte por peso no aplique a esta parada, igual que un
+    `capacity_ton` ausente en un vehículo. En cero, en cambio, el recorte
+    nunca cortaría pero por el motivo equivocado, y el día que alguien
+    invierta una comparación el error aparecería solo en las paradas medidas.
+
+    **La clase sale de `tipoResiduo`**, que existe solo para los escombros. Un
+    punto extra no trae tipo y no es problema: la ausencia de clase ya es un
+    caso soportado (para cinco de las siete clases del detector el conjunto de
+    vehículos preferidos queda vacío y se elige entre todos, ver
+    `tipo_prefiere_clase()`).
+    """
+    volumen_pedido = {p.id: p.retirarM3 for p in pedidas}
+    valid_ids: list[ObjectId] = []
+    for parada in pedidas:
+        try:
+            valid_ids.append(ObjectId(parada.id))
+        except Exception:
+            continue
+    if not valid_ids:
+        return []
+
+    docs = await get_db().puntos_diarios.find(
+        {"_id": {"$in": valid_ids}}
+    ).to_list(length=None)
+
+    stops: list[dict] = []
+    for doc in docs:
+        lat = doc.get("lat")
+        lng = doc.get("lng")
+        if lat is None or lng is None:
+            continue
+        declarado = doc.get("volumenM3")
+        if not declarado:
+            continue
+        clase = CLASE_POR_TIPO_ESCOMBRO.get(doc.get("tipoResiduo") or "")
+        stops.append({
+            "stopId": str(doc["_id"]),
+            "kind": "punto_diario",
+            # Su dirección ES su nombre: un punto diario no tiene uno propio,
+            # se reconoce por dónde está.
+            "name": doc.get("address") or "Punto diario sin dirección",
+            "lat": float(lat),
+            "lng": float(lng),
+            "volumeM3": float(declarado),
+            # Sin peso a propósito, ver el docstring.
+            "clasesPorVolumen": {clase: float(declarado)} if clase else {},
+            "claseDominante": clase,
+            "retirarM3": volumen_pedido.get(str(doc["_id"])),
         })
     return stops
 
@@ -968,6 +1258,19 @@ _MINIMO_RETIRO_M3 = 0.5
 
 def _parcializar(zona: dict, volumen: float) -> dict:
     """La misma zona, pero retirando solo `volumen` de su total.
+
+    > **SIN USO desde HDU5.2, y se conserva a propósito.** El retiro parcial era
+    > el AC6 de HDU5.1: una zona que no cabía en la capacidad despachada no se
+    > descartaba, se le retiraba lo que entraba. Desde que el trabajador
+    > **declara** cuánto retirar de cada parada (AC4 de HDU5.2), el sistema ya no
+    > decide fracciones: recortar por su cuenta sería cambiar en silencio una
+    > cifra que él eligió, y contradice que cada parada se visite una sola vez
+    > (AC5). Lo que no cabe ahora se descarta con un motivo que dice el máximo
+    > que sí habría entrado.
+    >
+    > **No se borra** porque es la evidencia del AC6 de HDU5.1, que está
+    > verificado y demostrado. Quien vuelva a conectarla a `generate_route`
+    > rompe el AC4 y el AC5; `_aplicar_declarado()` es su reemplazo.
 
     **Escala el peso y el desglose por clase junto con el volumen, y eso no es
     cosmético.** `_trucks_used` compara el peso del conjunto contra el límite en
@@ -994,7 +1297,11 @@ def _parcializar(zona: dict, volumen: float) -> dict:
     return {
         **zona,
         "volumeM3": volumen,
-        "weightTon": zona.get("weightTon", 0) * fraccion,
+        # Ausente se CONSERVA ausente: multiplicar por la fracción un dato
+        # que nadie midió lo convertiría en un cero con pinta de medición.
+        "weightTon": (
+            None if zona.get("weightTon") is None else zona["weightTon"] * fraccion
+        ),
         "clasesPorVolumen": {
             clase: vol * fraccion for clase, vol in (zona.get("clasesPorVolumen") or {}).items()
         },
@@ -1154,12 +1461,37 @@ async def _best_stop_order(
     origin: tuple[float, float],
     stop_coords: list[tuple[float, float]],
     autonomia_km: float | None = None,
-) -> tuple[list[int], float, float, float] | None | str:
+    volumenes: list[float] | None = None,
+    capacidad_m3: float | None = None,
+    pesos: list[float] | None = None,
+    capacidad_ton: float | None = None,
+) -> tuple[list[int], list[dict], float] | None | str:
     """Evalúa todas las permutaciones de `stop_coords` (fuerza bruta hasta
     _MAX_STOPS_BRUTE_FORCE, vecino-más-cercano por encima de eso) usando la
-    matriz real de OSRM, y devuelve el mejor orden con los tres tiempos del
-    recorrido: (orden de índices 1-based, ida, descarga, regreso) en segundos.
-    None si OSRM no responde.
+    matriz real de OSRM, y devuelve el mejor orden **repartido en viajes**:
+    `(orden de índices 1-based, viajes, regreso)` con el regreso en segundos.
+
+    Cada viaje es `{"indices": [...], "ida": seg, "descarga": seg}`: las paradas
+    que el convoy atiende antes de ir a descargar, el tiempo vacío que le toma
+    llegar a ellas (desde la base en el primer viaje, desde el relleno en los
+    siguientes) y el tiempo cargado hasta el relleno. None si OSRM no responde.
+
+    **Los viajes son una CONSECUENCIA del orden, no un parámetro.** Con
+    `volumenes` y `capacidad_m3` se recorre cada permutación acumulando carga, y
+    cuando la siguiente parada no entra en lo que queda libre se inserta una
+    visita al relleno y la carga vuelve a cero. Eso es lo que de verdad hace la
+    cuadrilla, y es la razón de que el reparto no se decida antes: depende del
+    orden, y el orden se elige sabiendo cuánto cuestan los desvíos que el propio
+    reparto provoca.
+
+    Sin `capacidad_m3` el recorrido es de un viaje, que es el caso de siempre y
+    deja la función comportándose como antes.
+
+    **El costo de una permutación deja de ser la suma de los pares
+    consecutivos**: incluye los desvíos insertados, así que dos órdenes con la
+    misma distancia entre zonas pueden costar distinto porque uno fuerza un
+    depósito más. Sigue siendo aritmética pura sobre la matriz, o sea UNA sola
+    llamada a OSRM y el mismo conteo de permutaciones.
 
     **El relleno entra en la matriz como un nodo más**, así que el orden elegido
     ya tiene en cuenta dónde termina el recorrido: con la base y el relleno en
@@ -1213,37 +1545,121 @@ async def _best_stop_order(
     regreso_m = distances[relleno][0]
     limite_m = autonomia_km * 1000 if autonomia_km else None
 
+    def volumen_de(idx: int) -> float:
+        """El volumen de la parada `idx` (1-based), 0 si no se declararon."""
+        return volumenes[idx - 1] if volumenes else 0.0
+
+    def peso_de(idx: int) -> float:
+        """El peso de la parada `idx` (1-based), 0 si no se declararon."""
+        return pesos[idx - 1] if pesos else 0.0
+
+    def desborda(carga: float, peso: float, vol_nuevo: float, peso_nuevo: float) -> bool:
+        """Si agregar esa parada pasaría alguno de los dos límites del convoy.
+
+        **Los dos recortan, el volumen y el peso.** Un camión tiene cuánto le
+        entra y cuánto aguanta, y el que primero se agota decide dónde cae el
+        depósito. No es redundante: la densidad cambia con el tipo de residuo,
+        así que una zona de escombros llena la tolva por peso mucho antes que
+        por metros cúbicos.
+
+        Un límite ausente no restringe, por la regla de siempre: un dato que
+        nadie midió no puede descartar nada.
+        """
+        if capacidad_m3 is not None and carga + vol_nuevo > capacidad_m3 + 1e-9:
+            return True
+        if capacidad_ton is not None and peso + peso_nuevo > capacidad_ton + 1e-9:
+            return True
+        return False
+
+    def repartir(order: tuple[int, ...]) -> tuple[list[dict], float]:
+        """El orden partido en viajes, con los metros totales del recorrido.
+
+        El depósito se inserta ANTES de la parada que no entra, no después de la
+        que llenó el camión: es la condición que de verdad decide, y hace que la
+        carga de cada viaje nunca supere la capacidad despachada. De ahí que la
+        geometría siga siendo exacta y no una aproximación.
+        """
+        viajes: list[dict] = []
+        actual: dict = {"indices": [], "ida": 0.0, "descarga": 0.0}
+        carga = 0.0
+        carga_ton = 0.0
+        prev = 0
+        metros = 0.0
+        for idx in order:
+            vol = volumen_de(idx)
+            peso = peso_de(idx)
+            if actual["indices"] and desborda(carga, carga_ton, vol, peso):
+                # Cerrar el viaje: se descarga y el siguiente arranca desde el
+                # relleno, no desde la base. El camión no vuelve al patio entre
+                # viajes, que es lo que ocurre en terreno.
+                actual["descarga"] = durations[prev][relleno] / _LOADED_SPEED_FACTOR
+                metros += distances[prev][relleno]
+                viajes.append(actual)
+                actual = {"indices": [], "ida": 0.0, "descarga": 0.0}
+                # **La carga se reinicia, las DOS magnitudes.** El camión
+                # descarga en el relleno y su capacidad vuelve a cero. Arrastrar
+                # el peso entre viajes rechazaría un plan por un peso que ningún
+                # viaje llega a llevar nunca.
+                carga = 0.0
+                carga_ton = 0.0
+                prev = relleno
+            # Vacío: el camión se va llenando recién en el camino.
+            actual["ida"] += durations[prev][idx]
+            metros += distances[prev][idx]
+            actual["indices"].append(idx)
+            prev = idx
+            carga += vol
+            carga_ton += peso
+
+        # El último viaje siempre lleva carga, porque el depósito se inserta
+        # antes de una parada y nunca después de la última.
+        actual["descarga"] = durations[prev][relleno] / _LOADED_SPEED_FACTOR
+        metros += distances[prev][relleno]
+        viajes.append(actual)
+        # Y el regreso, vacío, desde el relleno.
+        metros += regreso_m
+        return viajes, metros
+
     best_order: tuple[int, ...] | None = None
+    best_viajes: list[dict] | None = None
     best_total = None
-    best_ida = best_descarga = 0.0
     hubo_candidatos = False
     for order in orders_to_try():
-        ida = 0.0
-        ida_m = 0.0
-        prev = 0
-        for idx in order:
-            ida += durations[prev][idx]
-            ida_m += distances[prev][idx]
-            prev = idx
-        # Cargado desde la última zona hasta el relleno. La ida va a velocidad
-        # normal porque el camión se va llenando recién en el camino, y el
-        # regreso también, porque vuelve vacío.
-        descarga = durations[prev][relleno] / _LOADED_SPEED_FACTOR
-        # AC3: el recorrido COMPLETO, que con el relleno son tres tramos. El
-        # criterio dice "ida y vuelta", o sea todo lo que el camión maneja antes
-        # de volver al patio.
-        if limite_m is not None and ida_m + distances[prev][relleno] + regreso_m > limite_m:
+        viajes, metros = repartir(order)
+        # AC3: el recorrido COMPLETO, con todos sus viajes. El criterio dice
+        # "ida y vuelta", o sea todo lo que el camión maneja antes de volver al
+        # patio, y con varios viajes eso incluye cada pasada por el relleno.
+        if limite_m is not None and metros > limite_m:
             continue
         hubo_candidatos = True
-        total = ida + descarga + regreso
+        total = sum(v["ida"] + v["descarga"] for v in viajes) + regreso
         if best_total is None or total < best_total:
-            best_total, best_order, best_ida, best_descarga = total, order, ida, descarga
+            best_total, best_order, best_viajes = total, order, viajes
 
     if not hubo_candidatos:
         return "sin_autonomia"
 
-    assert best_order is not None
-    return list(best_order), best_ida, best_descarga, regreso
+    assert best_order is not None and best_viajes is not None
+    return list(best_order), best_viajes, regreso
+
+
+def _primer_salto_de(viaje: dict) -> list[list[float]]:
+    """El trazo del primer salto de un viaje: del patio (o del relleno) a su
+    primera zona, con el camión vacío.
+
+    Separado de las transiciones entre zonas porque no es lo mismo: ese tramo
+    se hace vacío y los siguientes ya cargando. Si el proveedor no mandó
+    geometría por salto, cae a la ida completa como un solo trazo."""
+    hops = viaje.get("hops") or []
+    if hops and hops[0].get("path"):
+        return hops[0]["path"]
+    return viaje["outbound"]["path"]
+
+
+def _saltos_entre_zonas_de(viaje: dict) -> list[list[list[float]]]:
+    """Los trazos de zona a zona dentro de un viaje, sin el primero."""
+    hops = viaje.get("hops") or []
+    return [h["path"] for h in hops[1:] if h.get("path")]
 
 
 async def _build_subroute(
@@ -1313,15 +1729,28 @@ async def _build_subroute(
     order_result = None
     while True:
         punto_pool = {**point, "trucks": flota}
-        volumen_sub = sum(s["volumeM3"] for s in stops_actuales)
-        peso_sub = sum(s.get("weightTon", 0) for s in stops_actuales)
-        camiones = _trucks_used(punto_pool, volumen_sub, peso_sub, clase_dominante, personal)
+        # **El convoy se dimensiona por la parada MÁS GRANDE, no por el total.**
+        #
+        # Es lo que tiene que poder cargar en un viaje; el resto se resuelve
+        # volviendo al relleno. Con el total, el convoy siempre podía con todo
+        # de una vez y nunca había un segundo viaje: los viajes múltiples
+        # quedaban escritos y muertos. Ver `_mayor_parada()`.
+        volumen_viaje, peso_viaje = _mayor_parada(stops_actuales)
+        camiones = _trucks_used(punto_pool, volumen_viaje, peso_viaje, clase_dominante, personal)
         if camiones:
             autonomias = [c["autonomia_km"] for c in camiones if c.get("autonomia_km")]
             rango = min(autonomias) if autonomias else None
             if rango is None:
                 break
-            prueba = await _best_stop_order(origin, stop_coords, rango)
+            prueba = await _best_stop_order(
+                origin,
+                stop_coords,
+                rango,
+                volumenes=[s["volumeM3"] for s in stops_actuales],
+                capacidad_m3=_capacidad_del_convoy(camiones),
+                pesos=[(s.get("weightTon") or 0) for s in stops_actuales],
+                capacidad_ton=_peso_del_convoy(camiones),
+            )
             if prueba is None:
                 return None
             if prueba != "sin_autonomia":
@@ -1336,17 +1765,26 @@ async def _build_subroute(
             tope = sum(c.get("capacity_m3", 0) or 0 for c in resto)
             if cabe is not None:
                 tope = min(tope, cabe)
-            recortadas = _recortar_a_capacidad(stops_actuales, tope)
-            if recortadas is None:
+            # **Acá NO se recorta, se devuelve el motivo.**
+            #
+            # Antes se llamaba a `_recortar_a_capacidad()` para que las paradas
+            # cupieran en la flota de mayor rango, que suele ser más chica. Con
+            # el volumen declarado por el trabajador (AC4) eso significaría
+            # cambiarle en silencio una cifra que él eligió, y contradice que
+            # cada parada se visite una sola vez retirando exactamente lo
+            # declarado (AC5).
+            #
+            # Devolviendo el motivo, el bucle de relajación del handler saca una
+            # zona con su explicación y vuelve a intentar, que es el mismo
+            # mecanismo que ya usa para las horas y la capacidad.
+            if sum(s["volumeM3"] for s in stops_actuales) > tope + 1e-9:
                 return {"excedeAutonomia": True, "autonomiaKm": rango}
             flota = resto
-            stops_actuales = recortadas
             continue
         break
 
     point_stops = stops_actuales
-    volumen_sub = sum(s["volumeM3"] for s in point_stops)
-    peso_sub = sum(s.get("weightTon", 0) for s in point_stops)
+    volumen_viaje, peso_viaje = _mayor_parada(point_stops)
 
     if not camiones and personal is not None:
         # ¿Fue el personal el que faltó? Se repite la selección ignorándolo: si
@@ -1354,7 +1792,7 @@ async def _build_subroute(
         # segunda oportunidad, y cuesta nada porque la enumeración es sobre ocho
         # unidades. Sin esto el motivo diría "no hay vehículo" cuando el camión
         # estaba ahí y lo que faltaba era un peoneta.
-        sin_personal = _trucks_used(point, volumen_sub, peso_sub, clase_dominante)
+        sin_personal = _trucks_used(point, volumen_viaje, peso_viaje, clase_dominante)
         if sin_personal:
             return {
                 "sinDotacion": True,
@@ -1368,7 +1806,7 @@ async def _build_subroute(
         return {
             "sinVehiculoCompatible": True,
             "clase": clase_dominante,
-            "pesoTon": sum(s.get("weightTon", 0) for s in point_stops),
+            "pesoTon": _peso_del_conjunto(point_stops),
             # Redondeo por zona antes de sumar, igual que la vista y que
             # totalVolumeM3: sumando crudo el mensaje decía 6,95 donde la
             # interfaz mostraba 6,94.
@@ -1386,17 +1824,30 @@ async def _build_subroute(
     # Sin rango declarado el bucle corta antes de pedir el orden, asi que acá se
     # pide una sola vez. Con rango, el bucle ya lo resolvió y lo trae resuelto.
     if order_result is None:
-        order_result = await _best_stop_order(origin, stop_coords, autonomia_km)
+        order_result = await _best_stop_order(
+            origin,
+            stop_coords,
+            autonomia_km,
+            volumenes=[s["volumeM3"] for s in point_stops],
+            capacidad_m3=_capacidad_del_convoy(camiones),
+            pesos=[(s.get("weightTon") or 0) for s in point_stops],
+            capacidad_ton=_peso_del_convoy(camiones),
+        )
         if order_result is None:
             return None
         if order_result == "sin_autonomia":
             return {"excedeAutonomia": True, "autonomiaKm": autonomia_km}
-    order, ida_seconds, descarga_seconds, regreso_seconds = order_result
+    order, viajes_matriz, regreso_seconds = order_result
 
-    total_hours = (ida_seconds + descarga_seconds + regreso_seconds) / 3600
+    total_hours = (
+        sum(v["ida"] + v["descarga"] for v in viajes_matriz) + regreso_seconds
+    ) / 3600
     if total_hours > available_hours:
         # No es un fallo del servicio: el recorrido existe y es demasiado largo.
         # El handler lo resuelve sacando la parada más lejana y reintentando.
+        #
+        # Con varios viajes esto descarta bastante más que antes, y es correcto:
+        # cada pasada por el relleno es tiempo que el camión maneja de verdad.
         return {"excedeHoras": True, "horas": total_hours}
 
     ordered_stops = [point_stops[i - 1] for i in order]
@@ -1419,14 +1870,43 @@ async def _build_subroute(
     # Cuántas peticiones cuesta no es asunto de esta función: routes_provider.py
     # lo resuelve con tres llamadas en paralelo contra OSRM, o con una sola
     # contra Google cuando AC5 está habilitado.
-    tramos = await routes_provider.route_tramos(
-        origin, [(s["lat"], s["lng"]) for s in ordered_stops], RELLENO_SANITARIO
-    )
+    #
+    # La secuencia completa, con el relleno repetido una vez por viaje:
+    #   base, z1, z2, relleno, z3, relleno, base
+    # Los dos proveedores devuelven un tramo por salto, y agruparlos en viajes
+    # se hace acá porque acá se sabe dónde cae cada descarga.
+    coords_por_indice = {i + 1: (s["lat"], s["lng"]) for i, s in enumerate(point_stops)}
+    waypoints: list[tuple[float, float]] = [origin]
+    for viaje in viajes_matriz:
+        waypoints.extend(coords_por_indice[i] for i in viaje["indices"])
+        waypoints.append(RELLENO_SANITARIO)
+    waypoints.append(origin)
+
+    tramos = await routes_provider.route_saltos(waypoints)
     if tramos is None:
         return None
-    outbound_geo = tramos["outbound"]
-    disposal_geo = tramos["disposal"]
-    return_geo = tramos["return"]
+    saltos = tramos["legs"]
+
+    # Los saltos se reparten en los viajes con las MISMAS longitudes que decidió
+    # el reparto: cada viaje consume tantos saltos vacíos como paradas tiene,
+    # más uno cargado hasta el relleno. El último salto de todos es el regreso.
+    viajes_geo: list[dict] = []
+    cursor = 0
+    for viaje in viajes_matriz:
+        n = len(viaje["indices"])
+        vacios = saltos[cursor : cursor + n]
+        cargado = saltos[cursor + n]
+        cursor += n + 1
+        viajes_geo.append({
+            "indices": viaje["indices"],
+            # La ida de un viaje se pinta como un trazo continuo aunque sean N
+            # saltos, igual que antes; el detalle por salto viaja aparte para la
+            # línea de tiempo.
+            "outbound": routes_provider.unir_tramos(vacios),
+            "disposal": cargado,
+            "hops": vacios,
+        })
+    return_geo = saltos[cursor]
 
     # Duraciones "reales" (de la geometría final que se va a dibujar, no del
     # estimado de la matriz, que solo sirvió para elegir el orden). El factor de
@@ -1447,12 +1927,19 @@ async def _build_subroute(
     # ella. Cerrarlo significaría pedir la geometría antes de decidir, o sea
     # gastar una llamada por cada iteración de la relajación en vez de una por
     # plan, que es exactamente la garantía que sostiene el costo.
-    outbound_hours = outbound_geo["durationHours"]
-    disposal_hours = disposal_geo["durationHours"] / _LOADED_SPEED_FACTOR
+    # Suma sobre TODOS los viajes. El factor de carga se aplica a cada tramo de
+    # descarga, que son los únicos que el convoy hace cargado: la ida de cada
+    # viaje va vacía (el camión se llena en el camino) y el regreso final
+    # también, porque sale del relleno ya descargado.
+    outbound_hours = sum(v["outbound"]["durationHours"] for v in viajes_geo)
+    disposal_hours = sum(
+        v["disposal"]["durationHours"] / _LOADED_SPEED_FACTOR for v in viajes_geo
+    )
     return_hours = return_geo["durationHours"]
     horas_reales = outbound_hours + disposal_hours + return_hours
     km_reales = (
-        outbound_geo["distanceKm"] + disposal_geo["distanceKm"] + return_geo["distanceKm"]
+        sum(v["outbound"]["distanceKm"] + v["disposal"]["distanceKm"] for v in viajes_geo)
+        + return_geo["distanceKm"]
     )
 
     # ── Las dos restricciones, otra vez, contra las cifras REALES ──
@@ -1494,29 +1981,53 @@ async def _build_subroute(
         # de la configuración haría que la vista afirmara el ajuste incluso
         # cuando el plan salió a flujo libre.
         "trafico": tramos.get("trafico", False),
-        # Los saltos de la ida, en el mismo orden que `stops`. El número de
-        # parada se lo pone el handler, que es donde se asigna.
-        "hops": tramos.get("hops") or [],
+        # Todos los saltos vacíos del recorrido, en el mismo orden que `stops`.
+        # La línea de tiempo los usa para el tiempo entre parada y parada, y el
+        # número de parada se lo pone el handler.
+        "hops": [h for v in viajes_geo for h in v["hops"]],
         # Los camiones elegidos viajan enteros, no solo su cantidad: el handler
         # necesita la patente y la dotación para el AC7. Se eligieron arriba,
         # antes de evaluar el recorrido.
         "trucks": camiones,
         "stops": ordered_stops,
-        # La ida va PARTIDA en dos trazos, y no es cosmética: el primero sale
-        # del patio con el camión vacío y los demás son las transiciones entre
-        # zonas, que el camión ya hace cargando. Pintados del mismo color, un
-        # recorrido con varias paradas era una sola mancha azul en la que no se
-        # distinguía dónde empezaba ni en qué orden se recorría.
+        # A qué VIAJE pertenece cada parada, 1-based y en el mismo orden que
+        # `stops`.
         #
-        # El primer salto es `hops[0]`; si el proveedor no mandó geometría por
-        # salto, cae a la ida completa como un solo trazo, que es como estaba.
-        "outboundPath": _primer_salto(tramos, outbound_geo),
-        "transferPaths": _saltos_entre_zonas(tramos),
-        "disposalPath": disposal_geo["path"],
+        # **Un entero por parada en vez de una estructura anidada de viajes.**
+        # El mapa del frontend ya dibuja listas de trazos (una entrada por
+        # sub-ruta), así que los viajes se expresan agregando entradas a esas
+        # listas y el mapa no necesita cambiar nada. Lo único que sí necesita
+        # saber el agrupamiento es la línea de tiempo, para poner el separador
+        # "Viaje 2 de 3" y repetir el nodo de descarga, y para eso alcanza con
+        # que cada parada diga en cuál va. Una estructura anidada habría
+        # obligado a reescribir los tres lugares que suman distancias.
+        "viajePorParada": [
+            n + 1 for n, v in enumerate(viajes_geo) for _ in v["indices"]
+        ],
+        "viajes": len(viajes_geo),
+        # La descarga de cada viaje, con cuántas paradas lleva acumuladas el
+        # recorrido cuando ocurre. El handler traduce ese conteo al `order` de
+        # la parada, que es lo único que conoce la línea de tiempo.
+        "descargas": [
+            {
+                "trasParadas": sum(len(x["indices"]) for x in viajes_geo[: n + 1]),
+                "distanceKm": v["disposal"]["distanceKm"],
+                "durationHours": v["disposal"]["durationHours"] / _LOADED_SPEED_FACTOR,
+            }
+            for n, v in enumerate(viajes_geo)
+        ],
+        # Un trazo de ida y uno de descarga POR VIAJE. El primero de cada viaje
+        # sale del patio (viaje 1) o del relleno (los siguientes) con el camión
+        # vacío; los demás saltos son las transiciones entre zonas, que ya hace
+        # cargando. Pintados del mismo color, un recorrido con varias paradas
+        # era una sola mancha azul en la que no se distinguía dónde empezaba.
+        "outboundPaths": [_primer_salto_de(v) for v in viajes_geo],
+        "transferPaths": [p for v in viajes_geo for p in _saltos_entre_zonas_de(v)],
+        "disposalPaths": [v["disposal"]["path"] for v in viajes_geo],
         "returnPath": return_geo["path"],
-        "outboundDistanceKm": outbound_geo["distanceKm"],
+        "outboundDistanceKm": sum(v["outbound"]["distanceKm"] for v in viajes_geo),
         "outboundDurationHours": outbound_hours,
-        "disposalDistanceKm": disposal_geo["distanceKm"],
+        "disposalDistanceKm": sum(v["disposal"]["distanceKm"] for v in viajes_geo),
         "disposalDurationHours": disposal_hours,
         "returnDistanceKm": return_geo["distanceKm"],
         "returnDurationHours": return_hours,
@@ -1550,17 +2061,49 @@ async def generate_route(
     if not active_points:
         return RoutePlanInfeasibleOut(message="No hay puntos activos disponibles para generar la ruta.")
 
-    stops = await _load_route_stops(payload.analysisIds)
+    stops = await _load_route_stops(payload.stops)
     if not stops:
         return RoutePlanInfeasibleOut(message="No hay zonas de basura ubicables para generar la ruta.")
+
+    # AC4: sin el volumen a retirar no se genera nada, y el motivo nombra cuál
+    # falta. Va antes de cualquier cálculo: armar medio plan y abandonarlo sería
+    # gastar la llamada a la matriz para nada.
+    faltan = _faltan_volumenes(stops)
+    if faltan:
+        nombres = ", ".join(faltan[:3]) + ("..." if len(faltan) > 3 else "")
+        return RoutePlanInfeasibleOut(
+            message=(
+                f"Falta indicar cuánto volumen retirar de: {nombres}. "
+                "Sin esa cifra una sola zona grande ocuparía toda la capacidad del plan."
+            )
+        )
+
+    # AC5: lo que el plan mueve es exactamente lo declarado, y cada parada se
+    # visita una sola vez. De acá en adelante `volumeM3` ES el volumen a
+    # retirar; lo medido queda en `volumenZonaM3` para poder mostrarlo al lado.
+    stops = [_aplicar_declarado(s) for s in stops]
+
+    # Una parada por debajo del piso no es un retiro: una parada existe para que
+    # un camión llegue y cargue, y hacer el viaje por veinte litros no lo es. Se
+    # filtra acá y no en el reparto porque es una propiedad de lo declarado, no
+    # de la capacidad que haya quedado.
+    bajo_el_piso = [s for s in stops if s["volumeM3"] < _MINIMO_RETIRO_M3]
+    stops = [s for s in stops if s["volumeM3"] >= _MINIMO_RETIRO_M3]
+    if not stops:
+        return RoutePlanInfeasibleOut(
+            message=(
+                f"Todas las paradas declaran menos de {_format_number(_MINIMO_RETIRO_M3)} m³, "
+                "que es el balde más chico de la flota. Ninguna justifica un viaje."
+            )
+        )
 
     # La marca de prioridad se cruza contra las zonas que SÍ se pudieron cargar,
     # así que un id marcado que no se pudo ubicar (sin orthoCenter, sin CRS
     # reproyectable) desaparece por sí solo en vez de arrastrarse como una
     # prioridad sobre una zona que no está en el plan.
-    prioritarias = set(payload.priorityAnalysisIds)
+    prioritarias = set(payload.priorityStopIds)
     for z in stops:
-        z["prioritaria"] = z["analysisId"] in prioritarias
+        z["prioritaria"] = z["stopId"] in prioritarias
 
     total_volume = sum(s["volumeM3"] for s in stops)
     centroid = (
@@ -1604,7 +2147,7 @@ async def generate_route(
         if zona.get("prioritaria"):
             motivo = f"{motivo} Estaba marcada como prioritaria."
         sin_asignar.append(RoutePlanUnassignedOut(
-            analysisId=zona["analysisId"], name=zona["name"], reason=motivo
+            stopId=zona["stopId"], kind=zona.get("kind"), name=zona["name"], reason=motivo
         ))
 
     # Paso 1, la capacidad. Se elige el grupo de puntos que más volumen cubre y
@@ -1665,77 +2208,74 @@ async def generate_route(
             )
         capacidad_total = min(capacidad_total, capacidad_tripulable)
 
-    # Una zona que no cabe entera ya NO se descarta: se retira de ella lo que la
-    # capacidad libre permita y el resto queda pendiente para otra jornada. Es lo
-    # que de verdad hace la cuadrilla, y descartarla negaba el viaje completo por
-    # no poder hacerlo entero.
+    # Qué zonas puede atender el plan.
     #
-    # **Los dos límites del vehículo recortan igual**, el volumen y el peso. Un
-    # camión tiene cuánto le entra y cuánto aguanta, y el que primero se agota es
-    # el que decide la fracción. El peso no es redundante con el volumen porque
-    # la densidad cambia con el tipo de residuo: una zona de escombros llena la
-    # tolva por peso mucho antes que por metros cúbicos.
+    # **El filtro es por VIAJE, no por el total.** `capacidad_total` son los m³
+    # que el convoy carga de una vez, y con viajes múltiples lo único que una
+    # zona tiene que cumplir es caber en una carga: lo demás se resuelve
+    # volviendo al relleno, y cuántas veces se vuelve lo acota la jornada.
     #
-    # Normalmente queda **una sola** zona parcial: la primera que desborda se
-    # lleva la capacidad que quedaba, así que a las siguientes no les queda nada
-    # y se descartan con un motivo propio, más honesto que el anterior (no es que
-    # la capacidad total no alcance para esa zona, es que las anteriores ya la
-    # ocuparon). La excepción es una zona sin peso calculado, que no consume
-    # capacidad de peso y por lo tanto puede entrar después de una parcial que
-    # quedó limitada por toneladas.
+    # **Los dos límites del vehículo filtran igual**, el volumen y el peso. Un
+    # camión tiene cuánto le entra y cuánto aguanta, y basta que uno se agote.
+    # El peso no es redundante porque la densidad cambia con el tipo de residuo:
+    # una zona de escombros llena la tolva por peso mucho antes que por m³.
+    #
+    # El orden de llenado (prioritarias primero y, dentro de cada grupo, volumen
+    # ascendente) **ya no decide quién entra**, porque no hay capacidad que se
+    # agote: se conserva porque sigue decidiendo el orden en que las zonas se
+    # evalúan y, con eso, cuál sale primero cuando las horas obligan a recortar.
     capacidad_peso = _capacidad_de_peso(origin_group)
 
     stops_que_caben: list[dict] = []
-    acumulado = 0.0
-    acumulado_peso = 0.0
     for zona in sorted(stops, key=lambda z: (not z["prioritaria"], z["volumeM3"])):
         volumen_zona = zona["volumeM3"]
-        peso_zona = zona.get("weightTon", 0)
+        peso_zona = zona.get("weightTon") or 0
 
-        cabe_volumen = acumulado + volumen_zona <= capacidad_total
-        cabe_peso = capacidad_peso is None or acumulado_peso + peso_zona <= capacidad_peso
+        # **El tope ya no es el TOTAL del plan, es un viaje.**
+        #
+        # Antes se exigía que la suma de todas las zonas cupiera en la capacidad
+        # despachada, o sea el plan se limitaba a una sola carga. Con viajes
+        # múltiples lo que tiene que caber es cada zona por separado: lo demás
+        # se resuelve volviendo al relleno, y cuántas veces se vuelve lo acota la
+        # jornada, no la capacidad.
+        #
+        # Una zona que no cabe NI SOLA en el convoy sí se descarta, porque no
+        # hay forma de retirarla sin revisitarla, y una parada se visita una vez.
+        cabe_volumen = volumen_zona <= capacidad_total + 1e-9
+        cabe_peso = capacidad_peso is None or peso_zona <= capacidad_peso + 1e-9
         if cabe_volumen and cabe_peso:
             stops_que_caben.append(zona)
-            acumulado += volumen_zona
-            acumulado_peso += peso_zona
             continue
 
-        # Qué fracción de la zona entra según cada límite. El peso no limita
-        # cuando nadie declaró el suyo (capacidad_peso None), igual que en
-        # `aguanta_el_peso`: un dato ausente significa "no medido", no "cero".
-        fraccion_volumen = (capacidad_total - acumulado) / volumen_zona if volumen_zona > 0 else 0.0
-        if capacidad_peso is None or peso_zona <= 0:
-            fraccion_peso = 1.0
+        # **Lo declarado entra entero o no entra: no se parcializa.**
+        #
+        # Antes se retiraba de la zona lo que la capacidad libre permitiera. Eso
+        # tenía sentido cuando el sistema decidía la fracción, pero ahora la
+        # declara el trabajador: recortarla por nuestra cuenta sería cambiar en
+        # silencio una cifra que él eligió, y además contradice que cada parada
+        # se visite una sola vez (lo que no se retiró hoy no se completa después
+        # dentro del mismo plan).
+        #
+        # El motivo nombra el límite del CONVOY y no "la capacidad que queda",
+        # porque con viajes múltiples lo que falló es que la zona no cabe en una
+        # carga: declarar menos la vuelve posible, esperar a que se libere
+        # capacidad no.
+        if not cabe_peso and capacidad_peso is not None:
+            descartar(
+                zona,
+                f"Se declararon {_format_number(volumen_zona)} m³, que pesan "
+                f"{_format_number(peso_zona)} t y no caben en las "
+                f"{_format_number(capacidad_peso)} t que el convoy aguanta en un viaje. "
+                "Declara menos volumen de esta zona.",
+            )
         else:
-            fraccion_peso = (capacidad_peso - acumulado_peso) / peso_zona
-        fraccion = max(0.0, min(1.0, fraccion_volumen, fraccion_peso))
-        volumen_parcial = volumen_zona * fraccion
-
-        if volumen_parcial < _MINIMO_RETIRO_M3:
-            # El motivo nombra el límite que se agotó, no "no se pudo": la
-            # descripción de HDU5.1 pide poder distinguir cuál fue en cada caso,
-            # y "no queda capacidad" sin decir de qué manda a revisar la cifra
-            # equivocada en los recursos.
-            if fraccion_peso < fraccion_volumen:
-                descartar(
-                    zona,
-                    f"No queda capacidad de peso para esta zona: las "
-                    f"{_format_number(capacidad_peso or 0)} t disponibles se ocuparon con "
-                    f"las zonas anteriores.",
-                )
-            else:
-                descartar(
-                    zona,
-                    f"No queda capacidad para esta zona: los "
-                    f"{_format_number(capacidad_total)} m³ disponibles se ocuparon con "
-                    f"las zonas anteriores.",
-                )
-            continue
-
-        parcial = _parcializar(zona, volumen_parcial)
-        stops_que_caben.append(parcial)
-        acumulado += volumen_parcial
-        acumulado_peso += parcial.get("weightTon", 0)
+            descartar(
+                zona,
+                f"Se declararon {_format_number(volumen_zona)} m³ y el convoy carga "
+                f"{_format_number(capacidad_total)} m³ por viaje. Una parada se visita una "
+                "sola vez, así que declara ese volumen o menos.",
+            )
+        continue
 
     if not stops_que_caben:
         # Sigue siendo alcanzable: basta que la capacidad libre quede por debajo
@@ -1958,18 +2498,31 @@ async def generate_route(
         # visita. Se guardan porque los saltos se identifican por ellos, y acá es
         # donde se asignan.
         ordenes_sub: list[int] = []
-        for s in sub["stops"]:
+        # En el mismo orden que `stops`, así que el índice de la parada da su
+        # viaje. Un plan de un solo viaje deja la lista en 1 para todas.
+        viaje_por_parada = sub.get("viajePorParada") or []
+        for indice_parada, s in enumerate(sub["stops"]):
             out_stops.append(RoutePlanStopOut(
                 order=order,
                 lat=s["lat"],
                 lng=s["lng"],
                 label=s["name"],
-                analysisId=s.get("analysisId"),
+                stopId=s.get("stopId"),
+                kind=s.get("kind"),
+                trip=(
+                    viaje_por_parada[indice_parada]
+                    if indice_parada < len(viaje_por_parada)
+                    else 1
+                ),
                 # Se redondea acá por la misma razón que totalVolumeM3: la vista
                 # imprime dos decimales, y un retirado crudo contra un pendiente
                 # crudo no suman el total de la zona en pantalla.
                 removedVolumeM3=round(s["volumeM3"], 2),
-                removedWeightKg=round(s.get("weightTon", 0) * 1000),
+                # None y no 0 cuando nadie lo midió (un punto diario): la
+                # línea de tiempo omite el peso en vez de afirmar "0 kg".
+                removedWeightKg=(
+                    None if s.get("weightTon") is None else round(s["weightTon"] * 1000)
+                ),
                 # Solo las parciales lo traen. Cero significa "se retira
                 # completa", que es lo que la vista ya sabía hacer.
                 pendingVolumeM3=round(s.get("pendienteM3", 0), 2),
@@ -1992,9 +2545,12 @@ async def generate_route(
             )
             for i, hop in enumerate(hops[: len(ordenes_sub)])
         ]
-        outbound_paths.append(sub["outboundPath"])
+        # Una entrada POR VIAJE, no una por sub-ruta: así los viajes múltiples
+        # se dibujan solos, porque el mapa ya recorre estas listas y pinta cada
+        # entrada con el color de su clase de tramo.
+        outbound_paths.extend(sub.get("outboundPaths") or [])
         transfer_paths.extend(sub.get("transferPaths") or [])
-        disposal_paths.append(sub["disposalPath"])
+        disposal_paths.extend(sub.get("disposalPaths") or [])
         return_paths.append(sub["returnPath"])
 
         # ── AC7 ──
@@ -2026,6 +2582,18 @@ async def generate_route(
             trucksUsed=len(camiones),
             vehicles=vehiculos,
             disposalName=RELLENO_SANITARIO_NOMBRE,
+            trips=sub.get("viajes", 1),
+            # `trasParadas` cuenta paradas dentro de la sub-ruta; `ordenes_sub`
+            # las traduce al número global que la línea de tiempo usa.
+            disposals=[
+                RoutePlanDisposalOut(
+                    afterOrder=ordenes_sub[d["trasParadas"] - 1],
+                    distanceKm=round(d["distanceKm"], 2),
+                    durationHours=d["durationHours"],
+                )
+                for d in (sub.get("descargas") or [])
+                if 0 < d["trasParadas"] <= len(ordenes_sub)
+            ],
             disposalDistanceKm=round(sub["disposalDistanceKm"], 2),
             disposalDurationHours=round(sub["disposalDurationHours"], 2),
             outboundDistanceKm=round(sub["outboundDistanceKm"], 2),

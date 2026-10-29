@@ -22,9 +22,31 @@
 // que la cookie de sesión no se pierda por ser cross-origin. Ver config.ts.
 import { CLIENT_BACKEND_URL as BACKEND_URL } from "./config";
 
+/** De dónde sale una parada cargada al plan.
+ *
+ *  `analysis` es un análisis guardado (HDU4): trae volumen medido, peso y las
+ *  clases de residuo del detector. `punto_diario` es un retiro de la jornada
+ *  (HDU15): trae el volumen que declaró quien lo pidió, y **no trae peso**,
+ *  porque nadie lo midió. */
+export type RouteStopKind = "analysis" | "punto_diario";
+
+/** Una parada cargada, con su origen y cuánto retirar de ella.
+ *
+ *  **Referencia tipada y no dos listas paralelas**: con listas hay que mantener
+ *  la sincronía en los dos lados en cada lectura. Un punto diario no es una
+ *  zona ni un análisis, así que el id solo no alcanza para saber dónde
+ *  buscarlo. */
+export interface RouteStopRef {
+  kind: RouteStopKind;
+  id: string;
+  /** Cuánto volumen retirar de esta parada, en m³. Obligatorio: sin él una
+   *  sola zona grande se come el plan entero. */
+  retirarM3?: number | null;
+}
+
 export interface RoutePlanRequest {
-  /** ids de análisis guardados (HDU4, Mongo) cargados para la ruta. */
-  analysisIds: string[];
+  /** Las paradas cargadas, cada una con su origen y su volumen a retirar. */
+  stops: RouteStopRef[];
   /** ids de puntos HDU6 marcados como activos. */
   activePointIds: string[];
   availableHours: number;
@@ -41,13 +63,13 @@ export interface RoutePlanRequest {
    *  `capacidad_ton`. La lista se recuerda en el navegador (crewState.ts) solo
    *  para no retipearla; lo que decide el plan es lo que viaja aca. */
   personal?: { nombre: string; rol: "conductor" | "peoneta" | "operador" }[];
-  /** Subconjunto de `analysisIds` que el trabajador marcó como prioritario:
+  /** Subconjunto de los ids de `stops` que el trabajador marcó como prioritario:
    *  entra al plan antes que el resto y es el último en salir cuando hay que
    *  recortar por capacidad o por horas.
    *
    *  No se guarda en ninguna parte. Es una decisión de este plan, de esta
    *  jornada, y la vista la sostiene en memoria junto con las zonas cargadas. */
-  priorityAnalysisIds?: string[];
+  priorityStopIds?: string[];
 }
 
 export interface RoutePlanStop {
@@ -55,21 +77,32 @@ export interface RoutePlanStop {
   lat: number;
   lng: number;
   label: string;
-  /** Qué análisis guardado (HDU4) es esta parada. Opcional mientras el backend
-   *  no lo mande.
+  /** Qué parada cargada es esta, y de dónde salió.
    *
-   *  Con él, la vista puede mostrar el volumen y el tipo de residuo de cada
-   *  parada SIN pedirlos por la red: ya tiene los análisis cargados en memoria,
-   *  solo le falta saber cuál es cuál. Sin él tendría que emparejar por nombre,
-   *  que se rompe en cuanto dos zonas se llaman parecido. */
-  analysisId?: string;
+   *  Con ella, la vista puede mostrar el volumen y el tipo de residuo de cada
+   *  parada SIN pedirlos por la red: ya tiene lo cargado en memoria, solo le
+   *  falta saber cuál es cuál. Sin ella tendría que emparejar por nombre, que
+   *  se rompe en cuanto dos zonas se llaman parecido.
+   *
+   *  Se llamaba `analysisId`: con paradas tipadas puede ser el id de un punto
+   *  diario, que no es un análisis, así que el nombre mentía. */
+  stopId?: string;
+  kind?: RouteStopKind;
+  /** A qué VIAJE del recorrido pertenece esta parada, 1-based.
+   *
+   *  El convoy vuelve al relleno cuando no puede con la siguiente zona, así que
+   *  un recorrido puede tener varios viajes. La línea de tiempo lo usa para
+   *  poner el separador "Viaje 2 de 3" y repetir el nodo de descarga.
+   *
+   *  Ausente, o 1 en todas, significa un solo viaje. */
+  trip?: number;
   /** Cuánto se retira DE VERDAD en esta parada, que no siempre es el volumen de
    *  la zona.
    *
    *  Una zona que no cabe en la capacidad despachada ya no se descarta entera:
    *  el camión carga lo que le entra y la zona queda con un resto. Y la vista no
-   *  puede deducirlo, porque toma las cifras del análisis que empareja por
-   *  `analysisId`: sin estos campos imprimiría el volumen completo de una zona
+   *  puede deducirlo, porque toma las cifras de lo que empareja por
+   *  `stopId`: sin estos campos imprimiría el volumen completo de una zona
    *  que se retira a medias.
    *
    *  `pendingVolumeM3` en cero, o ausente en un plan generado por una versión
@@ -134,6 +167,21 @@ export interface RoutePlanSegment {
   /** Tramo de la última zona al relleno sanitario, el único que el camión hace
    *  cargado. Opcionales porque un plan generado por una versión anterior del
    *  backend no los trae, y la línea de tiempo no dibuja el nodo si faltan. */
+  /** Cuántos viajes tiene este recorrido. El criterio pide informarlo: sin la
+   *  cifra, un nodo de descarga repetido se lee como si el recorrido se hubiera
+   *  dibujado dos veces. Ausente o 1 = un solo viaje. */
+  trips?: number;
+  /** Cada pasada por el relleno, con después de qué parada ocurre.
+   *
+   *  **Sin esto las horas de llegada mienten.** La línea de tiempo acumula el
+   *  tiempo transcurrido parada por parada; con varios viajes, el reloj se
+   *  saltaba cada depósito intermedio y todas las llegadas posteriores salían
+   *  más temprano de lo real. El total (`disposalDurationHours`) no sirve para
+   *  eso: dice cuánto suman todas las descargas, no cuándo ocurre cada una.
+   *
+   *  Vacía en un plan generado por una versión anterior del backend, y ahí la
+   *  vista cae a un solo nodo con el total, que es como estaba. */
+  disposals?: { afterOrder: number; distanceKm: number; durationHours: number }[];
   disposalName?: string;
   disposalDistanceKm?: number;
   disposalDurationHours?: number;
@@ -170,7 +218,8 @@ export interface RoutePlanSegment {
 /** Una zona que no se pudo asignar a ningún vehículo, con el motivo. HDU5.1/AC6:
  *  el plan sigue siendo válido para el resto, la zona queda marcada. */
 export interface RoutePlanUnassigned {
-  analysisId: string;
+  stopId: string;
+  kind?: RouteStopKind;
   name: string;
   /** Por qué no se pudo: sin vehículo compatible, sin personal completo, fuera
    *  de autonomía, sin capacidad. En texto, porque es lo que se le muestra al
