@@ -576,6 +576,7 @@ function RutasPage() {
   /** Las zonas registradas que todavía no tienen vuelo. Se listan en el diálogo
    *  deshabilitadas, con "Sin vuelo" como motivo. */
   const [zonasSinVuelo, setZonasSinVuelo] = useState<ZoneRecord[]>([]);
+  const [sinVueloAbierto, setSinVueloAbierto] = useState(false);
   const [selectedDiarios, setSelectedDiarios] = useState<Set<string>>(new Set());
   /** Cuántas paradas hay cargadas, de las dos clases. El botón de generar
    *  miraba solo las zonas analizadas, así que un plan hecho únicamente de
@@ -2427,29 +2428,54 @@ function RutasPage() {
               lugar que sabe que existe, porque lo registró él, y al no
               encontrarlo no tiene forma de saber si el sistema lo ignora, si se
               equivocó de nombre o si le falta un dato. */}
+          {/* **Plegada por omisión, y con 54 eso no es un detalle.** El
+              catastro de la municipalidad son 54 microbasurales y al principio
+              ninguno está volado, así que listados de entrada empujaban fuera
+              de vista justo lo que sí se puede cargar. El motivo se dice una
+              vez para todas (es el mismo) y los nombres quedan a un clic, que
+              es lo que el criterio pide sin sepultar la lista accionable. */}
           {zonasSinVuelo.length > 0 && (
             <div className="space-y-1.5">
-              <p className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">
-                Zonas sin vuelo ({zonasSinVuelo.length})
-              </p>
-              <ul className="max-h-32 space-y-1 overflow-y-auto">
-                {zonasSinVuelo.map((z) => (
-                  <li
-                    key={z.id}
-                    className="flex items-center gap-2 rounded-md border border-dashed border-border/50 p-2 opacity-70"
-                  >
-                    <MapPin className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/60" />
-                    <p className="min-w-0 flex-1 truncate text-xs">{z.name}</p>
-                    <span className="flex-shrink-0 rounded-full bg-muted px-2 py-0.5 text-[0.625rem] font-medium text-muted-foreground">
-                      Sin vuelo
-                    </span>
-                  </li>
-                ))}
-              </ul>
-              <p className="text-[0.625rem] leading-relaxed text-muted-foreground">
-                Una zona sin medición no tiene volumen, peso ni tipo de residuo, que es sobre lo
-                que descansa el reparto. Vuélale el dron desde Vista Principal.
-              </p>
+              <button
+                type="button"
+                onClick={() => setSinVueloAbierto((v) => !v)}
+                className="flex w-full cursor-pointer items-start gap-2 rounded-md border border-dashed border-border/50 p-2 text-left transition-colors hover:bg-accent"
+                aria-expanded={sinVueloAbierto}
+              >
+                <MapPin className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/60" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-xs text-foreground">
+                    {zonasSinVuelo.length} zona{zonasSinVuelo.length === 1 ? "" : "s"} sin vuelo, no
+                    se pueden cargar
+                  </span>
+                  <span className="mt-0.5 block text-[0.625rem] leading-relaxed text-muted-foreground">
+                    Sin medición no hay volumen, peso ni tipo de residuo, que es sobre lo que
+                    descansa el reparto. Vuélalas desde Vista Principal.
+                  </span>
+                </span>
+                <ChevronDown
+                  className={`mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-muted-foreground transition-transform duration-150 ${
+                    sinVueloAbierto ? "rotate-180" : ""
+                  }`}
+                />
+              </button>
+              {sinVueloAbierto && (
+                <ul className="max-h-40 space-y-1 overflow-y-auto">
+                  {zonasSinVuelo.map((z) => (
+                    <li
+                      key={z.id}
+                      className="flex items-center gap-2 rounded-md border border-dashed border-border/50 px-2 py-1.5 opacity-70"
+                    >
+                      <p className="min-w-0 flex-1 truncate text-xs">{z.name}</p>
+                      {z.tipo && (
+                        <span className="flex-shrink-0 text-[0.625rem] text-muted-foreground">
+                          {z.tipo}
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           )}
 
