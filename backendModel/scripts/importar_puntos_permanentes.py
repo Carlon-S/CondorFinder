@@ -267,12 +267,39 @@ def main() -> None:
     db = MongoClient(MONGODB_URI)[DB_NAME]
 
     existentes = {z["name"]: z for z in db.zones.find({}, {"name": 1, "owner": 1, "kind": 1})}
-    owner = args.owner or next((z.get("owner", "") for z in existentes.values() if z.get("owner")), "")
-    if not owner and args.aplicar:
-        raise SystemExit(
-            "No se pudo deducir el dueño (la base no tiene zonas). "
-            "Pasa --owner con el usuario que va a administrarlos."
-        )
+
+    # El dueño, por orden de preferencia: lo que se pasó, el de una zona que ya
+    # exista, o la colección `users`.
+    #
+    # El tercer camino importa y faltaba: la base puede no tener **ninguna**
+    # zona (es justo el caso de una carga inicial, o después de limpiar los
+    # puntos de prueba), y ahí el script moría pidiendo `--owner`. `users` es
+    # exactamente donde el sistema registra quién puede entrar (`username` es
+    # el correo con que se inició sesión), así que el dato está ahí y no hay
+    # por qué hacerlo tipear.
+    #
+    # Con varios usuarios NO se elige por cuenta propia: se listan y se pide
+    # `--owner`. Adivinar el dueño de 54 puntos entre varias personas es la
+    # clase de suposición que después nadie puede rastrear.
+    owner = args.owner or next(
+        (z.get("owner", "") for z in existentes.values() if z.get("owner")), ""
+    )
+    if not owner:
+        usuarios = [u.get("username", "") for u in db.users.find({}, {"username": 1})]
+        usuarios = [u for u in usuarios if u]
+        if len(usuarios) == 1:
+            owner = usuarios[0]
+            print(f"\nDueño deducido de la colección `users`: {owner}")
+        elif len(usuarios) > 1 and args.aplicar:
+            raise SystemExit(
+                "Hay varios usuarios y la base no tiene zonas de las que deducir el dueño.\n"
+                f"Pasa --owner con uno de: {', '.join(sorted(usuarios))}"
+            )
+        elif args.aplicar:
+            raise SystemExit(
+                "No se pudo deducir el dueño: la base no tiene zonas ni usuarios. "
+                "Inicia sesión una vez en el sistema, o pasa --owner."
+            )
 
     crear = [p for p in puntos if p["nombre"] not in existentes]
     actualizar = [p for p in puntos if p["nombre"] in existentes]
