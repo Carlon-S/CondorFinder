@@ -924,16 +924,38 @@ async def delete_zone(
     zone_id: str,
     current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
 ):
-    """Borra una zona que no tenga ningún análisis.
+    """Borra una zona que no tenga ningún análisis, y la saca del itinerario.
 
-    **Se niega si los tiene**, nombrando cuántos. Borrar en cascada el historial
-    de mediciones de un terreno detrás de un solo clic no es una operación que
-    deba existir: el camino para eso es borrar los análisis uno por uno, donde
-    cada borrado se ve y queda en la bitácora.
+    **Se niega si tiene análisis**, nombrando cuántos. Borrar en cascada el
+    historial de mediciones de un terreno detrás de un solo clic no es una
+    operación que deba existir: el camino para eso es borrar los análisis uno
+    por uno, donde cada borrado se ve y queda en la bitácora.
 
-    Sacarla del itinerario semanal va en la misma operación. Si no, el día de
-    la semana quedaría apuntando a un id que ya no resuelve, y la grilla
-    mostraría un hueco sin explicación.
+    ---
+
+    **Pero sí la saca de TODOS sus días del itinerario, incluidos los que ya
+    pasaron, y eso es un cambio de criterio.** Antes respondía 409 mientras el
+    punto estuviera programado en algún día, para que lo quitara primero de
+    ellos. Dos motivos para revertirlo:
+
+    1. **Era un bloqueo sin salida.** `_exigir_editable()` en `itinerario.py`
+       rechaza toda escritura sobre un día terminado, así que un punto
+       programado en un día pasado no se podía sacar de ese día **ni** eliminar:
+       quedaba en la base para siempre, sin ningún camino en la interfaz.
+    2. **El defecto original era el SILENCIO, no la cascada.** Lo que estaba mal
+       era un `$pull` que nadie veía, y la cura del silencio es decirlo: el
+       diálogo enumera en cuántos días está y cuántos ya pasaron, y la bitácora
+       guarda la lista. Volver el punto inmortal fue una sobrecorrección.
+
+    **El itinerario de un día pasado es un PLAN, no un registro.** Guarda lo que
+    se pensó hacer ese día; nadie confirma nunca una visita. Lo que sí va a
+    merecer protección es el registro de retiros (fecha, zona, m³, camión), que
+    es un hecho y no una intención: cuando exista, el 409 vuelve solo y bien
+    fundado, igual que el de los análisis de acá arriba.
+
+    Consulta directa sobre la colección del itinerario en vez de importar
+    `itinerario.py`: ese módulo importa modelos de acá, y el import cruzado
+    sería circular.
     """
     doc = await get_db().zones.find_one({"_id": _object_id(zone_id)})
     if not doc:
@@ -949,29 +971,29 @@ async def delete_zone(
             ),
         )
 
-    # **Un punto programado no se borra por accidente.** Antes se sacaba del
-    # itinerario con un `$pull` y se eliminaba, así que un clic deshacía un
-    # reparto semanal completo sin decir que lo estaba haciendo. Quien de
-    # verdad quiere eliminarlo, primero lo saca de los días: ese gesto se ve.
-    #
-    # Consulta directa sobre la colección del itinerario en vez de importar
-    # `itinerario.py`: ese módulo importa modelos de acá, y el import cruzado
-    # sería circular.
-    dias = await get_db().itinerario_dias.count_documents({"puntos": zone_id})
-    if dias:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"El punto está programado en {dias} día(s) del itinerario. "
-                "Quítalo de esos días antes de eliminarlo."
-            ),
+    # Qué días lo tenían, ANTES de sacarlo: la bitácora guarda la lista, porque
+    # el día que alguien pregunte por qué un punto desapareció del reparto, el
+    # registro tiene que poder responderlo.
+    programado_en = [
+        f"{d.get('semana')} {d.get('dia')}"
+        async for d in get_db().itinerario_dias.find(
+            {"puntos": zone_id}, {"semana": 1, "dia": 1}
+        )
+    ]
+    if programado_en:
+        await get_db().itinerario_dias.update_many(
+            {"puntos": zone_id}, {"$pull": {"puntos": zone_id}}
         )
 
     await get_db().zones.delete_one({"_id": _object_id(zone_id)})
     await auditoria.registrar(
-        current_user.username, "eliminar", "zona", zone_id, {"nombre": doc.get("name")}
+        current_user.username,
+        "eliminar",
+        "zona",
+        zone_id,
+        {"nombre": doc.get("name"), "diasDelItinerario": programado_en},
     )
-    return {"ok": True}
+    return {"ok": True, "diasDelItinerario": programado_en}
 
 
 @router.patch("/{analysis_id}/name", response_model=SavedAnalysisOut)

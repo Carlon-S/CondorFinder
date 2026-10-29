@@ -502,7 +502,7 @@ export async function updateZone(zoneId: string, data: ZoneInput): Promise<ZoneR
 
 /** Borra una zona. El backend la rechaza con 409 si tiene análisis guardados,
  *  y ese mensaje es el que hay que mostrar: dice cuántos tiene. */
-export async function deleteZone(zoneId: string): Promise<void> {
+export async function deleteZone(zoneId: string): Promise<{ diasDelItinerario: string[] }> {
   const res = await fetch(`${BACKEND_URL}/analyses/zones/${encodeURIComponent(zoneId)}`, {
     method: "DELETE",
     credentials: "include",
@@ -510,6 +510,15 @@ export async function deleteZone(zoneId: string): Promise<void> {
   if (!res.ok) {
     throw new Error(await parseErrorMessage(res, "No se pudo eliminar la zona."));
   }
+  // Los días del itinerario de los que se quitó el punto, como "2026-W44 lunes".
+  //
+  // El borrado lo saca de TODOS sus días, incluidos los que ya pasaron, así que
+  // la vista tiene que poder decir qué se deshizo. Enumerarlos ANTES de
+  // confirmar costaría un endpoint aparte (la vista solo conoce la semana que
+  // está mirando), así que el diálogo advierte la regla y el aviso posterior
+  // nombra los días: la bitácora del backend guarda la lista para siempre.
+  const data = (await res.json().catch(() => ({}))) as { diasDelItinerario?: string[] };
+  return { diasDelItinerario: data.diasDelItinerario ?? [] };
 }
 
 /** Renombra UNA versión, o sea una medición guardada con su fecha.

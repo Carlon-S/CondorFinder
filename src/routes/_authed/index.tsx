@@ -697,8 +697,17 @@ function MainPage() {
     // que es la red de seguridad por si la vista quedó desactualizada.
     if (target.state === "no_flight" && target.zoneId) {
       try {
-        await deleteZone(target.zoneId);
-        notify.success("Punto eliminado", `"${deletedName}" ya no aparece en tu listado.`);
+        // El borrado lo saca de TODOS sus días del itinerario, los pasados
+        // incluidos, y devuelve cuáles. Decirlo acá importa porque desde esta
+        // vista el itinerario no se ve: sin el aviso, un reparto semanal se
+        // deshacía sin que nada lo mencionara, que es el defecto original.
+        const { diasDelItinerario } = await deleteZone(target.zoneId);
+        notify.success(
+          "Punto eliminado",
+          diasDelItinerario.length > 0
+            ? `"${deletedName}" ya no aparece. Se quitó de ${diasDelItinerario.length} día(s) del itinerario: ${diasDelItinerario.join(", ")}.`
+            : `"${deletedName}" ya no aparece en tu listado.`,
+        );
       } catch (e) {
         notify.error("No se pudo eliminar", (e as Error).message);
       }

@@ -158,6 +158,8 @@ function ItinerarioPage() {
   const [editando, setEditando] = useState<ZoneRecord | null>(null);
   const [formAbierto, setFormAbierto] = useState(false);
   const [aBorrar, setABorrar] = useState<ZoneRecord | null>(null);
+  /** El día que se está por vaciar, o null. */
+  const [diaAVaciar, setDiaAVaciar] = useState<DiaSemana | null>(null);
   const [confirmarCopia, setConfirmarCopia] = useState(false);
   /** El reparto de la semana anterior, traído al abrir la confirmación.
    *  `null` mientras carga. Confirmar un reemplazo sin ver con qué se
@@ -262,6 +264,18 @@ function ItinerarioPage() {
 
   const quitarDelDia = (dia: DiaSemana, id: string) =>
     persistir([{ dia, puntos: puntosDe(dia).filter((p) => p.id !== id) }]);
+
+  /** Vacía un día completo.
+   *
+   *  **No necesita endpoint nuevo**: vaciar es escribir una lista vacía, y el
+   *  `PUT` del itinerario ya existe con su regla de día pasado. Un endpoint
+   *  propio habría sido un segundo camino para la misma escritura, con su
+   *  propia copia de esa regla.
+   *
+   *  Con confirmación porque deshace trabajo que alguien repartió a mano, y
+   *  quitar las paradas de a una era el único camino: con siete en un día, eso
+   *  son siete clics y seis peticiones. */
+  const vaciarDia = (dia: DiaSemana) => persistir([{ dia, puntos: [] }]);
 
   /** Suelta un punto en un día. Ver el comentario de `MIME` sobre `carga`.
    *  `destino` es el índice donde cae; `-1` significa al final de la columna. */
@@ -467,6 +481,7 @@ function ItinerarioPage() {
               puntosDe={puntosDe}
               guardando={guardando}
               onAgregar={setDiaAbierto}
+              onVaciar={setDiaAVaciar}
               onQuitar={(dia, id) => void quitarDelDia(dia, id)}
               onSoltar={(dia, carga, destino) => void soltar(dia, carga, destino)}
               onEditar={abrirEdicion}
@@ -537,22 +552,75 @@ function ItinerarioPage() {
         onConfirmar={copiarAnterior}
       />
 
+      {/* Vaciar un día deshace trabajo que alguien repartió a mano, así que
+          confirma. Y dice CUÁNTAS paradas se van, que es la cifra que decide:
+          vaciar un día con una parada y uno con siete no es lo mismo. */}
+      <ConfirmarBorrado
+        abierto={diaAVaciar !== null}
+        onOpenChange={(abierto) => !abierto && setDiaAVaciar(null)}
+        titulo="Vaciar el día"
+        descripcion={
+          diaAVaciar ? (
+            <>
+              Se quitarán las <strong>{puntosDe(diaAVaciar).length}</strong> paradas del{" "}
+              <strong>{ROTULO_DIA[diaAVaciar].toLowerCase()}</strong>. Los puntos siguen
+              registrados en el sistema: solo dejan de estar programados ese día.
+            </>
+          ) : (
+            ""
+          )
+        }
+        etiquetaConfirmar="Vaciar"
+        onConfirmar={async () => {
+          if (!diaAVaciar) return;
+          const dia = diaAVaciar;
+          setDiaAVaciar(null);
+          await vaciarDia(dia);
+        }}
+      />
+
       <ConfirmarBorrado
         abierto={aBorrar !== null}
         onOpenChange={(abierto) => !abierto && setABorrar(null)}
         titulo="Eliminar punto permanente"
         descripcion={
-          aBorrar ? `Se eliminará "${aBorrar.name}" del sistema. Esto no se puede deshacer.` : ""
+          aBorrar ? (
+            <>
+              Se eliminará <strong>{aBorrar.name}</strong> del sistema. Esto no se puede deshacer.
+              {/* **El aviso de la cascada va siempre, no solo cuando esta semana
+                  lo tiene programado.** La vista solo conoce la semana que está
+                  mirando, así que no puede saber si el punto está en una semana
+                  pasada; decir la regla cubre los dos casos, y el aviso de
+                  después nombra los días exactos. */}
+              <span className="mt-2 block">
+                Si está programado en algún día del itinerario, se va a quitar de todos,
+                <strong> incluidos los que ya pasaron</strong>.
+              </span>
+              {(diasPorPunto.get(aBorrar.id) ?? 0) > 0 && (
+                <span className="mt-1 block text-warning-strong">
+                  Esta semana está en {diasPorPunto.get(aBorrar.id)} día
+                  {diasPorPunto.get(aBorrar.id) === 1 ? "" : "s"}.
+                </span>
+              )}
+            </>
+          ) : (
+            ""
+          )
         }
         onConfirmar={async () => {
           if (!aBorrar) return;
           try {
-            await deleteZone(aBorrar.id);
-            notify.success("Punto eliminado", aBorrar.name);
+            const { diasDelItinerario } = await deleteZone(aBorrar.id);
+            notify.success(
+              "Punto eliminado",
+              diasDelItinerario.length > 0
+                ? `${aBorrar.name}. Se quitó de ${diasDelItinerario.length} día(s) del itinerario: ${diasDelItinerario.join(", ")}.`
+                : aBorrar.name,
+            );
             await cargar();
           } catch (e) {
-            // El backend se niega si el punto está programado en algún día, y
-            // ese mensaje dice en cuántos.
+            // Ya no se niega por el itinerario: lo único que lo bloquea es
+            // tener análisis guardados, y ese mensaje dice cuántos.
             notify.error("No se pudo eliminar", (e as Error).message);
           }
         }}
@@ -657,6 +725,7 @@ function CalendarioSemanal({
   puntosDe,
   guardando,
   onAgregar,
+  onVaciar,
   onQuitar,
   onSoltar,
   onEditar,
@@ -666,6 +735,7 @@ function CalendarioSemanal({
   puntosDe: (dia: DiaSemana) => PuntoDelDia[];
   guardando: DiaSemana | null;
   onAgregar: (dia: DiaSemana) => void;
+  onVaciar: (dia: DiaSemana) => void;
   onQuitar: (dia: DiaSemana, id: string) => void;
   onSoltar: (dia: DiaSemana, carga: string, destino: number) => void;
   onEditar: (id: string) => void;
@@ -686,6 +756,7 @@ function CalendarioSemanal({
             puntos={puntosDe(dia)}
             guardando={guardando === dia}
             onAgregar={() => onAgregar(dia)}
+            onVaciar={() => onVaciar(dia)}
             onQuitar={(id) => onQuitar(dia, id)}
             onSoltar={(carga, destino) => onSoltar(dia, carga, destino)}
             onEditar={onEditar}
@@ -704,6 +775,7 @@ function ColumnaDia({
   puntos,
   guardando,
   onAgregar,
+  onVaciar,
   onQuitar,
   onSoltar,
   onEditar,
@@ -715,6 +787,7 @@ function ColumnaDia({
   puntos: PuntoDelDia[];
   guardando: boolean;
   onAgregar: () => void;
+  onVaciar: () => void;
   onQuitar: (id: string) => void;
   /** `carga` es `"<diaDeOrigen>|<id>"`, vacío el origen si vino de la tabla. */
   onSoltar: (carga: string, destino: number) => void;
@@ -761,19 +834,39 @@ function ColumnaDia({
               {fecha.getDate()}
             </p>
           </div>
-          {/* Un día pasado no ofrece el `+`: un botón que el servidor va a
-              rechazar es peor que ninguno. */}
+          {/* Un día pasado no ofrece ninguno de los dos: un botón que el
+              servidor va a rechazar es peor que ninguno.
+
+              **Vaciar es planificar, así que sigue la misma regla que agregar.**
+              Borrar un punto sí saca ese punto de un día pasado, y la asimetría
+              es deliberada: eso es sobre el PUNTO, que deja de existir, mientras
+              que vaciar es sobre el DÍA, y un día que ya pasó no es de uno para
+              replanificarlo. */}
           {!pasado && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              onClick={onAgregar}
-              aria-label={`Agregar puntos al ${ROTULO_DIA[dia]}`}
-              title={`Agregar puntos al ${ROTULO_DIA[dia]}`}
-            >
-              <Plus className="h-4 w-4" />
-            </Button>
+            <div className="flex items-center gap-0.5">
+              {puntos.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-muted-foreground hover:bg-destructive/15 hover:text-destructive-strong"
+                  onClick={onVaciar}
+                  aria-label={`Vaciar el ${ROTULO_DIA[dia]}`}
+                  title={`Quitar las ${puntos.length} paradas del ${ROTULO_DIA[dia]}`}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              )}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={onAgregar}
+                aria-label={`Agregar puntos al ${ROTULO_DIA[dia]}`}
+                title={`Agregar puntos al ${ROTULO_DIA[dia]}`}
+              >
+                <Plus className="h-4 w-4" />
+              </Button>
+            </div>
           )}
         </div>
         <p className="mt-0.5 flex h-3 items-center text-[0.5625rem] text-muted-foreground">

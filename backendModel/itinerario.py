@@ -277,6 +277,18 @@ async def copiar_semana(
     docs = await get_db().itinerario_dias.find({"semana": origen}).to_list(length=None)
     por_dia = {d["dia"]: d.get("puntos", []) for d in docs}
 
+    # **Los ids que ya no resuelven NO se copian.** El `GET` los filtra al
+    # dibujar, así que un punto borrado no se ve en la semana de origen; pero
+    # copiando en crudo se escribía igual en la de destino, y ahí quedaba un id
+    # muerto recién creado. `delete_zone` hace el `$pull`, así que en
+    # condiciones normales no debería quedar ninguno: esto cubre un documento
+    # de una versión anterior del sistema o un borrado hecho a mano en Mongo.
+    #
+    # Se filtra acá y no solo al leer porque escribir basura nueva es distinto
+    # de arrastrar basura vieja: lo primero se puede evitar.
+    vivas = await _zonas_por_id([p for lista in por_dia.values() for p in lista])
+    por_dia = {dia: [p for p in lista if p in vivas] for dia, lista in por_dia.items()}
+
     ahora = datetime.now(timezone.utc)
     hoy = _hoy_local()
     for dia in DIAS:
