@@ -5,13 +5,28 @@ de Aseo: 51 microbasurales y 3 VIRS, cada uno con su ubicación escrita y su
 geometría. Es la misma lista de 54 que el README menciona y de la que hasta
 ahora el sistema solo tenía el número.
 
-Uso, desde backendModel/ y con el entorno del backend activo:
+## Cómo correrlo
 
-    python scripts/importar_puntos_permanentes.py <ruta.kmz>            # simulación
-    python scripts/importar_puntos_permanentes.py <ruta.kmz> --aplicar  # escribe
+**En la VM, que es donde vive `MONGODB_URI`.** El `WORKDIR` del contenedor es
+`/app` y el backend está en `/app/backendModel/`, así que la ruta lleva ese
+prefijo (sin él, `python` responde `No such file or directory`):
 
-**Dry-run por omisión**, igual que `importar_flota.py` y `migrar_zonas.py`: la
-salida se revisa antes de escribir 54 documentos en la base de producción.
+    cd ~/CondorFinder
+    docker compose exec backend python backendModel/scripts/importar_puntos_permanentes.py
+    docker compose exec backend python backendModel/scripts/importar_puntos_permanentes.py --aplicar
+
+El `.env` del servicio ya está cargado en el contenedor, así que no hace falta
+pasar nada más, y el KMZ viaja en la imagen (está dentro de `backendModel/`).
+
+**En local, desde `backendModel/` y con el entorno del backend activo**, útil
+solo para revisar la data: sin `MONGODB_URI` imprime los 54 y no escribe.
+
+    python scripts/importar_puntos_permanentes.py
+    python scripts/importar_puntos_permanentes.py <otro.kmz>
+
+**Dry-run por omisión en los dos casos**, igual que `importar_flota.py` y
+`migrar_zonas.py`: la salida se revisa antes de escribir 54 documentos en la
+base de producción, y `--aplicar` es lo único que escribe.
 
 **Es idempotente.** Un punto que ya existe con el mismo nombre se actualiza en
 vez de duplicarse, y solo en los campos que el KMZ trae: la dirección, la
