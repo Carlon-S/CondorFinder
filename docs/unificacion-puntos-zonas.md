@@ -5,8 +5,9 @@
 > Escrito el 2026-10-26 **antes** de que el equipo tomara las decisiones. Se conserva solo como registro de cómo estaba planteado el problema; **no describe el plan vigente** y varias cosas que dice ya no valen:
 >
 > - Decía que la pieza 3.5 estaba sin resolver y ofrecía **tres opciones para el volumen de un punto que nadie midió**. Esa pregunta **ya no existe**: se decidió que solo entran a una ruta las paradas con datos, así que no hay que estimar nada.
-> - No tiene las 18 decisiones acordadas, ni los 8 criterios de aceptación redactados, ni el reparto en Fase 0 / Fase 1 / Fase 2.
-> - La **Fase 0 está cerrada y verificada en producción** (28-10-2026), con AC1 y AC8 cumplidos.
+> - No tiene las 18 decisiones acordadas ni el reparto en Fase 0 / Fase 1 / Fase 2.
+> - La **Fase 0 está cerrada y verificada en producción** (28-10-2026).
+> - **Los criterios de aceptación de HDU5.2 son SEIS**, los de la historia, y están en el plan vigente. Una versión anterior de ese plan traía ocho redactados en Gherkin que **no eran los de la historia**; si encuentras una referencia a "AC1" a "AC8" de HDU5.2 en cualquier documento, es de esa numeración inventada y no vale.
 >
 > **El plan vigente vive fuera del repositorio**, por decisión del usuario: `CondorFinder - Plan HDU5.2.md`, en la carpeta `Feria`. Un resumen con el orden de la Fase 1 está en `CLAUDE.md`, en "Current project status".
 

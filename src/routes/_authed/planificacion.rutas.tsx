@@ -190,6 +190,56 @@ const PREFIJO_DIARIO = "diario:";
  *  origen, porque un punto diario no es ninguna de las dos cosas. */
 const COLOR_PUNTO_DIARIO = "#f59e0b";
 
+/** Prefijo del id de un marcador de zona registrada SIN vuelo (C1 de HDU5.2).
+ *
+ *  Necesita el suyo y no le sirve el id pelado porque el clic hace otra cosa:
+ *  una zona analizada abre su visor con su mapa unificado, y una sin vuelo no
+ *  tiene mapa que mostrar, así que abre el diálogo de carga, que es donde está
+ *  escrito por qué no se puede cargar. */
+const PREFIJO_SIN_VUELO = "sinvuelo:";
+
+/** El color de un marcador de lugar registrado que NO está en la ruta.
+ *
+ *  **Los dos motores lo IGNORAN mientras `muted` sea true**, y está comprobado:
+ *  `zoneIcon()` en `GeoMapImpl.tsx` hace `filled ? color : "var(--muted-foreground)"`,
+ *  y `GoogleMapImpl.tsx` hace lo mismo. O sea estos marcadores se pintan en
+ *  `--muted-foreground`, que ya es el gris correcto para algo que no participa.
+ *
+ *  **Va igual, y no es decorativo**: `color` es lo que hace que el marcador tenga
+ *  forma de ZONA y no de punto de origen, porque `GeoMapImpl` elige con
+ *  `p.color ? zoneIcon(...) : originIcon(...)`. Sin él, los 54 puntos del
+ *  catastro se dibujarían como si fueran patios de donde sale la flota.
+ *
+ *  Deliberadamente fuera de `ZONE_COLORS`, cuyo primer valor ES el violeta con
+ *  que el mapa de recursos dibuja sus zonas de contexto: si alguna vez estos
+ *  marcadores dejan de ser huecos, el violeta los confundiría con la primera
+ *  zona cargada, que es justo la distinción que importa acá.
+ *
+ *  **Lo que distingue una zona cargable de una sin vuelo no es el color** (no se
+ *  renderiza, y a 14 px tampoco se leería): es el rótulo, que dice "sin vuelo" y
+ *  su tipo. Misma regla que la estrella de prioritaria, que se distingue por
+ *  relleno contra contorno. */
+const COLOR_FUERA_DE_RUTA = "#64748b";
+
+/** Las zonas registradas que todavía no tienen ningún vuelo vigente.
+ *
+ *  **Una sola definición para los dos consumidores**, el mapa y el diálogo de
+ *  carga: es la regla de qué significa "sin vuelo", y escrita en dos lugares
+ *  bastaba con corregir uno para que el mapa y el diálogo discreparan sobre la
+ *  misma zona.
+ *
+ *  Una zona cuyo único análisis es histórico cuenta como sin vuelo, porque lo
+ *  que se pregunta es si tiene una medición VIGENTE. */
+function sinVueloDe(records: SavedAnalysisRecord[], zonas: ZoneRecord[]): ZoneRecord[] {
+  const conAnalisis = new Set(
+    records
+      .filter((r) => !r.historical)
+      .map((r) => r.zoneId)
+      .filter(Boolean) as string[],
+  );
+  return zonas.filter((z) => !conAnalisis.has(z.id));
+}
+
 /** Forma mínima de una detección tal como quedó en un SavedAnalysisRecord —
  *  `detections` ahí es `unknown`, este es el subset que HDU5 necesita leer. */
 interface StoredDetection {
@@ -430,7 +480,9 @@ function RutasPage() {
     // local". En Chile son tres horas de diferencia, así que desde las 21:00 un
     // punto se guardaba bajo un día y se consultaba bajo el siguiente: se
     // creaba bien, decía "Punto creado", y no aparecía en ninguna parte.
-    listarPuntosDiarios(hoy()).then(setPuntosDiarios).catch(() => {});
+    listarPuntosDiarios(hoy())
+      .then(setPuntosDiarios)
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -492,7 +544,9 @@ function RutasPage() {
   }, [fechaHistorial]);
 
   const recargarDiasConPuntos = useCallback(() => {
-    fechasConPuntos().then(setDiasConPuntos).catch(() => {});
+    fechasConPuntos()
+      .then(setDiasConPuntos)
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -988,6 +1042,11 @@ function RutasPage() {
       const [analisis, zonas] = await Promise.all([listAnalyses(), listZones().catch(() => [])]);
       records = analisis;
       nombres = new Map(zonas.map((z) => [z.id, z.name]));
+      // C1 de HDU5.2: las zonas sin vuelo se dibujan en el mapa, así que hacen
+      // falta al MONTAR y no solo al abrir el diálogo de carga, que era el
+      // único que las calculaba. No cuesta una consulta: las dos listas que la
+      // regla necesita ya están pedidas acá arriba.
+      setZonasSinVuelo(sinVueloDe(analisis, zonas));
     } catch (err) {
       notify.error(
         "No se pudieron cargar las zonas guardadas",
@@ -1064,8 +1123,11 @@ function RutasPage() {
       // Omitirlas era peor que mostrarlas: el trabajador las busca acá (sabe
       // que el punto existe, lo registró él) y al no encontrarlas no tenía
       // forma de saber si el sistema las ignora o si se equivocó de nombre.
-      const conAnalisis = new Set(vigentes.map((r) => r.zoneId).filter(Boolean) as string[]);
-      setZonasSinVuelo(zonas.filter((z) => !conAnalisis.has(z.id)));
+      //
+      // Se recalculan acá además de al montar porque este es el momento en que
+      // alguien elige qué cargar, y una zona que recibió su primer vuelo en
+      // otra pestaña tiene que haber dejado de ser "sin vuelo".
+      setZonasSinVuelo(sinVueloDe(records, zonas));
       recargarPuntosDiarios();
     } catch (err) {
       notify.error(
@@ -1221,6 +1283,18 @@ function RutasPage() {
       }
       return;
     }
+    // Una zona sin vuelo no tiene mapa unificado ni cifras que mostrar, así que
+    // su clic abre el diálogo de carga con la sección desplegada, que es donde
+    // está escrito por qué no se puede cargar y qué hacer al respecto.
+    if (point.id.startsWith(PREFIJO_SIN_VUELO)) {
+      setFocusPoint(point.position);
+      setSinVueloAbierto(true);
+      void openLoadDialog();
+      return;
+    }
+    // Sirve para una zona cargada y para una que no, y eso es intencional: el
+    // visor muestra el mapa unificado y las cifras de la zona, que es lo que se
+    // quiere mirar antes de decidir si entra a la ruta.
     const analysis = allAnalyses.find((a) => a.id === point.id);
     if (analysis) {
       setZoomAnalysis(analysis);
@@ -1337,12 +1411,14 @@ function RutasPage() {
   // inactivos) — ambos en el mismo mapa. Sólido vs. hueco en vez de
   // opacidad: la opacidad se perdía apenas se solapaba con las capas del
   // mapa base, sólido/hueco se reconoce a cualquier zoom.
-  // AC4/HDU5 (texto literal): "cuando se seleccione uno de los archivos de
-  // análisis guardados... el sistema cargará los polígonos asociados en el
-  // mapa" — el marcador de una zona solo debe existir una vez que esa zona
-  // se cargó a la ruta, no antes. Antes se mostraban TODAS las zonas
-  // guardadas de una vez (huecas las no cargadas), lo cual no lo pide la AC
-  // y hacía que el mapa se llenara de íconos apenas resolvía listAnalyses().
+  // **Las zonas cargadas, sólidas y en la escala de colores de la ruta.**
+  //
+  // El índice `i` es la posición entre las CARGADAS, y de ahí sale su color en
+  // `ZONE_COLORS`, el mismo con que se pinta su fila en el panel y su trazo en
+  // el mapa. Por eso esta lista se filtra antes de mapear y las zonas fuera de
+  // la ruta van en su propio arreglo más abajo: mapeando sobre todas, el índice
+  // cambiaría y el color de una zona en el mapa dejaría de coincidir con el de
+  // su fila.
   const zoneMapPoints: GeoMapPoint[] = allAnalyses
     .filter((a) => loadedIds.has(a.id))
     .map((a, i) => ({
@@ -1396,7 +1472,57 @@ function RutasPage() {
       muted: false,
     }));
 
+  // **C1 de HDU5.2: "se mostrarán todos los puntos importantes con los que se
+  // generarán las distintas rutas y vehículos".**
+  //
+  // Son los dos arreglos de acá: las zonas que tienen vuelo y todavía no se
+  // cargaron, y las que no tienen ninguno. Huecas las dos (`muted`), que es lo
+  // que este mapa ya usa para decir "no incluido", y en gris.
+  //
+  // **Esto REVIERTE una decisión anterior, y conviene saber por qué**: el
+  // marcador de una zona existía solo desde que se cargaba a la ruta, y el
+  // motivo escrito era que el AC4 de HDU5 no lo pide y que el mapa se llenaba
+  // de íconos apenas resolvía `listAnalyses()`. Lo primero era un argumento de
+  // ausencia, y ahora hay un criterio que sí lo pide: con el mapa vacío, decidir
+  // qué incluir obliga a abrir un diálogo para enterarse de qué hay, cuando la
+  // pregunta de la planificación es geográfica. Lo segundo sigue siendo cierto
+  // con 54 puntos del catastro, y es lo que atiende el hueco y el gris: lo que
+  // está en la ruta se lee igual encima del contexto.
+  //
+  // **Sin `previewImageUrl` en ninguno de los dos**, a diferencia de las
+  // cargadas. Ese campo hace aparecer el mapa unificado al pasar el puntero, y
+  // una imagen de varios MB tapando el mapa estorba justo la operación de la
+  // vista. Se mira apretando la zona, que abre el visor completo. Mismo criterio
+  // que el mapa de recursos. Una zona sin vuelo además no tiene ninguna.
+  const zonaFueraMapPoints: GeoMapPoint[] = allAnalyses
+    .filter((a) => !loadedIds.has(a.id))
+    .map((a) => ({
+      id: a.id,
+      position: a.center,
+      label: `${a.name}, ${cifra(a.summary.totalVolumeM3)} m³ (no cargada)`,
+      color: COLOR_FUERA_DE_RUTA,
+      muted: true,
+    }));
+
+  // Las sin vuelo solo si alguien declaró su coordenada: una zona nacida de un
+  // vuelo no trae lat/lng (`_resolve_zone` escribe nada más owner, nombre y
+  // fecha), así que sin este filtro entrarían con `undefined` como posición.
+  const zonaSinVueloMapPoints: GeoMapPoint[] = zonasSinVuelo
+    .filter((z) => z.lat != null && z.lng != null)
+    .map((z) => ({
+      id: `${PREFIJO_SIN_VUELO}${z.id}`,
+      position: [z.lat as number, z.lng as number] as [number, number],
+      label: `${z.name} (sin vuelo${z.tipo ? `, ${z.tipo}` : ""})`,
+      color: COLOR_FUERA_DE_RUTA,
+      muted: true,
+    }));
+
+  // El contexto va PRIMERO: el motor dibuja en orden, así que lo último queda
+  // encima. Con el contexto al final, un punto de origen o una zona cargada
+  // podía quedar tapada por un círculo gris de una zona que no participa.
   const mapPoints: GeoMapPoint[] = [
+    ...zonaSinVueloMapPoints,
+    ...zonaFueraMapPoints,
     ...zoneMapPoints,
     ...originMapPoints,
     ...puntoDiarioMapPoints,
@@ -2204,11 +2330,7 @@ function RutasPage() {
                                       siempre sería una columna que nunca dice
                                       nada. */}
                                   {(seg.trips ?? 1) > 1 && (
-                                    <Medida
-                                      etiqueta="Viajes"
-                                      valor={String(seg.trips)}
-                                      unidad=""
-                                    />
+                                    <Medida etiqueta="Viajes" valor={String(seg.trips)} unidad="" />
                                   )}
                                 </span>
                               </button>
@@ -2329,12 +2451,15 @@ function RutasPage() {
 
       {/* AC4 — elegir una o varias zonas guardadas para cargar */}
       <Dialog open={loadDialogOpen} onOpenChange={setLoadDialogOpen}>
-        <DialogContent>
+        {/* `max-h` y scroll propio: el diálogo pasó de una lista a tres
+            secciones, y con 54 zonas sin vuelo desplegadas se salía de la
+            pantalla por abajo. Mismo tratamiento que el de generar ruta. */}
+        <DialogContent className="max-h-[85vh] max-w-xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Cargar paradas</DialogTitle>
             <DialogDescription>
-              Marca las zonas y los retiros del día que entran a la ruta. Lo que no se puede
-              cargar aparece igual, con el motivo.
+              Marca las zonas y los retiros del día que entran a la ruta. Lo que no se puede cargar
+              aparece igual, con el motivo.
             </DialogDescription>
           </DialogHeader>
           {loadingSaved ? (
@@ -2346,7 +2471,7 @@ function RutasPage() {
               Todavía no hay zonas guardadas.
             </p>
           ) : (
-            <ul className="max-h-80 space-y-1.5 overflow-y-auto">
+            <ul className="max-h-80 min-w-0 space-y-1.5 overflow-y-auto">
               {savedAnalyses.map((record) => {
                 const placeable = allAnalyses.some((a) => a.id === record.id);
                 const alreadyLoaded = loadedIds.has(record.id);
@@ -2435,7 +2560,7 @@ function RutasPage() {
               vez para todas (es el mismo) y los nombres quedan a un clic, que
               es lo que el criterio pide sin sepultar la lista accionable. */}
           {zonasSinVuelo.length > 0 && (
-            <div className="space-y-1.5">
+            <div className="min-w-0 space-y-1.5">
               <button
                 type="button"
                 onClick={() => setSinVueloAbierto((v) => !v)}
@@ -2481,7 +2606,7 @@ function RutasPage() {
 
           {/* Los retiros del día (HDU15). Entran con el volumen que declaró
               quien los pidió y SIN peso, porque nadie lo midió. */}
-          <div className="space-y-1.5">
+          <div className="min-w-0 space-y-1.5">
             <p className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">
               Retiros de hoy ({puntosDiarios.length})
             </p>
@@ -2813,13 +2938,9 @@ function RutasPage() {
             <div className="flex items-center justify-between gap-3 border-b border-border pb-2">
               <label className="flex cursor-pointer items-center gap-2 text-[0.6875rem] text-muted-foreground">
                 <Checkbox
-                  checked={
-                    seleccionados.size > 0 && seleccionados.size === puntosDelDia.length
-                  }
+                  checked={seleccionados.size > 0 && seleccionados.size === puntosDelDia.length}
                   onCheckedChange={(marcado) =>
-                    setSeleccionados(
-                      marcado ? new Set(puntosDelDia.map((p) => p.id)) : new Set(),
-                    )
+                    setSeleccionados(marcado ? new Set(puntosDelDia.map((p) => p.id)) : new Set())
                   }
                   aria-label="Seleccionar todos los puntos del día"
                 />
@@ -3236,6 +3357,12 @@ function RutasPage() {
                           <p className="text-[0.625rem] text-muted-foreground">
                             {p.origen} · hay {cifra(p.disponible)} m³
                           </p>
+                          {excede && (
+                            <p className="text-[0.625rem] text-warning-strong">
+                              Declarado por sobre lo medido, se va a retirar {cifra(p.disponible)}{" "}
+                              m³
+                            </p>
+                          )}
                         </div>
                         <Input
                           value={volumenARetirar[p.id] ?? ""}
@@ -3341,9 +3468,7 @@ function RutasPage() {
                             {[
                               r.patente,
                               r.capacidad_m3 != null ? `${cifra(r.capacidad_m3)} m³` : null,
-                              r.capacidad_ton != null
-                                ? `${peso(r.capacidad_ton * 1000)} kg`
-                                : null,
+                              r.capacidad_ton != null ? `${peso(r.capacidad_ton * 1000)} kg` : null,
                             ]
                               .filter(Boolean)
                               .join(" · ")}
@@ -3391,7 +3516,8 @@ function RutasPage() {
                       >
                         <span className="truncate">{p.name}</span>
                         <span className="mono flex-shrink-0 tabular-nums text-muted-foreground">
-                          {resumen.suman.length} de {p.resource_count} suman {cifra(resumen.capacidad)} m³
+                          {resumen.suman.length} de {p.resource_count} suman{" "}
+                          {cifra(resumen.capacidad)} m³
                         </span>
                       </li>
                     );
