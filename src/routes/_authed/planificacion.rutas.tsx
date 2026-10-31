@@ -74,6 +74,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import { GeoMap, type GeoMapPoint } from "@/components/GeoMap";
 import { MapLegend } from "@/components/MapLegend";
+import { PuntoPermanenteDialog } from "@/components/PuntoPermanenteDialog";
 import {
   Dialog,
   DialogContent,
@@ -115,6 +116,7 @@ import {
   type Resource,
   type ResourcePoint,
 } from "@/lib/resources";
+import { cargarRutaCargada, guardarRutaCargada } from "@/lib/rutaState";
 import { MAIPU_BBOX } from "@/lib/maipuBoundary";
 import {
   Table,
@@ -400,7 +402,12 @@ function RutasPage() {
   // el trabajador decidió sumar a la ruta.
   const [allAnalyses, setAllAnalyses] = useState<LoadedAnalysis[]>([]);
   // Subconjunto de allAnalyses.id que participa en el cálculo de la ruta.
-  const [loadedIds, setLoadedIds] = useState<Set<string>>(new Set());
+  // Los cuatro estados de abajo arrancan de lo que esta PESTAÑA tenía
+  // cargado, para que un F5 no lo pierda. Ver `src/lib/rutaState.ts` para por
+  // qué vive en `sessionStorage` y no en Mongo.
+  const [loadedIds, setLoadedIds] = useState<Set<string>>(
+    () => new Set(cargarRutaCargada().analisis),
+  );
   const loadedAnalyses = allAnalyses.filter((a) => loadedIds.has(a.id));
 
   // Zonas marcadas como prioritarias: entran al plan antes que el resto y son
@@ -417,7 +424,9 @@ function RutasPage() {
   // scroll a partir de la cuarta fila, así que una zona marcada podía quedar
   // fuera de la vista y la marca dejaba de ser verificable justo cuando hay
   // muchas zonas, que es cuando sirve.
-  const [prioritarias, setPrioritarias] = useState<Set<string>>(new Set());
+  const [prioritarias, setPrioritarias] = useState<Set<string>>(
+    () => new Set(cargarRutaCargada().prioritarias),
+  );
   const togglePrioritaria = (id: string) => {
     setPrioritarias((prev) => {
       const next = new Set(prev);
@@ -594,6 +603,41 @@ function RutasPage() {
     }
   };
 
+  /** La zona que se está editando desde el panel de la ruta (C3 de HDU5.2).
+   *
+   *  **El criterio se cumplía en Vista Principal y en Itinerario**, que es
+   *  donde el punto se ve con su dirección y sus cifras, y el criterio dice
+   *  "dado un punto registrado" sin exigir una pantalla. Se agrega acá además
+   *  porque es la pestaña de la que habla la historia, así que poder editar sin
+   *  salir de ella deja el criterio demostrable en la misma vista.
+   *
+   *  Es la ZONA completa y no su id: el formulario necesita todos sus campos, y
+   *  `loadedAnalyses` solo trae lo que la ruta usa. */
+  const [zonaAEditar, setZonaAEditar] = useState<ZoneRecord | null>(null);
+  const [abriendoEdicion, setAbriendoEdicion] = useState<string | null>(null);
+
+  /** Trae la zona completa y abre su formulario.
+   *
+   *  Se pide al momento y no se guarda una copia: entre que la vista cargó y
+   *  alguien aprieta el lápiz, la dirección pudo cambiar en otra pestaña, y
+   *  editar sobre una copia vieja la revertiría sin avisar. */
+  const editarZonaDeLaRuta = async (zoneId: string) => {
+    setAbriendoEdicion(zoneId);
+    try {
+      const zonas = await listZones();
+      const zona = zonas.find((z) => z.id === zoneId);
+      if (!zona) {
+        notify.error("No se pudo abrir", "La zona ya no existe.");
+        return;
+      }
+      setZonaAEditar(zona);
+    } catch (e) {
+      notify.error("No se pudo abrir la zona", (e as Error).message);
+    } finally {
+      setAbriendoEdicion(null);
+    }
+  };
+
   const [loadDialogOpen, setLoadDialogOpen] = useState(false);
   const [savedAnalyses, setSavedAnalyses] = useState<SavedAnalysisRecord[]>([]);
   /** zoneId -> nombre de la zona. Lo que esta vista carga y rotula es un
@@ -608,7 +652,9 @@ function RutasPage() {
    *  y un análisis se resuelven contra colecciones distintas, y un id suelto no
    *  dice en cuál buscarlo. Es la misma razón por la que la petición manda
    *  paradas tipadas. */
-  const [loadedDiarioIds, setLoadedDiarioIds] = useState<Set<string>>(new Set());
+  const [loadedDiarioIds, setLoadedDiarioIds] = useState<Set<string>>(
+    () => new Set(cargarRutaCargada().diarios),
+  );
   /** Las zonas registradas que todavía no tienen vuelo. Se listan en el diálogo
    *  deshabilitadas, con "Sin vuelo" como motivo. */
   const [zonasSinVuelo, setZonasSinVuelo] = useState<ZoneRecord[]>([]);
@@ -651,7 +697,9 @@ function RutasPage() {
    *  `sinVolumen` nunca corre, así que nadie toca la variable. Reventaba al
    *  cargar la PRIMERA parada, de cualquiera de las dos clases. `tsc` no lo
    *  detecta porque el acceso ocurre dentro de una función, no en el cuerpo. */
-  const [volumenARetirar, setVolumenARetirar] = useState<Record<string, string>>({});
+  const [volumenARetirar, setVolumenARetirar] = useState<Record<string, string>>(
+    () => cargarRutaCargada().volumenes,
+  );
 
   /** El piso de un retiro, en m³. **Espeja `_MINIMO_RETIRO_M3` del backend**,
    *  que descarta por debajo de esa cifra: una parada existe para que un camión
@@ -1263,6 +1311,48 @@ function RutasPage() {
     };
   }, []);
 
+  // **Se guarda en cada cambio, no al salir.** Un `beforeunload` no corre al
+  // cerrar una pestaña desde el móvil ni cuando el navegador la descarta por
+  // memoria, que son justo los casos en que uno quiere no haber perdido nada.
+  // Son cuatro arreglos cortos serializados a JSON; el costo es despreciable al
+  // lado de cualquier cosa que esta vista haga con el mapa.
+  useEffect(() => {
+    guardarRutaCargada({
+      analisis: Array.from(loadedIds),
+      diarios: Array.from(loadedDiarioIds),
+      volumenes: volumenARetirar,
+      prioritarias: Array.from(prioritarias),
+    });
+  }, [loadedIds, loadedDiarioIds, volumenARetirar, prioritarias]);
+
+  // **Lo que ya no existe se suelta solo.**
+  //
+  // Lo guardado son ids, y entre un F5 y el siguiente alguien pudo borrar una
+  // zona desde Vista Principal o un retiro desde el diálogo del día. Sin esto,
+  // la vista arrancaría con paradas fantasma: contadas en los totales,
+  // imposibles de dibujar en el mapa y rechazadas por el backend al generar,
+  // con un motivo que nadie podría explicar.
+  //
+  // Corre cuando las listas reales llegan, y solo si de verdad sobra alguno,
+  // para no provocar un render por cada recarga de datos.
+  useEffect(() => {
+    if (allAnalyses.length === 0) return;
+    const vivos = new Set(allAnalyses.map((a) => a.id));
+    setLoadedIds((prev) => {
+      const quedan = Array.from(prev).filter((id) => vivos.has(id));
+      return quedan.length === prev.size ? prev : new Set(quedan);
+    });
+  }, [allAnalyses]);
+
+  useEffect(() => {
+    if (puntosDiarios.length === 0) return;
+    const vivos = new Set(puntosDiarios.map((p) => p.id));
+    setLoadedDiarioIds((prev) => {
+      const quedan = Array.from(prev).filter((id) => vivos.has(id));
+      return quedan.length === prev.size ? prev : new Set(quedan);
+    });
+  }, [puntosDiarios]);
+
   const openLoadDialog = async () => {
     setLoadDialogOpen(true);
     setSelectedToLoad(new Set());
@@ -1516,7 +1606,11 @@ function RutasPage() {
     // La flota se pide al ABRIR y no al montar la vista: es la foto del momento
     // en que se decide, y entre que se entró a la pantalla y se aprieta generar
     // alguien pudo cambiar una disponibilidad desde /recursos.
-    setFlotaAbierta(false);
+    // **Desplegada**, igual que el valor inicial del estado. Esta línea la
+    // cerraba en cada apertura, así que cambiar el `useState` a `true` no se
+    // notaba nunca: el diálogo se abre por acá y siempre la volvía a plegar.
+    setFlotaAbierta(true);
+    setBusquedaFlota("");
     setRouteError(null);
     setConfirmOpen(true);
     setLoadingPoints(true);
@@ -2396,6 +2490,28 @@ function RutasPage() {
                                 )}
                               </button>
 
+                              {/* C3: editar el punto sin salir de la vista de
+                                  rutas. Solo si la parada tiene zona: una
+                                  medición anterior a la migración no tiene qué
+                                  editar, y un botón que no hace nada es peor
+                                  que ninguno. */}
+                              {a.zoneId && (
+                                <button
+                                  type="button"
+                                  onClick={() => void editarZonaDeLaRuta(a.zoneId!)}
+                                  disabled={abriendoEdicion === a.zoneId}
+                                  aria-label={`Editar los datos de ${a.name}`}
+                                  title="Editar los datos del punto"
+                                  className="flex h-6 w-6 flex-shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-wait"
+                                >
+                                  {abriendoEdicion === a.zoneId ? (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                  ) : (
+                                    <Pencil className="h-3 w-3" />
+                                  )}
+                                </button>
+                              )}
+
                               <button
                                 type="button"
                                 onClick={() => handleUnload(a.id)}
@@ -2668,6 +2784,23 @@ function RutasPage() {
           </div>
         </aside>
       </main>
+
+      {/* C3 de HDU5.2: el formulario completo del punto, el MISMO que usan
+          Vista Principal y el Itinerario. Uno solo y no una copia por vista:
+          con una copia por lugar, el día que se agregue un campo quedan dos
+          formularios que piden cosas distintas del mismo objeto. */}
+      <PuntoPermanenteDialog
+        open={zonaAEditar !== null}
+        onOpenChange={(abierto) => !abierto && setZonaAEditar(null)}
+        punto={zonaAEditar}
+        onGuardado={() => {
+          // Se releen las zonas para que el nombre y la dirección nuevos se
+          // vean en el panel, en el mapa y en el diálogo de carga, que es donde
+          // se nota si la edición sirvió de algo.
+          setZonaAEditar(null);
+          void refreshAllAnalyses();
+        }}
+      />
 
       {/* AC4 — elegir una o varias zonas guardadas para cargar */}
       <Dialog open={loadDialogOpen} onOpenChange={setLoadDialogOpen}>

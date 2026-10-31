@@ -586,6 +586,20 @@ class GenerateRequest(BaseModel):
     # (preciso/lento). Default 0 para no romper ningún caller que todavía no
     # mande este campo.
     opc: int = 0
+    # **El lugar al que pertenece este vuelo, declarado antes de subir las
+    # fotos** (HDU5.2).
+    #
+    # Viaja hasta acá y se guarda en el documento de la tarea porque el vínculo
+    # entre el vuelo y su lugar tiene que durar lo mismo que el vuelo. Vivía
+    # SOLO en `sessionStorage` del navegador, y la tarea vive en Mongo: apagar
+    # la máquina con el análisis pendiente borraba el vínculo y dejaba la tarea
+    # intacta, así que al volver y guardar, `_resolve_zone()` no recibía zona
+    # declarada, caía en su tercera rama y **creaba una zona nueva**. O sea
+    # reaparecía por otra puerta el huérfano que la unificación vino a eliminar.
+    #
+    # Opcional a propósito: volar sin declarar punto sigue siendo un camino
+    # válido (ver AppSidebar.tsx), solo que deja de ser el único.
+    zoneId: str | None = None
 
 
 @app.post("/generate", dependencies=[Depends(limitar("generacion", 10, 3600))])
@@ -625,6 +639,8 @@ async def generate_map(request: GenerateRequest = GenerateRequest()):
         # así "Analizar volumen" puede seguir recalculando sobre esta misma
         # tarea aunque el análisis ya esté guardado.
         "reviewed": False,
+        # El lugar declarado, si hubo uno. Ver GenerateRequest.zoneId.
+        "zone_id": request.zoneId or None,
     })
 
     # UPLOAD_DIR es compartido entre todas las tareas, se sobreescribe con
@@ -981,6 +997,13 @@ async def get_status(task_id: str):
         response["capture_date_estimated"] = bool(task.get("capture_date_estimated"))
     if task.get("algorithm_version") is not None:
         response["algorithm_version"] = task["algorithm_version"]
+
+    # El lugar declarado al iniciar el vuelo. La vista de análisis lo usa al
+    # guardar, y es lo que hace que el vínculo sobreviva a cerrar el navegador:
+    # `sessionStorage` sigue siendo el camino rápido dentro de la misma pestaña,
+    # pero la fuente que dura es esta.
+    if task.get("zone_id"):
+        response["zone_id"] = task["zone_id"]
 
     # Si este vuelo todavía se puede volver a medir. Es falso cuando sus
     # modelos de elevación ya se liberaron porque hay una captura más nueva de

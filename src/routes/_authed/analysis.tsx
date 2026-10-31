@@ -1171,6 +1171,20 @@ function AnalysisPage() {
           setCaptureDateEstimated(Boolean(estado.capture_date_estimated));
         }
         if (estado?.algorithm_version != null) setAlgorithmVersion(estado.algorithm_version);
+        // **El lugar declarado se recupera de la TAREA cuando el navegador ya
+        // no lo tiene.**
+        //
+        // `zoneId` arranca de `sessionStorage`, que se borra al cerrar el
+        // navegador mientras la tarea sigue viva en Mongo. Ese hueco desligaba
+        // el vuelo de su punto: se declaraba el lugar, se generaba, se apagaba
+        // la máquina con el análisis pendiente, y al volver a guardar
+        // `_resolve_zone()` no recibía zona y creaba una nueva, o sea el
+        // huérfano que la unificación vino a eliminar.
+        //
+        // Solo rellena si no hay nada: dentro de la misma pestaña manda lo que
+        // el trabajador acaba de elegir, y pisarlo con el dato del servidor
+        // revertiría un cambio de destino hecho recién.
+        if (estado?.zone_id) setZoneId((previa) => previa ?? estado.zone_id!);
         // Una medición nueva es un análisis nuevo, no una corrección del
         // anterior: se suelta la identidad del guardado para que "Guardar"
         // cree un registro con su propia fecha en vez de sobrescribir.

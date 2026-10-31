@@ -905,7 +905,13 @@ function Page() {
     clearBackendStage();
 
     try {
-      const res = await unifyImages(validFiles, { precise: modelPrecise }, (stage, avance) => {
+      const res = await unifyImages(
+        validFiles,
+        // El punto declarado viaja al backend y queda en el documento de la
+        // tarea. Antes vivía solo acá en el navegador, así que apagar la
+        // máquina con el análisis pendiente desligaba el vuelo de su lugar.
+        { precise: modelPrecise, zoneId: loadZonaDestino() },
+        (stage, avance) => {
         setBackendStage(stage);
         saveBackendStage(stage);
         setStageProgress(avance);

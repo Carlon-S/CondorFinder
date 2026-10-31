@@ -65,6 +65,15 @@ export interface UnifyOptions {
    *  presetfast/presethigh en el backend — se manda como el parámetro
    *  `opc` que ya existía ahí (0 = rápido, 1 = calidad). */
   precise?: boolean;
+  /** El lugar al que pertenece este vuelo, si se declaró antes de subir las
+   *  fotos (HDU5.2).
+   *
+   *  **Viaja al backend para quedar guardado en el documento de la tarea.**
+   *  Vivía solo en `sessionStorage`, y la tarea vive en Mongo: apagar la
+   *  máquina con el análisis pendiente borraba el vínculo y dejaba la tarea
+   *  intacta, así que al volver y guardar se creaba una zona nueva en vez de
+   *  colgar el vuelo de su punto. */
+  zoneId?: string | null;
 }
 
 // =============================================================================
@@ -93,7 +102,10 @@ export async function unifyImages(
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ opc: options.precise ? 1 : 0 }),
+    body: JSON.stringify({
+      opc: options.precise ? 1 : 0,
+      zoneId: options.zoneId ?? null,
+    }),
   });
   const startData = await startRes.json();
 
@@ -129,6 +141,13 @@ export interface RawTaskStatus {
   capture_date_estimated?: boolean;
   /** Versión del algoritmo con que se calculó el último análisis. */
   algorithm_version?: number;
+  /** El lugar al que se declaró que pertenece este vuelo (HDU5.2).
+   *
+   *  **Es la fuente que DURA.** `sessionStorage` sigue siendo el camino rápido
+   *  dentro de la misma pestaña, pero se borra al cerrar el navegador y la
+   *  tarea no, así que un vuelo retomado al día siguiente necesita leer el
+   *  vínculo de acá o termina creando una zona nueva. */
+  zone_id?: string;
   /** false cuando los modelos de elevación de este vuelo ya se liberaron
    *  porque existe una captura más reciente de la zona: el vuelo se puede
    *  consultar, pero no volver a medir. */
