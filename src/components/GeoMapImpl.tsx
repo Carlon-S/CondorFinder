@@ -15,7 +15,7 @@ import "leaflet/dist/leaflet.css";
 import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
 import markerIcon from "leaflet/dist/images/marker-icon.png";
 import markerShadow from "leaflet/dist/images/marker-shadow.png";
-import type { GeoMapProps } from "@/components/GeoMap";
+import type { GeoMapPoint, GeoMapPointKind, GeoMapProps } from "@/components/GeoMap";
 import {
   ROUTE_DISPOSAL_COLOR,
   ROUTE_DISPOSAL_OPACITY,
@@ -33,14 +33,21 @@ import {
   MAIPU_VIEW_CENTER,
 } from "@/lib/maipuBoundary";
 import {
+  COLOR_DIARIO,
+  COLOR_INACTIVO,
+  COLOR_ORIGEN,
+  COLOR_SIN_VUELO,
+  COLOR_ZONA_MEDIDA,
   DISPOSAL_PIN,
   DISPOSAL_PLATE,
-  ORIGIN_PIN_FILL,
-  ORIGIN_PIN_REGULAR,
+  GLIFO_DIARIO,
+  GLIFO_MEDIDA,
+  GLIFO_ORIGEN,
+  GLIFO_SIN_DATO,
   ORIGIN_PIN_SIZE,
-  ZONE_PIN_FILL,
-  ZONE_PIN_REGULAR,
+  PIN_GOTA,
   ZONE_PIN_SIZE,
+  tamanoDePin,
 } from "@/components/map-pins";
 
 /** Encuadre inicial: el casco urbano de Maipú. Ver la nota de
@@ -71,10 +78,20 @@ L.Icon.Default.mergeOptions({
 // GoogleMapImpl.tsx usa los mismos: con una copia en cada implementacion, la
 // que no se esta mirando se queda con el pin viejo.
 
-function pinDivIcon(path: string, color: string, size: number): L.DivIcon {
+/** La gota en su color, con el glifo blanco encima.
+ *
+ *  Dos `<path>` y no uno calado: ver el comentario de `PIN_GOTA` en map-pins.ts.
+ *  El glifo va en blanco puro y no en un token porque tiene que leerse sobre
+ *  cualquiera de los cinco colores de gota. */
+function pinDivIcon(glifo: string, color: string, size: number): L.DivIcon {
   return L.divIcon({
     className: "",
-    html: `<svg width="${size}" height="${size}" viewBox="0 0 256 256" fill="${color}" style="filter:drop-shadow(0 2px 4px rgba(0,0,0,0.45));"><path d="${path}"/></svg>`,
+    html:
+      `<svg width="${size}" height="${size}" viewBox="0 0 256 256" ` +
+      `style="filter:drop-shadow(0 2px 4px rgba(0,0,0,0.45));">` +
+      `<path d="${PIN_GOTA}" fill="${color}"/>` +
+      `<path d="${glifo}" fill="#fff"/>` +
+      `</svg>`,
     // El pin "apunta" hacia abajo, el ancla va en la punta inferior del
     // dibujo (no en el centro geométrico, como sí correspondía con el
     // círculo/cuadrado anteriores), para que quede clavado en la
@@ -85,24 +102,72 @@ function pinDivIcon(path: string, color: string, size: number): L.DivIcon {
   });
 }
 
-// Zonas (HDU5): pin más grande, "precisión espectacular" para distinguirlas
-// de los pines de puntos (HDU6) aunque compartan la misma familia de forma.
-function zoneIcon(color: string, filled: boolean): L.DivIcon {
-  return pinDivIcon(
-    filled ? ZONE_PIN_FILL : ZONE_PIN_REGULAR,
-    filled ? color : "var(--muted-foreground)",
-    ZONE_PIN_SIZE,
-  );
+/** Qué clase es un marcador, con el respaldo de compatibilidad.
+ *
+ *  `kind` ausente se interpreta como antes se infería: con `color` es una zona y
+ *  sin él un punto de origen. Así un consumidor que todavía no declara `kind`
+ *  (hoy ninguno, pero el contrato es público) sigue dibujando lo mismo. */
+function claseDe(p: GeoMapPoint): GeoMapPointKind {
+  if (p.kind) return p.kind;
+  return p.color ? "zona" : "origen";
 }
 
-// Puntos de origen (HDU6): pin "de área" (silueta con base ovalada en la
-// versión fill), mismo criterio sólido=activo/hueco=inactivo que zoneIcon.
-function originIcon(active: boolean): L.DivIcon {
-  return pinDivIcon(
-    active ? ORIGIN_PIN_FILL : ORIGIN_PIN_REGULAR,
-    active ? "var(--primary)" : "var(--muted-foreground)",
-    ORIGIN_PIN_SIZE,
-  );
+/** El glifo y el color de un marcador, ya resueltos.
+ *
+ *  **El `color` del punto solo manda sobre una zona EN la ruta**, que es para lo
+ *  que existe: emparejar la gota con el color de su recorrido. Para el resto, el
+ *  color sale de la clase, porque es parte de lo que el marcador significa y no
+ *  una decisión de quien lo dibuja. */
+function dibujoDe(p: GeoMapPoint): { glifo: string; color: string; base: number } {
+  const clase = claseDe(p);
+  if (clase === "origen") {
+    return {
+      glifo: GLIFO_ORIGEN,
+      color: p.muted ? COLOR_INACTIVO : COLOR_ORIGEN,
+      base: ORIGIN_PIN_SIZE,
+    };
+  }
+  if (clase === "sin-vuelo") {
+    return { glifo: GLIFO_SIN_DATO, color: COLOR_SIN_VUELO, base: ZONE_PIN_SIZE };
+  }
+  if (clase === "diario") {
+    return { glifo: GLIFO_DIARIO, color: COLOR_DIARIO, base: ZONE_PIN_SIZE };
+  }
+  return {
+    glifo: GLIFO_MEDIDA,
+    color: p.muted ? COLOR_ZONA_MEDIDA : (p.color ?? COLOR_ZONA_MEDIDA),
+    base: ZONE_PIN_SIZE,
+  };
+}
+
+/** El ícono final de un punto: su dibujo, a su tamaño para este zoom. */
+function iconoDePunto(p: GeoMapPoint, zoom: number): L.DivIcon {
+  const { glifo, color, base } = dibujoDe(p);
+  return pinDivIcon(glifo, color, tamanoDePin(base, zoom));
+}
+
+/** Informa el zoom del mapa hacia arriba, para escalar los marcadores.
+ *
+ *  **Es un componente y no un hook, y no es una preferencia de estilo**:
+ *  `useMap()` solo funciona dentro de `<MapContainer>`, y los marcadores los
+ *  dibuja el componente que RENDERIZA ese contenedor, o sea afuera. Un hijo
+ *  mínimo que levanta el dato es lo que cierra esa brecha sin partir en dos el
+ *  bloque de marcadores con sus tooltips.
+ *
+ *  **Se escucha `zoomend` y no `zoom`**: `zoom` se dispara en cada cuadro de la
+ *  animación, o sea un render del mapa entero por cuadro con 60 marcadores en
+ *  pantalla, y el tamaño intermedio no se alcanza a leer mientras la cámara se
+ *  mueve. El efecto de montaje cubre el primer valor, que no se puede saber
+ *  antes porque el mapa nace encuadrado por `bounds` y no por un zoom dado. */
+function ObservarZoom({ onCambio }: { onCambio: (z: number) => void }) {
+  const map = useMap();
+  useEffect(() => {
+    onCambio(map.getZoom());
+  }, [map, onCambio]);
+  useMapEvents({
+    zoomend: () => onCambio(map.getZoom()),
+  });
+  return null;
 }
 
 /** El relleno sanitario: placa circular con su nombre impreso, no un pin.
@@ -391,6 +456,12 @@ export function GeoMapImpl({
   lockToMaipu,
   className,
 }: GeoMapProps) {
+  /** El zoom vigente, que decide el tamaño de los marcadores.
+   *
+   *  Arranca en el `zoom` declarado por el consumidor y lo corrige `ObservarZoom`
+   *  en cuanto el mapa monta: con `lockToMaipu` el encuadre lo deciden los
+   *  `bounds`, así que el zoom real casi nunca es el declarado. */
+  const [zoomActual, setZoomActual] = useState(zoom);
   const hasRealPaths =
     (outboundPaths && outboundPaths.length > 0) ||
     (transferPaths && transferPaths.length > 0) ||
@@ -496,6 +567,7 @@ export function GeoMapImpl({
         }}
       />
 
+      <ObservarZoom onCambio={setZoomActual} />
       <ClickHandler onMapClick={onMapClick} />
       <FlyToPoint target={focusPoint ?? null} />
       <FitBounds points={fitBoundsTo ?? null} />
@@ -506,7 +578,18 @@ export function GeoMapImpl({
         returnPaths={returnPaths}
         onRouteClick={onRouteClick}
       />
-      {marker && <Marker position={marker} />}
+      {/* El punto que se está creando o editando (lo usa `/recursos` al ubicar
+          uno en el mapa). **Lleva el pin de origen y no el marcador azul por
+          omisión de Leaflet**, que es lo que tenía: el otro motor ya dibujaba
+          acá el pin de la casa, así que el punto a medio crear se veía de dos
+          formas distintas según qué dijera `VITE_MAPS_PROVIDER`, y esa clase de
+          divergencia aparece recién en producción. */}
+      {marker && (
+        <Marker
+          position={marker}
+          icon={pinDivIcon(GLIFO_ORIGEN, COLOR_ORIGEN, tamanoDePin(ORIGIN_PIN_SIZE, zoomActual))}
+        />
+      )}
       {hasRealPaths ? (
         <>
           {/* Borde oscuro debajo de ambos trazos ("casing"), separa la
@@ -647,7 +730,7 @@ export function GeoMapImpl({
         <Marker
           key={p.id}
           position={p.position}
-          icon={p.color ? zoneIcon(p.color, !p.muted) : originIcon(!p.muted)}
+          icon={iconoDePunto(p, zoomActual)}
           eventHandlers={{
             click: (e) => {
               // Sin esto, el click en el marker también dispara el click

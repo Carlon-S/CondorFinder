@@ -17,6 +17,7 @@ import {
   MousePointerClick,
   Pencil,
   RotateCcw,
+  RotateCw,
   Save,
   Scale,
   Search,
@@ -364,6 +365,19 @@ function AnalysisPage() {
 
   const [scale, setScale]   = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
+  /** Cuántos grados está girado el mapa unificado, en pasos de 90.
+   *
+   *  **Para qué sirve**: el ortomosaico sale del vuelo con el norte arriba, y
+   *  eso no es cómo la cuadrilla ve el terreno cuando llega. Poder girarlo deja
+   *  orientar la imagen como se la va a mirar en la calle.
+   *
+   *  **Pasos de 90 y no libre.** Un ángulo arbitrario deja la imagen torcida
+   *  respecto de los bordes del visor y obliga a decidir cuánto encoger para que
+   *  siga entrando, con un factor distinto por cada ángulo. En 90 el problema
+   *  tiene una sola respuesta exacta (ver `factorRotacion`) y los cuatro estados
+   *  son los que alguien de verdad quiere: norte arriba, o cada uno de los otros
+   *  tres lados. */
+  const [rotacion, setRotacion] = useState(0);
   const [dragging, setDragging] = useState(false);
   const dragStart    = useRef({ x: 0, y: 0, offsetX: 0, offsetY: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
@@ -825,6 +839,10 @@ function AnalysisPage() {
     // con esa medida y con la vieja caerían corridos por un instante.
     setScale(1);
     setOffset({ x: 0, y: 0 });
+    // La rotación también: la PNG de una versión tiene que abrirse derecha y
+    // completa, igual que se abre sin zoom ni desplazamiento. Arrastrar el giro
+    // de la captura anterior dejaría la nueva de costado sin que nadie lo pidiera.
+    setRotacion(0);
     setImgNaturalSize(null);
 
     // El desglose desplegado tampoco se hereda. Los ids de detección son
@@ -1175,7 +1193,40 @@ function AnalysisPage() {
   const resetView = () => {
     setScale(1);
     setOffset({ x: 0, y: 0 });
+    setRotacion(0);
   };
+
+  /** Gira 90 grados y vuelve la vista a su encuadre inicial.
+   *
+   *  **Reinicia el zoom y el paneo a propósito.** Girar con la imagen ampliada y
+   *  corrida deja en pantalla un trozo cualquiera del ortomosaico, porque el
+   *  desplazamiento estaba calculado sobre la orientación anterior: lo que se ve
+   *  después del giro no tiene relación con lo que se estaba mirando. Volver al
+   *  encuadre completo es el único resultado predecible. */
+  const girar = (grados: number) => {
+    setRotacion((r) => (r + grados + 360) % 360);
+    setScale(1);
+    setOffset({ x: 0, y: 0 });
+  };
+
+  /** Cuánto encoger el contenido cuando está de costado, para que siga entrando.
+   *
+   *  Girando 90 grados, una caja de ancho W y alto H necesita H de ancho y W de
+   *  alto. Si el visor es más ancho que alto (el caso normal), la imagen de
+   *  costado se sale por arriba y por abajo, y el visor recorta. El factor
+   *  `min(W/H, H/W)` es exactamente la proporción que la vuelve a hacer entrar,
+   *  y en 0 y 180 grados es 1 porque no hay nada que compensar.
+   *
+   *  **Se lee del DOM en cada render y no se memoiza**: depende del tamaño del
+   *  visor, que cambia con la ventana y con el ancho del panel de detecciones.
+   *  Es una lectura de dos propiedades, así que recalcularla siempre sale más
+   *  barato que mantenerla sincronizada. */
+  const factorRotacion = (() => {
+    if (rotacion % 180 === 0) return 1;
+    const el = containerRef.current;
+    if (!el || !el.clientWidth || !el.clientHeight) return 1;
+    return Math.min(el.clientWidth / el.clientHeight, el.clientHeight / el.clientWidth);
+  })();
 
   const onWheel = (event: React.WheelEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -1532,14 +1583,49 @@ function AnalysisPage() {
                 </div>
               </div>
 
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={resetView}
-                className="absolute right-4 top-4 z-20 h-8 px-3 text-xs"
-              >
-                <RotateCcw className="mr-1.5 h-3.5 w-3.5" /> Reiniciar vista
-              </Button>
+              {/* Girar y reiniciar van juntos arriba a la derecha: los tres
+                  actúan sobre el encuadre y no sobre el análisis. Los de giro
+                  son solo ícono porque son un par simétrico que se entiende por
+                  la forma, y llevan `title` y `aria-label` con el sentido. */}
+              <div className="absolute right-4 top-4 z-20 flex items-center gap-1.5">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => girar(-90)}
+                  title="Girar 90 grados a la izquierda"
+                  aria-label="Girar el mapa 90 grados a la izquierda"
+                  className="h-8 w-8 p-0"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => girar(90)}
+                  title="Girar 90 grados a la derecha"
+                  aria-label="Girar el mapa 90 grados a la derecha"
+                  className="h-8 w-8 p-0"
+                >
+                  <RotateCw className="h-3.5 w-3.5" />
+                </Button>
+                {/* El ángulo se imprime solo cuando NO es cero: un "0°"
+                    permanente sería una cifra que nunca dice nada, y su
+                    aparición es justo lo que avisa que la imagen está girada
+                    cuando alguien vuelve a la pestaña más tarde. */}
+                {rotacion !== 0 && (
+                  <span className="mono rounded-md border border-border bg-card/90 px-2 py-1 text-[0.6875rem] tabular-nums text-foreground shadow-xl backdrop-blur">
+                    {rotacion}°
+                  </span>
+                )}
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={resetView}
+                  className="h-8 px-3 text-xs"
+                >
+                  Reiniciar vista
+                </Button>
+              </div>
 
               {/* key={animKey}: al cambiar de captura por la barra inferior,
                   React reemplaza este subárbol y la animación de entrada se
@@ -1572,7 +1658,20 @@ function AnalysisPage() {
                       imagen no llegaba a levantarse. De paso deja las esquinas
                       amarillas de .detect-frame por fuera de la imagen en vez de
                       encima. */}
-                  <div className="absolute inset-8 flex items-center justify-center">
+                  {/* **El giro se aplica ACÁ y no en el contenedor de zoom**, y
+                      es lo que mantiene alineadas las detecciones: la imagen y
+                      el SVG de recuadros son hermanos dentro de esta misma caja,
+                      así que girarla gira las dos juntas y ningún rectángulo se
+                      corre. Aplicado en el contenedor de arriba habría roto la
+                      aritmética del paneo, que descuenta `offset` y `scale`
+                      suponiendo un `transformOrigin` en el vértice. */}
+                  <div
+                    className="absolute inset-8 flex items-center justify-center"
+                    style={{
+                      transform: `rotate(${rotacion}deg) scale(${factorRotacion})`,
+                      transition: "transform 200ms ease-out",
+                    }}
+                  >
                     {/* La imagen llena esta caja y el SVG se superpone sobre LA
                         MISMA caja con position: absolute. Las dos letterboxean
                         igual (object-contain y xMidYMid meet hacen la misma

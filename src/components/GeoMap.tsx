@@ -1,17 +1,41 @@
 import { useEffect, useState, type ComponentType } from "react";
 
+/** Qué REPRESENTA un marcador, que es lo que decide su glifo y su color.
+ *
+ *  **Es explícito y no se deduce**: antes las implementaciones inferían la clase
+ *  de la presencia de `color` (`p.color ? zoneIcon(...) : originIcon(...)`), y
+ *  con eso no había forma de pedir un marcador distinto para una zona medida y
+ *  una sin medir, porque las dos son "zona con color". Peor: una clase nueva
+ *  obligaba a elegir un color para poder dibujarla, o sea el dato de
+ *  presentación decidía la semántica.
+ *
+ *  - `zona`: un basural con vuelo, o sea con volumen medido.
+ *  - `sin-vuelo`: un lugar registrado del que todavía no hay medición.
+ *  - `origen`: el patio del que sale la flota (HDU6).
+ *  - `diario`: un retiro del día (HDU15). */
+export type GeoMapPointKind = "zona" | "sin-vuelo" | "origen" | "diario";
+
 export interface GeoMapPoint {
   id: string;
   position: [number, number];
   label: string;
-  /** Si viene, el marker se dibuja como un círculo grande de este color en
-   *  vez del pin por defecto — ej. zonas de basural cargadas (HDU5), para
-   *  distinguirlas visualmente de los puntos (HDU6). */
+  /** Qué representa el marcador. Ausente se interpreta por compatibilidad:
+   *  con `color` es `zona` y sin él es `origen`, que es lo que hacían las dos
+   *  implementaciones antes de que esta propiedad existiera. */
+  kind?: GeoMapPointKind;
+  /** Color de la gota, y **solo un override**: cada `kind` ya trae el suyo
+   *  (ver `map-pins.ts`). Se usa para las zonas que están EN la ruta, que se
+   *  pintan con el color de su recorrido para poder emparejarlas con su fila en
+   *  el panel y con su trazo en el mapa. */
   color?: string;
-  /** Marca el punto como "no activo/no incluido" (ej. un punto
-   *  desactivado, o una zona todavía no sumada a la ruta) con un ícono hueco
-   *  (relleno transparente, solo borde) en vez del ícono sólido normal — la
-   *  opacidad sola no se distinguía bien sobre las capas del mapa. Default false. */
+  /** Marca el punto como "no participa": un punto de origen desactivado, o una
+   *  zona que todavía no se sumó a la ruta.
+   *
+   *  **Ya NO dibuja el ícono hueco.** Lo hacía, y se eliminó: un contorno sin
+   *  relleno sobre los tiles de OpenStreetMap es casi imperceptible, que es lo
+   *  contrario de lo que un marcador tiene que hacer. Hoy pinta la gota en gris
+   *  sólido, así que "no participa" se sigue leyendo sin depender de la
+   *  transparencia. Default false. */
   muted?: boolean;
   /** Si viene, el tooltip al pasar el mouse muestra esta imagen (ej. el
    *  mapa unificado de la zona) en vez de solo el texto de `label`. */

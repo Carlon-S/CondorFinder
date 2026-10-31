@@ -6,7 +6,7 @@ import {
   useMap,
   useMapsLibrary,
 } from "@vis.gl/react-google-maps";
-import type { GeoMapPoint, GeoMapProps } from "@/components/GeoMap";
+import type { GeoMapPoint, GeoMapPointKind, GeoMapProps } from "@/components/GeoMap";
 import {
   ROUTE_DISPOSAL_COLOR,
   ROUTE_DISPOSAL_OPACITY,
@@ -18,12 +18,19 @@ import {
 } from "@/components/route-colors";
 import {
   DISPOSAL_PIN,
-  ORIGIN_PIN_FILL,
-  ORIGIN_PIN_REGULAR,
+  COLOR_DIARIO,
+  COLOR_INACTIVO,
+  COLOR_ORIGEN,
+  COLOR_SIN_VUELO,
+  COLOR_ZONA_MEDIDA,
+  GLIFO_DIARIO,
+  GLIFO_MEDIDA,
+  GLIFO_ORIGEN,
+  GLIFO_SIN_DATO,
   ORIGIN_PIN_SIZE,
-  ZONE_PIN_FILL,
-  ZONE_PIN_REGULAR,
+  PIN_GOTA,
   ZONE_PIN_SIZE,
+  tamanoDePin,
 } from "@/components/map-pins";
 import {
   MAIPU_BBOX,
@@ -390,18 +397,73 @@ function VueloAPunto({ target }: { target: [number, number] | null | undefined }
 // donde este motor es más cómodo que el otro.
 // =============================================================================
 
-function PinSvg({ path, color, size }: { path: string; color: string; size: number }) {
+function PinSvg({ glifo, color, size }: { glifo: string; color: string; size: number }) {
   return (
     <svg
       width={size}
       height={size}
       viewBox="0 0 256 256"
-      fill={color}
       style={{ filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.45))" }}
     >
-      <path d={path} />
+      {/* Dos paths y no uno calado, y el glifo en blanco puro porque tiene que
+          leerse sobre cualquiera de los cinco colores de gota. Ver PIN_GOTA en
+          map-pins.ts. */}
+      <path d={PIN_GOTA} fill={color} />
+      <path d={glifo} fill="#fff" />
     </svg>
   );
+}
+
+/** Qué clase es un marcador, con el respaldo de compatibilidad.
+ *
+ *  Idéntico al de `GeoMapImpl.tsx` a propósito: cuál de los dos motores corre lo
+ *  decide una variable de entorno, así que una diferencia acá aparecería recién
+ *  en producción. */
+function claseDe(p: GeoMapPoint): GeoMapPointKind {
+  if (p.kind) return p.kind;
+  return p.color ? "zona" : "origen";
+}
+
+/** El glifo, el color y el tamaño base de un marcador. */
+function dibujoDe(p: GeoMapPoint): { glifo: string; color: string; base: number } {
+  const clase = claseDe(p);
+  if (clase === "origen") {
+    return {
+      glifo: GLIFO_ORIGEN,
+      color: p.muted ? COLOR_INACTIVO : COLOR_ORIGEN,
+      base: ORIGIN_PIN_SIZE,
+    };
+  }
+  if (clase === "sin-vuelo") {
+    return { glifo: GLIFO_SIN_DATO, color: COLOR_SIN_VUELO, base: ZONE_PIN_SIZE };
+  }
+  if (clase === "diario") {
+    return { glifo: GLIFO_DIARIO, color: COLOR_DIARIO, base: ZONE_PIN_SIZE };
+  }
+  return {
+    glifo: GLIFO_MEDIDA,
+    color: p.muted ? COLOR_ZONA_MEDIDA : (p.color ?? COLOR_ZONA_MEDIDA),
+    base: ZONE_PIN_SIZE,
+  };
+}
+
+/** El zoom vigente del mapa de Google, para escalar los marcadores.
+ *
+ *  **Se escucha `zoom_changed` sobre la instancia**, que es el equivalente del
+ *  `zoomend` de Leaflet. Este motor sí permite llamar `useMap()` desde cualquier
+ *  descendiente del `<Map>`, así que acá alcanza un hook y no hace falta el
+ *  componente observador que necesita el otro. */
+function useZoomDeGoogle(): number {
+  const map = useMap();
+  const [zoom, setZoom] = useState(12);
+  useEffect(() => {
+    if (!map) return;
+    const leer = () => setZoom(map.getZoom() ?? 12);
+    leer();
+    const sub = map.addListener("zoom_changed", leer);
+    return () => sub.remove();
+  }, [map]);
+  return zoom;
 }
 
 /** La miniatura de la tarjeta de hover, con su propio manejo de error: si el
@@ -472,16 +534,9 @@ function MarcadorConPrevia({
   punto: GeoMapPoint;
   onClick?: (p: GeoMapPoint) => void;
 }) {
-  const esZona = !!punto.color;
-  const size = esZona ? ZONE_PIN_SIZE : ORIGIN_PIN_SIZE;
-  const path = esZona
-    ? punto.muted
-      ? ZONE_PIN_REGULAR
-      : ZONE_PIN_FILL
-    : punto.muted
-      ? ORIGIN_PIN_REGULAR
-      : ORIGIN_PIN_FILL;
-  const color = punto.muted ? "var(--muted-foreground)" : (punto.color ?? "var(--primary)");
+  const { glifo, color, base } = dibujoDe(punto);
+  const zoom = useZoomDeGoogle();
+  const size = tamanoDePin(base, zoom);
 
   return (
     <AdvancedMarker
@@ -497,7 +552,7 @@ function MarcadorConPrevia({
         className="group relative"
         style={{ transform: `translateY(${size / 2 - 2}px)`, cursor: onClick ? "pointer" : "" }}
       >
-        <PinSvg path={path} color={color} size={size} />
+        <PinSvg glifo={glifo} color={color} size={size} />
 
         {/* El tamaño natural se saca a una constante para que TypeScript lo vea
             definido dentro del map() de abajo: la comprobación del JSX no
@@ -627,7 +682,7 @@ export function GoogleMapImpl({
           {marker && (
             <AdvancedMarker position={aLatLng(marker)}>
               <div style={{ transform: `translateY(${ORIGIN_PIN_SIZE / 2 - 2}px)` }}>
-                <PinSvg path={ORIGIN_PIN_FILL} color="var(--primary)" size={ORIGIN_PIN_SIZE} />
+                <PinSvg glifo={GLIFO_ORIGEN} color={COLOR_ORIGEN} size={ORIGIN_PIN_SIZE} />
               </div>
             </AdvancedMarker>
           )}

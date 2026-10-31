@@ -60,6 +60,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { GeoMap, type GeoMapPoint } from "@/components/GeoMap";
+import { MapLegend } from "@/components/MapLegend";
 import { SortableHead } from "@/components/SortableHead";
 import { MapThumb } from "@/components/MapThumb";
 import { PanelPuntos, type PanelPuntosMapProps } from "@/components/PanelPuntos";
@@ -358,12 +359,12 @@ function RecursosPage() {
       id: `${PREFIJO_ZONA}${z.visor.id}`,
       position: z.position,
       label: `${z.visor.name} · ${z.visor.summary.totalVolumeM3} m³`,
-      // Con `color` el marcador se dibuja como círculo en vez de pin, que es lo
-      // que distingue una zona de un punto en /rutas. Violeta, el primero de los
-      // colores de zona de esa vista: no compite con el navy de los puntos ni
-      // con el teal del relleno. Literal y no `var(--primary)` por el renderer
-      // de canvas, igual que el resto de los colores del mapa.
-      color: "#7c3aed",
+      // `kind` y no un `color`: antes el color era lo que hacía que el marcador
+      // se dibujara como zona en vez de como punto, o sea un dato de
+      // presentación decidía la semántica. Con la clase declarada, el motor
+      // elige el glifo (el punto de "medida") y el color, y esta vista deja de
+      // tener que saber de qué color va una zona.
+      kind: "zona" as const,
     })),
     ...points.map((p) => ({
       id: p.id,
@@ -371,6 +372,7 @@ function RecursosPage() {
       label: p.active
         ? `${p.name} · ${p.capacity_m3} m³`
         : `${p.name} (inactivo) · ${p.capacity_m3} m³`,
+      kind: "origen" as const,
       muted: !p.active,
     })),
   ];
@@ -443,6 +445,9 @@ function RecursosPage() {
           </aside>
 
           <section className="map-frame h-full bg-background">
+            {/* Sin retiros del día ni relleno: esta vista no los dibuja, y
+                nombrarlos prometería marcadores que acá no existen. */}
+            <MapLegend alcance="recursos" />
             <GeoMap
               className="h-full w-full"
               points={mapPoints}

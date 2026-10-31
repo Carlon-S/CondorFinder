@@ -14,11 +14,14 @@
 // basurales.
 //
 // El botón se llamaba "Cargar archivo de análisis", que es el texto literal del
-// criterio. Se cambió a "Cargar zona" a sabiendas: lo que se elige no es un
-// archivo (nada se sube ni se descarga, son registros guardados en la base) y
-// tampoco un análisis suelto, sino la zona cuyos basurales entran a la ruta.
-// Queda anotado como divergencia deliberada en la tabla de criterios del
-// README, igual que los tres criterios de HDU6 que ya no describen su pantalla.
+// criterio, y después "Cargar zona". Hoy dice "Cargar paradas": lo que se elige
+// no es un archivo (nada se sube ni se descarga, son registros guardados en la
+// base), tampoco un análisis suelto, y desde HDU5.2 tampoco solo una zona, sino
+// también los retiros del día. "Paradas" es el único sustantivo que cubre las
+// dos clases, y es el mismo que usa el título del diálogo, así que el botón y lo
+// que abre dejaron de llamarse distinto. Queda anotado como divergencia
+// deliberada en la tabla de criterios del README, igual que los tres criterios
+// de HDU6 que ya no describen su pantalla.
 //
 // Todos los análisis guardados con coordenadas ubicables se ven SIEMPRE en
 // el mapa como círculos (atenuados si todavía no están "cargados" para la
@@ -70,6 +73,7 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import { GeoMap, type GeoMapPoint } from "@/components/GeoMap";
+import { MapLegend } from "@/components/MapLegend";
 import {
   Dialog,
   DialogContent,
@@ -172,7 +176,16 @@ const WASTE_CLASSES = [
 // zona lo abren esta vista y la de recursos, y una tabla por vista significaría
 // que un plástico se pinta de dos azules distintos según de dónde se abrió.
 
-const ZONE_COLORS = ["#7c3aed", "#0ea5e9", "#f97316", "#22c55e", "#ef4444", "#eab308"];
+/** Los colores con que se pinta una zona que ESTÁ en la ruta, y su trazo.
+ *
+ *  **El rojo salió de la paleta**, y no es un ajuste estético: los puntos de
+ *  origen pasaron a ser rojos (`COLOR_ORIGEN` en map-pins.ts), que es el único
+ *  marcador que representa un recurso de la municipalidad y no un lugar que hay
+ *  que limpiar. Con el rojo acá, la quinta zona cargada se habría pintado del
+ *  mismo color que el patio del que sale la flota, justo en la pantalla donde
+ *  hay que distinguir de dónde se sale y a dónde se va. Cinco colores alcanzan:
+ *  con más de cinco recorridos simultáneos el plan ya no se lee por color. */
+const ZONE_COLORS = ["#7c3aed", "#0ea5e9", "#f97316", "#22c55e", "#eab308"];
 
 /** Prefijo del id de un marcador de punto diario (HDU15).
  *
@@ -182,14 +195,6 @@ const ZONE_COLORS = ["#7c3aed", "#0ea5e9", "#f97316", "#22c55e", "#ef4444", "#ea
  *  análisis con ese id, no lo encontraría, y el clic quedaría sin efecto. */
 const PREFIJO_DIARIO = "diario:";
 
-/** Ámbar, literal y no `var(--warning)`: este mapa dibuja con el renderer de
- *  canvas, que descarta en silencio una variable CSS asignada a `strokeStyle`.
- *  Mismo motivo que `route-colors.ts`.
- *
- *  Fuera de la escala verde a rojo de las zonas y del navy de los puntos de
- *  origen, porque un punto diario no es ninguna de las dos cosas. */
-const COLOR_PUNTO_DIARIO = "#f59e0b";
-
 /** Prefijo del id de un marcador de zona registrada SIN vuelo (C1 de HDU5.2).
  *
  *  Necesita el suyo y no le sirve el id pelado porque el clic hace otra cosa:
@@ -197,29 +202,6 @@ const COLOR_PUNTO_DIARIO = "#f59e0b";
  *  tiene mapa que mostrar, así que abre el diálogo de carga, que es donde está
  *  escrito por qué no se puede cargar. */
 const PREFIJO_SIN_VUELO = "sinvuelo:";
-
-/** El color de un marcador de lugar registrado que NO está en la ruta.
- *
- *  **Los dos motores lo IGNORAN mientras `muted` sea true**, y está comprobado:
- *  `zoneIcon()` en `GeoMapImpl.tsx` hace `filled ? color : "var(--muted-foreground)"`,
- *  y `GoogleMapImpl.tsx` hace lo mismo. O sea estos marcadores se pintan en
- *  `--muted-foreground`, que ya es el gris correcto para algo que no participa.
- *
- *  **Va igual, y no es decorativo**: `color` es lo que hace que el marcador tenga
- *  forma de ZONA y no de punto de origen, porque `GeoMapImpl` elige con
- *  `p.color ? zoneIcon(...) : originIcon(...)`. Sin él, los 54 puntos del
- *  catastro se dibujarían como si fueran patios de donde sale la flota.
- *
- *  Deliberadamente fuera de `ZONE_COLORS`, cuyo primer valor ES el violeta con
- *  que el mapa de recursos dibuja sus zonas de contexto: si alguna vez estos
- *  marcadores dejan de ser huecos, el violeta los confundiría con la primera
- *  zona cargada, que es justo la distinción que importa acá.
- *
- *  **Lo que distingue una zona cargable de una sin vuelo no es el color** (no se
- *  renderiza, y a 14 px tampoco se leería): es el rótulo, que dice "sin vuelo" y
- *  su tipo. Misma regla que la estrella de prioritaria, que se distingue por
- *  relleno contra contorno. */
-const COLOR_FUERA_DE_RUTA = "#64748b";
 
 /** Las zonas registradas que todavía no tienen ningún vuelo vigente.
  *
@@ -632,10 +614,44 @@ function RutasPage() {
   const [zonasSinVuelo, setZonasSinVuelo] = useState<ZoneRecord[]>([]);
   const [sinVueloAbierto, setSinVueloAbierto] = useState(false);
   const [selectedDiarios, setSelectedDiarios] = useState<Set<string>>(new Set());
+  /** El texto del buscador del diálogo de carga.
+   *
+   *  **Uno solo para las tres listas** (zonas, zonas sin vuelo y retiros del
+   *  día) y no uno por lista: lo que se busca es un LUGAR, y quien escribe una
+   *  calle no sabe de antemano en cuál de las tres cayó. Con tres campos habría
+   *  que probar el mismo texto tres veces para descubrir que el lugar existe
+   *  pero no se puede cargar, que es justo lo que las tres listas juntas
+   *  vinieron a responder. */
+  const [busquedaCarga, setBusquedaCarga] = useState("");
   /** Cuántas paradas hay cargadas, de las dos clases. El botón de generar
    *  miraba solo las zonas analizadas, así que un plan hecho únicamente de
    *  retiros del día quedaba imposible de generar. */
   const paradasCargadas = loadedIds.size + loadedDiarioIds.size;
+
+  /** Cuánto volumen retirar de cada parada cargada, por id, como TEXTO.
+   *
+   *  Texto y no número porque es lo que el campo tiene mientras se escribe: un
+   *  "1," a medio teclear no es un número, y guardarlo ya convertido obligaría a
+   *  decidir qué hacer con cada pulsación intermedia. Se convierte al generar.
+   *
+   *  **Es del PLAN, no de la zona**, igual que la marca de prioritaria: cuánto
+   *  se saca hoy de un basural no es un atributo del basural. Por eso no se
+   *  persiste y se limpia al descargar la parada.
+   *
+   *  **Va declarado ACÁ ARRIBA y no junto al resto del estado del diálogo de
+   *  generación, y no es cosmético.** `numeroDeclarado()` lo lee y `sinVolumen`
+   *  lo llama DURANTE el render, unas líneas más abajo; con la declaración
+   *  después, ese render entraba a la zona muerta temporal del `const` y
+   *  levantaba `ReferenceError: Cannot access 'volumenARetirar' before
+   *  initialization`, que en producción se ve como la página de error del
+   *  `errorComponent` ("Something went wrong on our end").
+   *
+   *  **El defecto no se veía al cargar la vista**: con cero paradas,
+   *  `paradasParaDeclarar` es `[]` y el callback del `.filter()` de
+   *  `sinVolumen` nunca corre, así que nadie toca la variable. Reventaba al
+   *  cargar la PRIMERA parada, de cualquiera de las dos clases. `tsc` no lo
+   *  detecta porque el acceso ocurre dentro de una función, no en el cuerpo. */
+  const [volumenARetirar, setVolumenARetirar] = useState<Record<string, string>>({});
 
   /** El volumen declarado de una parada, ya como número, o null si no hay uno
    *  válido. Acepta coma decimal porque es lo que se teclea en español. */
@@ -670,6 +686,86 @@ function RutasPage() {
    *  botón de generar se bloquea con ellas y el diálogo las señala, en vez de
    *  dejar que el backend responda con el motivo después de la llamada. */
   const sinVolumen = paradasParaDeclarar.filter((p) => numeroDeclarado(p.id) === null);
+
+  /** Si un texto calza con la búsqueda del diálogo de carga.
+   *
+   *  Sin acentos y sin distinguir mayúsculas, porque la municipalidad escribe
+   *  sus direcciones en mayúsculas y con acentos inconsistentes: buscar
+   *  "farfana" tiene que encontrar "CAMINO LA FARFANA". `normalize("NFD")` más
+   *  el borrado de diacríticos es lo que vuelve equivalentes "Maipú" y "maipu". */
+  const calzaBusqueda = (...textos: (string | null | undefined)[]) => {
+    const aguja = busquedaCarga.trim();
+    if (aguja === "") return true;
+    const limpiar = (s: string) =>
+      s
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase();
+    const objetivo = limpiar(textos.filter(Boolean).join(" "));
+    return limpiar(aguja)
+      .split(/\s+/)
+      .every((palabra) => objetivo.includes(palabra));
+  };
+
+  /** Las tres listas del diálogo, ya filtradas por el buscador.
+   *
+   *  Cada una busca por lo que esa fila MUESTRA, que es la lección del buscador
+   *  de Vista Principal: filtraba solo por el nombre de la medición, así que
+   *  escribir lo que se leía en grande devolvía una tabla vacía. Acá una zona se
+   *  busca por el nombre que se imprime (el de la zona cuando hay) y un retiro
+   *  por su dirección, su clase y su tipo de residuo. */
+  const zonasFiltradas = savedAnalyses.filter((r) =>
+    calzaBusqueda(nombreConZona(r.name, r.zoneId ?? undefined, zoneNames), r.name),
+  );
+  const sinVueloFiltradas = zonasSinVuelo.filter((z) =>
+    calzaBusqueda(z.name, z.address, z.barrio, z.tipo),
+  );
+  const diariosFiltrados = puntosDiarios.filter((p) =>
+    calzaBusqueda(p.address, p.tipoResiduo, p.clase === "escombros" ? "escombros" : "extra"),
+  );
+
+  /** Lo que "seleccionar todas" puede marcar de verdad.
+   *
+   *  **Solo lo cargable y lo que todavía NO está en la ruta**, y las dos
+   *  exclusiones importan: marcar una zona no ubicable no haría nada, y marcar
+   *  una que ya está cargada significaría descargarla, así que un botón que
+   *  dice "seleccionar todas" terminaría quitando paradas del plan. */
+  const zonasMarcables = zonasFiltradas.filter(
+    (r) => allAnalyses.some((a) => a.id === r.id) && !loadedIds.has(r.id),
+  );
+  const diariosMarcables = diariosFiltrados.filter(
+    (p) => p.volumenM3 && p.lat != null && p.lng != null && !loadedDiarioIds.has(p.id),
+  );
+  const todasLasZonasMarcadas =
+    zonasMarcables.length > 0 && zonasMarcables.every((r) => selectedToLoad.has(r.id));
+  const todosLosDiariosMarcados =
+    diariosMarcables.length > 0 && diariosMarcables.every((p) => selectedDiarios.has(p.id));
+
+  /** Marca o desmarca de una vez lo marcable de una lista.
+   *
+   *  Opera sobre un conjunto NUEVO en vez de vaciar y rellenar, para no pisar
+   *  una selección hecha en la otra lista ni en una búsqueda anterior: filtrar,
+   *  marcar todo, cambiar el filtro y marcar todo otra vez tiene que acumular. */
+  const alternarTodasLasZonas = () => {
+    setSelectedToLoad((prev) => {
+      const next = new Set(prev);
+      for (const r of zonasMarcables) {
+        if (todasLasZonasMarcadas) next.delete(r.id);
+        else next.add(r.id);
+      }
+      return next;
+    });
+  };
+  const alternarTodosLosDiarios = () => {
+    setSelectedDiarios((prev) => {
+      const next = new Set(prev);
+      for (const p of diariosMarcables) {
+        if (todosLosDiariosMarcados) next.delete(p.id);
+        else next.add(p.id);
+      }
+      return next;
+    });
+  };
 
   // Puntos (HDU6) — se ven siempre en el mapa (atenuados si están
   // inactivos), y su subconjunto activo es lo que la confirmación (AC1)
@@ -757,16 +853,6 @@ function RutasPage() {
 
   // AC1 — confirmación.
   const [confirmOpen, setConfirmOpen] = useState(false);
-  /** Cuánto volumen retirar de cada parada cargada, por id, como TEXTO.
-   *
-   *  Texto y no número porque es lo que el campo tiene mientras se escribe: un
-   *  "1," a medio teclear no es un número, y guardarlo ya convertido obligaría a
-   *  decidir qué hacer con cada pulsación intermedia. Se convierte al generar.
-   *
-   *  **Es del PLAN, no de la zona**, igual que la marca de prioritaria: cuánto
-   *  se saca hoy de un basural no es un atributo del basural. Por eso no se
-   *  persiste y se limpia al descargar la parada. */
-  const [volumenARetirar, setVolumenARetirar] = useState<Record<string, string>>({});
   /** El desglose de la flota abierto en el diálogo (AC7).
    *
    *  **Son dos listas distintas y mezclarlas es el error a evitar**: acá el
@@ -1425,6 +1511,7 @@ function RutasPage() {
       id: a.id,
       position: a.center,
       label: a.name,
+      kind: "zona" as const,
       color: ZONE_COLORS[i % ZONE_COLORS.length],
       muted: false,
       previewImageUrl: a.mapUrl,
@@ -1452,6 +1539,7 @@ function RutasPage() {
       id: p.id,
       position: [p.lat, p.lng] as [number, number],
       label: p.active ? `${p.name}, ${capacityLabel}` : `${p.name} (inactivo), ${capacityLabel}`,
+      kind: "origen" as const,
       muted: !p.active,
     };
   });
@@ -1468,7 +1556,7 @@ function RutasPage() {
       label: `${p.address} (${p.clase === "escombros" ? "escombros" : "extra"}${
         p.volumenM3 ? `, ${cifra(p.volumenM3)} m³` : ""
       })`,
-      color: COLOR_PUNTO_DIARIO,
+      kind: "diario" as const,
       muted: false,
     }));
 
@@ -1500,7 +1588,7 @@ function RutasPage() {
       id: a.id,
       position: a.center,
       label: `${a.name}, ${cifra(a.summary.totalVolumeM3)} m³ (no cargada)`,
-      color: COLOR_FUERA_DE_RUTA,
+      kind: "zona" as const,
       muted: true,
     }));
 
@@ -1513,8 +1601,7 @@ function RutasPage() {
       id: `${PREFIJO_SIN_VUELO}${z.id}`,
       position: [z.lat as number, z.lng as number] as [number, number],
       label: `${z.name} (sin vuelo${z.tipo ? `, ${z.tipo}` : ""})`,
-      color: COLOR_FUERA_DE_RUTA,
-      muted: true,
+      kind: "sin-vuelo" as const,
     }));
 
   // El contexto va PRIMERO: el motor dibuja en orden, así que lo último queda
@@ -1821,6 +1908,11 @@ function RutasPage() {
           que la otra. */}
       <main className="grid min-h-0 flex-1 gap-5 px-6 pb-6 lg:grid-cols-[clamp(21rem,30vw,28rem)_1fr]">
         <section className="map-frame order-2 min-h-[24rem] min-w-0 bg-background animate-in fade-in duration-500 lg:min-h-0">
+          {/* Qué significa cada pin. Va como hermana del mapa y no dentro de
+              ninguna implementación: hay dos motores y cuál corre lo decide una
+              variable de entorno, así que una leyenda escrita dentro de uno se
+              quedaría sin actualizar en el otro. */}
+          <MapLegend alcance="rutas" />
           <GeoMap
             className="h-full w-full"
             points={mapPoints}
@@ -1933,7 +2025,7 @@ function RutasPage() {
                 <div className="animate-in fade-in flex flex-col gap-5 duration-300">
                   <div className="flex flex-col gap-2">
                     <Button onClick={openLoadDialog} variant="secondary" className="w-full">
-                      <FolderOpen className="mr-2 h-4 w-4" /> Cargar zona
+                      <FolderOpen className="mr-2 h-4 w-4" /> Cargar paradas
                     </Button>
                     {/* HDU15/AC1: abre la selección entre escombros y extras. */}
                     <Button
@@ -2462,6 +2554,21 @@ function RutasPage() {
               aparece igual, con el motivo.
             </DialogDescription>
           </DialogHeader>
+
+          {/* **Un buscador para las tres listas.** Con 54 puntos del catastro
+              más las zonas medidas más los retiros del día, encontrar un lugar
+              recorriendo con la rueda dejó de ser viable. */}
+          <div className="relative min-w-0">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={busquedaCarga}
+              onChange={(e) => setBusquedaCarga(e.target.value)}
+              placeholder="Buscar por nombre, dirección o barrio"
+              aria-label="Buscar paradas"
+              className="h-8 pl-8 text-xs"
+            />
+          </div>
+
           {loadingSaved ? (
             <div className="flex justify-center py-6">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -2471,81 +2578,107 @@ function RutasPage() {
               Todavía no hay zonas guardadas.
             </p>
           ) : (
-            <ul className="max-h-80 min-w-0 space-y-1.5 overflow-y-auto">
-              {savedAnalyses.map((record) => {
-                const placeable = allAnalyses.some((a) => a.id === record.id);
-                const alreadyLoaded = loadedIds.has(record.id);
-                const checked = alreadyLoaded || selectedToLoad.has(record.id);
-                // Un análisis ya cargado también se puede "descargar" desde
-                // acá mismo, clickeándolo de nuevo — no hace falta ir hasta
-                // "Análisis cargados" para eso. Solo lo no-ubicable (sin
-                // CRS) queda realmente sin interacción.
-                const toggle = () => {
-                  if (!placeable) return;
-                  if (alreadyLoaded) {
-                    handleUnload(record.id);
-                    return;
-                  }
-                  toggleSelectToLoad(record.id);
-                };
-                return (
-                  <li
-                    key={record.id}
-                    role="checkbox"
-                    aria-checked={checked}
-                    aria-disabled={!placeable}
-                    tabIndex={placeable ? 0 : -1}
-                    onClick={toggle}
-                    onKeyDown={(e) => {
-                      if (!placeable) return;
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        toggle();
-                      }
-                    }}
-                    title={
-                      alreadyLoaded
-                        ? "Quitar de la ruta"
-                        : placeable
-                          ? "Agregar a la ruta"
-                          : undefined
-                    }
-                    className={`flex items-center gap-2 rounded-md border border-border/60 bg-background/60 p-2 ${
-                      placeable ? "cursor-pointer transition-colors hover:bg-muted" : ""
-                    }`}
-                  >
+            <div className="min-w-0 space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">
+                  Zonas con vuelo ({zonasFiltradas.length})
+                </p>
+                {/* Se dibuja solo si hay algo que marcar: con todas cargadas ya,
+                    o con el filtro sin resultados, el control no tendría efecto
+                    y un botón que no hace nada es peor que ninguno. */}
+                {zonasMarcables.length > 0 && (
+                  <label className="flex cursor-pointer items-center gap-1.5 text-[0.625rem] text-muted-foreground">
                     <Checkbox
-                      checked={checked}
-                      disabled={!placeable}
-                      tabIndex={-1}
-                      className="pointer-events-none"
+                      checked={todasLasZonasMarcadas}
+                      onCheckedChange={alternarTodasLasZonas}
+                      aria-label="Seleccionar todas las zonas con vuelo"
                     />
-                    <MapPin className="h-3.5 w-3.5 flex-shrink-0 text-primary/70" />
-                    <div className="min-w-0 flex-1">
-                      {/* El nombre de la ZONA, no el de la medición: lo que se
+                    {todasLasZonasMarcadas ? "Ninguna" : `Todas (${zonasMarcables.length})`}
+                  </label>
+                )}
+              </div>
+              {zonasFiltradas.length === 0 ? (
+                <p className="rounded-md border border-dashed border-border/50 py-3 text-center text-[0.6875rem] text-muted-foreground">
+                  Ninguna zona con vuelo calza con la búsqueda.
+                </p>
+              ) : (
+                <ul className="max-h-64 min-w-0 space-y-1.5 overflow-y-auto">
+                  {zonasFiltradas.map((record) => {
+                    const placeable = allAnalyses.some((a) => a.id === record.id);
+                    const alreadyLoaded = loadedIds.has(record.id);
+                    const checked = alreadyLoaded || selectedToLoad.has(record.id);
+                    // Un análisis ya cargado también se puede "descargar" desde
+                    // acá mismo, clickeándolo de nuevo — no hace falta ir hasta
+                    // "Análisis cargados" para eso. Solo lo no-ubicable (sin
+                    // CRS) queda realmente sin interacción.
+                    const toggle = () => {
+                      if (!placeable) return;
+                      if (alreadyLoaded) {
+                        handleUnload(record.id);
+                        return;
+                      }
+                      toggleSelectToLoad(record.id);
+                    };
+                    return (
+                      <li
+                        key={record.id}
+                        role="checkbox"
+                        aria-checked={checked}
+                        aria-disabled={!placeable}
+                        tabIndex={placeable ? 0 : -1}
+                        onClick={toggle}
+                        onKeyDown={(e) => {
+                          if (!placeable) return;
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            toggle();
+                          }
+                        }}
+                        title={
+                          alreadyLoaded
+                            ? "Quitar de la ruta"
+                            : placeable
+                              ? "Agregar a la ruta"
+                              : undefined
+                        }
+                        className={`flex items-center gap-2 rounded-md border border-border/60 bg-background/60 p-2 ${
+                          placeable ? "cursor-pointer transition-colors hover:bg-muted" : ""
+                        }`}
+                      >
+                        <Checkbox
+                          checked={checked}
+                          disabled={!placeable}
+                          tabIndex={-1}
+                          className="pointer-events-none"
+                        />
+                        <MapPin className="h-3.5 w-3.5 flex-shrink-0 text-primary/70" />
+                        <div className="min-w-0 flex-1">
+                          {/* El nombre de la ZONA, no el de la medición: lo que se
                           carga a una ruta es el terreno. Con el del análisis,
                           renombrar la zona no se veía acá. */}
-                      <p className="truncate text-sm font-medium">
-                        {nombreConZona(record.name, record.zoneId ?? undefined, zoneNames)}
-                      </p>
-                      <p className="text-[0.625rem] text-muted-foreground">
-                        {new Date(record.savedAt).toLocaleDateString("es-CL")}
-                        {record.summary && `, ${cifra(record.summary.totalVolumeM3)} m³`}
-                      </p>
-                    </div>
-                    {alreadyLoaded ? (
-                      <span className="flex-shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[0.625rem] font-medium text-primary">
-                        En la ruta
-                      </span>
-                    ) : !placeable ? (
-                      <span className="flex-shrink-0 rounded-full bg-muted px-2 py-0.5 text-[0.625rem] font-medium text-muted-foreground">
-                        No ubicable
-                      </span>
-                    ) : null}
-                  </li>
-                );
-              })}
-            </ul>
+                          <p className="truncate text-sm font-medium">
+                            {nombreConZona(record.name, record.zoneId ?? undefined, zoneNames)}
+                          </p>
+                          <p className="text-[0.625rem] text-muted-foreground">
+                            {new Date(record.savedAt).toLocaleDateString("es-CL")}
+                            {record.summary && `, ${cifra(record.summary.totalVolumeM3)} m³`}
+                          </p>
+                        </div>
+                        {alreadyLoaded ? (
+                          <span className="flex-shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[0.625rem] font-medium text-primary">
+                            En la ruta
+                          </span>
+                        ) : !placeable ? (
+                          <span className="flex-shrink-0 rounded-full bg-muted px-2 py-0.5 text-[0.625rem] font-medium text-muted-foreground">
+                            No ubicable
+                          </span>
+                        ) : null}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
           )}
 
           {/* **AC2: lo que NO se puede cargar aparece igual, con su motivo.**
@@ -2559,7 +2692,7 @@ function RutasPage() {
               de vista justo lo que sí se puede cargar. El motivo se dice una
               vez para todas (es el mismo) y los nombres quedan a un clic, que
               es lo que el criterio pide sin sepultar la lista accionable. */}
-          {zonasSinVuelo.length > 0 && (
+          {sinVueloFiltradas.length > 0 && (
             <div className="min-w-0 space-y-1.5">
               <button
                 type="button"
@@ -2570,8 +2703,8 @@ function RutasPage() {
                 <MapPin className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/60" />
                 <span className="min-w-0 flex-1">
                   <span className="block text-xs text-foreground">
-                    {zonasSinVuelo.length} zona{zonasSinVuelo.length === 1 ? "" : "s"} sin vuelo, no
-                    se pueden cargar
+                    {sinVueloFiltradas.length} zona{sinVueloFiltradas.length === 1 ? "" : "s"} sin
+                    vuelo, no se pueden cargar
                   </span>
                   <span className="mt-0.5 block text-[0.625rem] leading-relaxed text-muted-foreground">
                     Sin medición no hay volumen, peso ni tipo de residuo, que es sobre lo que
@@ -2586,7 +2719,7 @@ function RutasPage() {
               </button>
               {sinVueloAbierto && (
                 <ul className="max-h-40 space-y-1 overflow-y-auto">
-                  {zonasSinVuelo.map((z) => (
+                  {sinVueloFiltradas.map((z) => (
                     <li
                       key={z.id}
                       className="flex items-center gap-2 rounded-md border border-dashed border-border/50 px-2 py-1.5 opacity-70"
@@ -2607,16 +2740,34 @@ function RutasPage() {
           {/* Los retiros del día (HDU15). Entran con el volumen que declaró
               quien los pidió y SIN peso, porque nadie lo midió. */}
           <div className="min-w-0 space-y-1.5">
-            <p className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">
-              Retiros de hoy ({puntosDiarios.length})
-            </p>
-            {puntosDiarios.length === 0 ? (
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">
+                Retiros de hoy ({diariosFiltrados.length})
+              </p>
+              {/* Su propio "todos", separado del de las zonas: marcar todas las
+                  zonas y marcar todos los retiros son dos decisiones distintas,
+                  y un único control para las dos obligaría a desmarcar a mano lo
+                  que no se quería. */}
+              {diariosMarcables.length > 0 && (
+                <label className="flex cursor-pointer items-center gap-1.5 text-[0.625rem] text-muted-foreground">
+                  <Checkbox
+                    checked={todosLosDiariosMarcados}
+                    onCheckedChange={alternarTodosLosDiarios}
+                    aria-label="Seleccionar todos los retiros del día"
+                  />
+                  {todosLosDiariosMarcados ? "Ninguno" : `Todos (${diariosMarcables.length})`}
+                </label>
+              )}
+            </div>
+            {diariosFiltrados.length === 0 ? (
               <p className="rounded-md border border-dashed border-border/50 py-3 text-center text-[0.6875rem] text-muted-foreground">
-                No hay puntos diarios creados hoy.
+                {puntosDiarios.length === 0
+                  ? "No hay puntos diarios creados hoy."
+                  : "Ningún retiro de hoy calza con la búsqueda."}
               </p>
             ) : (
               <ul className="max-h-40 space-y-1 overflow-y-auto">
-                {puntosDiarios.map((pd) => {
+                {diariosFiltrados.map((pd) => {
                   // Los dos motivos por los que un punto de hoy no se puede
                   // cargar: sin volumen no hay nada que repartir, y sin
                   // coordenadas no se puede ubicar en un recorrido real.
