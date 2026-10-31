@@ -2018,6 +2018,14 @@ function RutasPage() {
    *  Copia antes de ordenar, y sobre `loadedAnalyses` y no sobre `allAnalyses`:
    *  `sort` muta, y `allAnalyses` es la fuente de los círculos del mapa. El
    *  orden relativo del resto se conserva porque `sort` es estable. */
+  /** Los retiros del día cargados a la ruta, en el orden en que se crearon.
+   *
+   *  **Sin estrella de prioritaria, y no es un olvido**: `priorityStopIds` se
+   *  resuelve contra zonas en el backend, y marcar un retiro no cambiaría
+   *  ninguna decisión del plan. Un control que no hace nada es peor que
+   *  ninguno. */
+  const diariosCargados = puntosDiarios.filter((p) => loadedDiarioIds.has(p.id));
+
   const zonasOrdenadas = [...loadedAnalyses].sort(
     (a, b) => Number(prioritarias.has(b.id)) - Number(prioritarias.has(a.id)),
   );
@@ -2356,11 +2364,16 @@ function RutasPage() {
                           aclaración de la frase, no como un dato, y además lo
                           hace crecer y encoger cuando el número cambia de
                           dígitos. La pastilla es un dato con forma de dato. */}
+                      {/* "Paradas" y no "Zonas": desde HDU5.2 acá conviven las
+                          zonas medidas por vuelo y los retiros del día, y el
+                          conteo cuenta las dos. Con "Zonas cargadas" sobre una
+                          lista que incluye retiros, el número no cuadraba con
+                          el título. */}
                       <h3 className="flex items-center gap-2 text-xs font-semibold text-foreground">
-                        Zonas cargadas
-                        <Conteo n={loadedAnalyses.length} />
+                        Paradas cargadas
+                        <Conteo n={paradasCargadas} />
                       </h3>
-                      {loadedAnalyses.length > 0 && (
+                      {paradasCargadas > 0 && (
                         <span className="flex items-baseline gap-1.5">
                           <span className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">
                             Volumen total
@@ -2371,9 +2384,10 @@ function RutasPage() {
                         </span>
                       )}
                     </div>
-                    {loadedAnalyses.length === 0 ? (
+                    {paradasCargadas === 0 ? (
                       <p className="rounded-lg border border-dashed border-border/60 px-3 py-5 text-center text-[0.6875rem] leading-relaxed text-muted-foreground">
-                        Ninguna zona cargada todavía. Una ruta se arma con las zonas que elijas.
+                        Ninguna parada cargada todavía. Una ruta se arma con las zonas y los retiros
+                        del día que elijas.
                       </p>
                     ) : (
                       <ul className="max-h-[19rem] space-y-1.5 overflow-y-auto pr-0.5">
@@ -2572,6 +2586,82 @@ function RutasPage() {
                                 valor={String(a.summary.totalWeightKg)}
                                 unidad="kg"
                               />
+                            </dl>
+                          </li>
+                        ))}
+
+                        {/* ── Retiros del día cargados ──
+                            Misma tarjeta que una zona, con las diferencias que
+                            son reales y no decorativas: el ícono de obra en vez
+                            del pin, y UNA sola cifra en vez de tres. Un retiro
+                            lo declaró alguien por teléfono, así que tiene
+                            volumen pero **no tiene peso ni área medidos**;
+                            imprimir "0 kg" afirmaría una medición que nadie
+                            hizo, y es la misma regla por la que la línea de
+                            tiempo le omite el peso. */}
+                        {diariosCargados.map((pd) => (
+                          <li
+                            key={pd.id}
+                            className="rounded-lg border border-border/60 bg-background/60 transition-colors hover:border-primary/40 hover:bg-primary/5"
+                          >
+                            <div className="flex items-center gap-2 px-3 py-2">
+                              <Construction className="h-3.5 w-3.5 flex-shrink-0 text-warning-strong" />
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-xs font-medium text-foreground">
+                                  {pd.address}
+                                </p>
+                                <p className="truncate text-[0.625rem] text-muted-foreground">
+                                  {[
+                                    pd.clase === "escombros" ? "Escombros" : "Extra",
+                                    pd.tipoResiduo ?? pd.solicitud,
+                                    pd.barrio,
+                                  ]
+                                    .filter(Boolean)
+                                    .join(" · ")}
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setLoadedDiarioIds((prev) => {
+                                    const next = new Set(prev);
+                                    next.delete(pd.id);
+                                    return next;
+                                  })
+                                }
+                                aria-label={`Quitar ${pd.address} de la ruta`}
+                                title="Quitar de la ruta"
+                                className="flex h-6 w-6 flex-shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive-strong"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </div>
+                            <dl className="grid grid-cols-3 gap-2 border-t border-border/50 px-3 py-2">
+                              <Medida
+                                etiqueta="Volumen"
+                                valor={String(pd.volumenM3 ?? 0)}
+                                unidad="m³"
+                              />
+                              {/* Las otras dos columnas se nombran igual que en
+                                  una zona para que las cifras queden alineadas
+                                  entre tarjetas, y dicen que el dato no existe
+                                  en vez de inventar un cero. */}
+                              <div>
+                                <dt className="text-[0.5625rem] uppercase tracking-wide text-muted-foreground">
+                                  Peso
+                                </dt>
+                                <dd className="text-[0.6875rem] text-muted-foreground">
+                                  sin medir
+                                </dd>
+                              </div>
+                              <div>
+                                <dt className="text-[0.5625rem] uppercase tracking-wide text-muted-foreground">
+                                  Área
+                                </dt>
+                                <dd className="text-[0.6875rem] text-muted-foreground">
+                                  sin medir
+                                </dd>
+                              </div>
                             </dl>
                           </li>
                         ))}

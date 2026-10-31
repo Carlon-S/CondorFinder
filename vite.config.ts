@@ -53,6 +53,14 @@ const BACKEND_ROUTE_PREFIXES = [
   "/resources",
   "/routes",
   "/analyses",
+  // HDU14 y HDU15. **Faltaban, y el síntoma solo aparecía en local**: en
+  // producción el navegador usa la URL absoluta del backend
+  // (VITE_CLIENT_BACKEND_URL) y no pasa por este proxy, así que el itinerario y
+  // los puntos diarios funcionaban allá y daban 404 contra el dev server acá.
+  // Al agregar una ruta nueva al backend hay que agregar su prefijo acá o queda
+  // rota para todo el que desarrolle con backend local.
+  "/itinerario",
+  "/puntos-diarios",
 ];
 
 export default defineConfig({
