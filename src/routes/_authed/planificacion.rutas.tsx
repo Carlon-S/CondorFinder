@@ -402,12 +402,11 @@ function RutasPage() {
   // el trabajador decidió sumar a la ruta.
   const [allAnalyses, setAllAnalyses] = useState<LoadedAnalysis[]>([]);
   // Subconjunto de allAnalyses.id que participa en el cálculo de la ruta.
-  // Los cuatro estados de abajo arrancan de lo que esta PESTAÑA tenía
+  // Los cuatro estados de abajo se restauran de lo que esta PESTAÑA tenía
   // cargado, para que un F5 no lo pierda. Ver `src/lib/rutaState.ts` para por
-  // qué vive en `sessionStorage` y no en Mongo.
-  const [loadedIds, setLoadedIds] = useState<Set<string>>(
-    () => new Set(cargarRutaCargada().analisis),
-  );
+  // qué vive en `sessionStorage` y no en Mongo, y el efecto de restauración
+  // más abajo para por qué arrancan VACÍOS en vez de leerlo acá.
+  const [loadedIds, setLoadedIds] = useState<Set<string>>(new Set());
   const loadedAnalyses = allAnalyses.filter((a) => loadedIds.has(a.id));
 
   // Zonas marcadas como prioritarias: entran al plan antes que el resto y son
@@ -424,9 +423,7 @@ function RutasPage() {
   // scroll a partir de la cuarta fila, así que una zona marcada podía quedar
   // fuera de la vista y la marca dejaba de ser verificable justo cuando hay
   // muchas zonas, que es cuando sirve.
-  const [prioritarias, setPrioritarias] = useState<Set<string>>(
-    () => new Set(cargarRutaCargada().prioritarias),
-  );
+  const [prioritarias, setPrioritarias] = useState<Set<string>>(new Set());
   const togglePrioritaria = (id: string) => {
     setPrioritarias((prev) => {
       const next = new Set(prev);
@@ -652,9 +649,7 @@ function RutasPage() {
    *  y un análisis se resuelven contra colecciones distintas, y un id suelto no
    *  dice en cuál buscarlo. Es la misma razón por la que la petición manda
    *  paradas tipadas. */
-  const [loadedDiarioIds, setLoadedDiarioIds] = useState<Set<string>>(
-    () => new Set(cargarRutaCargada().diarios),
-  );
+  const [loadedDiarioIds, setLoadedDiarioIds] = useState<Set<string>>(new Set());
   /** Las zonas registradas que todavía no tienen vuelo. Se listan en el diálogo
    *  deshabilitadas, con "Sin vuelo" como motivo. */
   const [zonasSinVuelo, setZonasSinVuelo] = useState<ZoneRecord[]>([]);
@@ -697,9 +692,7 @@ function RutasPage() {
    *  `sinVolumen` nunca corre, así que nadie toca la variable. Reventaba al
    *  cargar la PRIMERA parada, de cualquiera de las dos clases. `tsc` no lo
    *  detecta porque el acceso ocurre dentro de una función, no en el cuerpo. */
-  const [volumenARetirar, setVolumenARetirar] = useState<Record<string, string>>(
-    () => cargarRutaCargada().volumenes,
-  );
+  const [volumenARetirar, setVolumenARetirar] = useState<Record<string, string>>({});
 
   /** El piso de un retiro, en m³. **Espeja `_MINIMO_RETIRO_M3` del backend**,
    *  que descarta por debajo de esa cifra: una parada existe para que un camión
@@ -1311,19 +1304,58 @@ function RutasPage() {
     };
   }, []);
 
+  /** Si ya se restauró lo que la pestaña tenía cargado.
+   *
+   *  **Es lo que impide que el guardado pise lo guardado.** El efecto de
+   *  guardar corre también en el primer render, cuando los cuatro estados
+   *  todavía están vacíos, y `guardarRutaCargada` borra la clave cuando todo
+   *  está vacío: sin esta guarda, montar la vista borraba lo que acababa de
+   *  restaurarse.
+   *
+   *  **Estado y no `useRef`**, aunque un ref parezca más barato: los dos
+   *  efectos corren en el MISMO commit, el de restaurar primero, así que con un
+   *  ref el de guardar ya lo vería en `true` mientras su propio cierre todavía
+   *  tiene los valores vacíos del primer render, y alcanzaría a borrar la clave
+   *  antes de volver a escribirla. Con estado, el efecto de guardar se saltea
+   *  en ese commit y corre recién en el siguiente, cuando ve lo restaurado. */
+  const [rutaRestaurada, setRutaRestaurada] = useState(false);
+
+  // **La restauración va en un EFECTO y no en los `useState`.**
+  //
+  // TanStack Start renderiza esta vista en el servidor, donde `sessionStorage`
+  // no existe, así que un inicializador devuelve vacío en el SSR y los valores
+  // restaurados en el cliente: dos árboles distintos para el mismo render. El
+  // síntoma era exactamente ese desfase, y costaba leerlo porque solo aparecía
+  // con F5 y no al navegar entre vistas: tras recargar, las paradas se veían en
+  // el panel pero "Generar ruta" quedaba deshabilitado, porque `paradasCargadas`
+  // se había quedado con el valor del servidor. Entrando por navegación no hay
+  // hidratación, el componente monta solo en el cliente y todo coincidía.
+  //
+  // Con un efecto, el servidor y el primer render del cliente coinciden en
+  // vacío, y la restauración ocurre después en un commit propio.
+  useEffect(() => {
+    const guardado = cargarRutaCargada();
+    setLoadedIds(new Set(guardado.analisis));
+    setLoadedDiarioIds(new Set(guardado.diarios));
+    setPrioritarias(new Set(guardado.prioritarias));
+    setVolumenARetirar(guardado.volumenes);
+    setRutaRestaurada(true);
+  }, []);
+
   // **Se guarda en cada cambio, no al salir.** Un `beforeunload` no corre al
   // cerrar una pestaña desde el móvil ni cuando el navegador la descarta por
   // memoria, que son justo los casos en que uno quiere no haber perdido nada.
   // Son cuatro arreglos cortos serializados a JSON; el costo es despreciable al
   // lado de cualquier cosa que esta vista haga con el mapa.
   useEffect(() => {
+    if (!rutaRestaurada) return;
     guardarRutaCargada({
       analisis: Array.from(loadedIds),
       diarios: Array.from(loadedDiarioIds),
       volumenes: volumenARetirar,
       prioritarias: Array.from(prioritarias),
     });
-  }, [loadedIds, loadedDiarioIds, volumenARetirar, prioritarias]);
+  }, [rutaRestaurada, loadedIds, loadedDiarioIds, volumenARetirar, prioritarias]);
 
   // **Lo que ya no existe se suelta solo.**
   //
@@ -2793,6 +2825,9 @@ function RutasPage() {
         open={zonaAEditar !== null}
         onOpenChange={(abierto) => !abierto && setZonaAEditar(null)}
         punto={zonaAEditar}
+        // Una zona cargada a una ruta tiene análisis guardado por definición,
+        // así que su marcador sale del vuelo y no de la dirección.
+        tieneVuelo
         onGuardado={() => {
           // Se releen las zonas para que el nombre y la dirección nuevos se
           // vean en el panel, en el mapa y en el diálogo de carga, que es donde

@@ -74,12 +74,22 @@ export function PuntoPermanenteDialog({
   onOpenChange,
   punto,
   onGuardado,
+  tieneVuelo = false,
 }: {
   open: boolean;
   onOpenChange: (abierto: boolean) => void;
   /** `null` para crear, la zona para editar. */
   punto: ZoneRecord | null;
   onGuardado: (zona: ZoneRecord) => void;
+  /** Si esta zona ya tiene un vuelo con su ortomosaico.
+   *
+   *  **Cambia lo que el mapa dibuja, y por eso hay que decirlo.** La posición
+   *  de una zona volada sale del `orthoCenter`, el centro geográfico que
+   *  `volumeCalc.py` deriva del ortomosaico, y NO de la coordenada de su
+   *  dirección: una medición sobre la imagen real es más precisa que
+   *  geocodificar un nombre de calle. La consecuencia desconcierta si nadie la
+   *  explica: se corrige la dirección, se guarda, y el marcador no se mueve. */
+  tieneVuelo?: boolean;
 }) {
   const [nombre, setNombre] = useState("");
   const [direccion, setDireccion] = useState("");
@@ -96,6 +106,22 @@ export function PuntoPermanenteDialog({
   // sugerencias ahí sería gastar una solicitud para ofrecerle corregir una
   // dirección que el sistema acaba de cargar.
   const escribioRef = useRef(false);
+  /** La dirección con la que el formulario se abrió.
+   *
+   *  **Es lo que delata que la coordenada quedó obsoleta.** `coord` se siembra
+   *  con la del punto, y el guardado solo geocodificaba `if (!destino)`, o sea
+   *  nunca para un punto que ya tenía ubicación: se podía cambiar la dirección
+   *  entera y la coordenada se quedaba en el lugar anterior, sin ningún aviso.
+   *  La dirección y la ubicación son el mismo dato visto de dos formas, y
+   *  dejarlas separarse es lo que hacía que el mapa mostrara una cosa y la
+   *  ficha otra. */
+  const direccionOriginalRef = useRef("");
+  /** Si la coordenada actual vino de elegir una sugerencia.
+   *
+   *  Una sugerencia trae su propia coordenada exacta, así que ahí la dirección
+   *  y el punto ya concuerdan y volver a geocodificar sería gastar una
+   *  solicitud para obtener algo peor. */
+  const coordDeSugerenciaRef = useRef(false);
 
   useEffect(() => {
     if (!open) return;
@@ -107,6 +133,8 @@ export function PuntoPermanenteDialog({
     setTipo(punto?.tipo ?? SIN_VALOR);
     setFrecuencia(punto?.frecuencia ?? SIN_VALOR);
     setCoord(punto?.lat != null && punto?.lng != null ? { lat: punto.lat, lng: punto.lng } : null);
+    direccionOriginalRef.current = punto?.address ?? "";
+    coordDeSugerenciaRef.current = false;
   }, [open, punto]);
 
   useEffect(() => {
@@ -124,6 +152,7 @@ export function PuntoPermanenteDialog({
     if (!detalle) return;
     setDireccion(detalle.address);
     setCoord({ lat: detalle.lat, lng: detalle.lng });
+    coordDeSugerenciaRef.current = true;
   };
 
   const guardar = async () => {
@@ -135,10 +164,22 @@ export function PuntoPermanenteDialog({
 
     setGuardando(true);
     try {
+      // La coordenada que el punto ya tenía, para no perderla si la dirección
+      // nueva no se puede ubicar.
+      const previa =
+        punto?.lat != null && punto?.lng != null ? { lat: punto.lat, lng: punto.lng } : null;
+
+      // **Si la dirección cambió, la coordenada que venía del punto quedó
+      // obsoleta y hay que volver a buscarla.** Sin esto, editar la dirección
+      // de un punto ya ubicado no movía nada: `coord` seguía siendo la vieja y
+      // la guarda `if (!destino)` saltaba la geocodificación.
+      let destino = coord;
+      const direccionCambio = direccion.trim() !== direccionOriginalRef.current.trim();
+      if (direccionCambio && !coordDeSugerenciaRef.current) destino = null;
+
       // Si escribió la dirección a mano y nunca eligió una sugerencia, se
       // geocodifica al guardar. Sin coordenada el punto existe igual, pero no
       // se puede dibujar ni rutear, así que vale el viaje.
-      let destino = coord;
       if (!destino && direccion.trim()) {
         const g = await forwardGeocode(`${direccion}, Maipú, Chile`);
         // `preciso === false` es Google devolviendo el centroide de la comuna
@@ -147,6 +188,16 @@ export function PuntoPermanenteDialog({
         // correcto. `undefined` es Nominatim, que no manda la señal.
         if (g && g.preciso !== false) destino = { lat: g.lat, lng: g.lng };
       }
+
+      // **Una geocodificación fallida NO borra la ubicación que ya había.**
+      //
+      // Escribía `lat: null`, así que editar la dirección de un punto ubicado y
+      // que la nueva no se encontrara lo dejaba sin ubicación, fuera del mapa y
+      // fuera de toda ruta. Perder una coordenada conocida es estrictamente
+      // peor que conservarla con un aviso: lo segundo se corrige escribiendo
+      // mejor la dirección, lo primero hay que volver a ubicarlo a mano.
+      const noSePudoUbicar = destino == null && direccion.trim() !== "";
+      if (noSePudoUbicar) destino = previa;
 
       const datos: ZoneInput = {
         name: n,
@@ -168,7 +219,14 @@ export function PuntoPermanenteDialog({
 
       // Un punto sin coordenada se registra igual, pero no se puede dibujar en
       // ningún mapa. Vale avisarlo en el momento, no cuando alguien lo busque.
-      if (datos.lat == null) {
+      if (noSePudoUbicar && datos.lat != null) {
+        // Se conservó la de antes: hay que decirlo, o quedaría pensando que la
+        // dirección nueva quedó ubicada.
+        notify.warning(
+          "Dirección guardada, ubicación sin cambiar",
+          "No se encontró esa dirección en el mapa, así que el punto conserva la ubicación que ya tenía. Revisa cómo está escrita o elige una de las sugerencias.",
+        );
+      } else if (datos.lat == null) {
         notify.warning(
           "Punto guardado, pero sin ubicar",
           "No se encontró esa dirección en el mapa. El punto queda registrado y se puede usar en el itinerario, pero no se dibuja hasta que tenga una ubicación.",
@@ -253,6 +311,12 @@ export function PuntoPermanenteDialog({
               <p className="flex items-center gap-1 text-[0.6875rem] text-success-strong">
                 <MapPin className="h-3 w-3" />
                 Ubicado en {coord.lat.toFixed(5)}, {coord.lng.toFixed(5)}
+              </p>
+            )}
+            {tieneVuelo && (
+              <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
+                En el mapa, este lugar se dibuja donde lo midió su vuelo, no donde cae su dirección.
+                Cambiar la dirección actualiza la ficha, pero no mueve el marcador.
               </p>
             )}
           </div>
