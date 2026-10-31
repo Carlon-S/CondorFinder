@@ -653,13 +653,41 @@ function RutasPage() {
    *  detecta porque el acceso ocurre dentro de una función, no en el cuerpo. */
   const [volumenARetirar, setVolumenARetirar] = useState<Record<string, string>>({});
 
+  /** El piso de un retiro, en m³. **Espeja `_MINIMO_RETIRO_M3` del backend**,
+   *  que descarta por debajo de esa cifra: una parada existe para que un camión
+   *  llegue y cargue, y hacer el viaje por veinte litros no es un retiro. Si
+   *  cambia una, tiene que cambiar la otra, igual que `motivoFueraDeRuta()`
+   *  espeja la regla de disponibilidad.
+   *
+   *  Vale acá y no solo allá porque el aviso tiene que salir ANTES de generar:
+   *  con el chequeo únicamente en el backend, declarar 0 generaba el plan y la
+   *  zona volvía en "sin asignar" con un motivo, que es mucho más caro de leer
+   *  que un campo en ámbar. */
+  const MINIMO_RETIRO_M3 = 0.5;
+
   /** El volumen declarado de una parada, ya como número, o null si no hay uno
    *  válido. Acepta coma decimal porque es lo que se teclea en español. */
   const numeroDeclarado = (id: string): number | null => {
     const bruto = (volumenARetirar[id] ?? "").trim().replace(",", ".");
     if (bruto === "") return null;
     const n = Number(bruto);
-    return Number.isFinite(n) && n > 0 ? n : null;
+    return Number.isFinite(n) && n >= MINIMO_RETIRO_M3 ? n : null;
+  };
+
+  /** Por qué el volumen declarado de una parada no sirve, o null si sirve.
+   *
+   *  **Un cero no es lo mismo que un campo vacío**, y tratarlos igual era
+   *  desconcertante: quien escribía `0` veía reaparecer "falta el volumen" sobre
+   *  un campo donde acababa de escribir algo, sin ninguna pista de qué estaba
+   *  mal. Ahora el campo vacío dice que falta y el cero dice que es demasiado
+   *  poco, que son dos problemas distintos con dos arreglos distintos. */
+  const motivoDelVolumen = (id: string): string | null => {
+    const bruto = (volumenARetirar[id] ?? "").trim().replace(",", ".");
+    if (bruto === "") return "Falta declarar cuánto retirar";
+    const n = Number(bruto);
+    if (!Number.isFinite(n)) return "No es un número";
+    if (n < MINIMO_RETIRO_M3) return `El mínimo de un retiro es ${cifra(MINIMO_RETIRO_M3)} m³`;
+    return null;
   };
 
   /** Las paradas cargadas con lo que hace falta para pedir su volumen: id,
@@ -669,7 +697,10 @@ function RutasPage() {
       id: a.id,
       nombre: a.name,
       disponible: a.summary.totalVolumeM3,
-      origen: "Zona" as const,
+      // "Punto permanente" y no "Zona": desde la unificación de HDU5.2 un lugar
+      // registrado y una zona con vuelo son el mismo objeto, y "zona" es como lo
+      // llamaba el sistema antes, no como lo llama la municipalidad.
+      origen: "Punto permanente" as const,
     }));
     const deDiarios = puntosDiarios
       .filter((p) => loadedDiarioIds.has(p.id))
@@ -874,7 +905,16 @@ function RutasPage() {
    *  **Colapsado por omisión.** Las 21 unidades con su foto abiertas de entrada
    *  tapan el resto del formulario, que es justo lo que el diálogo viene a
    *  confirmar. */
-  const [flotaAbierta, setFlotaAbierta] = useState(false);
+  /** La flota, **desplegada por omisión**.
+   *
+   *  Nació plegada para no tapar el resto del formulario con 21 filas. Se
+   *  cambió: la dotación que cada unidad exige es la causa más frecuente de que
+   *  un plan no salga ("faltan conductores"), y plegada esa información no
+   *  existe hasta que alguien descubre que hay algo que abrir. El buscador y el
+   *  alto acotado resuelven el problema de espacio sin esconder el dato. */
+  const [flotaAbierta, setFlotaAbierta] = useState(true);
+  /** Filtro de la lista de flota del diálogo de generación. */
+  const [busquedaFlota, setBusquedaFlota] = useState("");
   /** El id de la unidad cuyo interruptor está en vuelo, para no dejar la fila
    *  muda mientras se guarda. */
   const [cambiandoUnidad, setCambiandoUnidad] = useState<string | null>(null);
@@ -883,6 +923,33 @@ function RutasPage() {
   const flotaDeLosActivos = useMemo(
     () => activePoints.flatMap((p) => recursosPorPunto[p.id] ?? []),
     [activePoints, recursosPorPunto],
+  );
+
+  /** Si un texto calza con el buscador de la flota. Misma normalización que el
+   *  del diálogo de carga: sin acentos y sin distinguir mayúsculas, porque la
+   *  municipalidad escribe sus tipos en mayúsculas. */
+  const calzaFlota = (...textos: (string | null | undefined)[]) => {
+    const aguja = busquedaFlota.trim();
+    if (aguja === "") return true;
+    const limpiar = (s: string) =>
+      s
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase();
+    const objetivo = limpiar(textos.filter(Boolean).join(" "));
+    return limpiar(aguja)
+      .split(/\s+/)
+      .every((palabra) => objetivo.includes(palabra));
+  };
+
+  /** La flota de los puntos activos, filtrada por el buscador del diálogo.
+   *
+   *  Busca por lo que la fila MUESTRA: tipo, número de equipo y patente. Con 21
+   *  unidades, encontrar "la tolva 412" recorriendo con la rueda es más lento
+   *  que escribirlo, y es lo que hay que hacer para apagar una unidad concreta
+   *  antes de generar. */
+  const flotaFiltrada = flotaDeLosActivos.filter((r) =>
+    calzaFlota(r.tipo, r.numero_equipo, r.patente),
   );
 
   const alternarUnidad = async (r: Resource) => {
@@ -1277,6 +1344,27 @@ function RutasPage() {
       setLoadedDiarioIds((prev) => {
         const next = new Set(prev);
         for (const id of diarios) next.add(id);
+        return next;
+      });
+      // **Un retiro del día llega con su volumen ya declarado.**
+      //
+      // Quien pidió el retiro por teléfono ya dijo cuánto hay, así que volver a
+      // preguntarlo sería preguntar dos veces lo mismo. Es el "si es necesario"
+      // del criterio: para una zona medida la estimación SÍ hace falta (su
+      // volumen suele exceder largamente un turno), para un retiro no.
+      //
+      // Esto estaba documentado como si funcionara y **nunca se había
+      // implementado**: nada sembraba `volumenARetirar`, así que los retiros
+      // aparecían en ámbar pidiendo un dato que el sistema ya tenía.
+      //
+      // Solo si no hay nada escrito para ese id: si alguien ya tecleó una cifra
+      // y vuelve a cargar el mismo retiro, pisarla sería descartar su decisión.
+      setVolumenARetirar((prev) => {
+        const next = { ...prev };
+        for (const id of diarios) {
+          const pd = puntosDiarios.find((p) => p.id === id);
+          if (pd?.volumenM3 && !next[id]) next[id] = String(pd.volumenM3);
+        }
         return next;
       });
     }
@@ -1777,8 +1865,22 @@ function RutasPage() {
    *  zonas de 3,33 y 3,61 la cabecera decía 6,9, y el lector que suma a mano
    *  obtiene 6,94 y concluye, con razón, que una de las dos cifras está mal.
    *  Un total que no cuadra con su detalle no es un redondeo, es un error. */
-  const volumenCargado = loadedAnalyses.reduce(
-    (suma, a) => suma + Number(a.summary.totalVolumeM3.toFixed(2)),
+  const volumenCargado =
+    loadedAnalyses.reduce((suma, a) => suma + Number(a.summary.totalVolumeM3.toFixed(2)), 0) +
+    puntosDiarios
+      .filter((p) => loadedDiarioIds.has(p.id))
+      .reduce((suma, p) => suma + Number((p.volumenM3 ?? 0).toFixed(2)), 0);
+
+  /** El volumen que el trabajador DECLARÓ retirar, sumando las dos clases.
+   *
+   *  **Es contra esto que se compara lo que el plan mueve, no contra lo
+   *  medido.** La cabecera decía "80,00 m³ de 0.00 cargados" en un plan hecho
+   *  solo de retiros del día, porque `volumenCargado` sumaba únicamente
+   *  `loadedAnalyses` y los retiros no están ahí. Y aun arreglando eso, comparar
+   *  contra lo medido dejó de tener sentido desde que el volumen se declara: lo
+   *  que importa es si el plan mueve todo lo que se pidió mover. */
+  const volumenDeclarado = paradasParaDeclarar.reduce(
+    (suma, p) => suma + Number((numeroDeclarado(p.id) ?? 0).toFixed(2)),
     0,
   );
 
@@ -2355,7 +2457,7 @@ function RutasPage() {
                               {Math.abs(routeTotals.volumeM3 - volumenCargado) > 0.005 && (
                                 <span className="text-warning-strong">
                                   {" "}
-                                  de {volumenCargado.toFixed(2)} cargados
+                                  de {volumenDeclarado.toFixed(2)} declarados
                                 </span>
                               )}
                             </span>
@@ -2881,7 +2983,7 @@ function RutasPage() {
                 fecha ya se retiró, y mandar un camión ahí sería ir a un lugar
                 limpio. */}
             {diasConPuntos.some((d) => d.fecha !== hoy()) && (
-              <p className="text-[0.625rem] leading-relaxed text-muted-foreground">
+              <p className="pb-1 text-[0.625rem] leading-relaxed text-muted-foreground">
                 Solo se ofrecen los de hoy. Los de otros días ya se retiraron y se consultan en el
                 diálogo de puntos diarios.
               </p>
@@ -3563,17 +3665,34 @@ function RutasPage() {
                               m³
                             </p>
                           )}
+                          {/* El motivo exacto, en la fila que lo tiene. El aviso
+                              del pie dice CUÁNTAS faltan; esto dice QUÉ pasa con
+                              esta. */}
+                          {motivoDelVolumen(p.id) && (
+                            <p className="text-[0.625rem] text-warning-strong">
+                              {motivoDelVolumen(p.id)}
+                            </p>
+                          )}
                         </div>
-                        <Input
-                          value={volumenARetirar[p.id] ?? ""}
-                          onChange={(e) =>
-                            setVolumenARetirar((prev) => ({ ...prev, [p.id]: e.target.value }))
-                          }
-                          inputMode="decimal"
-                          placeholder="m³"
-                          aria-label={`Volumen a retirar de ${p.nombre}`}
-                          className="h-8 w-24 text-right text-xs"
-                        />
+                        {/* La unidad va FUERA del campo y no como marcador de
+                            posición: un `placeholder="m³"` desaparece en cuanto
+                            se teclea el primer dígito, justo cuando hay una
+                            cifra que necesita decir de qué unidad es. Con la
+                            unidad al lado, el campo se lee "40 m³" mientras se
+                            escribe. */}
+                        <span className="flex flex-shrink-0 items-center gap-1">
+                          <Input
+                            value={volumenARetirar[p.id] ?? ""}
+                            onChange={(e) =>
+                              setVolumenARetirar((prev) => ({ ...prev, [p.id]: e.target.value }))
+                            }
+                            inputMode="decimal"
+                            placeholder="0"
+                            aria-label={`Volumen a retirar de ${p.nombre}, en metros cúbicos`}
+                            className="h-8 w-20 text-right text-xs"
+                          />
+                          <span className="mono text-[0.625rem] text-muted-foreground">m³</span>
+                        </span>
                         <button
                           type="button"
                           onClick={() =>
@@ -3631,14 +3750,30 @@ function RutasPage() {
                   }`}
                 />
               </button>
+              {flotaAbierta && flotaDeLosActivos.length > 0 && (
+                <div className="relative">
+                  <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={busquedaFlota}
+                    onChange={(e) => setBusquedaFlota(e.target.value)}
+                    placeholder="Buscar por tipo, equipo o patente"
+                    aria-label="Buscar en la flota"
+                    className="h-8 pl-8 text-xs"
+                  />
+                </div>
+              )}
               {flotaAbierta && (
                 <ul className="max-h-64 space-y-1 overflow-y-auto">
                   {flotaDeLosActivos.length === 0 ? (
                     <li className="rounded-md border border-dashed border-border/50 py-3 text-center text-xs text-muted-foreground">
                       Los puntos activos no tienen unidades cargadas.
                     </li>
+                  ) : flotaFiltrada.length === 0 ? (
+                    <li className="rounded-md border border-dashed border-border/50 py-3 text-center text-xs text-muted-foreground">
+                      Ninguna unidad calza con la búsqueda.
+                    </li>
                   ) : (
-                    flotaDeLosActivos.map((r) => (
+                    flotaFiltrada.map((r) => (
                       <li
                         key={r.id}
                         className={`flex items-center gap-2 rounded-md border p-2 ${
@@ -3673,6 +3808,32 @@ function RutasPage() {
                               .filter(Boolean)
                               .join(" · ")}
                           </p>
+                          {/* **La dotación que esta unidad exige, acá y no solo
+                              en su ficha.** Es la causa más frecuente de que un
+                              plan no salga ("faltan conductores"), y sin verla
+                              el trabajador no tiene cómo saber cuánta gente
+                              declarar: con dos conductores y dos peonetas un
+                              plan puede fallar y la pantalla no decía que cada
+                              tolva pide un conductor y dos peonetas. */}
+                          {r.conductores_requeridos + r.peonetas_requeridas > 0 && (
+                            <p className="text-[0.625rem] text-muted-foreground">
+                              Dotación:{" "}
+                              {[
+                                r.conductores_requeridos > 0
+                                  ? `${r.conductores_requeridos} conductor${
+                                      r.conductores_requeridos === 1 ? "" : "es"
+                                    }`
+                                  : null,
+                                r.peonetas_requeridas > 0
+                                  ? `${r.peonetas_requeridas} peoneta${
+                                      r.peonetas_requeridas === 1 ? "" : "s"
+                                    }`
+                                  : null,
+                              ]
+                                .filter(Boolean)
+                                .join(", ")}
+                            </p>
+                          )}
                         </div>
                         {cambiandoUnidad === r.id ? (
                           <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-muted-foreground" />
@@ -3980,31 +4141,45 @@ function RutasPage() {
             )}
           </div>
 
-          <DialogFooter>
-            <Button variant="ghost" onClick={handleCancelConfirm} disabled={generating}>
-              Cancelar
-            </Button>
-            {/* `sinVolumen` bloquea el botón acá en vez de dejar que el backend
+          <DialogFooter className="sm:justify-between">
+            {/* **El motivo del bloqueo va en TEXTO, no en el `title` del
+                botón.** Estaba como `title`, y ningún navegador muestra el
+                tooltip de un elemento deshabilitado: el botón quedaba apagado
+                sin ninguna explicación visible, que es exactamente lo que el
+                `title` existía para evitar. Acá nombra la causa concreta, que
+                puede ser cualquiera de las cuatro que lo deshabilitan. */}
+            <span className="text-[0.6875rem] text-warning-strong">
+              {sinVolumen.length > 0
+                ? `Falta el volumen a retirar de ${sinVolumen.length} parada${
+                    sinVolumen.length === 1 ? "" : "s"
+                  }`
+                : !hoursValid
+                  ? "Las horas disponibles no son válidas"
+                  : activePoints.length === 0
+                    ? "No hay ningún punto de origen activo"
+                    : ""}
+            </span>
+            <span className="flex gap-2">
+              <Button variant="ghost" onClick={handleCancelConfirm} disabled={generating}>
+                Cancelar
+              </Button>
+              {/* `sinVolumen` bloquea el botón acá en vez de dejar que el backend
                 responda con el motivo después de la llamada: el dato falta en
                 este formulario y se arregla en este formulario, así que hacer
                 el viaje de ida y vuelta solo para que vuelva a decir lo que ya
                 se ve en pantalla sería gastar una generación (que además está
                 limitada a 30 por hora por costo). El backend valida igual, por
                 si la petición llega de otra parte. */}
-            <Button
-              onClick={handleGenerateRoute}
-              disabled={
-                generating || !hoursValid || activePoints.length === 0 || sinVolumen.length > 0
-              }
-              title={
-                sinVolumen.length > 0
-                  ? `Falta el volumen a retirar de ${sinVolumen.length} parada(s)`
-                  : undefined
-              }
-            >
-              {generating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Generar ruta
-            </Button>
+              <Button
+                onClick={handleGenerateRoute}
+                disabled={
+                  generating || !hoursValid || activePoints.length === 0 || sinVolumen.length > 0
+                }
+              >
+                {generating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Generar ruta
+              </Button>
+            </span>
           </DialogFooter>
         </DialogContent>
       </Dialog>

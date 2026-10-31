@@ -1,5 +1,6 @@
 import asyncio
 import itertools
+import math
 import re
 from math import asin, cos, radians, sin, sqrt
 from typing import Literal
@@ -679,6 +680,27 @@ def _mayor_parada(stops: list[dict]) -> tuple[float, float]:
     return mayor["volumeM3"], (mayor.get("weightTon") or 0)
 
 
+def _carga_de_un_viaje(stops: list[dict], tope_m3: float) -> tuple[float, float]:
+    """Cuánto tiene que poder cargar el convoy EN UN VIAJE.
+
+    Es la parada más grande, **acotada por lo que el punto tiene**. El tope es lo
+    que vuelve posible la visita múltiple: sin él, una zona de 4.582 m³ le pedía
+    a `_trucks_used` un convoy de 4.582 m³, ninguna combinación de la flota lo
+    cubría, la función devolvía `[]` y el plan moría sin ruta, que es justo el
+    caso que las visitas múltiples vienen a resolver.
+
+    Con el tope, esa zona despacha la flota entera y se retira en varias pasadas.
+    El peso se escala con la misma fracción: dimensionar por el peso completo de
+    la zona contra una carga recortada rechazaría camiones que sí sirven, el
+    mismo error que `_aplicar_declarado` ya evita.
+    """
+    volumen, peso = _mayor_parada(stops)
+    if tope_m3 > 0 and volumen > tope_m3:
+        fraccion = tope_m3 / volumen
+        return tope_m3, peso * fraccion
+    return volumen, peso
+
+
 def _peso_del_conjunto(stops: list[dict]) -> float:
     """Toneladas de un conjunto de paradas, o 0 si a alguna le falta el dato.
 
@@ -1253,6 +1275,13 @@ async def _stops_de_diarios(pedidas: list["RouteStopIn"]) -> list[dict]:
 # litros no es un retiro. Medio metro cúbico es del orden del balde más chico de
 # la flota real (el minicargador, 0,5 m³), así que es la unidad de carga más
 # pequeña que la municipalidad puede mover de hecho.
+# Tope de VISITAS a una misma zona en un recorrido. No es una regla de negocio:
+# lo que de verdad acota cuántas veces vuelve el convoy es la jornada (ver el
+# recorte por horas en `_build_subroute`). Esto solo evita construir una lista de
+# cientos de visitas que ese recorte va a tirar casi entera, una vez por cada
+# permutación evaluada.
+_MAX_VISITAS_POR_ZONA = 40
+
 _MINIMO_RETIRO_M3 = 0.5
 
 
@@ -1571,48 +1600,102 @@ async def _best_stop_order(
             return True
         return False
 
+    def porciones_de(idx: int) -> list[tuple[float, float]]:
+        """La parada `idx` partida en visitas que entran en UN viaje del convoy.
+
+        **Una zona puede visitarse varias veces.** Antes se visitaba una sola, y
+        una zona con más volumen declarado del que el convoy carga por viaje se
+        descartaba entera con el motivo "declara ese volumen o menos". Eso no es
+        lo que hace la cuadrilla: vuelve, carga otra vez y vuelve a descargar.
+        Lo que acota cuántas veces vuelve no es la capacidad sino **la jornada**,
+        y de eso se encarga el recorte por horas de `_build_subroute`.
+
+        Devuelve `[(volumen, peso)]` por visita. Sin capacidad declarada, o con
+        una zona que entra entera, es una sola visita y todo se comporta como
+        antes.
+
+        **El peso se reparte en la misma proporción que el volumen.** Si no, el
+        primer viaje cargaría el peso completo de la zona y `desborda()`
+        insertaría un depósito que no corresponde.
+
+        `_MAX_VISITAS_POR_ZONA` no es una regla de negocio sino un tope de
+        seguridad: con una zona de 4.582 m³ y un convoy de 40, partir sin tope
+        arma una lista de 115 visitas que después el recorte por horas va a tirar
+        casi entera, y esa lista se construye una vez por permutación. El límite
+        real lo sigue poniendo la jornada; esto solo evita construir lo absurdo.
+        """
+        vol = volumen_de(idx)
+        peso = peso_de(idx)
+        # **Las DOS magnitudes deciden cuántas visitas**, no solo el volumen. La
+        # densidad cambia con el tipo de residuo, así que una zona de escombros
+        # puede necesitar dos viajes por peso aunque entre de sobra en metros
+        # cúbicos. Partir solo por volumen dejaría esa carga por sobre el límite
+        # en toneladas del convoy en cada visita.
+        por_volumen = (
+            math.ceil(vol / capacidad_m3) if capacidad_m3 and capacidad_m3 > 0 and vol > 0 else 1
+        )
+        por_peso = (
+            math.ceil(peso / capacidad_ton)
+            if capacidad_ton and capacidad_ton > 0 and peso > 0
+            else 1
+        )
+        visitas = max(1, por_volumen, por_peso)
+        if visitas == 1:
+            return [(vol, peso)]
+        visitas = min(visitas, _MAX_VISITAS_POR_ZONA)
+        # Porciones IGUALES y no "llenar hasta el tope y dejar el resto": un
+        # último viaje con cuatro metros cúbicos obliga a hacer el mismo
+        # recorrido por una carga ridícula, y repartir parejo deja todas las
+        # pasadas del mismo tamaño sin cambiar cuántas son.
+        return [(vol / visitas, peso / visitas)] * visitas
+
     def repartir(order: tuple[int, ...]) -> tuple[list[dict], float]:
         """El orden partido en viajes, con los metros totales del recorrido.
 
-        El depósito se inserta ANTES de la parada que no entra, no después de la
+        El depósito se inserta ANTES de la visita que no entra, no después de la
         que llenó el camión: es la condición que de verdad decide, y hace que la
         carga de cada viaje nunca supere la capacidad despachada. De ahí que la
         geometría siga siendo exacta y no una aproximación.
+
+        Cada viaje lleva `indices` (qué parada se visita) y `cargas` (cuánto se
+        retira en esa visita), **del mismo largo y en el mismo orden**: con una
+        zona partida en varias visitas, el índice se repite y lo único que las
+        distingue es cuánto se carga en cada una.
         """
         viajes: list[dict] = []
-        actual: dict = {"indices": [], "ida": 0.0, "descarga": 0.0}
+        actual: dict = {"indices": [], "cargas": [], "ida": 0.0, "descarga": 0.0}
         carga = 0.0
         carga_ton = 0.0
         prev = 0
         metros = 0.0
         for idx in order:
-            vol = volumen_de(idx)
-            peso = peso_de(idx)
-            if actual["indices"] and desborda(carga, carga_ton, vol, peso):
-                # Cerrar el viaje: se descarga y el siguiente arranca desde el
-                # relleno, no desde la base. El camión no vuelve al patio entre
-                # viajes, que es lo que ocurre en terreno.
-                actual["descarga"] = durations[prev][relleno] / _LOADED_SPEED_FACTOR
-                metros += distances[prev][relleno]
-                viajes.append(actual)
-                actual = {"indices": [], "ida": 0.0, "descarga": 0.0}
-                # **La carga se reinicia, las DOS magnitudes.** El camión
-                # descarga en el relleno y su capacidad vuelve a cero. Arrastrar
-                # el peso entre viajes rechazaría un plan por un peso que ningún
-                # viaje llega a llevar nunca.
-                carga = 0.0
-                carga_ton = 0.0
-                prev = relleno
-            # Vacío: el camión se va llenando recién en el camino.
-            actual["ida"] += durations[prev][idx]
-            metros += distances[prev][idx]
-            actual["indices"].append(idx)
-            prev = idx
-            carga += vol
-            carga_ton += peso
+            for vol, peso in porciones_de(idx):
+                if actual["indices"] and desborda(carga, carga_ton, vol, peso):
+                    # Cerrar el viaje: se descarga y el siguiente arranca desde
+                    # el relleno, no desde la base. El camión no vuelve al patio
+                    # entre viajes, que es lo que ocurre en terreno.
+                    actual["descarga"] = durations[prev][relleno] / _LOADED_SPEED_FACTOR
+                    metros += distances[prev][relleno]
+                    viajes.append(actual)
+                    actual = {"indices": [], "cargas": [], "ida": 0.0, "descarga": 0.0}
+                    # **La carga se reinicia, las DOS magnitudes.** El camión
+                    # descarga en el relleno y su capacidad vuelve a cero.
+                    # Arrastrar el peso entre viajes rechazaría un plan por un
+                    # peso que ningún viaje llega a llevar nunca.
+                    carga = 0.0
+                    carga_ton = 0.0
+                    prev = relleno
+                # Vacío: el camión se va llenando recién en el camino.
+                actual["ida"] += durations[prev][idx]
+                metros += distances[prev][idx]
+                actual["indices"].append(idx)
+                actual["cargas"].append(vol)
+                prev = idx
+                carga += vol
+                carga_ton += peso
 
         # El último viaje siempre lleva carga, porque el depósito se inserta
-        # antes de una parada y nunca después de la última.
+        # antes de una visita y nunca después de la última.
         actual["descarga"] = durations[prev][relleno] / _LOADED_SPEED_FACTOR
         metros += distances[prev][relleno]
         viajes.append(actual)
@@ -1729,14 +1812,35 @@ async def _build_subroute(
     order_result = None
     while True:
         punto_pool = {**point, "trucks": flota}
-        # **El convoy se dimensiona por la parada MÁS GRANDE, no por el total.**
-        #
-        # Es lo que tiene que poder cargar en un viaje; el resto se resuelve
-        # volviendo al relleno. Con el total, el convoy siempre podía con todo
-        # de una vez y nunca había un segundo viaje: los viajes múltiples
-        # quedaban escritos y muertos. Ver `_mayor_parada()`.
-        volumen_viaje, peso_viaje = _mayor_parada(stops_actuales)
+        # **El convoy se dimensiona por la parada MÁS GRANDE, acotada por lo que
+        # el punto tiene.** Es lo que tiene que poder cargar en un viaje; el
+        # resto se resuelve volviendo al relleno. Ver `_carga_de_un_viaje()`.
+        volumen_viaje, peso_viaje = _carga_de_un_viaje(
+            stops_actuales, _point_truck_capacity(punto_pool)
+        )
         camiones = _trucks_used(punto_pool, volumen_viaje, peso_viaje, clase_dominante, personal)
+        # **Si la cuadrilla no alcanza para ese convoy, se despacha uno más
+        # chico y se hacen más viajes.**
+        #
+        # Con la visita múltiple el convoy ya NO tiene que cargar la zona más
+        # grande de una vez, y el dimensionado seguía exigiéndolo: una zona de
+        # 40 m³ pedía cuatro tolvas, o sea cuatro conductores y ocho peonetas, y
+        # con dos conductores declarados el plan moría con "faltan conductores"
+        # cuando UNA tolva haciendo cuatro viajes lo resolvía con la gente que sí
+        # había.
+        #
+        # Se baja el objetivo a la mitad en cada vuelta, hasta el mínimo de
+        # retiro. Es el canje que la cuadrilla hace de verdad: menos gente a
+        # cambio de una jornada más larga, y si la jornada tampoco alcanza, el
+        # recorte por horas de `_build_subroute` se encarga.
+        objetivo = volumen_viaje
+        while not camiones and objetivo > _MINIMO_RETIRO_M3:
+            fraccion = 0.5
+            objetivo *= fraccion
+            peso_viaje *= fraccion
+            camiones = _trucks_used(
+                punto_pool, max(objetivo, _MINIMO_RETIRO_M3), peso_viaje, clase_dominante, personal
+            )
         if camiones:
             autonomias = [c["autonomia_km"] for c in camiones if c.get("autonomia_km")]
             rango = min(autonomias) if autonomias else None
@@ -1784,7 +1888,9 @@ async def _build_subroute(
         break
 
     point_stops = stops_actuales
-    volumen_viaje, peso_viaje = _mayor_parada(point_stops)
+    volumen_viaje, peso_viaje = _carga_de_un_viaje(
+        point_stops, _point_truck_capacity({**point, "trucks": flota})
+    )
 
     if not camiones and personal is not None:
         # ¿Fue el personal el que faltó? Se repite la selección ignorándolo: si
@@ -1839,18 +1945,80 @@ async def _build_subroute(
             return {"excedeAutonomia": True, "autonomiaKm": autonomia_km}
     order, viajes_matriz, regreso_seconds = order_result
 
-    total_hours = (
-        sum(v["ida"] + v["descarga"] for v in viajes_matriz) + regreso_seconds
-    ) / 3600
+    def horas_de(viajes: list[dict]) -> float:
+        return (sum(v["ida"] + v["descarga"] for v in viajes) + regreso_seconds) / 3600
+
+    # **La jornada se acota recortando VIAJES, no zonas**, y es lo que vuelve
+    # utilizable la visita múltiple.
+    #
+    # Una zona con más volumen del que el convoy carga por viaje se parte en
+    # varias visitas (ver `porciones_de`), así que un plan puede pedir más viajes
+    # de los que caben en el turno. Quitar la zona entera sería tirar el trabajo
+    # que SÍ se alcanzaba a hacer; quitar los últimos viajes deja un plan válido
+    # (el convoy hace los que caben y se va al patio) y lo no retirado queda
+    # como pendiente de esa zona, que es exactamente lo que la cuadrilla hace
+    # cuando se le acaba el día.
+    #
+    # Se recortan desde el FINAL porque los viajes son secuenciales y cada uno
+    # termina en el relleno: cortar después del viaje K deja un recorrido
+    # completo y coherente, mientras que sacar uno del medio dejaría al convoy
+    # cargado a mitad de camino.
+    while len(viajes_matriz) > 1 and horas_de(viajes_matriz) > available_hours:
+        viajes_matriz = viajes_matriz[:-1]
+
+    total_hours = horas_de(viajes_matriz)
     if total_hours > available_hours:
-        # No es un fallo del servicio: el recorrido existe y es demasiado largo.
-        # El handler lo resuelve sacando la parada más lejana y reintentando.
-        #
-        # Con varios viajes esto descarta bastante más que antes, y es correcto:
-        # cada pasada por el relleno es tiempo que el camión maneja de verdad.
+        # Ni UN viaje cabe en la jornada. No es un fallo del servicio: el
+        # recorrido existe y es demasiado largo. El handler lo resuelve sacando
+        # la parada más lejana y reintentando.
         return {"excedeHoras": True, "horas": total_hours}
 
-    ordered_stops = [point_stops[i - 1] for i in order]
+    # **Una parada por VISITA, no por zona.** Con una zona partida en varias
+    # visitas el índice se repite, y lo que distingue cada entrada es cuánto se
+    # retira en ella. `_aplicar_declarado` ya dejó cada zona con su volumen
+    # declarado; acá se vuelve a repartir ese volumen entre sus visitas.
+    #
+    # El peso y las clases se escalan con la misma fracción, por el mismo motivo
+    # que en `_aplicar_declarado`: con el peso completo en cada visita,
+    # `_trucks_used` compararía contra un número que ningún viaje llega a
+    # llevar.
+    ordered_stops = []
+    retirado_por_indice: dict[int, float] = {}
+    for viaje in viajes_matriz:
+        for idx, carga in zip(viaje["indices"], viaje["cargas"]):
+            base = point_stops[idx - 1]
+            declarado = base["volumeM3"]
+            fraccion = (carga / declarado) if declarado > 0 else 0.0
+            peso_base = base.get("weightTon")
+            ordered_stops.append({
+                **base,
+                "volumeM3": carga,
+                "weightTon": None if peso_base is None else peso_base * fraccion,
+                "clasesPorVolumen": {
+                    clase: vol * fraccion
+                    for clase, vol in (base.get("clasesPorVolumen") or {}).items()
+                },
+                # Se rellena abajo, cuando se sabe cuánto quedó sin retirar.
+                "pendienteM3": 0.0,
+            })
+            retirado_por_indice[idx] = retirado_por_indice.get(idx, 0.0) + carga
+
+    # El pendiente va en la ÚLTIMA visita de cada zona y no repartido entre
+    # todas: es una cifra de la zona, no de la visita, y repetirla en cada
+    # parada haría que la vista la sumara tantas veces como visitas hubo.
+    ultima_visita: dict[int, int] = {}
+    for posicion, viaje in enumerate(
+        [idx for v in viajes_matriz for idx in v["indices"]]
+    ):
+        ultima_visita[viaje] = posicion
+    for idx, posicion in ultima_visita.items():
+        declarado = point_stops[idx - 1]["volumeM3"]
+        pendiente = declarado - retirado_por_indice.get(idx, 0.0)
+        # Lo que ya traía la zona de `_aplicar_declarado` (lo medido menos lo
+        # declarado) se SUMA a lo que la jornada no alcanzó a retirar: las dos
+        # cosas son volumen que queda en el terreno.
+        previo = point_stops[idx - 1].get("pendienteM3", 0.0) or 0.0
+        ordered_stops[posicion]["pendienteM3"] = max(0.0, pendiente) + previo
 
     # Tres tramos, no dos: la carga se descarga en el relleno y el camión
     # recién después vuelve al patio.
@@ -2228,62 +2396,51 @@ async def generate_route(
 
     stops_que_caben: list[dict] = []
     for zona in sorted(stops, key=lambda z: (not z["prioritaria"], z["volumeM3"])):
-        volumen_zona = zona["volumeM3"]
-        peso_zona = zona.get("weightTon") or 0
-
-        # **El tope ya no es el TOTAL del plan, es un viaje.**
+        # **Ninguna zona se descarta por tamaño, y eso es lo que cambió.**
         #
-        # Antes se exigía que la suma de todas las zonas cupiera en la capacidad
-        # despachada, o sea el plan se limitaba a una sola carga. Con viajes
-        # múltiples lo que tiene que caber es cada zona por separado: lo demás
-        # se resuelve volviendo al relleno, y cuántas veces se vuelve lo acota la
-        # jornada, no la capacidad.
+        # Hubo dos reglas acá, las dos ya obsoletas. La primera exigía que la
+        # SUMA de las zonas cupiera en la capacidad despachada, o sea el plan se
+        # limitaba a una sola carga. La segunda, que cada zona cupiera POR
+        # SEPARADO en un viaje, y descartaba con "declara ese volumen o menos"
+        # la que no.
         #
-        # Una zona que no cabe NI SOLA en el convoy sí se descarta, porque no
-        # hay forma de retirarla sin revisitarla, y una parada se visita una vez.
-        cabe_volumen = volumen_zona <= capacidad_total + 1e-9
-        cabe_peso = capacidad_peso is None or peso_zona <= capacidad_peso + 1e-9
-        if cabe_volumen and cabe_peso:
+        # Las dos caen con la visita múltiple: una zona más grande que el convoy
+        # se retira en varias pasadas (ver `porciones_de`), y lo que acota
+        # cuántas pasadas se hacen es **la jornada**, que se aplica recortando
+        # viajes en `_build_subroute`. Lo no retirado queda como pendiente de la
+        # zona en vez de descartarla entera, que es lo que de verdad hace la
+        # cuadrilla cuando se le acaba el día.
+        #
+        # Lo único que sigue siendo imposible es que el convoy no pueda cargar
+        # nada, y eso lo resuelve el `infeasible` de más abajo.
+        if capacidad_total > 0:
             stops_que_caben.append(zona)
             continue
 
-        # **Lo declarado entra entero o no entra: no se parcializa.**
-        #
-        # Antes se retiraba de la zona lo que la capacidad libre permitiera. Eso
-        # tenía sentido cuando el sistema decidía la fracción, pero ahora la
-        # declara el trabajador: recortarla por nuestra cuenta sería cambiar en
-        # silencio una cifra que él eligió, y además contradice que cada parada
-        # se visite una sola vez (lo que no se retiró hoy no se completa después
-        # dentro del mismo plan).
-        #
-        # El motivo nombra el límite del CONVOY y no "la capacidad que queda",
-        # porque con viajes múltiples lo que falló es que la zona no cabe en una
-        # carga: declarar menos la vuelve posible, esperar a que se libere
-        # capacidad no.
-        if not cabe_peso and capacidad_peso is not None:
-            descartar(
-                zona,
-                f"Se declararon {_format_number(volumen_zona)} m³, que pesan "
-                f"{_format_number(peso_zona)} t y no caben en las "
-                f"{_format_number(capacidad_peso)} t que el convoy aguanta en un viaje. "
-                "Declara menos volumen de esta zona.",
-            )
-        else:
-            descartar(
-                zona,
-                f"Se declararon {_format_number(volumen_zona)} m³ y el convoy carga "
-                f"{_format_number(capacidad_total)} m³ por viaje. Una parada se visita una "
-                "sola vez, así que declara ese volumen o menos.",
-            )
+        # Lo único que queda imposible: el convoy no puede cargar nada. Pasa
+        # cuando ninguna unidad con capacidad está disponible, o cuando el
+        # personal declarado no alcanza ni para tripular la más chica.
+        descartar(
+            zona,
+            "Ningún vehículo disponible del punto puede cargar esta zona. "
+            "Revisa la disponibilidad de la flota y el personal declarado.",
+        )
         continue
 
     if not stops_que_caben:
-        # Sigue siendo alcanzable: basta que la capacidad libre quede por debajo
-        # del mínimo de retiro para la única zona cargada.
+        # **El mensaje nombra la causa, no una cifra sin contexto.**
+        #
+        # Decía "ninguna zona cargada cabe en la capacidad disponible (20 m³)",
+        # y con los viajes múltiples eso quedó al revés: una zona de 40 m³ SÍ
+        # cabe en un convoy de 20, en dos pasadas. Si se llega acá no es porque
+        # las zonas sean grandes sino porque el convoy no puede cargar nada, y
+        # las dos razones posibles son la flota y la cuadrilla.
         return RoutePlanInfeasibleOut(
             message=(
-                f"Ninguna zona cargada cabe en la capacidad disponible "
-                f"({_format_number(capacidad_total)} m³)."
+                "Ningún vehículo del punto puede cargar: no hay unidades de carga "
+                "disponibles con capacidad declarada, o el personal declarado no "
+                "alcanza para tripular ninguna. Revisa la flota y la cuadrilla en el "
+                "diálogo de generación."
             )
         )
 
@@ -2301,35 +2458,18 @@ async def generate_route(
         if not point_stops:
             continue
 
-        # Paso 2, el reparto. _split_stops_by_nearest es una heurística y puede
-        # dejar un punto por sobre su propia capacidad aunque la del grupo
-        # alcance. Antes eso devolvía infeasible; ahora se recorta ese punto.
-        capacidad_punto = _point_truck_capacity(point)
-        asignado = sum(s["volumeM3"] for s in point_stops)
-        # La holgura es por el retiro parcial, no por prolijidad: a la zona
-        # parcial se le asigna exactamente la capacidad que quedaba libre, así
-        # que la suma de las paradas da la capacidad del punto al último bit. Al
-        # recomputarla acá en otro orden, el resultado puede quedar un epsilon
-        # por encima, y sin holgura el bucle descartaría una zona que cabe
-        # justo, con un motivo que nadie podría explicar.
-        while point_stops and asignado > capacidad_punto + 1e-9:
-            # `not prioritaria` delante del volumen en la clave de `max` es lo que
-            # hace que una prioritaria sea la ÚLTIMA en salir: las no prioritarias
-            # puntúan 1 y las marcadas 0, así que se recorta entre las no
-            # marcadas (y de ellas, la más grande) mientras quede alguna. Si todas
-            # las que quedan están marcadas, empatan en 0 y el criterio vuelve a
-            # ser el volumen: la marca no puede volver imposible un recorte que de
-            # todos modos hay que hacer.
-            fuera = max(point_stops, key=lambda z: (not z["prioritaria"], z["volumeM3"]))
-            point_stops.remove(fuera)
-            asignado -= fuera["volumeM3"]
-            descartar(
-                fuera,
-                f'El reparto dejó esta zona fuera de la capacidad de "{point.get("name", "el punto")}" '
-                f"({_format_number(capacidad_punto)} m³).",
-            )
-        if not point_stops:
-            continue
+        # **El recorte por capacidad total del punto SE ELIMINÓ.**
+        #
+        # Descartaba zonas mientras la suma asignada a un punto superara su
+        # capacidad de UN viaje, y con los viajes múltiples eso dejó de ser una
+        # restricción: el convoy vuelve al relleno y sale otra vez. El defecto
+        # era visible y costaba zonas enteras: tres retiros de 40 m³ contra un
+        # patio de 100 daban 120 > 100, así que se descartaba uno con el motivo
+        # "el reparto dejó esta zona fuera de la capacidad", y el plan terminaba
+        # haciendo dos viajes de 40 cuando podía hacer tres.
+        #
+        # Lo que de verdad acota cuánto se lleva un punto es la JORNADA, y eso
+        # se aplica donde corresponde, recortando viajes en `_build_subroute`.
 
         # Paso 3, las horas y la autonomía. Se saca la parada más lejana del
         # punto y se reintenta, hasta que el recorrido quepa o no queden
