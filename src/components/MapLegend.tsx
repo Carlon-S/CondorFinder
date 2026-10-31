@@ -107,16 +107,20 @@ function filasDe(alcance: AlcanceLeyenda): Fila[] {
   ];
 }
 
-/** La leyenda, plegable y plegada por omisión.
+/** La leyenda, plegable y **desplegada por omisión**.
  *
- *  **Plegada**, porque el mapa es el contenido y una tarjeta fija de seis filas
- *  le come una esquina a quien ya sabe leer los marcadores. Abierta se queda
- *  abierta mientras la vista viva, así que leerla una vez no cuesta nada
- *  después. Va abajo a la izquierda: arriba a la izquierda está el panel del
- *  plan, abajo a la derecha el control de zoom de Leaflet, y arriba a la derecha
- *  los controles de Google. */
+ *  Nació plegada, con el argumento de que el mapa es el contenido y una tarjeta
+ *  de seis filas le come una esquina. Se cambió a pedido, y el pedido tiene
+ *  razón: una leyenda plegada no cumple su función, porque hay que saber que
+ *  existe para abrirla, y quien necesita saber qué significa un pin es justo
+ *  quien todavía no sabe que hay una leyenda. Sigue pudiendo plegarse para quien
+ *  ya los reconoce.
+ *
+ *  Va abajo a la izquierda: arriba a la izquierda está el panel del plan, abajo
+ *  a la derecha el control de zoom de Leaflet, y arriba a la derecha los
+ *  controles de Google. */
 export function MapLegend({ alcance = "rutas" }: { alcance?: AlcanceLeyenda }) {
-  const [abierta, setAbierta] = useState(false);
+  const [abierta, setAbierta] = useState(true);
   const filas = filasDe(alcance);
 
   // `z-[800]` es el nivel de los CONTROLES de Leaflet. Sus capas llegan hasta

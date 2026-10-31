@@ -365,18 +365,20 @@ function AnalysisPage() {
 
   const [scale, setScale]   = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
-  /** Cuántos grados está girado el mapa unificado, en pasos de 90.
+  /** Cuántos grados está girado el mapa unificado. **Ángulo libre, 0 a 359.**
    *
    *  **Para qué sirve**: el ortomosaico sale del vuelo con el norte arriba, y
    *  eso no es cómo la cuadrilla ve el terreno cuando llega. Poder girarlo deja
    *  orientar la imagen como se la va a mirar en la calle.
    *
-   *  **Pasos de 90 y no libre.** Un ángulo arbitrario deja la imagen torcida
-   *  respecto de los bordes del visor y obliga a decidir cuánto encoger para que
-   *  siga entrando, con un factor distinto por cada ángulo. En 90 el problema
-   *  tiene una sola respuesta exacta (ver `factorRotacion`) y los cuatro estados
-   *  son los que alguien de verdad quiere: norte arriba, o cada uno de los otros
-   *  tres lados. */
+   *  **Empezó en pasos de 90 y se abrió a cualquier ángulo**, a pedido: un
+   *  basural no se alinea con los puntos cardinales, se alinea con la calle que
+   *  lo bordea, y esa calle casi nunca cae en un múltiplo de 90. Lo que hacía
+   *  caro el ángulo libre era cuánto encoger la imagen para que siguiera
+   *  entrando de costado, y eso resultó tener una fórmula cerrada para cualquier
+   *  ángulo, no solo para 90 (ver `factorRotacion`). Los botones de 90 se
+   *  conservan igual, porque son el caso frecuente y con el deslizador habría
+   *  que apuntar para clavar un cuarto de vuelta exacto. */
   const [rotacion, setRotacion] = useState(0);
   const [dragging, setDragging] = useState(false);
   const dragStart    = useRef({ x: 0, y: 0, offsetX: 0, offsetY: 0 });
@@ -1196,36 +1198,48 @@ function AnalysisPage() {
     setRotacion(0);
   };
 
-  /** Gira 90 grados y vuelve la vista a su encuadre inicial.
-   *
-   *  **Reinicia el zoom y el paneo a propósito.** Girar con la imagen ampliada y
-   *  corrida deja en pantalla un trozo cualquiera del ortomosaico, porque el
-   *  desplazamiento estaba calculado sobre la orientación anterior: lo que se ve
-   *  después del giro no tiene relación con lo que se estaba mirando. Volver al
-   *  encuadre completo es el único resultado predecible. */
+  /** Gira una cantidad de grados relativa, envolviendo en 360. */
   const girar = (grados: number) => {
-    setRotacion((r) => (r + grados + 360) % 360);
-    setScale(1);
-    setOffset({ x: 0, y: 0 });
+    setRotacion((r) => (((r + grados) % 360) + 360) % 360);
   };
 
-  /** Cuánto encoger el contenido cuando está de costado, para que siga entrando.
+  /** Fija el ángulo absoluto, para el deslizador y el campo numérico. */
+  const fijarRotacion = (grados: number) => {
+    if (!Number.isFinite(grados)) return;
+    setRotacion((((Math.round(grados) % 360) + 360) % 360));
+  };
+
+  /** Cuánto encoger el contenido girado para que siga entrando en el visor.
    *
-   *  Girando 90 grados, una caja de ancho W y alto H necesita H de ancho y W de
-   *  alto. Si el visor es más ancho que alto (el caso normal), la imagen de
-   *  costado se sale por arriba y por abajo, y el visor recorta. El factor
-   *  `min(W/H, H/W)` es exactamente la proporción que la vuelve a hacer entrar,
-   *  y en 0 y 180 grados es 1 porque no hay nada que compensar.
+   *  Una caja de ancho W y alto H girada un ángulo t ocupa una caja envolvente
+   *  de `W·|cos t| + H·|sin t|` por `W·|sin t| + H·|cos t|`. El factor que la
+   *  devuelve adentro es el menor de las dos proporciones, acotado a 1 porque
+   *  nunca se agranda. En 0 y 180 grados da exactamente 1, y en 90 da
+   *  `min(W/H, H/W)`, que era el caso particular que esto resolvía antes.
+   *
+   *  **Es la fórmula la que hizo barato el ángulo libre**: sin ella habría que
+   *  tener un factor por ángulo, que es lo que parecía caro.
+   *
+   *  Ajusta la CAJA y la imagen va `object-contain` dentro, así que el resultado
+   *  es conservador: si la foto no llena la caja, podría crecer un poco más.
+   *  Preferible a lo contrario, que es recortarla.
    *
    *  **Se lee del DOM en cada render y no se memoiza**: depende del tamaño del
    *  visor, que cambia con la ventana y con el ancho del panel de detecciones.
-   *  Es una lectura de dos propiedades, así que recalcularla siempre sale más
-   *  barato que mantenerla sincronizada. */
+   *  Son dos propiedades, así que recalcular siempre sale más barato que
+   *  mantenerlo sincronizado. */
   const factorRotacion = (() => {
     if (rotacion % 180 === 0) return 1;
     const el = containerRef.current;
     if (!el || !el.clientWidth || !el.clientHeight) return 1;
-    return Math.min(el.clientWidth / el.clientHeight, el.clientHeight / el.clientWidth);
+    const rad = (rotacion * Math.PI) / 180;
+    const cos = Math.abs(Math.cos(rad));
+    const sen = Math.abs(Math.sin(rad));
+    const w = el.clientWidth;
+    const h = el.clientHeight;
+    const anchoGirado = w * cos + h * sen;
+    const altoGirado = w * sen + h * cos;
+    return Math.min(w / anchoGirado, h / altoGirado, 1);
   })();
 
   const onWheel = (event: React.WheelEvent<HTMLDivElement>) => {
@@ -1587,44 +1601,65 @@ function AnalysisPage() {
                   actúan sobre el encuadre y no sobre el análisis. Los de giro
                   son solo ícono porque son un par simétrico que se entiende por
                   la forma, y llevan `title` y `aria-label` con el sentido. */}
-              <div className="absolute right-4 top-4 z-20 flex items-center gap-1.5">
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => girar(-90)}
-                  title="Girar 90 grados a la izquierda"
-                  aria-label="Girar el mapa 90 grados a la izquierda"
-                  className="h-8 w-8 p-0"
-                >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => girar(90)}
-                  title="Girar 90 grados a la derecha"
-                  aria-label="Girar el mapa 90 grados a la derecha"
-                  className="h-8 w-8 p-0"
-                >
-                  <RotateCw className="h-3.5 w-3.5" />
-                </Button>
-                {/* El ángulo se imprime solo cuando NO es cero: un "0°"
-                    permanente sería una cifra que nunca dice nada, y su
-                    aparición es justo lo que avisa que la imagen está girada
-                    cuando alguien vuelve a la pestaña más tarde. */}
-                {rotacion !== 0 && (
-                  <span className="mono rounded-md border border-border bg-card/90 px-2 py-1 text-[0.6875rem] tabular-nums text-foreground shadow-xl backdrop-blur">
-                    {rotacion}°
-                  </span>
-                )}
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={resetView}
-                  className="h-8 px-3 text-xs"
-                >
-                  Reiniciar vista
-                </Button>
+              <div className="absolute right-4 top-4 z-20 flex flex-col gap-2 rounded-md border border-border bg-card/90 p-2 shadow-xl backdrop-blur">
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => girar(-90)}
+                    title="Girar un cuarto de vuelta a la izquierda"
+                    aria-label="Girar el mapa 90 grados a la izquierda"
+                    className="h-8 w-8 flex-shrink-0 p-0"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => girar(90)}
+                    title="Girar un cuarto de vuelta a la derecha"
+                    aria-label="Girar el mapa 90 grados a la derecha"
+                    className="h-8 w-8 flex-shrink-0 p-0"
+                  >
+                    <RotateCw className="h-3.5 w-3.5" />
+                  </Button>
+                  {/* El ángulo **se escribe**, no solo se lee: con el deslizador
+                      es imposible clavar un valor exacto, y quien quiere 37
+                      grados porque es como corre la calle necesita poder
+                      teclearlo. Los dos controles mueven el mismo estado. */}
+                  <label className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
+                    <input
+                      type="number"
+                      min={0}
+                      max={359}
+                      value={rotacion}
+                      onChange={(e) => fijarRotacion(Number(e.target.value))}
+                      aria-label="Ángulo de giro en grados"
+                      className="mono h-8 w-14 rounded-md border border-border bg-background px-1.5 text-right text-[0.6875rem] tabular-nums text-foreground"
+                    />
+                    °
+                  </label>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={resetView}
+                    className="h-8 flex-shrink-0 px-2.5 text-xs"
+                  >
+                    Reiniciar
+                  </Button>
+                </div>
+                {/* El deslizador va en su propia fila y a lo ancho del panel:
+                    en la misma fila que cuatro controles quedaba de 3 rem, donde
+                    un grado es medio pixel y apuntar es imposible. */}
+                <input
+                  type="range"
+                  min={0}
+                  max={359}
+                  value={rotacion}
+                  onChange={(e) => fijarRotacion(Number(e.target.value))}
+                  aria-label="Girar el mapa, en grados"
+                  className="h-1.5 w-full cursor-pointer accent-primary"
+                />
               </div>
 
               {/* key={animKey}: al cambiar de captura por la barra inferior,
@@ -1669,7 +1704,12 @@ function AnalysisPage() {
                     className="absolute inset-8 flex items-center justify-center"
                     style={{
                       transform: `rotate(${rotacion}deg) scale(${factorRotacion})`,
-                      transition: "transform 200ms ease-out",
+                      // **Sin transición, y es por el deslizador.** Tenía 200 ms
+                      // de suavizado, que está bien para un salto de 90 grados y
+                      // mal para arrastrar: la imagen quedaba persiguiendo al
+                      // cursor un quinto de segundo atrás, así que elegir un
+                      // ángulo a ojo se volvía imposible. Un editor de imágenes
+                      // tampoco interpola mientras se gira.
                     }}
                   >
                     {/* La imagen llena esta caja y el SVG se superpone sobre LA

@@ -756,6 +756,14 @@ function RutasPage() {
       return next;
     });
   };
+  /** Cuántas paradas hay marcadas en el diálogo, de las dos clases juntas.
+   *
+   *  El pie lo imprime y el botón de confirmar se habilita con él. Se calcula
+   *  una vez y no tres veces en el JSX, que es lo que había: con la suma escrita
+   *  en cada lugar, el botón podía habilitarse con un criterio y el rótulo
+   *  contar con otro. */
+  const seleccionadasEnTotal = selectedToLoad.size + selectedDiarios.size;
+
   const alternarTodosLosDiarios = () => {
     setSelectedDiarios((prev) => {
       const next = new Set(prev);
@@ -1291,17 +1299,35 @@ function RutasPage() {
       setRecentrar(ubicables.map((a) => [a.center[0], a.center[1]] as [number, number]));
     }
 
-    if (ubicables.length > 0) {
+    // **El aviso cuenta las DOS clases de parada, no solo las zonas.**
+    //
+    // Contaba solo `ubicables`, que sale de las zonas marcadas, así que cargar
+    // únicamente retiros del día daba cero y disparaba la advertencia de "ninguna
+    // tiene coordenadas ubicables" sobre una carga que había funcionado
+    // perfectamente: los retiros ya estaban en `loadedDiarioIds` y aparecían en
+    // el panel y en el mapa. El defecto era el mensaje, no la carga, y es peor
+    // que un mensaje de más: mandaba a volver a analizar y guardar una zona para
+    // arreglar algo que no estaba roto.
+    const cargadasEnTotal = ubicables.length + diarios.length;
+    if (cargadasEnTotal > 0) {
+      const partes = [
+        ubicables.length > 0
+          ? `${ubicables.length} zona${ubicables.length === 1 ? "" : "s"}`
+          : null,
+        diarios.length > 0
+          ? `${diarios.length} retiro${diarios.length === 1 ? "" : "s"} del día`
+          : null,
+      ].filter(Boolean);
       notify.success(
-        ubicables.length === 1 ? "Zona cargada" : "Zonas cargadas",
-        `${ubicables.length} zona${ubicables.length === 1 ? " se agregó" : "s se agregaron"} a la ruta${
+        cargadasEnTotal === 1 ? "Parada cargada" : "Paradas cargadas",
+        `${partes.join(" y ")} ${cargadasEnTotal === 1 ? "se agregó" : "se agregaron"} a la ruta${
           noUbicables > 0 ? ` (${noUbicables} no se pudieron ubicar en el mapa)` : ""
         }.`,
       );
     } else {
       notify.warning(
         "No se pudo cargar ninguna zona",
-        "Ninguna de las seleccionadas tiene coordenadas ubicables — vuelve a analizarlas y guardarlas.",
+        "Ninguna de las seleccionadas tiene coordenadas ubicables, vuelve a analizarlas y guardarlas.",
       );
     }
   };
@@ -2862,16 +2888,39 @@ function RutasPage() {
             )}
           </div>
 
-          <DialogFooter>
-            <Button
-              onClick={handleLoadSelected}
-              disabled={selectedToLoad.size + selectedDiarios.size === 0}
-            >
-              Cargar seleccionados
-              {selectedToLoad.size + selectedDiarios.size > 0
-                ? ` (${selectedToLoad.size + selectedDiarios.size})`
-                : ""}
-            </Button>
+          {/* **El pie va PEGADO al borde inferior del diálogo.**
+              `DialogContent` es el contenedor que hace scroll, y con el
+              buscador más las tres secciones el botón de confirmar quedaba
+              debajo del pliegue: había que desplazarse hasta el final para
+              descubrir que existía, así que en pantalla el formulario parecía no
+              tener ninguna forma de aceptarse. `sticky bottom-0` lo deja siempre
+              visible, y los márgenes negativos cancelan el `p-6` del diálogo
+              para que la barra llegue de borde a borde en vez de flotar con aire
+              a los lados.
+
+              **Y lleva Cancelar**, que antes no estaba: un formulario con una
+              sola salida obliga a buscar la X de la esquina para salir sin
+              cargar nada. */}
+          <DialogFooter className="sticky bottom-0 -mx-6 -mb-6 mt-1 gap-2 border-t border-border bg-background px-6 py-3 sm:justify-between">
+            {/* Cuántas paradas se van a cargar, a la izquierda del botón: con el
+                contador solo dentro del botón, el número se leía recién al ir a
+                apretarlo. */}
+            <span className="text-[0.6875rem] text-muted-foreground">
+              {seleccionadasEnTotal === 0
+                ? "Marca al menos una parada"
+                : `${seleccionadasEnTotal} parada${seleccionadasEnTotal === 1 ? "" : "s"} seleccionada${
+                    seleccionadasEnTotal === 1 ? "" : "s"
+                  }`}
+            </span>
+            <span className="flex gap-2">
+              <Button variant="secondary" onClick={() => setLoadDialogOpen(false)}>
+                Cancelar
+              </Button>
+              <Button onClick={handleLoadSelected} disabled={seleccionadasEnTotal === 0}>
+                Cargar paradas
+                {seleccionadasEnTotal > 0 ? ` (${seleccionadasEnTotal})` : ""}
+              </Button>
+            </span>
           </DialogFooter>
         </DialogContent>
       </Dialog>
