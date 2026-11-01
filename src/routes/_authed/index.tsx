@@ -480,6 +480,15 @@ function MainPage() {
   const [previewOpen, setPreviewOpen] = useState(false);
   /** Zona cuya evolución se está viendo, o null si el diálogo está cerrado. */
   const [evolutionZone, setEvolutionZone] = useState<ZoneRecord | null>(null);
+  /** Los retiros de la zona cuya evolución se mira. `null` mientras se piden.
+   *
+   *  **Este era el defecto de E2**: el botón "Evolución" de esta vista no los
+   *  pasaba. Solo estaba cableado el de la vista de Análisis, así que para una
+   *  zona con un solo vuelo (el caso de todo punto que se midió una vez) el
+   *  diálogo decía "Sin versiones anteriores" y el gráfico nunca aparecía, por
+   *  más retiros que tuviera registrados. `null` y no `[]` mientras carga, para
+   *  mostrar el spinner en vez de ese mensaje por un instante. */
+  const [retirosEvolucion, setRetirosEvolucion] = useState<RetiroDeZona[] | null>(null);
   /** Punto permanente que se esta editando con el formulario completo, o null. */
   const [editarPunto, setEditarPunto] = useState<ZoneRecord | null>(null);
   /** True mientras el formulario está dando de alta un punto NUEVO.
@@ -1504,7 +1513,24 @@ function MainPage() {
                                     <Button
                                       size="sm"
                                       variant="secondary"
-                                      onClick={() => setEvolutionZone(zona)}
+                                      onClick={() => {
+                                        setRetirosEvolucion(null);
+                                        setEvolutionZone(zona);
+                                        // Degrada a vacío: sin los retiros el gráfico
+                                        // queda como antes (solo mediciones), y dejar
+                                        // el diálogo cargando para siempre por una
+                                        // consulta caída sería peor.
+                                        listarRetiros(zona.id)
+                                          .then((rs) =>
+                                            setRetirosEvolucion(
+                                              rs.map((r) => ({
+                                                fecha: r.fecha,
+                                                volumenRetiradoM3: r.volumenRetiradoM3,
+                                              })),
+                                            ),
+                                          )
+                                          .catch(() => setRetirosEvolucion([]));
+                                      }}
                                       title="Ver cómo cambió el volumen de esta zona"
                                     >
                                       <ChartLineUp className="mr-1.5 h-3.5 w-3.5" /> Evolución
@@ -1952,10 +1978,10 @@ function MainPage() {
           <DialogHeader>
             <DialogTitle>Evolución de {evolutionZone?.name}</DialogTitle>
             <DialogDescription>
-              Cómo cambió el volumen de esta zona entre sus distintas capturas.
+              Cómo cambió el volumen de esta zona entre sus capturas y los retiros registrados.
             </DialogDescription>
           </DialogHeader>
-          {evolutionZone && (
+          {evolutionZone && retirosEvolucion !== null && (
             <Suspense
               fallback={
                 <div className="flex h-[13rem] items-center justify-center">
@@ -1966,12 +1992,18 @@ function MainPage() {
               <ZoneEvolution
                 zone={evolutionZone}
                 analyses={savedAnalyses}
+                retiros={retirosEvolucion}
                 onOpenAnalysis={(id) => {
                   setPendingOpenId(id);
                   navigate({ to: "/analysis" });
                 }}
               />
             </Suspense>
+          )}
+          {evolutionZone && retirosEvolucion === null && (
+            <div className="flex h-[13rem] items-center justify-center">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
           )}
         </DialogContent>
       </Dialog>
