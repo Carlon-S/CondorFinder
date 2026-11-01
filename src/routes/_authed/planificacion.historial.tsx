@@ -34,7 +34,7 @@
 // celda.
 // =============================================================================
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 
 import { Button } from "@/components/ui/button";
@@ -42,7 +42,17 @@ import { CerrarRutaDialog } from "@/components/CerrarRutaDialog";
 import { ConfirmarBorrado } from "@/components/ConfirmarBorrado";
 import { RouteTimeline } from "@/components/RouteTimeline";
 import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
   ArrowLeft,
+  CheckCircle2,
+  ChevronDown,
   Clock,
   Loader2,
   MapPin,
@@ -52,7 +62,7 @@ import {
   TriangleAlert,
   Truck,
 } from "@/components/icons/Icons";
-import { cifra, entero } from "@/lib/formato";
+import { cifra, entero, volumen } from "@/lib/formato";
 import { notify } from "@/lib/notify";
 import { guardarRutaCargada } from "@/lib/rutaState";
 import {
@@ -67,6 +77,7 @@ import {
   type EstadoRuta,
   type RutaGuardada,
   type RutaGuardadaCompleta,
+  type ZonaDeRuta,
 } from "@/lib/routePlans";
 
 export const Route = createFileRoute("/_authed/planificacion/historial")({
@@ -338,8 +349,7 @@ function HistorialPage() {
           <TriangleAlert className="mt-px h-3.5 w-3.5 flex-shrink-0" />
           <span>
             Estás viendo un <strong>historial</strong>. Son planes ya generados, no la jornada en
-            curso: lo que ves acá no despacha ningún camión. Para armar una ruta nueva, anda a
-            Rutas.
+            curso: lo que ves acá no despacha ningún camión. Para armar una ruta nueva, ve a Rutas.
           </span>
         </p>
 
@@ -377,6 +387,32 @@ function HistorialPage() {
           </div>
         )}
 
+        {/* El total de lo que se está mirando. Cambia con el filtro de día, y es
+            lo que permite saber de un vistazo cuánto se planificó contra cuánto
+            salió. Las canceladas no cuentan como planificado: nunca se hicieron,
+            y sumarlas inflaría el denominador. */}
+        {!cargando && rutas.length > 0 && (
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Cifra icono={RouteIcon} etiqueta="Rutas" valor={entero(rutas.length)} />
+            <Cifra
+              icono={Truck}
+              etiqueta="Planificado"
+              valor={`${volumen(
+                rutas
+                  .filter((r) => r.estado !== "cancelada")
+                  .reduce((s, r) => s + (r.resumen.volumenM3 ?? 0), 0),
+              )} m³`}
+              nota="sin contar las canceladas"
+            />
+            <Cifra
+              icono={CheckCircle2}
+              etiqueta="Retirado"
+              valor={`${volumen(rutas.reduce((s, r) => s + (r.resumen.volumenRetiradoM3 ?? 0), 0))} m³`}
+              nota="de las rutas cerradas con cifra"
+            />
+          </div>
+        )}
+
         {cargando ? (
           <div className="flex justify-center py-10">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -388,32 +424,33 @@ function HistorialPage() {
               : "Todavía no se ha generado ninguna ruta. Las que generes en Rutas van a aparecer acá."}
           </p>
         ) : (
-          porDia.map(([dia, delDia]) => (
-            <section key={dia} className="space-y-1.5">
-              {/* La fecha como ENCABEZADO del bloque, no como columna repetida
-                  en cada fila. */}
-              <h2 className="flex items-baseline gap-2 text-xs font-semibold capitalize text-foreground">
-                {fechaLarga(dia)}
-                <span className="text-[0.625rem] font-normal text-muted-foreground">
-                  {delDia.length} ruta{delDia.length === 1 ? "" : "s"}
-                </span>
-              </h2>
-              <ul className="space-y-1.5">
-                {delDia.map((r) => (
-                  <FilaRuta
-                    key={r.id}
-                    ruta={r}
-                    abriendo={abriendo === r.id}
-                    onAbrir={() => void abrir(r)}
-                    onEditar={() => void editar(r)}
-                    onBorrar={() => setABorrar(r)}
-                    onEstado={(e) => void cambiarEstado(r, e)}
-                    cambiando={cambiando === r.id}
-                  />
-                ))}
-              </ul>
-            </section>
-          ))
+          porDia.map(([dia, delDia]) => {
+            const retiradoDia = delDia.reduce((s, r) => s + (r.resumen.volumenRetiradoM3 ?? 0), 0);
+            return (
+              <section key={dia} className="space-y-1.5">
+                {/* La fecha como ENCABEZADO del bloque, no como columna repetida
+                    en cada fila. Con lo que se retiró ese día al lado: es la
+                    pregunta que el historial responde primero, y sumarla de
+                    cabeza fila por fila es justo lo que una tabla ahorra. */}
+                <h2 className="flex items-baseline gap-2 text-xs font-semibold capitalize text-foreground">
+                  {fechaLarga(dia)}
+                  <span className="text-[0.625rem] font-normal text-muted-foreground">
+                    {delDia.length} ruta{delDia.length === 1 ? "" : "s"}
+                    {retiradoDia > 0 && ` · ${volumen(retiradoDia)} m³ retirados`}
+                  </span>
+                </h2>
+                <TablaDelDia
+                  rutas={delDia}
+                  abriendo={abriendo}
+                  cambiando={cambiando}
+                  onAbrir={(r) => void abrir(r)}
+                  onEditar={(r) => void editar(r)}
+                  onBorrar={(r) => setABorrar(r)}
+                  onEstado={(r, e) => void cambiarEstado(r, e)}
+                />
+              </section>
+            );
+          })
         )}
       </div>
 
@@ -473,170 +510,448 @@ function HistorialPage() {
   );
 }
 
-/** Una ruta del historial. La fila entera abre el detalle; la papelera va
- *  aparte para que apretar "eliminar" no pueda confundirse con "abrir". */
-function FilaRuta({
-  ruta,
+/** Cómo se llama cada salto en el botón de la tabla, en corto.
+ *
+ *  `VERBO_ESTADO` es la versión larga y va en el `title`; acá no cabe "Marcar
+ *  terminada" al lado de los otros dos botones de la fila. El verbo sigue siendo
+ *  el mismo: "Terminar" dice lo que va a pasar, "terminada" obliga a deducirlo. */
+const VERBO_CORTO: Record<EstadoRuta, string> = {
+  generada: "Volver a generada",
+  "en curso": "Despachar",
+  terminada: "Terminar",
+  cancelada: "Cancelar",
+};
+
+/** Qué es cada lugar, en una palabra, para que se distinga de dónde sale la
+ *  cifra: una zona medida por el dron o un retiro pedido para ese día. */
+const ETIQUETA_TIPO: Record<string, string> = {
+  analysis: "Zona con vuelo",
+  punto_diario: "Retiro del día",
+};
+
+/** El desglose por lugar de una ruta.
+ *
+ *  Sale del resumen cuando existe. Para una ruta guardada antes de ese campo se
+ *  arma desde las paradas del plan, sin cifra retirada: es lo único que se sabe,
+ *  y decir "0" afirmaría algo que nadie midió. Un lugar visitado varias veces
+ *  figura una sola vez, con lo planificado sumado. */
+function zonasDeRuta(
+  zonas: ZonaDeRuta[] | undefined,
+  paradas:
+    | { stopId?: string; kind?: string; label: string; removedVolumeM3?: number }[]
+    | undefined,
+): ZonaDeRuta[] {
+  if (zonas && zonas.length > 0) return zonas;
+  const por: Map<string, ZonaDeRuta> = new Map();
+  for (const s of paradas ?? []) {
+    if (!s.stopId) continue;
+    const kind = (s.kind ?? "analysis") as ZonaDeRuta["kind"];
+    const clave = `${kind}:${s.stopId}`;
+    const previa = por.get(clave);
+    if (previa) {
+      previa.planificadoM3 =
+        Math.round((previa.planificadoM3 + (s.removedVolumeM3 ?? 0)) * 100) / 100;
+    } else {
+      por.set(clave, {
+        stopId: s.stopId,
+        kind,
+        nombre: s.label,
+        planificadoM3: s.removedVolumeM3 ?? 0,
+        retiradoM3: null,
+        completado: null,
+      });
+    }
+  }
+  return Array.from(por.values());
+}
+
+/** Cómo va un lugar de la ruta: pendiente, completo, parcial o sin cifra. */
+function estadoDeZona(z: ZonaDeRuta, estadoRuta: EstadoRuta): { texto: string; estilo: string } {
+  if (estadoRuta !== "terminada") {
+    return {
+      texto: estadoRuta === "cancelada" ? "No se hizo" : "Pendiente",
+      estilo: "border-border bg-muted text-muted-foreground",
+    };
+  }
+  if (z.retiradoM3 == null) {
+    return { texto: "Sin cifra", estilo: "border-border bg-muted text-muted-foreground" };
+  }
+  if (z.completado === false || z.retiradoM3 + 0.005 < z.planificadoM3) {
+    return {
+      texto: "Parcial",
+      estilo: "border-warning-strong/40 bg-warning/10 text-warning-strong",
+    };
+  }
+  return {
+    texto: "Completo",
+    estilo: "border-success-strong/40 bg-success/10 text-success-strong",
+  };
+}
+
+/** Cuánto volumen se retiró de cada lugar de una ruta.
+ *
+ *  Es lo que la tabla del historial no podía decir con una sola cifra por ruta:
+ *  "87 m³ retirados" no dice de dónde salieron ni cuál lugar quedó corto. Cada
+ *  fila compara lo retirado con lo planificado y lo dibuja como una barra, que
+ *  se lee de un vistazo sin comparar dos números. */
+function TablaZonas({ zonas, estadoRuta }: { zonas: ZonaDeRuta[]; estadoRuta: EstadoRuta }) {
+  if (zonas.length === 0) {
+    return (
+      <p className="py-2 text-[0.6875rem] text-muted-foreground">
+        Esta ruta no guardó el desglose por lugar.
+      </p>
+    );
+  }
+  return (
+    <table className="w-full text-xs">
+      <thead>
+        <tr className="text-left text-[0.625rem] text-muted-foreground">
+          <th className="py-1.5 pr-3 font-medium">Lugar</th>
+          <th className="hidden px-3 py-1.5 font-medium md:table-cell">Origen</th>
+          <th className="px-3 py-1.5 text-right font-medium">Planificado (m³)</th>
+          <th className="px-3 py-1.5 text-right font-medium">Retirado (m³)</th>
+          <th className="hidden w-40 px-3 py-1.5 font-medium sm:table-cell">Avance</th>
+          <th className="py-1.5 pl-3 text-right font-medium">Estado</th>
+        </tr>
+      </thead>
+      <tbody>
+        {zonas.map((z) => {
+          const est = estadoDeZona(z, estadoRuta);
+          // La barra solo existe cuando hay con qué comparar. Sin cifra retirada
+          // queda vacía y no llena: un 0 % dibujado afirmaría que no salió nada.
+          const pct =
+            z.retiradoM3 != null && z.planificadoM3 > 0
+              ? Math.max(0, Math.min(100, (z.retiradoM3 / z.planificadoM3) * 100))
+              : null;
+          return (
+            <tr key={`${z.kind}:${z.stopId}`} className="border-t border-border/40">
+              <td className="max-w-[16rem] truncate py-2 pr-3 font-medium text-foreground">
+                {z.nombre ?? "Sin nombre"}
+              </td>
+              <td className="hidden px-3 py-2 text-muted-foreground md:table-cell">
+                {ETIQUETA_TIPO[z.kind] ?? z.kind}
+              </td>
+              <td className="mono px-3 py-2 text-right tabular-nums text-muted-foreground">
+                {volumen(z.planificadoM3)}
+              </td>
+              <td className="mono px-3 py-2 text-right font-semibold tabular-nums text-foreground">
+                {z.retiradoM3 != null ? volumen(z.retiradoM3) : "-"}
+              </td>
+              <td className="hidden px-3 py-2 sm:table-cell">
+                <div
+                  className="h-1.5 w-full overflow-hidden rounded-full bg-muted"
+                  role="img"
+                  aria-label={
+                    pct != null
+                      ? `Se retiró el ${Math.round(pct)} % de lo planificado`
+                      : "Sin cifra retirada para comparar"
+                  }
+                >
+                  {pct != null && (
+                    <div
+                      className={`h-full rounded-full ${pct >= 99.5 ? "bg-success" : "bg-warning"}`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  )}
+                </div>
+              </td>
+              <td className="py-2 pl-3 text-right">
+                <span
+                  className={`inline-block rounded-full border px-2 py-0.5 text-[0.625rem] font-medium ${est.estilo}`}
+                >
+                  {est.texto}
+                </span>
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+/** Las rutas de UN día, como tabla.
+ *
+ *  Una tabla y no una lista de tarjetas: lo que se hace con el historial es
+ *  comparar rutas entre sí (cuánto se planificó, cuánto salió, cuánto tardó), y
+ *  eso pide cifras alineadas en columnas con su unidad en el encabezado, igual
+ *  que Vista Principal y las tablas de recursos. En una tarjeta cada cifra
+ *  flotaba en su propia línea y no había con qué compararla.
+ *
+ *  **La fecha sigue siendo el encabezado del bloque y no una columna**: repetida
+ *  por fila, el mismo día se imprimiría una vez por ruta. */
+function TablaDelDia({
+  rutas,
   abriendo,
+  cambiando,
   onAbrir,
   onEditar,
   onBorrar,
   onEstado,
-  cambiando,
 }: {
-  ruta: RutaGuardada;
-  abriendo: boolean;
-  onAbrir: () => void;
-  onEditar: () => void;
-  onBorrar: () => void;
-  onEstado: (estado: EstadoRuta) => void;
-  cambiando: boolean;
+  rutas: RutaGuardada[];
+  abriendo: string | null;
+  cambiando: string | null;
+  onAbrir: (r: RutaGuardada) => void;
+  onEditar: (r: RutaGuardada) => void;
+  onBorrar: (r: RutaGuardada) => void;
+  onEstado: (r: RutaGuardada, estado: EstadoRuta) => void;
 }) {
-  const r = ruta.resumen;
+  const [abiertas, setAbiertas] = useState<Set<string>>(new Set());
+  const alternar = (id: string) =>
+    setAbiertas((prev) => {
+      const sig = new Set(prev);
+      if (sig.has(id)) sig.delete(id);
+      else sig.add(id);
+      return sig;
+    });
+
   return (
-    <li className="flex items-stretch overflow-hidden rounded-lg border border-border/60 bg-background/60 transition-colors hover:border-primary/40 hover:bg-primary/5">
-      <button
-        type="button"
-        onClick={onAbrir}
-        className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 px-3 py-2.5 text-left"
-      >
-        <span className="mono flex-shrink-0 text-xs tabular-nums text-muted-foreground">
-          {horaDe(ruta.fecha)}
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-xs font-medium text-foreground">
-            {r.origenNombre ?? "Sin punto de origen"}
-            {r.recorridos > 1 && (
-              <span className="font-normal text-muted-foreground"> y {r.recorridos - 1} más</span>
-            )}
-          </span>
-          <span className="block text-[0.625rem] text-muted-foreground">
-            {[
-              `${entero(r.paradas)} parada${r.paradas === 1 ? "" : "s"}`,
-              // **Lo retirado manda cuando existe.** Una ruta cerrada seguía
-              // anunciando el volumen PLANIFICADO, así que corregir una cifra
-              // al cerrar no se veía en ninguna parte. Cuando difieren se
-              // imprimen las dos, porque la diferencia entre lo que se iba a
-              // sacar y lo que salió es justamente el dato que este registro
-              // existe para conservar.
-              r.volumenRetiradoM3 != null
-                ? r.volumenM3 != null && Math.abs(r.volumenRetiradoM3 - r.volumenM3) > 0.005
-                  ? `${cifra(r.volumenRetiradoM3)} m³ retirados de ${cifra(r.volumenM3)}`
-                  : `${cifra(r.volumenRetiradoM3)} m³ retirados`
-                : r.volumenM3 != null
-                  ? // Una ruta ya cerrada sin cifra dice "planificados": con solo
-                    // "40 m³" parecía lo que salió, y nadie lo midió.
-                    `${cifra(r.volumenM3)} m³${ruta.estado === "terminada" ? " planificados" : ""}`
-                  : null,
-              r.distanciaKm != null ? `${cifra(r.distanciaKm)} km` : null,
-              r.duracionHoras != null ? `${cifra(r.duracionHoras)} h` : null,
-              // Los viajes solo cuando hay más de uno: con uno, la columna
-              // nunca diría nada. Mismo criterio que la medida "Viajes" del
-              // detalle de un recorrido.
-              r.viajes > 1 ? `${entero(r.viajes)} viajes` : null,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-          </span>
-        </span>
+    <div className="panel overflow-hidden">
+      <Table>
+        <TableHeader>
+          <TableRow className="border-b border-border/60 bg-muted/40 hover:bg-muted/40">
+            <TableHead className="w-9 px-2" />
+            <TableHead className="w-[5.5rem] px-3 text-[0.6875rem]">Hora</TableHead>
+            <TableHead className="px-3 text-[0.6875rem]">Origen</TableHead>
+            <TableHead className="w-[6.5rem] px-3 text-[0.6875rem]">Estado</TableHead>
+            <TableHead className="w-[5rem] px-3 text-center text-[0.6875rem]">Paradas</TableHead>
+            <TableHead className="w-[7.5rem] px-3 text-right text-[0.6875rem]">
+              Planificado (m³)
+            </TableHead>
+            <TableHead className="w-[7.5rem] px-3 text-right text-[0.6875rem]">
+              Retirado (m³)
+            </TableHead>
+            <TableHead className="hidden w-[6.5rem] px-3 text-right text-[0.6875rem] xl:table-cell">
+              Distancia (km)
+            </TableHead>
+            <TableHead className="hidden w-[6rem] px-3 text-right text-[0.6875rem] xl:table-cell">
+              Duración (h)
+            </TableHead>
+            <TableHead className="hidden w-[4.5rem] px-3 text-right text-[0.6875rem] xl:table-cell">
+              Viajes
+            </TableHead>
+            <TableHead className="px-3 text-right">
+              <span className="sr-only">Acciones</span>
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rutas.map((ruta) => {
+            const r = ruta.resumen;
+            const zonas = zonasDeRuta(r.zonas, undefined);
+            const abierta = abiertas.has(ruta.id);
+            const ocupada = cambiando === ruta.id;
+            const diferencia =
+              r.volumenRetiradoM3 != null && r.volumenM3 != null
+                ? r.volumenRetiradoM3 - r.volumenM3
+                : 0;
+            return (
+              <Fragment key={ruta.id}>
+                <TableRow className="border-b border-border/40">
+                  <TableCell className="px-2 py-3">
+                    {zonas.length > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => alternar(ruta.id)}
+                        aria-expanded={abierta}
+                        aria-controls={`zonas-${ruta.id}`}
+                        aria-label={
+                          abierta ? "Ocultar el retiro por lugar" : "Ver el retiro por lugar"
+                        }
+                        className="flex h-6 w-6 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                      >
+                        <ChevronDown
+                          className={`h-3.5 w-3.5 transition-transform ${abierta ? "" : "-rotate-90"}`}
+                        />
+                      </button>
+                    ) : null}
+                  </TableCell>
 
-        {/* Las zonas que quedaron fuera, si hubo. Es lo que delata que el plan
-            no cubrió todo lo que se cargó, y leerlo acá evita tener que abrir
-            cada ruta para descubrirlo. */}
-        {r.sinAsignar > 0 && (
-          <span className="flex-shrink-0 rounded-full bg-warning/15 px-2 py-0.5 text-[0.625rem] font-medium text-warning-strong">
-            {r.sinAsignar} sin asignar
-          </span>
-        )}
-        {/* **Dice CUÁNDO se editó, no solo que se editó.** Una ruta regenerada
-            reemplaza su registro conservando la fecha original (el historial
-            ordena por día de planificación), así que sin esta hora no queda
-            rastro de que lo que se está mirando no es lo que se generó esa
-            mañana. */}
-        {ruta.editadoEn && (
-          <span
-            className="flex-shrink-0 text-[0.625rem] text-muted-foreground"
-            title={`Regenerada el ${fechaLarga(diaDe(ruta.editadoEn))} a las ${horaDe(ruta.editadoEn)}`}
-          >
-            editada {horaDe(ruta.editadoEn)}
-          </span>
-        )}
-        <span
-          className={`flex-shrink-0 rounded-full border px-2 py-0.5 text-[0.625rem] font-medium capitalize ${
-            ESTILO_ESTADO[ruta.estado] ?? ESTILO_ESTADO.generada
-          }`}
-        >
-          {ruta.estado}
-        </span>
-        {abriendo && <Loader2 className="h-3.5 w-3.5 flex-shrink-0 animate-spin text-primary" />}
-      </button>
+                  <TableCell className="px-3 py-3">
+                    <span className="mono block text-xs font-semibold tabular-nums text-foreground">
+                      {horaDe(ruta.fecha)}
+                    </span>
+                    {/* **Dice CUÁNDO se editó, no solo que se editó.** Una ruta
+                        regenerada reemplaza su registro conservando la fecha
+                        original (el historial ordena por día de planificación),
+                        así que sin esta hora no queda rastro de que lo que se
+                        mira no es lo que se generó esa mañana. */}
+                    {ruta.editadoEn && (
+                      <span
+                        className="block text-[0.5625rem] text-muted-foreground"
+                        title={`Regenerada el ${fechaLarga(diaDe(ruta.editadoEn))} a las ${horaDe(ruta.editadoEn)}`}
+                      >
+                        editada {horaDe(ruta.editadoEn)}
+                      </span>
+                    )}
+                  </TableCell>
 
-      {/* Solo se puede borrar lo que todavía no salió. El backend lo vuelve a
-          verificar: la regla vive allá y acá solo se evita ofrecer un botón que
-          va a ser rechazado. */}
-      {/* Los saltos posibles DESDE donde está, uno por botón. Se leen de la
-          tabla espejada del backend, así que una ruta terminada no ofrece
-          ninguno y no hay que acordarse de esconderlos a mano.
+                  <TableCell className="px-3 py-3">
+                    <span className="block max-w-[18rem] truncate text-xs font-medium text-foreground">
+                      {r.origenNombre ?? "Sin punto de origen"}
+                      {r.recorridos > 1 && (
+                        <span className="font-normal text-muted-foreground">
+                          {" "}
+                          y {r.recorridos - 1} más
+                        </span>
+                      )}
+                    </span>
+                    {/* Las zonas que quedaron fuera, si hubo: delata que el plan
+                        no cubrió todo lo que se cargó, sin abrir la ruta. */}
+                    {r.sinAsignar > 0 && (
+                      <span className="mt-0.5 inline-block rounded-full bg-warning/15 px-2 py-0.5 text-[0.5625rem] font-medium text-warning-strong">
+                        {r.sinAsignar} sin asignar
+                      </span>
+                    )}
+                  </TableCell>
 
-          **Dicen el verbo y no el estado**: "Despachar" dice lo que va a
-          pasar, "en curso" obliga a deducirlo. */}
-      {cambiando ? (
-        <span className="flex w-10 flex-shrink-0 items-center justify-center border-l border-border/50">
-          <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-        </span>
-      ) : (
-        (TRANSICIONES[ruta.estado] ?? []).map((destino) => (
-          <button
-            key={destino}
-            type="button"
-            onClick={() => onEstado(destino)}
-            title={VERBO_ESTADO[destino]}
-            className={`flex flex-shrink-0 cursor-pointer items-center border-l border-border/50 px-2.5 text-[0.625rem] font-medium transition-colors ${
-              destino === "cancelada"
-                ? "text-muted-foreground hover:bg-destructive/15 hover:text-destructive-strong"
-                : "text-muted-foreground hover:bg-accent hover:text-foreground"
-            }`}
-          >
-            {VERBO_ESTADO[destino]}
-          </button>
-        ))
-      )}
+                  <TableCell className="px-3 py-3">
+                    <span
+                      className={`inline-block rounded-full border px-2 py-0.5 text-[0.625rem] font-medium capitalize ${
+                        ESTILO_ESTADO[ruta.estado] ?? ESTILO_ESTADO.generada
+                      }`}
+                    >
+                      {ruta.estado}
+                    </span>
+                  </TableCell>
 
-      {/* **Editar y eliminar solo mientras la ruta no haya salido.** Una en
-          curso se cancela y una terminada es historia: reescribir lo que ya
-          ocurrió es la misma regla que impide mutar un análisis guardado. El
-          backend lo vuelve a verificar; acá solo se evita ofrecer un botón que
-          va a ser rechazado. */}
-      {ruta.estado === "generada" && (
-        <button
-          type="button"
-          onClick={onEditar}
-          aria-label="Editar esta ruta"
-          title="Editar: la abre en Rutas para volver a generarla"
-          className="flex w-10 flex-shrink-0 cursor-pointer items-center justify-center border-l border-border/50 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        >
-          <Pencil className="h-3.5 w-3.5" />
-        </button>
-      )}
-      {/* **Se borra cualquiera menos una EN CURSO.** La regla era más estricta
-          y solo dejaba borrar las editables, con el argumento de que la
-          historia no se borra por conveniencia; no se sostiene, porque el
-          historial se llena de planes de prueba y de rutas canceladas que nunca
-          salieron, y eso no es historia sino ruido sobre lo que sí se hizo. La
-          garantía de que quede rastro la da la bitácora. La que no se borra es
-          la que está en la calle ahora mismo: esa se cancela. */}
-      {ruta.estado !== "en curso" && (
-        <button
-          type="button"
-          onClick={onBorrar}
-          aria-label="Eliminar esta ruta del historial"
-          title="Eliminar del historial"
-          className="flex w-10 flex-shrink-0 cursor-pointer items-center justify-center border-l border-border/50 text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive-strong"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </button>
-      )}
-    </li>
+                  <TableCell className="mono px-3 py-3 text-center text-xs tabular-nums text-foreground">
+                    {entero(r.paradas)}
+                  </TableCell>
+
+                  <TableCell className="mono px-3 py-3 text-right text-xs tabular-nums text-muted-foreground">
+                    {r.volumenM3 != null ? volumen(r.volumenM3) : "-"}
+                  </TableCell>
+
+                  {/* **Lo retirado es la cifra que manda cuando existe**, y
+                      queda más fuerte que lo planificado. Una ruta cerrada sin
+                      cifra dice "sin cifra" y no un 0: nadie midió. */}
+                  <TableCell className="px-3 py-3 text-right">
+                    {r.volumenRetiradoM3 != null ? (
+                      <>
+                        <span className="mono block text-xs font-semibold tabular-nums text-foreground">
+                          {volumen(r.volumenRetiradoM3)}
+                        </span>
+                        {Math.abs(diferencia) > 0.005 && (
+                          <span className="mono block text-[0.5625rem] tabular-nums text-warning-strong">
+                            {diferencia < 0 ? "-" : "+"}
+                            {volumen(Math.abs(diferencia))} vs plan
+                          </span>
+                        )}
+                      </>
+                    ) : ruta.estado === "terminada" ? (
+                      <span className="text-[0.625rem] text-muted-foreground">sin cifra</span>
+                    ) : (
+                      <span className="mono text-xs text-muted-foreground">-</span>
+                    )}
+                  </TableCell>
+
+                  <TableCell className="mono hidden px-3 py-3 text-right text-xs tabular-nums text-muted-foreground xl:table-cell">
+                    {r.distanciaKm != null ? cifra(r.distanciaKm) : "-"}
+                  </TableCell>
+                  <TableCell className="mono hidden px-3 py-3 text-right text-xs tabular-nums text-muted-foreground xl:table-cell">
+                    {r.duracionHoras != null ? cifra(r.duracionHoras) : "-"}
+                  </TableCell>
+                  <TableCell className="mono hidden px-3 py-3 text-right text-xs tabular-nums text-muted-foreground xl:table-cell">
+                    {entero(r.viajes)}
+                  </TableCell>
+
+                  <TableCell className="px-3 py-3">
+                    <div className="flex items-center justify-end gap-0.5">
+                      {ocupada ? (
+                        <Loader2 className="mx-2 h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                      ) : (
+                        // Los saltos posibles DESDE donde está, uno por botón. Se
+                        // leen de la tabla espejada del backend, así que una ruta
+                        // terminada no ofrece ninguno y no hay que acordarse de
+                        // esconderlos a mano.
+                        (TRANSICIONES[ruta.estado] ?? []).map((destino) => (
+                          <Button
+                            key={destino}
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => onEstado(ruta, destino)}
+                            title={VERBO_ESTADO[destino]}
+                            className={`h-7 px-2 text-[0.6875rem] font-medium ${
+                              destino === "cancelada"
+                                ? "text-muted-foreground hover:bg-destructive/15 hover:text-destructive-strong"
+                                : "text-muted-foreground hover:text-foreground"
+                            }`}
+                          >
+                            {VERBO_CORTO[destino]}
+                          </Button>
+                        ))
+                      )}
+                      {/* Editar solo mientras la ruta no haya salido: una en
+                          curso se cancela y una terminada es historia. El backend
+                          lo vuelve a verificar; acá solo se evita ofrecer un
+                          botón que va a ser rechazado. */}
+                      {ruta.estado === "generada" && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => onEditar(ruta)}
+                          aria-label="Editar esta ruta"
+                          title="Editar: la abre en Rutas para volver a generarla"
+                          className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                      {/* **Se borra cualquiera menos una EN CURSO.** El historial
+                          se llena de planes de prueba y de rutas canceladas que
+                          nunca salieron, y eso es ruido sobre lo que sí se hizo.
+                          La que no se borra es la que está en la calle ahora
+                          mismo: esa se cancela. */}
+                      {ruta.estado !== "en curso" && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => onBorrar(ruta)}
+                          aria-label="Eliminar esta ruta del historial"
+                          title="Eliminar del historial"
+                          className="h-7 w-7 text-muted-foreground hover:bg-destructive/15 hover:text-destructive-strong"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => onAbrir(ruta)}
+                        className="h-7 px-2.5 text-[0.6875rem] font-semibold text-foreground"
+                      >
+                        {abriendo === ruta.id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          "Ver"
+                        )}
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+
+                {abierta && (
+                  <TableRow
+                    id={`zonas-${ruta.id}`}
+                    className="border-b border-border/40 bg-muted/30 hover:bg-muted/30"
+                  >
+                    <TableCell colSpan={11} className="px-6 py-3">
+                      <TablaZonas zonas={zonas} estadoRuta={ruta.estado} />
+                    </TableCell>
+                  </TableRow>
+                )}
+              </Fragment>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </div>
   );
 }
 
@@ -739,6 +1054,18 @@ function DetalleRuta({ ruta, onVolver }: { ruta: RutaGuardadaCompleta; onVolver:
           />
           <Cifra icono={Truck} etiqueta="Viajes" valor={entero(ruta.resumen.viajes)} />
         </div>
+
+        {/* **Cuánto salió de cada lugar.** Es lo que la cifra total no puede
+            decir: "87 m³" no dice de dónde ni cuál lugar quedó corto. Sale del
+            mismo desglose que la tabla del listado, así que las dos pantallas no
+            pueden contradecirse. */}
+        <section className="panel space-y-2 p-4">
+          <h2 className="text-xs font-semibold text-foreground">Retiro por lugar</h2>
+          <TablaZonas
+            zonas={zonasDeRuta(ruta.resumen.zonas, plan?.stops)}
+            estadoRuta={ruta.estado}
+          />
+        </section>
 
         {!plan || (plan.segments ?? []).length === 0 ? (
           <p className="rounded-lg border border-dashed border-border/60 px-4 py-8 text-center text-xs text-muted-foreground">

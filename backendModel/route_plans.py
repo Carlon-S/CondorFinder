@@ -127,6 +127,42 @@ ESTADOS_EDITABLES = (ESTADO_GENERADA,)
 # =============================================================================
 
 
+def _zonas_de(plan: dict) -> list[dict]:
+    """Los lugares que el plan visita, con lo planificado de cada uno.
+
+    **Una entrada por LUGAR y no por visita.** Una zona de 30 m³ contra un
+    camión de 20 se visita dos veces (20 y 10), pero a la cuadrilla se le
+    pregunta cuánto sacó de ese lugar, no cuánto sacó en cada pasada: el cierre
+    del retiro ya agrupa así, y este desglose tiene que decir lo mismo que él o
+    la tabla y el diálogo de cierre mostrarían dos listas distintas.
+
+    Se identifica por `(kind, stopId)` y no por el nombre: dos puntos diarios
+    pueden llamarse igual.
+
+    `retiradoM3: None` significa "todavía no se cerró", y `completado: None`
+    igual. Un cero afirmaría que el camión se fue vacío, que es otra cosa.
+    """
+    zonas: dict[tuple[str, str], dict] = {}
+    for s in plan.get("stops") or []:
+        sid = s.get("stopId")
+        if not sid:
+            continue
+        clave = (s.get("kind") or "analysis", sid)
+        z = zonas.get(clave)
+        if z is None:
+            z = zonas[clave] = {
+                "stopId": sid,
+                "kind": clave[0],
+                "nombre": s.get("label"),
+                "zoneId": s.get("zoneId"),
+                "planificadoM3": 0.0,
+                "retiradoM3": None,
+                "completado": None,
+            }
+        z["planificadoM3"] = round(z["planificadoM3"] + (s.get("removedVolumeM3") or 0), 2)
+    return list(zonas.values())
+
+
 def _resumen_de(plan: dict, peticion: dict) -> dict:
     """Las cifras que la tabla del historial muestra, sin abrir el plan.
 
@@ -136,6 +172,11 @@ def _resumen_de(plan: dict, peticion: dict) -> dict:
     """
     recorridos = plan.get("segments") or []
     return {
+        # El desglose POR ZONA, como copia: es lo que permite que la tabla del
+        # historial diga cuánto se retiró de cada lugar sin descargar la
+        # geometría de cada ruta. `retiradoM3` arranca en None y lo escribe el
+        # cierre (ver `cerrar_ruta`).
+        "zonas": _zonas_de(plan),
         # Con varios puntos de origen el plan tiene varios recorridos. La tabla
         # nombra el primero y dice cuántos más, en vez de concatenarlos: una
         # celda con cuatro nombres deja de poder leerse de un vistazo.
@@ -678,7 +719,20 @@ async def cerrar_ruta(
     # `None` cuando se cerró sin registrar, que **no es cero**: nadie tomó nota,
     # y un cero afirmaría que no salió nada. Misma regla que `capacity_ton`.
     medidos = [r["volumenRetiradoM3"] for r in registros if r["volumenRetiradoM3"] is not None]
+
+    # El desglose por zona, con lo retirado de cada una. Se parte del que ya
+    # trae el resumen y, si el plan es anterior a ese campo, se arma desde las
+    # paradas. Se cruza por `(kind, stopId)`, igual que `planificado` más arriba.
+    zonas = (doc.get("resumen") or {}).get("zonas") or _zonas_de(doc.get("plan") or {})
+    por_clave = {(z.get("kind") or "analysis", z.get("stopId")): z for z in zonas}
+    for r in registros:
+        z = por_clave.get((r["kind"], r["stopId"]))
+        if z is not None:
+            z["retiradoM3"] = r["volumenRetiradoM3"]
+            z["completado"] = r["completado"]
+
     campos: dict[str, Any] = {"estado": ESTADO_TERMINADA, "cerradaEn": ahora}
+    campos["resumen.zonas"] = zonas
     campos["resumen.volumenRetiradoM3"] = round(sum(medidos), 2) if medidos else None
     campos["resumen.paradasRegistradas"] = len(registros)
     await get_db().route_plans.update_one({"_id": oid}, {"$set": campos})

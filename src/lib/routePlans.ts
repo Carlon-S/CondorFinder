@@ -33,7 +33,28 @@ export type PlanDibujable = RoutePlanSuccess["route"];
 export type EstadoRuta = "generada" | "en curso" | "terminada" | "cancelada";
 
 /** Las cifras que la tabla del historial muestra sin abrir el plan. */
+/** Un lugar que la ruta visita, con lo planificado y lo retirado de él.
+ *
+ *  **Es una copia, igual que el resto del resumen**: el nombre y las cifras
+ *  quedan como estaban ese día, aunque después se renombre la zona. Un lugar
+ *  visitado en varias pasadas figura UNA vez, con lo planificado sumado, que es
+ *  como el cierre del retiro lo pregunta. */
+export interface ZonaDeRuta {
+  stopId: string;
+  kind: "analysis" | "punto_diario";
+  nombre: string | null;
+  zoneId?: string | null;
+  planificadoM3: number;
+  /** `null` mientras la ruta no se cerró, y también si se cerró sin medir ese
+   *  lugar. **No es cero**: cero afirmaría que el camión se fue vacío. */
+  retiradoM3: number | null;
+  /** Si la cuadrilla marcó el lugar como atendido completo. `null` = sin dato. */
+  completado: boolean | null;
+}
+
 export interface ResumenRuta {
+  /** Desglose por lugar. Ausente en una ruta guardada antes de este campo. */
+  zonas?: ZonaDeRuta[];
   /** El primer punto de origen. `null` en un plan sin recorridos. */
   origenNombre: string | null;
   recorridos: number;
