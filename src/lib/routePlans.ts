@@ -38,7 +38,20 @@ export interface ResumenRuta {
   origenNombre: string | null;
   recorridos: number;
   paradas: number;
+  /** El volumen PLANIFICADO, congelado al generar. */
   volumenM3: number | null;
+  /** El volumen que el plan movió DE VERDAD, de lo que se anotó al cerrar.
+   *
+   *  **Es una segunda cifra, no un reemplazo de `volumenM3`.** Lo planificado
+   *  es lo que se decidió ese día y no cambia; lo retirado es lo que ocurrió.
+   *  Sin esto, una ruta cerrada con menos volumen del previsto seguía
+   *  anunciando el número viejo y no había dónde leer el real.
+   *
+   *  `null` mientras la ruta no se haya cerrado, y también cuando se cerró
+   *  **sin registrar cifras**, que no es lo mismo que cero: nadie tomó nota. */
+  volumenRetiradoM3?: number | null;
+  /** Cuántas paradas quedaron registradas al cerrar. 0 = se cerró sin anotar. */
+  paradasRegistradas?: number;
   distanciaKm: number | null;
   duracionHoras: number | null;
   /** Viajes al relleno, sumados entre todos los recorridos. */

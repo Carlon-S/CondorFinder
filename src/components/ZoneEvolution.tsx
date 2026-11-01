@@ -109,19 +109,29 @@ export function ZoneEvolution({
   const dias = points.map((p) => versionDay(p.date));
   const unSoloDia = new Set(dias).size === 1;
 
-  const chartData = points.map((p, i) => ({
-    // Un retiro no tiene `uploadedAt`: no vino de una subida de imágenes. Se
-    // rotula con su fecha, que es el único momento que tiene.
-    fecha:
-      p.origen === "retiro"
-        ? versionDay(p.date)
-        : unSoloDia || dias[i] === dias[i - 1]
-          ? versionTime(p.uploadedAt)
-          : versionLabel(p.date, p.uploadedAt),
-    volumeM3: p.volumeM3,
-    analysisId: p.analysisId,
-    origen: p.origen ?? "medicion",
-  }));
+  // **La MISMA regla para los dos orígenes, y el momento sale de `uploadedAt`
+  // sólo si existe.**
+  //
+  // Un retiro no tiene `uploadedAt`: no vino de una subida de imágenes. La
+  // primera versión lo rotulaba con `versionDay()` a secas, y eso rompía el eje
+  // de dos formas a la vez. Con varios retiros del mismo día, todos quedaban
+  // con la MISMA etiqueta, que es la que recharts usa como categoría, así que
+  // se leían como un solo punto repetido; y con un solo día en toda la serie,
+  // las mediciones mostraban su hora y los retiros una fecha, o sea dos
+  // vocabularios en el mismo eje.
+  //
+  // Cayendo a `p.date` para la hora, un retiro queda rotulado igual que una
+  // captura y nunca produce una etiqueta vacía ni repetida.
+  const chartData = points.map((p, i) => {
+    const momento = p.uploadedAt ?? p.date;
+    return {
+      fecha:
+        unSoloDia || dias[i] === dias[i - 1] ? versionTime(momento) : versionLabel(p.date, momento),
+      volumeM3: p.volumeM3,
+      analysisId: p.analysisId,
+      origen: p.origen ?? "medicion",
+    };
+  });
 
   const hayRetiros = points.some((p) => p.origen === "retiro");
 

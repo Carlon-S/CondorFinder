@@ -455,33 +455,45 @@ async def eliminar_ruta(
 ):
     """Borra una ruta guardada.
 
-    **Solo las editables**, o sea las que todavía no salieron. Una ruta en curso
-    se cancela, no se borra: borrarla haría desaparecer el trabajo que la
-    cuadrilla está haciendo en ese momento. Una terminada es historia y la
-    historia no se borra por conveniencia.
+    **Cualquiera menos una EN CURSO.** La regla era más estricta y solo dejaba
+    borrar las editables, con el argumento de que la historia no se borra por
+    conveniencia. No se sostiene: el historial se llena de planes de prueba y
+    de rutas canceladas que nunca salieron, y dejarlos ahí para siempre no los
+    vuelve historia, los vuelve ruido sobre lo que sí se hizo. Borrar queda
+    registrado en la bitácora, que es donde esa garantía corresponde.
+
+    La única que no se borra es la que está **en curso**, y ahí el motivo es
+    otro: es trabajo que la cuadrilla está haciendo en este momento, y hacerlo
+    desaparecer de la pantalla no lo detiene en la calle. Esa se cancela.
+
+    **Se lleva sus retiros.** Si la ruta deja de existir, su registro de lo
+    retirado tampoco ocurrió, y dejarlo huérfano seguiría descontando volumen
+    de una zona por un trabajo que ya no consta en ninguna parte. Es la misma
+    lógica con que `_soltar_referencias()` limpia al borrar un análisis.
     """
     oid = _object_id(plan_id)
     doc = await get_db().route_plans.find_one({"_id": oid}, {"estado": 1, "resumen": 1})
     if not doc:
         raise HTTPException(status_code=404, detail="Ruta no encontrada")
     estado = doc.get("estado", ESTADO_GENERADA)
-    if estado not in ESTADOS_EDITABLES:
+    if estado == ESTADO_EN_CURSO:
         raise HTTPException(
             status_code=409,
             detail=(
-                f'Esta ruta está "{estado}" y no se puede eliminar. '
-                "Una ruta que ya salió se cancela o se cierra, no se borra."
+                "Esta ruta está en curso y no se puede eliminar. "
+                "Cancélala primero, o ciérrala si ya se hizo."
             ),
         )
+    borrados = await get_db().retiros.delete_many({"planId": plan_id})
     await get_db().route_plans.delete_one({"_id": oid})
     await auditoria.registrar(
         current_user.username,
         "eliminar",
         "ruta",
         plan_id,
-        {"resumen": doc.get("resumen")},
+        {"resumen": doc.get("resumen"), "estado": estado, "retiros": borrados.deleted_count},
     )
-    return {"ok": True}
+    return {"ok": True, "retiros": borrados.deleted_count}
 
 
 # =============================================================================
@@ -603,10 +615,21 @@ async def cerrar_ruta(
     if registros:
         await get_db().retiros.insert_many(registros)
 
-    await get_db().route_plans.update_one(
-        {"_id": oid},
-        {"$set": {"estado": ESTADO_TERMINADA, "cerradaEn": ahora}},
-    )
+    # **Lo que el plan movió DE VERDAD, junto a lo que decía que iba a mover.**
+    #
+    # `resumen.volumenM3` es el volumen PLANIFICADO y queda congelado al
+    # generar, que es correcto: es lo que se decidió ese día. Pero sin esta
+    # segunda cifra, una ruta cerrada con menos (o con más) seguía anunciando en
+    # el historial el número viejo, y no había dónde leer lo que realmente
+    # salió. Son dos hechos distintos y ahora están los dos.
+    #
+    # `None` cuando se cerró sin registrar, que **no es cero**: nadie tomó nota,
+    # y un cero afirmaría que no salió nada. Misma regla que `capacity_ton`.
+    medidos = [r["volumenRetiradoM3"] for r in registros if r["volumenRetiradoM3"] is not None]
+    campos: dict[str, Any] = {"estado": ESTADO_TERMINADA, "cerradaEn": ahora}
+    campos["resumen.volumenRetiradoM3"] = round(sum(medidos), 2) if medidos else None
+    campos["resumen.paradasRegistradas"] = len(registros)
+    await get_db().route_plans.update_one({"_id": oid}, {"$set": campos})
     await auditoria.registrar(
         current_user.username,
         "cerrar",

@@ -1529,19 +1529,82 @@ def _repartir_por_carga(convoyes: list[dict], stops: list[dict]) -> dict[str, li
     punto más cercano, y acá todos los convoyes están en la misma coordenada,
     así que la distancia no distingue nada y todas caerían en el primero.
 
-    Lo que sí distingue es la CARGA. Se asigna de mayor a menor volumen al
-    convoy que menos lleva acumulado, que es la heurística clásica de reparto
-    (LPT): empezar por las grandes evita terminar con una zona enorme sin dónde
-    ponerla, y es lo que deja las dos jornadas pareciéndose. Como el plan dura
-    lo que dura el convoy MÁS LARGO, equilibrar la carga es literalmente
-    equilibrar la jornada.
+    Lo que sí distingue es la CARGA. Se arranca de mayor a menor volumen hacia
+    el convoy que menos lleva acumulado, que es la heurística clásica de reparto
+    (LPT), y después se afina.
+
+    **Equilibrar el VOLUMEN no es lo mismo que equilibrar el TRABAJO**, y esa es
+    la corrección que trae el segundo paso. Con cuatro zonas de 30, 25, 20 y 15
+    contra dos convoyes de 20 m³ por viaje, el LPT reparte 45 y 45, que parece
+    perfecto y cuesta 3 + 3 = **seis** viajes. Moviendo la zona de 15 al otro
+    lado quedan 30 y 60, que parece desequilibrado y cuesta 2 + 3 = **cinco**:
+    el de 60 hace tres viajes LLENOS y el de 30 hace dos. Lo observable era un
+    convoy haciendo un recorrido completo para retirar 5 m³ mientras el otro
+    hacía otro para retirar 10, cuando esos 15 cabían en un viaje que ya se
+    estaba haciendo.
+
+    Por eso el refinamiento optimiza los VIAJES, con la cantidad por convoy
+    aproximada como `ceil(volumen / capacidad)`. Es una aproximación por abajo
+    (el orden real de las paradas lo decide `_best_stop_order`, que enumera
+    permutaciones y puede necesitar uno más), pero es la cota que ese enumerador
+    alcanza cuando puede, así que optimizar contra ella no promete nada falso.
+
+    **Es una búsqueda local que solo ACEPTA MEJORAS**, no un óptimo: se prueba
+    mover cada zona a cada otro convoy y se queda con el primer movimiento que
+    reduce el total de viajes (desempatando por carga más pareja). No puede
+    empeorar el reparto, y con cuatro convoyes y las zonas de una jornada
+    termina en unas pocas vueltas.
     """
-    por_convoy: dict[str, list[dict]] = {str(c["_id"]): [] for c in convoyes}
-    carga: dict[str, float] = {str(c["_id"]): 0.0 for c in convoyes}
+    ids = [str(c["_id"]) for c in convoyes]
+    por_convoy: dict[str, list[dict]] = {i: [] for i in ids}
+    carga: dict[str, float] = {i: 0.0 for i in ids}
     for zona in sorted(stops, key=lambda z: z["volumeM3"], reverse=True):
         elegido = min(carga, key=lambda k: carga[k])
         por_convoy[elegido].append(zona)
         carga[elegido] += zona["volumeM3"]
+
+    # La capacidad de UN viaje de cada convoy. Sin ella (nadie declaró m³) no
+    # hay viajes que contar y el reparto por volumen es lo único que se puede
+    # hacer, así que el refinamiento se saltea entero.
+    capacidad = {str(c["_id"]): _point_truck_capacity(c) for c in convoyes}
+    if any(v <= 0 for v in capacidad.values()):
+        return por_convoy
+
+    def viajes_de(cid: str, volumen: float) -> int:
+        return math.ceil(volumen / capacidad[cid] - 1e-9) if volumen > 1e-9 else 0
+
+    def coste() -> tuple[int, float]:
+        # Primero el total de viajes, que es el trabajo real de la jornada.
+        # Después la carga del convoy más cargado, para desempatar hacia el
+        # reparto más parejo entre dos opciones que cuestan lo mismo.
+        return (sum(viajes_de(i, carga[i]) for i in ids), max(carga.values()))
+
+    # Tope de vueltas: cada una mueve una zona, así que sin mejora posible se
+    # corta sola. El límite solo evita un ciclo si dos movimientos se cancelaran
+    # entre sí por un empate numérico.
+    for _ in range(len(stops) * len(ids) + 1):
+        actual = coste()
+        mejor: tuple[tuple[int, float], str, str, dict] | None = None
+        for origen in ids:
+            for zona in por_convoy[origen]:
+                for destino in ids:
+                    if destino == origen:
+                        continue
+                    carga[origen] -= zona["volumeM3"]
+                    carga[destino] += zona["volumeM3"]
+                    candidato = coste()
+                    carga[origen] += zona["volumeM3"]
+                    carga[destino] -= zona["volumeM3"]
+                    if candidato < actual and (mejor is None or candidato < mejor[0]):
+                        mejor = (candidato, origen, destino, zona)
+        if mejor is None:
+            break
+        _, origen, destino, zona = mejor
+        por_convoy[origen].remove(zona)
+        por_convoy[destino].append(zona)
+        carga[origen] -= zona["volumeM3"]
+        carga[destino] += zona["volumeM3"]
+
     return por_convoy
 
 

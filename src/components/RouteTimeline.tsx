@@ -410,7 +410,24 @@ export function RouteTimeline({
       });
     }
 
-    const datos = datosDeParada?.(stop);
+    // **Sin `datosDeParada`, la parada se describe con lo que ella misma trae.**
+    //
+    // Ese prop enriquece la fila con el contexto de la zona (sus tipos de
+    // residuo, su dirección, su volumen total), que solo tiene quien cargó los
+    // análisis. El historial no los tiene, y por eso un plan reabierto no
+    // mostraba el volumen de ninguna parada: la fila entera dependía de un dato
+    // opcional, cuando la parada **ya trae** lo retirado, su peso y su
+    // pendiente. El respaldo vive acá y no en el historial para que cualquier
+    // consumidor futuro lo tenga sin acordarse de pasarlo.
+    const datos: DatosDeParada | undefined =
+      datosDeParada?.(stop) ??
+      (stop.removedVolumeM3 != null
+        ? {
+            volumeM3: stop.removedVolumeM3,
+            weightKg: stop.removedWeightKg ?? undefined,
+            pendingM3: stop.pendingVolumeM3 ?? undefined,
+          }
+        : undefined);
     const tramo = buscarTramo(legs, i === 0 ? null : propias[i - 1].order, stop.order);
     transcurrido += tramo?.durationHours ?? (i === 0 ? segment.outboundDurationHours : 0);
     filas.push({

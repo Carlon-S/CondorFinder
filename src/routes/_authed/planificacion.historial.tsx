@@ -448,6 +448,20 @@ function HistorialPage() {
             <>
               Se eliminará el plan generado el <strong>{fechaLarga(diaDe(aBorrar.fecha))}</strong> a
               las {horaDe(aBorrar.fecha)}. Esto no se puede deshacer.
+              {/* **Hay que decir que se lleva el retiro**, porque cambia una
+                  cifra fuera de esta pantalla: el volumen que Vista Principal
+                  muestra de esa zona vuelve a subir. Borrarlo en silencio
+                  dejaría a alguien buscando por qué cambió un número que él no
+                  tocó. Y es la coherencia correcta: si la ruta no ocurrió, su
+                  registro de lo retirado tampoco. */}
+              {aBorrar.estado === "terminada" && aBorrar.resumen.volumenRetiradoM3 != null && (
+                <>
+                  {" "}
+                  Se borrará también el retiro de{" "}
+                  <strong>{cifra(aBorrar.resumen.volumenRetiradoM3)} m³</strong> que quedó
+                  registrado al cerrarla, así que ese volumen vuelve a contarse en sus zonas.
+                </>
+              )}
             </>
           ) : (
             ""
@@ -499,7 +513,19 @@ function FilaRuta({
           <span className="block text-[0.625rem] text-muted-foreground">
             {[
               `${entero(r.paradas)} parada${r.paradas === 1 ? "" : "s"}`,
-              r.volumenM3 != null ? `${cifra(r.volumenM3)} m³` : null,
+              // **Lo retirado manda cuando existe.** Una ruta cerrada seguía
+              // anunciando el volumen PLANIFICADO, así que corregir una cifra
+              // al cerrar no se veía en ninguna parte. Cuando difieren se
+              // imprimen las dos, porque la diferencia entre lo que se iba a
+              // sacar y lo que salió es justamente el dato que este registro
+              // existe para conservar.
+              r.volumenRetiradoM3 != null
+                ? r.volumenM3 != null && Math.abs(r.volumenRetiradoM3 - r.volumenM3) > 0.005
+                  ? `${cifra(r.volumenRetiradoM3)} m³ retirados de ${cifra(r.volumenM3)}`
+                  : `${cifra(r.volumenRetiradoM3)} m³ retirados`
+                : r.volumenM3 != null
+                  ? `${cifra(r.volumenM3)} m³`
+                  : null,
               r.distanciaKm != null ? `${cifra(r.distanciaKm)} km` : null,
               r.duracionHoras != null ? `${cifra(r.duracionHoras)} h` : null,
               // Los viajes solo cuando hay más de uno: con uno, la columna
@@ -520,8 +546,18 @@ function FilaRuta({
             {r.sinAsignar} sin asignar
           </span>
         )}
+        {/* **Dice CUÁNDO se editó, no solo que se editó.** Una ruta regenerada
+            reemplaza su registro conservando la fecha original (el historial
+            ordena por día de planificación), así que sin esta hora no queda
+            rastro de que lo que se está mirando no es lo que se generó esa
+            mañana. */}
         {ruta.editadoEn && (
-          <span className="flex-shrink-0 text-[0.625rem] text-muted-foreground">editada</span>
+          <span
+            className="flex-shrink-0 text-[0.625rem] text-muted-foreground"
+            title={`Regenerada el ${fechaLarga(diaDe(ruta.editadoEn))} a las ${horaDe(ruta.editadoEn)}`}
+          >
+            editada {horaDe(ruta.editadoEn)}
+          </span>
         )}
         <span
           className={`flex-shrink-0 rounded-full border px-2 py-0.5 text-[0.625rem] font-medium capitalize ${
@@ -580,7 +616,14 @@ function FilaRuta({
           <Pencil className="h-3.5 w-3.5" />
         </button>
       )}
-      {ruta.estado === "generada" && (
+      {/* **Se borra cualquiera menos una EN CURSO.** La regla era más estricta
+          y solo dejaba borrar las editables, con el argumento de que la
+          historia no se borra por conveniencia; no se sostiene, porque el
+          historial se llena de planes de prueba y de rutas canceladas que nunca
+          salieron, y eso no es historia sino ruido sobre lo que sí se hizo. La
+          garantía de que quede rastro la da la bitácora. La que no se borra es
+          la que está en la calle ahora mismo: esa se cancela. */}
+      {ruta.estado !== "en curso" && (
         <button
           type="button"
           onClick={onBorrar}
@@ -631,7 +674,33 @@ function DetalleRuta({ ruta, onVolver }: { ruta: RutaGuardadaCompleta; onVolver:
           </span>
         </p>
 
-        <div className="grid gap-3 sm:grid-cols-4">
+        {/* **El volumen faltaba, y es la cifra por la que existe el plan.**
+            Estaban paradas, distancia, duración y viajes, o sea todo menos
+            cuánta basura se mueve. Va primero por eso.
+
+            Y es DOS cifras cuando la ruta se cerró: lo planificado queda
+            congelado al generar y lo retirado es lo que la cuadrilla anotó.
+            Mostrando solo el primero, corregir una cifra al cerrar no se veía
+            en ninguna parte. */}
+        <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          <Cifra
+            icono={Trash2}
+            etiqueta={ruta.resumen.volumenRetiradoM3 != null ? "Retirado" : "Volumen"}
+            valor={
+              ruta.resumen.volumenRetiradoM3 != null
+                ? `${cifra(ruta.resumen.volumenRetiradoM3)} m³`
+                : ruta.resumen.volumenM3 != null
+                  ? `${cifra(ruta.resumen.volumenM3)} m³`
+                  : "-"
+            }
+            nota={
+              ruta.resumen.volumenRetiradoM3 != null && ruta.resumen.volumenM3 != null
+                ? `se planificaron ${cifra(ruta.resumen.volumenM3)} m³`
+                : ruta.estado === "terminada"
+                  ? "se cerró sin registrar"
+                  : undefined
+            }
+          />
           <Cifra icono={MapPin} etiqueta="Paradas" valor={entero(ruta.resumen.paradas)} />
           <Cifra
             icono={RouteIcon}
@@ -694,10 +763,15 @@ function Cifra({
   icono: Icono,
   etiqueta,
   valor,
+  nota,
 }: {
   icono: (p: { className?: string }) => React.ReactElement;
   etiqueta: string;
   valor: string;
+  /** Una línea de contexto bajo la cifra. La usa el volumen para decir contra
+   *  qué se compara lo retirado, que es la mitad del dato: "35 m³" no significa
+   *  nada sin saber que se planificaron 40. */
+  nota?: string;
 }) {
   return (
     <div className="panel flex items-center gap-3 p-3">
@@ -705,6 +779,7 @@ function Cifra({
       <div className="min-w-0">
         <p className="text-[0.5625rem] uppercase tracking-wide text-muted-foreground">{etiqueta}</p>
         <p className="mono text-sm font-semibold tabular-nums text-foreground">{valor}</p>
+        {nota && <p className="truncate text-[0.5625rem] text-muted-foreground">{nota}</p>}
       </div>
     </div>
   );
