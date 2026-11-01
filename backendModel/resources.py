@@ -974,7 +974,10 @@ async def delete_resource(
     return {"message": "Recurso eliminado"}
 
 
-async def capacidad_de_carga_por_punto(point_ids: list[str]) -> dict[str, list[dict]]:
+async def capacidad_de_carga_por_punto(
+    point_ids: list[str],
+    unidades_ocupadas: set[str] | None = None,
+) -> dict[str, list[dict]]:
     """Los vehículos de transporte DISPONIBLES de cada punto, con su identidad.
 
     Por cada punto que tenga al menos un recurso cargado, devuelve la lista de
@@ -1006,6 +1009,16 @@ async def capacidad_de_carga_por_punto(point_ids: list[str]) -> dict[str, list[d
         declaran. Sumarlos como 0 sería inofensivo, pero contarlos como camiones
         disponibles haría que el ruteo despachara un vehículo que no puede
         llevar nada.
+      - **ocupado en una ruta en curso** (`unidades_ocupadas`, pieza 2.2): un
+        camión despachado está en la calle y no puede entrar a otro plan. Es
+        estado DERIVADO de los planes en curso y no una marca almacenada: ver
+        `route_plans.unidades_ocupadas()` para por qué.
+
+    `unidades_ocupadas` llega como parámetro y no se consulta acá a propósito.
+    Este módulo no sabe que existen los planes de ruta, y hacerlo saber crearía
+    una dependencia entre dos dominios para un dato que quien llama ya tiene a
+    mano. Ausente significa "no restringir", que es lo que corresponde a
+    cualquier lectura que no sea una generación de ruta.
     """
     if not point_ids:
         return {}
@@ -1037,6 +1050,10 @@ async def capacidad_de_carga_por_punto(point_ids: list[str]) -> dict[str, list[d
             continue
         capacidad = d.get("capacidad_m3")
         if not capacidad or capacidad <= 0:
+            continue
+        if unidades_ocupadas and (
+            str(d["_id"]) in unidades_ocupadas or d.get("patente") in unidades_ocupadas
+        ):
             continue
         unidades.append({
             # La clave se llama capacity_m3 y no capacidad_m3 a propósito: es la

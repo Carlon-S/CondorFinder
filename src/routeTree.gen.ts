@@ -14,6 +14,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthedIndexRouteImport } from './routes/_authed/index'
 import { Route as AuthedAnalysisRouteImport } from './routes/_authed/analysis'
 import { Route as AuthedCargaRouteImport } from './routes/_authed/carga'
+import { Route as AuthedPlanificacionHistorialRouteImport } from './routes/_authed/planificacion.historial'
 import { Route as AuthedPlanificacionItinerarioRouteImport } from './routes/_authed/planificacion.itinerario'
 import { Route as AuthedPlanificacionRecursosRouteImport } from './routes/_authed/planificacion.recursos'
 import { Route as AuthedPlanificacionRutasRouteImport } from './routes/_authed/planificacion.rutas'
@@ -43,6 +44,12 @@ const AuthedCargaRoute = AuthedCargaRouteImport.update({
   path: '/carga',
   getParentRoute: () => AuthedRoute,
 } as any)
+const AuthedPlanificacionHistorialRoute =
+  AuthedPlanificacionHistorialRouteImport.update({
+    id: '/planificacion/historial',
+    path: '/planificacion/historial',
+    getParentRoute: () => AuthedRoute,
+  } as any)
 const AuthedPlanificacionItinerarioRoute =
   AuthedPlanificacionItinerarioRouteImport.update({
     id: '/planificacion/itinerario',
@@ -73,6 +80,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/analysis': typeof AuthedAnalysisRoute
   '/carga': typeof AuthedCargaRoute
+  '/planificacion/historial': typeof AuthedPlanificacionHistorialRoute
   '/planificacion/itinerario': typeof AuthedPlanificacionItinerarioRoute
   '/planificacion/recursos': typeof AuthedPlanificacionRecursosRoute
   '/planificacion/rutas': typeof AuthedPlanificacionRutasRoute
@@ -83,6 +91,7 @@ export interface FileRoutesByTo {
   '/analysis': typeof AuthedAnalysisRoute
   '/carga': typeof AuthedCargaRoute
   '/': typeof AuthedIndexRoute
+  '/planificacion/historial': typeof AuthedPlanificacionHistorialRoute
   '/planificacion/itinerario': typeof AuthedPlanificacionItinerarioRoute
   '/planificacion/recursos': typeof AuthedPlanificacionRecursosRoute
   '/planificacion/rutas': typeof AuthedPlanificacionRutasRoute
@@ -95,6 +104,7 @@ export interface FileRoutesById {
   '/_authed/analysis': typeof AuthedAnalysisRoute
   '/_authed/carga': typeof AuthedCargaRoute
   '/_authed/': typeof AuthedIndexRoute
+  '/_authed/planificacion/historial': typeof AuthedPlanificacionHistorialRoute
   '/_authed/planificacion/itinerario': typeof AuthedPlanificacionItinerarioRoute
   '/_authed/planificacion/recursos': typeof AuthedPlanificacionRecursosRoute
   '/_authed/planificacion/rutas': typeof AuthedPlanificacionRutasRoute
@@ -107,6 +117,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/analysis'
     | '/carga'
+    | '/planificacion/historial'
     | '/planificacion/itinerario'
     | '/planificacion/recursos'
     | '/planificacion/rutas'
@@ -117,6 +128,7 @@ export interface FileRouteTypes {
     | '/analysis'
     | '/carga'
     | '/'
+    | '/planificacion/historial'
     | '/planificacion/itinerario'
     | '/planificacion/recursos'
     | '/planificacion/rutas'
@@ -128,6 +140,7 @@ export interface FileRouteTypes {
     | '/_authed/analysis'
     | '/_authed/carga'
     | '/_authed/'
+    | '/_authed/planificacion/historial'
     | '/_authed/planificacion/itinerario'
     | '/_authed/planificacion/recursos'
     | '/_authed/planificacion/rutas'
@@ -176,6 +189,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedCargaRouteImport
       parentRoute: typeof AuthedRoute
     }
+    '/_authed/planificacion/historial': {
+      id: '/_authed/planificacion/historial'
+      path: '/planificacion/historial'
+      fullPath: '/planificacion/historial'
+      preLoaderRoute: typeof AuthedPlanificacionHistorialRouteImport
+      parentRoute: typeof AuthedRoute
+    }
     '/_authed/planificacion/itinerario': {
       id: '/_authed/planificacion/itinerario'
       path: '/planificacion/itinerario'
@@ -211,6 +231,7 @@ interface AuthedRouteChildren {
   AuthedAnalysisRoute: typeof AuthedAnalysisRoute
   AuthedCargaRoute: typeof AuthedCargaRoute
   AuthedIndexRoute: typeof AuthedIndexRoute
+  AuthedPlanificacionHistorialRoute: typeof AuthedPlanificacionHistorialRoute
   AuthedPlanificacionItinerarioRoute: typeof AuthedPlanificacionItinerarioRoute
   AuthedPlanificacionRecursosRoute: typeof AuthedPlanificacionRecursosRoute
   AuthedPlanificacionRutasRoute: typeof AuthedPlanificacionRutasRoute
@@ -221,6 +242,7 @@ const AuthedRouteChildren: AuthedRouteChildren = {
   AuthedAnalysisRoute: AuthedAnalysisRoute,
   AuthedCargaRoute: AuthedCargaRoute,
   AuthedIndexRoute: AuthedIndexRoute,
+  AuthedPlanificacionHistorialRoute: AuthedPlanificacionHistorialRoute,
   AuthedPlanificacionItinerarioRoute: AuthedPlanificacionItinerarioRoute,
   AuthedPlanificacionRecursosRoute: AuthedPlanificacionRecursosRoute,
   AuthedPlanificacionRutasRoute: AuthedPlanificacionRutasRoute,

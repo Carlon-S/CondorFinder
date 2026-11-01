@@ -1,14 +1,15 @@
 import { useState } from "react";
 import { Link, useRouteContext, useRouterState } from "@tanstack/react-router";
 import {
+  CircleUserRound,
+  History,
+  LayoutDashboard,
+  ListChecks,
+  LogOut,
   PanelLeftClose,
   PanelLeftOpen,
-  LayoutDashboard,
-  Truck,
   Route,
-  ListChecks,
-  CircleUserRound,
-  LogOut,
+  Truck,
 } from "@/components/icons/Icons";
 // Dark Mode (wordmark blanco/gris) porque el sidebar ahora es navy — ver
 // styles.css, --sidebar. login.tsx usa Light Mode (navy) porque su tarjeta
@@ -55,6 +56,12 @@ const NAV_ITEMS = [
       { to: "/planificacion/recursos", label: "Recursos", icon: Truck },
       { to: "/planificacion/itinerario", label: "Itinerario", icon: ListChecks },
       { to: "/planificacion/rutas", label: "Rutas", icon: Route },
+      // C6 de HDU5.2 pide una PESTAÑA de historial, así que va al menú y no
+      // detrás de un diálogo. A diferencia de `/analysis` y `/carga`, que
+      // deliberadamente no están acá porque hablan de un objeto que hay que
+      // elegir antes, el historial ES la lista: entrar desde el menú es el
+      // camino correcto y no hay nada que preseleccionar.
+      { to: "/planificacion/historial", label: "Historial", icon: History },
     ],
   },
 ] as const;

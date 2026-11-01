@@ -8,15 +8,14 @@
 // -----------------------------------------------------------------------------
 // POR QUÉ `sessionStorage` Y NO MONGO
 // -----------------------------------------------------------------------------
-// Un plan NO se persiste en el servidor, y eso es deliberado: persistirlo es
-// exactamente C5 y C6 de HDU5.2 (editar una ruta guardada y el historial), que
-// son Fase 2 y traen su propia colección, su máquina de estados y la decisión
-// de si editar recalcula o reescribe el registro.
+// Un plan GENERADO sí se persiste, desde la Fase 2: vive en la colección
+// `route_plans` con su máquina de estados, y es lo que C5 y C6 de HDU5.2 piden.
+// Esto es otra cosa, y por eso sigue existiendo: lo que una PESTAÑA está A PUNTO
+// de generar, que todavía no es un plan y no tiene por qué ocupar la base.
 //
-// Pero perder diez paradas recién cargadas por un F5 accidental es fricción sin
+// Perder diez paradas recién cargadas por un F5 accidental es fricción sin
 // ninguna ventaja, y el proyecto ya tiene el patrón para eso: un envoltorio
-// chico por asunto en `src/lib/`, como `imageState.ts` o `mapState.ts`. Esto es
-// lo que una PESTAÑA estaba a punto de hacer, no un registro de lo que se hizo.
+// chico por asunto en `src/lib/`, como `imageState.ts` o `mapState.ts`.
 //
 // `sessionStorage` y no `localStorage` a propósito, al revés que `crewState.ts`:
 // una cuadrilla se repite entre semanas, pero lo que se está por rutear hoy es
@@ -45,9 +44,39 @@ export interface RutaCargada {
   volumenes: Record<string, string>;
   /** Ids marcados como prioritarios. */
   prioritarias: string[];
+  /** El plan guardado que se está EDITANDO, si se entró desde el historial
+   *  (C5 de HDU5.2).
+   *
+   *  **Editar una ruta es regenerarla**, así que el camino es: el historial
+   *  escribe acá las paradas y los volúmenes del plan guardado, `/rutas` los
+   *  restaura con el mismo mecanismo de siempre, y al generar manda este id
+   *  para que el backend REEMPLACE el registro en vez de crear uno nuevo.
+   *
+   *  Vive en el mismo lugar que el resto de lo cargado porque es lo mismo: el
+   *  estado de esta pestaña. Con una clave aparte habría dos cosas que limpiar
+   *  al descargar las paradas, y olvidar una dejaría a `/rutas` reemplazando un
+   *  plan que el trabajador ya no está editando. */
+  editandoPlanId?: string | null;
+  /** Las horas de jornada con que se generó, tal como se tecleó.
+   *
+   *  **Se restaura solo al EDITAR un plan guardado**, y es necesario: las horas
+   *  son lo que decide cuántos viajes entran, así que reabrir una ruta de 10
+   *  horas con el 8 por omisión la regeneraría más corta sin que nada lo dijera,
+   *  y el trabajador vería desaparecer paradas que él no quitó. */
+  horas?: string | null;
+  /** Cuántos convoyes por punto se usaron, por el mismo motivo que `horas`. */
+  convoyes?: number | null;
 }
 
-const VACIO: RutaCargada = { analisis: [], diarios: [], volumenes: {}, prioritarias: [] };
+const VACIO: RutaCargada = {
+  analisis: [],
+  diarios: [],
+  volumenes: {},
+  prioritarias: [],
+  editandoPlanId: null,
+  horas: null,
+  convoyes: null,
+};
 
 export function guardarRutaCargada(estado: RutaCargada): void {
   if (!isBrowser) return;
@@ -59,6 +88,7 @@ export function guardarRutaCargada(estado: RutaCargada): void {
       estado.analisis.length === 0 &&
       estado.diarios.length === 0 &&
       estado.prioritarias.length === 0 &&
+      !estado.editandoPlanId &&
       Object.keys(estado.volumenes).length === 0;
     if (vacio) {
       sessionStorage.removeItem(KEY);
@@ -98,6 +128,15 @@ export function cargarRutaCargada(): RutaCargada {
       diarios: textos(data.diarios),
       volumenes,
       prioritarias: textos(data.prioritarias),
+      editandoPlanId: typeof data.editandoPlanId === "string" ? data.editandoPlanId : null,
+      horas: typeof data.horas === "string" ? data.horas : null,
+      // Se acota al rango que el selector ofrece: un valor fuera de rango vino
+      // de otra versión de la vista y el backend lo iba a recortar igual, así
+      // que es mejor que la pantalla muestre lo que de verdad se va a usar.
+      convoyes:
+        typeof data.convoyes === "number" && data.convoyes >= 1 && data.convoyes <= 4
+          ? Math.round(data.convoyes)
+          : null,
     };
   } catch {
     return VACIO;

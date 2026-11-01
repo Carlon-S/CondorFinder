@@ -61,6 +61,9 @@ const BACKEND_ROUTE_PREFIXES = [
   // rota para todo el que desarrolle con backend local.
   "/itinerario",
   "/puntos-diarios",
+  // HDU5.2. Va DESPUÉS de "/routes" y no lo reemplaza: son dos prefijos
+  // distintos, `/routes/generate` genera y `/route-plans` lista lo guardado.
+  "/route-plans",
 ];
 
 export default defineConfig({

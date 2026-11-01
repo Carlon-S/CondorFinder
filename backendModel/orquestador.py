@@ -31,6 +31,7 @@ import routing as routing_module
 import analyses as analyses_module
 import itinerario as itinerario_module
 import puntos_diarios as puntos_diarios_module
+import route_plans as route_plans_module
 import task_store
 import storage as storage_module
 import auditoria
@@ -58,6 +59,7 @@ async def lifespan(app: FastAPI):
     analyses_module.set_db(db)
     itinerario_module.set_db(db)
     puntos_diarios_module.set_db(db)
+    route_plans_module.set_db(db)
 
     # Índices, create_index es idempotente (no rompe nada si ya existen),
     # así que se piden cada vez que arranca el proceso en vez de una
@@ -77,6 +79,7 @@ async def lifespan(app: FastAPI):
     # es único; HDU15 lista los puntos de UNA fecha y de una clase.
     await itinerario_module.create_index()
     await puntos_diarios_module.create_index()
+    await route_plans_module.create_index()
     # Los 17 programas de la hoja SOLICITUDES. Siembra idempotente: sin ella el
     # desplegable de "extras" arranca vacío y eso se lee como una falla.
     await puntos_diarios_module.sembrar_solicitudes()
@@ -193,6 +196,7 @@ app.include_router(routing_module.router)
 app.include_router(analyses_module.router)
 app.include_router(itinerario_module.router)
 app.include_router(puntos_diarios_module.router)
+app.include_router(route_plans_module.router)
 
 # =============================================================================
 # CONFIGURACIÓN DE RED

@@ -604,6 +604,25 @@ export function ImageIcon({ className }: IconProps) {
   );
 }
 
+/** Reloj con una flecha de retroceso: "lo que ya pasó".
+ *
+ *  Es el reloj de `Clock` con una flecha circular alrededor, que es el signo
+ *  con que las interfaces nombran un historial. No se reusa `Clock` a secas
+ *  porque en este menú ya hay tiempo (las horas de un plan) y hacen falta dos
+ *  signos distintos para dos cosas distintas. */
+export function History({ className }: IconProps) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+      fill="currentColor"
+      viewBox="0 0 256 256"
+    >
+      <path d="M136,80v43.47l36.12,21.67a8,8,0,0,1-8.24,13.72l-40-24A8,8,0,0,1,120,128V80a8,8,0,0,1,16,0Zm-8-48A95.44,95.44,0,0,0,60.08,60.15C52.81,67.51,46.35,74.59,40,82V64a8,8,0,0,0-16,0v40a8,8,0,0,0,8,8H72a8,8,0,0,0,0-16H49.39c7.19-8.34,14.5-16.32,22-24A80,80,0,1,1,128,208a8,8,0,0,0,0,16A96,96,0,0,0,128,32Z" />
+    </svg>
+  );
+}
+
 export function Clock({ className }: IconProps) {
   return (
     <svg

@@ -126,16 +126,36 @@ export interface ResourcePoint extends ResourcePointInput {
  *  que ya tiene. Si cambia una de las dos, tiene que cambiar la otra. */
 export type MotivoFueraDeRuta =
   | "no_disponible"
+  | "ocupado_en_ruta"
   | "se_remolca"
   | "no_transporta"
   | "solo_toneladas"
   | "sin_capacidad";
 
-export function motivoFueraDeRuta(r: Resource): MotivoFueraDeRuta | null {
+export function motivoFueraDeRuta(
+  r: Resource,
+  /** Ids y patentes de las unidades que están en una ruta EN CURSO (pieza 2.2).
+   *
+   *  **Llega como argumento y no se consulta acá**: es estado derivado de los
+   *  planes en curso, lo sabe el servidor, y este módulo no habla con el
+   *  historial. Ausente significa "no restringir", que es lo correcto para
+   *  cualquier pantalla que no esté por generar una ruta. */
+  ocupadas?: Set<string>,
+): MotivoFueraDeRuta | null {
   // El orden importa: cada unidad cae en UN motivo, y el primero es el que se
   // reporta. Una retroexcavadora fuera de servicio se informa como fuera de
   // servicio, que es lo que el trabajador puede cambiar.
   if (!r.disponible) return "no_disponible";
+  // Antes que la familia: que un camión esté en la calle es lo que el
+  // trabajador puede ver y entender, y es temporal. Reportarlo después de
+  // "no transporta carga" sería informar la propiedad permanente de una unidad
+  // que hoy además está ocupada, o sea el motivo menos accionable de los dos.
+  //
+  // Se comparan las DOS identidades porque el servidor junta ambas: el id es el
+  // real, y la patente es lo único que traen los planes guardados antes de que
+  // `resourceId` viajara en la respuesta.
+  if (ocupadas && (ocupadas.has(r.id) || (r.patente != null && ocupadas.has(r.patente))))
+    return "ocupado_en_ruta";
   // El arrastre va antes y con motivo propio: decirle "no transporta carga" a
   // un carro que declara 30 m³ es falso. Lo que lo deja fuera de una ruta no
   // es que no cargue, es que no circula solo.
@@ -153,6 +173,7 @@ export function motivoFueraDeRuta(r: Resource): MotivoFueraDeRuta | null {
 
 export const TEXTO_FUERA_DE_RUTA: Record<MotivoFueraDeRuta, string> = {
   no_disponible: "marcado como no disponible",
+  ocupado_en_ruta: "ocupado en una ruta en curso",
   se_remolca: "se remolca, no circula por sí solo",
   no_transporta: "no transporta carga",
   // "en peso" y no "en toneladas": el campo se guarda en toneladas pero la
@@ -171,13 +192,24 @@ export interface ResumenRuta {
 }
 
 /** Reparte los recursos de un punto entre los que cuentan para una ruta y los
- *  que no, con el motivo de cada exclusión. */
-export function resumenParaRuta(recursos: Resource[]): ResumenRuta {
+ *  que no, con el motivo de cada exclusión.
+ *
+ *  `ocupadas` son los vehículos que están en una ruta en curso (pieza 2.2).
+ *  Omitirlo no restringe, que es lo correcto para cualquier pantalla que no
+ *  esté por generar una ruta: la tabla de la flota describe el patio, no un
+ *  plan del día. */
+export function resumenParaRuta(recursos: Resource[], ocupadas?: Set<string>): ResumenRuta {
   const resumen: ResumenRuta = {
     suman: [],
     capacidad: 0,
+    // **Las claves van a mano y el tipo lo exige.** `Record<MotivoFueraDeRuta,
+    // ...>` obliga a que estén las seis, así que agregar un motivo sin
+    // agregarlo acá no compila. Es deliberado: el desglose tiene que
+    // reconciliar con el total de la flota (21 unidades), y un motivo que
+    // nadie cuenta lo rompe en silencio.
     fuera: {
       no_disponible: [],
+      ocupado_en_ruta: [],
       se_remolca: [],
       no_transporta: [],
       solo_toneladas: [],
@@ -185,7 +217,7 @@ export function resumenParaRuta(recursos: Resource[]): ResumenRuta {
     },
   };
   for (const r of recursos) {
-    const motivo = motivoFueraDeRuta(r);
+    const motivo = motivoFueraDeRuta(r, ocupadas);
     if (motivo) resumen.fuera[motivo].push(r);
     else {
       resumen.suman.push(r);

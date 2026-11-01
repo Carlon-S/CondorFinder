@@ -15,6 +15,7 @@ import auth as auth_module
 import osrm_client
 from rate_limit import limitar
 import resources as resources_module
+import route_plans
 import routes_provider
 
 # =============================================================================
@@ -169,6 +170,30 @@ class RoutePlanRequestIn(BaseModel):
     # antes de que este criterio existiera, que es lo que evita que el despliegue
     # rompa todas las rutas antes de que alguien haya cargado nada.
     personal: list[RoutePlanWorkerIn] = []
+    #: El plan que esta generación REEMPLAZA, si se está editando uno guardado
+    #: (C5 de HDU5.2).
+    #:
+    #: **Editar una ruta es regenerarla.** La alternativa era editar el registro
+    #: dejando la geometría guardada, y eso deja el trazo pasando por lugares
+    #: que la ruta ya no visita. Regenerar da un plan coherente consigo mismo, y
+    #: solo se permite mientras la ruta esté en estado `generada`: una que ya
+    #: salió a la calle se cancela o se cierra, no se reescribe.
+    #:
+    #: Ausente significa plan nuevo, así que el diálogo de generación de
+    #: siempre no cambia en nada.
+    editandoPlanId: str | None = None
+    #: Cuántos convoyes salen a la vez de cada punto (pieza 2.3).
+    #:
+    #: **1 es el comportamiento de siempre** y es el valor por omisión: un
+    #: recorrido por punto activo. Con más, la flota del punto se reparte y las
+    #: zonas se dividen entre los convoyes, que salen simultáneamente; el plan
+    #: dura lo que el más largo y no la suma.
+    #:
+    #: **Es explícito y no automático a propósito.** Cada convoy cuesta su
+    #: propia matriz y su propia geometría, o sea N veces las llamadas al
+    #: proveedor de rutas, y con Google eso se cobra. Decidirlo por nuestra
+    #: cuenta gastaría el presupuesto de otro sin preguntar.
+    convoyesPorPunto: int = 1
 
 
 class RoutePlanStopOut(BaseModel):
@@ -186,6 +211,12 @@ class RoutePlanStopOut(BaseModel):
     # diario, que no es un análisis ni una zona, así que el nombre mentía.
     stopId: str | None = None
     kind: Literal["analysis", "punto_diario"] | None = None
+    #: La zona a la que pertenece esta parada, cuando es un análisis.
+    #:
+    #: Un punto diario NO tiene: es un hecho de una fecha y no un lugar que se
+    #: sigue en el tiempo, así que su retiro no entra en ninguna serie. Lo usa
+    #: el cierre del retiro (pieza 2.4) para imputar lo retirado a la zona.
+    zoneId: str | None = None
     # A qué VIAJE de su recorrido pertenece esta parada, 1-based.
     #
     # **Un entero por parada en vez de una estructura anidada de viajes.** El
@@ -367,6 +398,18 @@ class RoutePlanRouteOut(BaseModel):
 class RoutePlanSuccessOut(BaseModel):
     status: str = "success"
     route: RoutePlanRouteOut
+    #: El id con que este plan quedó registrado (C5 y C6 de HDU5.2).
+    #:
+    #: **Opcional a propósito.** `route_plans.guardar()` nunca lanza: si Mongo
+    #: falla, el plan igual se devuelve y esto viene en `None`. Una generación
+    #: cuesta llamadas a OSRM o a Google y puede tardar, así que perderla porque
+    #: falló un registro secundario sería cobrarle al trabajador el precio de
+    #: nuestra contabilidad.
+    #:
+    #: La vista puede ignorarlo por completo y todo sigue funcionando igual, que
+    #: es lo que permitió implementar y verificar la persistencia sin tocar una
+    #: línea de pantalla.
+    planId: str | None = None
 
 
 class RoutePlanInfeasibleOut(BaseModel):
@@ -507,8 +550,14 @@ async def _load_active_points(point_ids: list[str]) -> list[dict]:
     # esto implementa: marcar TODOS los recursos de un punto como no disponibles
     # dejaba la lista vacía, el respaldo se activaba, y la capacidad volvía a
     # salir de los contadores en vez de bajar a cero.
+    # **Los vehículos que están en una ruta EN CURSO quedan fuera** (pieza 2.2).
+    #
+    # La consulta la hace acá y no `resources.py` porque ese módulo no sabe que
+    # existen los planes de ruta: hacérselo saber acoplaría dos dominios para un
+    # dato que este orquestador ya tiene a mano.
+    ocupadas = await route_plans.unidades_ocupadas()
     capacidades = await resources_module.capacidad_de_carga_por_punto(
-        [str(p["_id"]) for p in puntos]
+        [str(p["_id"]) for p in puntos], ocupadas
     )
     for punto in puntos:
         punto["trucks"] = capacidades.get(str(punto["_id"]), [])
@@ -1181,6 +1230,13 @@ async def _stops_de_analisis(pedidas: list["RouteStopIn"]) -> list[dict]:
         stops.append({
             "stopId": str(doc["_id"]),
             "kind": "analysis",
+            # **La ZONA a la que pertenece esta medición** (pieza 2.4). Viaja
+            # hasta la respuesta porque el cierre del retiro necesita saber a
+            # qué lugar imputar lo que se retiró: un análisis es una medición y
+            # la serie histórica es de la zona, no de la medición. Puede ser
+            # None en análisis anteriores a la migración de zonas, y ahí el
+            # retiro queda registrado sin lugar, que es la verdad.
+            "zoneId": doc.get("zoneId"),
             # Respaldo al nombre de la medición: los análisis anteriores a la
             # migración de zonas no tienen `zoneId`, y una zona borrada a mano
             # dejaría la referencia colgando.
@@ -1392,6 +1448,87 @@ def _select_origin_group(points: list[dict], total_volume: float) -> list[dict] 
             if sum(_point_truck_capacity(p) for p in combo) >= total_volume:
                 return list(combo)
     return None
+
+
+#: Tope de convoyes simultáneos por punto. **No es una regla de negocio**: cada
+#: convoy cuesta su propia matriz y su propia geometría, o sea N veces las
+#: llamadas al proveedor de rutas, y con Google eso es dinero (ver la nota de
+#: costo de AC5 en CLAUDE.md). Cuatro es más de lo que la flota real puede
+#: tripular y deja el peor caso acotado.
+_MAX_CONVOYES = 4
+
+
+def _partir_en_convoyes(punto: dict, cuantos: int) -> list[dict]:
+    """Un punto con N convoyes, como si fueran N puntos en la misma dirección.
+
+    **Esta es toda la pieza, y por eso no toca el algoritmo.** Las sub-rutas de
+    puntos distintos ya corren en paralelo (el plan usa el MÁXIMO de duración y
+    no la suma, ver `max_duration`), ya eligen sus camiones por separado y ya
+    comparten el pool de personal. Un convoy adicional del mismo patio es
+    exactamente eso: otro punto, en las mismas coordenadas, con otra parte de la
+    flota. Convirtiéndolo en N puntos virtuales, el resto del handler, de
+    `_trucks_used` y del reparto de dotación funciona sin enterarse.
+
+    **La flota se reparte alternando por capacidad descendente.** Así cada
+    convoy recibe una mezcla comparable: dando los primeros N a uno y el resto
+    a otro, el primero saldría con los dos AMPLIROLL y el segundo con tolvas, y
+    el reparto de zonas tendría que compensar un desbalance que nadie pidió.
+
+    Un convoy que quede sin camiones no se devuelve: `_select_origin_group` lo
+    descartaría igual por capacidad cero, y dejarlo haría que el plan reportara
+    un recorrido vacío.
+    """
+    flota = sorted(
+        punto.get("trucks") or [],
+        key=lambda t: t.get("capacity_m3", 0),
+        reverse=True,
+    )
+    cuantos = max(1, min(cuantos, _MAX_CONVOYES, len(flota)))
+    if cuantos <= 1:
+        return [punto]
+
+    repartida: list[list[dict]] = [[] for _ in range(cuantos)]
+    for i, camion in enumerate(flota):
+        repartida[i % cuantos].append(camion)
+
+    convoyes = []
+    for i, trucks in enumerate(repartida):
+        if not trucks:
+            continue
+        convoyes.append({
+            **punto,
+            # El id lleva sufijo porque el handler indexa las paradas por id de
+            # punto: con el mismo id, los N convoyes compartirían una sola
+            # lista y se pisarían. `_id` sigue siendo el real en el documento
+            # original, así que nada que lo lea de Mongo se confunde.
+            "_id": f'{punto["_id"]}#{i + 1}',
+            "name": f'{punto.get("name", "Punto")} (convoy {i + 1})',
+            "trucks": trucks,
+        })
+    return convoyes
+
+
+def _repartir_por_carga(convoyes: list[dict], stops: list[dict]) -> dict[str, list[dict]]:
+    """Reparte las paradas entre convoyes que salen del MISMO lugar.
+
+    **No se puede usar `_split_stops_by_nearest`**: ese asigna cada zona al
+    punto más cercano, y acá todos los convoyes están en la misma coordenada,
+    así que la distancia no distingue nada y todas caerían en el primero.
+
+    Lo que sí distingue es la CARGA. Se asigna de mayor a menor volumen al
+    convoy que menos lleva acumulado, que es la heurística clásica de reparto
+    (LPT): empezar por las grandes evita terminar con una zona enorme sin dónde
+    ponerla, y es lo que deja las dos jornadas pareciéndose. Como el plan dura
+    lo que dura el convoy MÁS LARGO, equilibrar la carga es literalmente
+    equilibrar la jornada.
+    """
+    por_convoy: dict[str, list[dict]] = {str(c["_id"]): [] for c in convoyes}
+    carga: dict[str, float] = {str(c["_id"]): 0.0 for c in convoyes}
+    for zona in sorted(stops, key=lambda z: z["volumeM3"], reverse=True):
+        elegido = min(carga, key=lambda k: carga[k])
+        por_convoy[elegido].append(zona)
+        carga[elegido] += zona["volumeM3"]
+    return por_convoy
 
 
 def _split_stops_by_nearest(points: list[dict], stops: list[dict]) -> dict[str, list[dict]]:
@@ -2444,11 +2581,24 @@ async def generate_route(
             )
         )
 
+    # **Varios convoyes del mismo punto** (pieza 2.3). Se expanden a puntos
+    # virtuales ANTES de repartir las paradas, así que todo lo que viene después
+    # (elección de camiones, dotación, horas, geometría) funciona sin enterarse:
+    # para el handler son simplemente más puntos de origen.
+    if payload.convoyesPorPunto > 1:
+        origin_group = [
+            c for p in origin_group for c in _partir_en_convoyes(p, payload.convoyesPorPunto)
+        ]
+
     if len(origin_group) == 1:
         # Copia: más abajo se le quitan paradas con .remove() al relajar por
         # horas, y sin copiar se estaría mutando la misma lista que acaba de
         # servir para decidir qué cabía.
         stops_by_point = {str(origin_group[0]["_id"]): list(stops_que_caben)}
+    elif payload.convoyesPorPunto > 1:
+        # Todos los convoyes salen de la MISMA coordenada, así que el reparto
+        # por cercanía no distingue nada: se reparte por carga.
+        stops_by_point = _repartir_por_carga(origin_group, stops_que_caben)
     else:
         stops_by_point = _split_stops_by_nearest(origin_group, stops_que_caben)
 
@@ -2649,6 +2799,9 @@ async def generate_route(
                 label=s["name"],
                 stopId=s.get("stopId"),
                 kind=s.get("kind"),
+                # Pieza 2.4: el cierre del retiro lo necesita para imputar lo
+                # retirado a la zona, no a la medición.
+                zoneId=s.get("zoneId"),
                 trip=(
                     viaje_por_parada[indice_parada]
                     if indice_parada < len(viaje_por_parada)
@@ -2757,24 +2910,59 @@ async def generate_route(
         total_volume_planificado += sum(round(s["volumeM3"], 2) for s in sub["stops"])
         max_duration = max(max_duration, sub["durationHours"])
 
-    return RoutePlanSuccessOut(
-        route=RoutePlanRouteOut(
-            stops=out_stops,
-            totalDistanceKm=round(total_distance, 2),
-            totalDurationHours=round(max_duration, 2),
-            totalVolumeM3=round(total_volume_planificado, 2),
-            outboundPaths=outbound_paths,
-            transferPaths=transfer_paths,
-            disposalPaths=disposal_paths,
-            returnPaths=return_paths,
-            segments=segments,
-            unassignedZones=sin_asignar,
-            # `all` y no `any`: con varios puntos de origen, un recorrido puede
-            # haberse calculado con tráfico y otro con el respaldo, y "los
-            # tiempos de este plan consideran el tráfico" solo es cierto si vale
-            # para todos. Con un solo punto, que es el caso de producción, da lo
-            # mismo; la diferencia aparece justo cuando Google falla a mitad de
-            # una generación, que es cuando el dato importa.
-            trafficAware=all(sub.get("trafico") for sub in sub_routes),
-        )
+    ruta = RoutePlanRouteOut(
+        stops=out_stops,
+        totalDistanceKm=round(total_distance, 2),
+        totalDurationHours=round(max_duration, 2),
+        totalVolumeM3=round(total_volume_planificado, 2),
+        outboundPaths=outbound_paths,
+        transferPaths=transfer_paths,
+        disposalPaths=disposal_paths,
+        returnPaths=return_paths,
+        segments=segments,
+        unassignedZones=sin_asignar,
+        # `all` y no `any`: con varios puntos de origen, un recorrido puede
+        # haberse calculado con tráfico y otro con el respaldo, y "los
+        # tiempos de este plan consideran el tráfico" solo es cierto si vale
+        # para todos. Con un solo punto, que es el caso de producción, da lo
+        # mismo; la diferencia aparece justo cuando Google falla a mitad de
+        # una generación, que es cuando el dato importa.
+        trafficAware=all(sub.get("trafico") for sub in sub_routes),
     )
+
+    # **El plan queda registrado (C5 y C6 de HDU5.2).**
+    #
+    # Al GENERAR y no al despachar: C6 pide "todas rutas generadas
+    # anteriormente", y generadas no es despachadas. Que el historial se llene
+    # de planes de prueba lo resuelve el `estado`, no guardar menos.
+    #
+    # Se guarda la respuesta TAL CUAL, con su geometría: reabrirla es pasarle
+    # el mismo objeto a los mismos componentes, sin una capa de traducción que
+    # podría quedar desincronizada del contrato. Y la geometría no cuesta
+    # ninguna llamada extra porque ya está calculada acá; lo que costaría es
+    # volver a pedirla al abrir un plan.
+    #
+    # Junto va la petición, que es lo que vuelve posible C5: editar una ruta es
+    # volver al diálogo de generación con sus valores y regenerar.
+    #
+    # **`editandoPlanId` reemplaza en vez de crear.** Sin eso, corregir el
+    # volumen de una zona dejaría dos entradas en el historial para el mismo
+    # trabajo y nadie sabría cuál se hizo.
+    plan_dict = ruta.model_dump()
+    peticion_dict = payload.model_dump()
+    plan_id: str | None = None
+    if payload.editandoPlanId:
+        reemplazado = await route_plans.reemplazar(
+            payload.editandoPlanId, current_user.username, plan_dict, peticion_dict
+        )
+        # Si la ruta ya no existe o dejó de ser editable (alguien la despachó
+        # desde otra pestaña), se registra como una nueva en vez de perderla.
+        plan_id = payload.editandoPlanId if reemplazado else await route_plans.guardar(
+            current_user.username, plan_dict, peticion_dict
+        )
+    else:
+        plan_id = await route_plans.guardar(
+            current_user.username, plan_dict, peticion_dict
+        )
+
+    return RoutePlanSuccessOut(route=ruta, planId=plan_id)

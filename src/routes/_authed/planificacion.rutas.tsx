@@ -117,6 +117,7 @@ import {
   type ResourcePoint,
 } from "@/lib/resources";
 import { cargarRutaCargada, guardarRutaCargada } from "@/lib/rutaState";
+import { unidadesOcupadas } from "@/lib/routePlans";
 import { MAIPU_BBOX } from "@/lib/maipuBoundary";
 import {
   Table,
@@ -1010,6 +1011,13 @@ function RutasPage() {
   const [loadingPoints, setLoadingPoints] = useState(false);
   const [availableHours, setAvailableHours] = useState("8");
   const [priorityWasteType, setPriorityWasteType] = useState<string>("none");
+  /** Cuántos convoyes salen a la vez de cada punto (pieza 2.3).
+   *
+   *  **Arranca en 1 siempre, y no se recuerda.** Al revés que la cuadrilla, que
+   *  se repite entre jornadas: cuántos convoyes salen depende del trabajo de
+   *  HOY, y heredar un 3 de ayer triplicaría en silencio las llamadas al
+   *  proveedor de rutas en la generación siguiente. */
+  const [convoyes, setConvoyes] = useState(1);
 
   /** La cuadrilla declarada para hoy (AC1 y AC2 de HDU5.1).
    *
@@ -1319,6 +1327,26 @@ function RutasPage() {
    *  antes de volver a escribirla. Con estado, el efecto de guardar se saltea
    *  en ese commit y corre recién en el siguiente, cuando ve lo restaurado. */
   const [rutaRestaurada, setRutaRestaurada] = useState(false);
+  /** El plan guardado que se está editando, si se entró desde el historial
+   *  (C5 de HDU5.2).
+   *
+   *  **Editar una ruta es regenerarla.** La alternativa era editar el registro
+   *  dejando la geometría guardada, y eso deja el trazo pasando por lugares que
+   *  la ruta ya no visita. Con este id la generación REEMPLAZA el registro en
+   *  vez de crear uno nuevo: sin eso, corregir un volumen dejaría dos entradas
+   *  en el historial para el mismo trabajo y nadie sabría cuál se hizo. */
+  const [editandoPlanId, setEditandoPlanId] = useState<string | null>(null);
+  /** Los vehículos que están en una ruta EN CURSO (pieza 2.2).
+   *
+   *  **Se pide al ABRIR el diálogo de generación, no al montar la vista**: es
+   *  la foto del momento en que se decide, y entre que se entró a la pantalla y
+   *  se aprieta generar alguien pudo despachar otra ruta desde otra pestaña.
+   *  Mismo criterio con el que ya se relee la flota ahí mismo.
+   *
+   *  El ruteo los excluye igual por su cuenta; esto existe para que la pantalla
+   *  pueda DECIRLO, en vez de mostrar un camión disponible que el plan no usa
+   *  sin explicación. */
+  const [unidadesEnRuta, setUnidadesEnRuta] = useState<Set<string>>(new Set());
 
   // **La restauración va en un EFECTO y no en los `useState`.**
   //
@@ -1339,6 +1367,12 @@ function RutasPage() {
     setLoadedDiarioIds(new Set(guardado.diarios));
     setPrioritarias(new Set(guardado.prioritarias));
     setVolumenARetirar(guardado.volumenes);
+    setEditandoPlanId(guardado.editandoPlanId ?? null);
+    // Las dos condiciones de la jornada. **Solo si vienen**, para que un F5 en
+    // una pestaña que nunca las tocó no las pise con un null; el valor por
+    // omisión de cada una lo pone su `useState`.
+    if (guardado.horas) setAvailableHours(guardado.horas);
+    if (guardado.convoyes) setConvoyes(guardado.convoyes);
     setRutaRestaurada(true);
   }, []);
 
@@ -1354,8 +1388,20 @@ function RutasPage() {
       diarios: Array.from(loadedDiarioIds),
       volumenes: volumenARetirar,
       prioritarias: Array.from(prioritarias),
+      editandoPlanId,
+      horas: availableHours,
+      convoyes,
     });
-  }, [rutaRestaurada, loadedIds, loadedDiarioIds, volumenARetirar, prioritarias]);
+  }, [
+    rutaRestaurada,
+    loadedIds,
+    loadedDiarioIds,
+    volumenARetirar,
+    prioritarias,
+    editandoPlanId,
+    availableHours,
+    convoyes,
+  ]);
 
   // **Lo que ya no existe se suelta solo.**
   //
@@ -1643,6 +1689,9 @@ function RutasPage() {
     // notaba nunca: el diálogo se abre por acá y siempre la volvía a plegar.
     setFlotaAbierta(true);
     setBusquedaFlota("");
+    // No se espera: si tarda o falla, el diálogo abre igual y la flota
+    // simplemente no marca ocupaciones. El ruteo las excluye de todos modos.
+    void unidadesOcupadas().then(setUnidadesEnRuta);
     setRouteError(null);
     setConfirmOpen(true);
     setLoadingPoints(true);
@@ -1686,11 +1735,24 @@ function RutasPage() {
       // Solo las marcadas, y sin el id local ni la bandera, que son de la
       // vista. Lista vacía = el backend no restringe por personal.
       personal: cuadrillaDeHoy.map((p) => ({ nombre: p.nombre.trim(), rol: p.rol })),
+      // C5: si se entró desde el historial, esta generación REEMPLAZA ese
+      // registro. El backend lo rechaza solo si la ruta dejó de ser editable
+      // (alguien la despachó desde otra pestaña) y en ese caso la guarda como
+      // nueva, para no perderla.
+      editandoPlanId,
+      // Pieza 2.3. Se manda siempre, incluso el 1, porque el valor por omisión
+      // del backend y el de la vista tienen que ser el mismo dato y no dos
+      // constantes que puedan separarse.
+      convoyesPorPunto: convoyes,
     });
     setGenerating(false);
     setConfirmOpen(false);
 
     if (result.status === "success") {
+      // La edición se consumió: lo que hay en pantalla ya ES el plan nuevo, y
+      // dejar el id puesto haría que la siguiente generación volviera a pisar
+      // el mismo registro sin que nadie lo haya pedido.
+      setEditandoPlanId(null);
       setRouteStops(result.route.stops);
       setRouteOutboundPaths(result.route.outboundPaths ?? null);
       setRouteTransferPaths(result.route.transferPaths ?? null);
@@ -2357,6 +2419,29 @@ function RutasPage() {
                       Cada fila puede descargarse desde acá con su papelera:
                       antes había que abrir el diálogo de carga para sacar una
                       zona de la ruta, o sea salir del plan para editar el plan. */}
+                  {/* **C5: que se está editando una ruta guardada hay que
+                      decirlo.** Sin este aviso, generar desde acá pisaría un
+                      registro del historial sin que nada en pantalla lo
+                      anunciara, y el trabajador creería estar armando un plan
+                      nuevo. Lleva su salida: dejar de editar no descarga las
+                      paradas, solo deja de reemplazar. */}
+                  {editandoPlanId && (
+                    <div className="mb-2 flex items-start gap-2 rounded-lg border border-warning-strong/40 bg-warning/10 px-3 py-2 text-[0.6875rem] leading-relaxed text-warning-strong">
+                      <TriangleAlert className="mt-px h-3.5 w-3.5 flex-shrink-0" />
+                      <span className="min-w-0 flex-1">
+                        Estás <strong>editando una ruta guardada</strong>. Al generar, este plan
+                        reemplaza al del historial en vez de crear uno nuevo.
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setEditandoPlanId(null)}
+                        className="flex-shrink-0 cursor-pointer underline underline-offset-2 hover:no-underline"
+                      >
+                        Dejar de editar
+                      </button>
+                    </div>
+                  )}
+
                   <section className="flex min-h-0 flex-col">
                     <div className="mb-2 flex items-baseline justify-between gap-2">
                       {/* El conteo va en una pastilla, no entre paréntesis.
@@ -4031,79 +4116,102 @@ function RutasPage() {
                       Ninguna unidad calza con la búsqueda.
                     </li>
                   ) : (
-                    flotaFiltrada.map((r) => (
-                      <li
-                        key={r.id}
-                        className={`flex items-center gap-2 rounded-md border p-2 ${
-                          r.disponible ? "border-border/60" : "border-dashed border-border/50"
-                        }`}
-                      >
-                        {r.foto ? (
-                          <img
-                            src={resourcePhotoUrl(r.foto)}
-                            alt=""
-                            loading="lazy"
-                            className={`h-9 w-12 flex-shrink-0 rounded object-cover ${
-                              r.disponible ? "" : "grayscale"
-                            }`}
-                          />
-                        ) : (
-                          <span className="flex h-9 w-12 flex-shrink-0 items-center justify-center rounded border border-dashed border-border/60">
-                            <Truck className="h-3.5 w-3.5 text-muted-foreground/50" />
-                          </span>
-                        )}
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-xs font-medium text-foreground">
-                            {r.tipo}
-                            {r.numero_equipo ? ` ${r.numero_equipo}` : ""}
-                          </p>
-                          <p className="text-[0.625rem] text-muted-foreground">
-                            {[
-                              r.patente,
-                              r.capacidad_m3 != null ? `${cifra(r.capacidad_m3)} m³` : null,
-                              r.capacidad_ton != null ? `${peso(r.capacidad_ton * 1000)} kg` : null,
-                            ]
-                              .filter(Boolean)
-                              .join(" · ")}
-                          </p>
-                          {/* **La dotación que esta unidad exige, acá y no solo
+                    flotaFiltrada.map((r) => {
+                      // Pieza 2.2: este camión está en la calle, en otra ruta.
+                      // El interruptor sigue encendido (nadie lo apagó) pero el
+                      // ruteo no lo va a considerar, así que la fila tiene que
+                      // decirlo o parecería disponible sin serlo.
+                      const ocupada =
+                        unidadesEnRuta.has(r.id) ||
+                        (r.patente != null && unidadesEnRuta.has(r.patente));
+                      return (
+                        <li
+                          key={r.id}
+                          className={`flex items-center gap-2 rounded-md border p-2 ${
+                            !r.disponible || ocupada
+                              ? "border-dashed border-border/50"
+                              : "border-border/60"
+                          }`}
+                        >
+                          {r.foto ? (
+                            <img
+                              src={resourcePhotoUrl(r.foto)}
+                              alt=""
+                              loading="lazy"
+                              className={`h-9 w-12 flex-shrink-0 rounded object-cover ${
+                                r.disponible ? "" : "grayscale"
+                              }`}
+                            />
+                          ) : (
+                            <span className="flex h-9 w-12 flex-shrink-0 items-center justify-center rounded border border-dashed border-border/60">
+                              <Truck className="h-3.5 w-3.5 text-muted-foreground/50" />
+                            </span>
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-xs font-medium text-foreground">
+                              {r.tipo}
+                              {r.numero_equipo ? ` ${r.numero_equipo}` : ""}
+                            </p>
+                            <p className="text-[0.625rem] text-muted-foreground">
+                              {[
+                                r.patente,
+                                r.capacidad_m3 != null ? `${cifra(r.capacidad_m3)} m³` : null,
+                                r.capacidad_ton != null
+                                  ? `${peso(r.capacidad_ton * 1000)} kg`
+                                  : null,
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </p>
+                            {/* **La dotación que esta unidad exige, acá y no solo
                               en su ficha.** Es la causa más frecuente de que un
                               plan no salga ("faltan conductores"), y sin verla
                               el trabajador no tiene cómo saber cuánta gente
                               declarar: con dos conductores y dos peonetas un
                               plan puede fallar y la pantalla no decía que cada
                               tolva pide un conductor y dos peonetas. */}
-                          {r.conductores_requeridos + r.peonetas_requeridas > 0 && (
-                            <p className="text-[0.625rem] text-muted-foreground">
-                              Dotación:{" "}
-                              {[
-                                r.conductores_requeridos > 0
-                                  ? `${r.conductores_requeridos} conductor${
-                                      r.conductores_requeridos === 1 ? "" : "es"
-                                    }`
-                                  : null,
-                                r.peonetas_requeridas > 0
-                                  ? `${r.peonetas_requeridas} peoneta${
-                                      r.peonetas_requeridas === 1 ? "" : "s"
-                                    }`
-                                  : null,
-                              ]
-                                .filter(Boolean)
-                                .join(", ")}
-                            </p>
+                            {r.conductores_requeridos + r.peonetas_requeridas > 0 && (
+                              <p className="text-[0.625rem] text-muted-foreground">
+                                Dotación:{" "}
+                                {[
+                                  r.conductores_requeridos > 0
+                                    ? `${r.conductores_requeridos} conductor${
+                                        r.conductores_requeridos === 1 ? "" : "es"
+                                      }`
+                                    : null,
+                                  r.peonetas_requeridas > 0
+                                    ? `${r.peonetas_requeridas} peoneta${
+                                        r.peonetas_requeridas === 1 ? "" : "s"
+                                      }`
+                                    : null,
+                                ]
+                                  .filter(Boolean)
+                                  .join(", ")}
+                              </p>
+                            )}
+                          </div>
+                          {/* El interruptor sigue encendido porque nadie lo
+                            apagó: lo que pasa es que esa unidad está en la
+                            calle. Decirlo con una insignia y no apagando el
+                            interruptor es lo que mantiene separadas las dos
+                            cosas, una decisión del patio y un hecho del día. */}
+                          {ocupada && (
+                            <span className="flex-shrink-0 rounded-full bg-warning/15 px-2 py-0.5 text-[0.625rem] font-medium text-warning-strong">
+                              En ruta
+                            </span>
                           )}
-                        </div>
-                        {cambiandoUnidad === r.id ? (
-                          <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-muted-foreground" />
-                        ) : (
-                          <Switch
-                            checked={r.disponible}
-                            onCheckedChange={() => void alternarUnidad(r)}
-                            aria-label={`${r.disponible ? "Marcar como no disponible" : "Marcar como disponible"}: ${r.tipo} ${r.patente ?? ""}`}
-                          />
-                        )}
-                      </li>
-                    ))
+                          {cambiandoUnidad === r.id ? (
+                            <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-muted-foreground" />
+                          ) : (
+                            <Switch
+                              checked={r.disponible}
+                              onCheckedChange={() => void alternarUnidad(r)}
+                              aria-label={`${r.disponible ? "Marcar como no disponible" : "Marcar como disponible"}: ${r.tipo} ${r.patente ?? ""}`}
+                            />
+                          )}
+                        </li>
+                      );
+                    })
                   )}
                 </ul>
               )}
@@ -4127,7 +4235,7 @@ function RutasPage() {
                 // ninguna explicación a la vista.
                 <ul className="max-h-32 space-y-1 overflow-y-auto">
                   {activePoints.map((p) => {
-                    const resumen = resumenParaRuta(recursosPorPunto[p.id] ?? []);
+                    const resumen = resumenParaRuta(recursosPorPunto[p.id] ?? [], unidadesEnRuta);
                     return (
                       <li
                         key={p.id}
@@ -4165,6 +4273,61 @@ function RutasPage() {
               {!hoursValid && (
                 <p className="text-[0.625rem] text-destructive">
                   Ingresa un número de horas mayor a 0.
+                </p>
+              )}
+            </div>
+
+            {/* ── Convoyes simultáneos por punto (pieza 2.3) ──
+                Un punto con 8 camiones podía despachar UN recorrido, así que la
+                mitad del patio se quedaba parada aunque hubiera jornada de sobra.
+                Con dos convoyes, la flota se reparte y las zonas se dividen entre
+                ellos; salen a la vez, así que el plan dura lo que el más largo.
+
+                **Es explícito y no automático**, y eso no es timidez: cada convoy
+                cuesta su propia matriz y su propia geometría, o sea N veces las
+                llamadas al proveedor de rutas, que con Google se cobran contra una
+                cuota diaria puesta a mano. Decidirlo por nuestra cuenta gastaría
+                presupuesto que no es nuestro.
+
+                Segmentado y no un campo numérico: el rango útil son cuatro valores
+                (la flota real tiene 8 unidades de carga y 21 en total), y un campo
+                libre invita a escribir un 12 que el backend va a recortar sin que
+                nadie entienda por qué. */}
+            <div className="space-y-1.5">
+              <div className="flex items-baseline justify-between gap-2">
+                <label className="text-xs font-medium text-muted-foreground">
+                  Convoyes por punto
+                </label>
+                <span className="text-[0.625rem] text-muted-foreground">
+                  {convoyes === 1 ? "Un recorrido por punto" : `${convoyes} salen a la vez`}
+                </span>
+              </div>
+              <div
+                role="radiogroup"
+                aria-label="Convoyes simultáneos por punto"
+                className="flex gap-1.5"
+              >
+                {[1, 2, 3, 4].map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    role="radio"
+                    aria-checked={convoyes === n}
+                    onClick={() => setConvoyes(n)}
+                    className={`mono h-8 flex-1 rounded-md border text-xs tabular-nums transition-colors ${
+                      convoyes === n
+                        ? "border-primary bg-primary/10 font-semibold text-primary"
+                        : "border-border/60 text-muted-foreground hover:bg-background/60"
+                    }`}
+                  >
+                    {n}
+                  </button>
+                ))}
+              </div>
+              {convoyes > 1 && (
+                <p className="text-[0.625rem] text-warning-strong">
+                  La flota de cada punto se reparte entre {convoyes} convoyes y cada uno pide su
+                  propia dotación. Con pocos vehículos o poca gente, varios pueden quedar sin salir.
                 </p>
               )}
             </div>

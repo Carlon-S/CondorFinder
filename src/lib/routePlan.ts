@@ -70,6 +70,28 @@ export interface RoutePlanRequest {
    *  No se guarda en ninguna parte. Es una decisión de este plan, de esta
    *  jornada, y la vista la sostiene en memoria junto con las zonas cargadas. */
   priorityStopIds?: string[];
+  /** El plan guardado que esta generacion REEMPLAZA (C5 de HDU5.2).
+   *
+   *  Editar una ruta es regenerarla, asi que el diálogo de generación es el
+   *  mismo y lo unico que cambia es que el resultado pisa un registro en vez de
+   *  crear otro. Ausente significa plan nuevo, que es el camino de siempre.
+   *
+   *  El backend solo lo acepta mientras la ruta este en estado `generada`: una
+   *  que ya salio a la calle se cancela o se cierra, no se reescribe. Si dejo
+   *  de serlo, la guarda como nueva en vez de perderla. */
+  editandoPlanId?: string | null;
+  /** Cuantos convoyes salen a la vez de cada punto (pieza 2.3).
+   *
+   *  **1 es el comportamiento de siempre** y es el valor por omision: un
+   *  recorrido por punto activo. Con mas, la flota del punto se reparte entre
+   *  los convoyes y las zonas se dividen entre ellos; salen simultaneamente, asi
+   *  que el plan dura lo que el mas largo y no la suma.
+   *
+   *  **Es explicito y no automatico a proposito.** Cada convoy cuesta su propia
+   *  matriz y su propia geometria, o sea N veces las llamadas al proveedor de
+   *  rutas, y con Google eso se cobra contra una cuota diaria configurada a
+   *  mano. Decidirlo sin preguntar gastaria el presupuesto de otro. */
+  convoyesPorPunto?: number;
 }
 
 export interface RoutePlanStop {
@@ -88,6 +110,12 @@ export interface RoutePlanStop {
    *  diario, que no es un análisis, así que el nombre mentía. */
   stopId?: string;
   kind?: RouteStopKind;
+  /** La zona a la que pertenece esta parada, cuando es un análisis.
+   *
+   *  Un punto diario no tiene: es un hecho de una fecha y no un lugar que se
+   *  sigue en el tiempo. Lo usa el cierre del retiro (pieza 2.4) para imputar
+   *  lo retirado a la zona y no a la medición. */
+  zoneId?: string | null;
   /** A qué VIAJE del recorrido pertenece esta parada, 1-based.
    *
    *  El convoy vuelve al relleno cuando no puede con la siguiente zona, así que

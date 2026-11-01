@@ -16,12 +16,29 @@
 // =============================================================================
 
 import type { SavedAnalysisRecord, ZoneRecord } from "@/lib/analysisStore";
-import { buildVersions, versionLabel, volumeByWasteType, zoneTotals } from "@/lib/volumeReport";
+import {
+  buildVersions,
+  evolutionSeries,
+  type RetiroDeZona,
+  versionLabel,
+  volumeByWasteType,
+  zoneTotals,
+} from "@/lib/volumeReport";
 
 /** Un análisis elegido para el informe, junto a la zona a la que pertenece. */
 export interface ReportSelection {
   zone: ZoneRecord;
   analyses: SavedAnalysisRecord[];
+  /** Los retiros registrados de esta zona (pieza 2.5 de HDU5.2).
+   *
+   *  **Entran a la misma linea de tiempo que las mediciones**, porque son el
+   *  mismo tipo de dato: los dos dicen cuanto volumen habia en un lugar en una
+   *  fecha, y lo que cambia es quien lo conto. Es lo que le da historial de
+   *  volumen a un punto permanente al que nadie le volo el dron.
+   *
+   *  Ausente significa que quien pidio el informe no los cargo, no que no haya:
+   *  el documento sale igual, con solo las mediciones. */
+  retiros?: RetiroDeZona[];
 }
 
 function formatDate(iso: string | null | undefined): string {
@@ -338,7 +355,16 @@ async function renderReport(selections: ReportSelection[]) {
   // que es el criterio de HDU9: comparar una versión con la que la reemplazó.
   for (const sel of selections) {
     const versiones = buildVersions(sel.analyses);
-    if (versiones.length < 2) continue;
+    // **La serie sale de `evolutionSeries`, no de un recorrido propio.** Es la
+    // regla del proyecto: la aritmetica del volumen vive en un solo lugar, o el
+    // informe y el grafico de la pantalla cuentan historias distintas de la
+    // misma zona. Trae las mediciones y, si se cargaron, los retiros ya
+    // descontados e intercalados por fecha.
+    const serie = evolutionSeries(versiones, sel.retiros);
+    // Con un solo punto no hay evolucion que mostrar. Se mide sobre la SERIE y
+    // no sobre las versiones: una zona de un vuelo con tres retiros si tiene
+    // curva, y es el caso de los 54 puntos permanentes.
+    if (serie.length < 2) continue;
 
     if (y > 680) {
       doc.addPage();
@@ -353,16 +379,22 @@ async function renderReport(selections: ReportSelection[]) {
     const puntos: { etiqueta: string; valor: number }[] = [];
     let anterior: number | null = null;
     const algoritmos = new Set<number | null>();
+    // Para poder poner en la fila cuantos analisis tiene cada captura, que es un
+    // dato de la VERSION y no del punto de la serie.
+    const analisisPorVuelo = new Map(versiones.map((v) => [v.sourceTaskId, v.analyses.length]));
 
-    for (const version of versiones) {
-      // La cifra de una versión es la de su análisis más reciente: es la
-      // lectura vigente de ese vuelo.
-      const ultimo = version.analyses[version.analyses.length - 1];
-      const volumen = zoneTotals(ultimo).volumeM3;
-      algoritmos.add(ultimo.algorithmVersion ?? null);
+    for (const punto of serie) {
+      const esRetiro = punto.origen === "retiro";
+      // Un retiro no lo calculo ningun algoritmo, asi que no puede disparar el
+      // aviso de algoritmos mezclados de mas abajo.
+      if (!esRetiro) algoritmos.add(punto.algorithmVersion ?? null);
+
+      const etiqueta = esRetiro
+        ? `Retiro ${formatDate(punto.date)}`
+        : versionLabel(punto.date, punto.uploadedAt);
       puntos.push({
-        etiqueta: versionLabel(version.captureDate, version.uploadedAt),
-        valor: volumen,
+        etiqueta: esRetiro ? formatDate(punto.date) : etiqueta,
+        valor: punto.volumeM3,
       });
 
       const variacion =
@@ -370,20 +402,24 @@ async function renderReport(selections: ReportSelection[]) {
           ? "-"
           : anterior === 0
             ? "sin base"
-            : `${(((volumen - anterior) / anterior) * 100).toFixed(1)} %`;
+            : `${(((punto.volumeM3 - anterior) / anterior) * 100).toFixed(1)} %`;
 
       filasComparacion.push([
-        versionLabel(version.captureDate, version.uploadedAt),
-        String(version.analyses.length),
-        num(volumen),
+        etiqueta,
+        // Un retiro no tiene analisis que contar: lleva un guion y no un cero,
+        // que afirmaria que se midio cero veces.
+        esRetiro ? "-" : String(analisisPorVuelo.get(punto.sourceTaskId) ?? 1),
+        num(punto.volumeM3),
         variacion,
       ]);
-      anterior = volumen;
+      anterior = punto.volumeM3;
     }
 
     autoTable(doc, {
       startY: y,
-      head: [["Captura", "Análisis", "Volumen m³", "Variación"]],
+      // "Registro" y no "Captura": desde que la tabla mezcla vuelos y retiros,
+      // la columna ya no nombra solo capturas.
+      head: [["Registro", "Análisis", "Volumen m³", "Variación"]],
       body: filasComparacion,
       margin: { left: margin, right: margin },
       styles: { fontSize: 8, cellPadding: 4 },

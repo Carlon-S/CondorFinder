@@ -26,6 +26,7 @@ import {
   hasMixedAlgorithms,
   zoneHistory,
   zoneTotals,
+  type RetiroDeZona,
   type ZoneVersion,
   versionDay,
   versionLabel,
@@ -37,6 +38,15 @@ const chartConfig = {
   volumeM3: { label: "Volumen m³", color: "var(--chart-1)" },
 } satisfies ChartConfig;
 
+/** El color de un retiro, distinto del de las mediciones.
+ *
+ *  Literal y no `var(--success-strong)` porque recharts lo pasa a atributos SVG
+ *  de un `<circle>` que sí resuelve variables CSS, pero la leyenda de abajo lo
+ *  usa como `background` de un recuadro de 8 px y las dos tienen que coincidir
+ *  exactamente: con una variable en un lado y un literal en el otro, cambiar el
+ *  tema separaría el punto del gráfico de su propia leyenda. */
+const COLOR_RETIRO = "#047857";
+
 // La etiqueta de una captura la arma versionLabel() en volumeReport.ts, igual
 // que las cifras: la barra de capturas, este grafico y el informe tienen que
 // nombrar la misma captura igual, o pareceran tres cosas distintas.
@@ -45,6 +55,7 @@ export function ZoneEvolution({
   zone,
   analyses,
   onOpenAnalysis,
+  retiros,
 }: {
   zone: ZoneRecord;
   /** Todos los análisis cargados; el componente filtra los de esta zona. */
@@ -52,15 +63,25 @@ export function ZoneEvolution({
   /** Abre un análisis en el visor. La vista de análisis lo mostrará en solo
    *  lectura si su vuelo ya no es el más reciente de la zona. */
   onOpenAnalysis: (analysisId: string) => void;
+  /** Los retiros registrados de esta zona (pieza 2.5 de HDU5.2).
+   *
+   *  **Van a la MISMA línea de tiempo que las mediciones**, porque son el mismo
+   *  tipo de dato: los dos dicen cuánto volumen había en un lugar en una fecha.
+   *  Ausente significa que la vista no los pidió, no que no haya. */
+  retiros?: RetiroDeZona[];
 }) {
   const versions: ZoneVersion[] = useMemo(() => zoneHistory(zone, analyses), [zone, analyses]);
-  const points = useMemo(() => evolutionSeries(versions), [versions]);
+  const points = useMemo(() => evolutionSeries(versions, retiros), [versions, retiros]);
   const mixedAlgorithms = useMemo(() => hasMixedAlgorithms(points), [points]);
 
   // AC3, una zona de una sola versión no tiene con qué compararse. Se dice
   // explícitamente en vez de dibujar un gráfico de un punto, que parece un
   // error de datos.
-  if (versions.length <= 1) {
+  //
+  // **Los retiros también cuentan como evolución**: una zona con un solo vuelo
+  // y tres retiros registrados SÍ tiene una curva, y es justamente la de los 54
+  // puntos permanentes, a los que nadie va a volarle el dron dos veces.
+  if (versions.length <= 1 && points.length <= 1) {
     return (
       <div className="rounded-lg border border-border/60 bg-muted/30 p-6 text-center">
         <p className="text-sm font-medium text-foreground">Sin versiones anteriores</p>
@@ -89,21 +110,30 @@ export function ZoneEvolution({
   const unSoloDia = new Set(dias).size === 1;
 
   const chartData = points.map((p, i) => ({
+    // Un retiro no tiene `uploadedAt`: no vino de una subida de imágenes. Se
+    // rotula con su fecha, que es el único momento que tiene.
     fecha:
-      unSoloDia || dias[i] === dias[i - 1]
-        ? versionTime(p.uploadedAt)
-        : versionLabel(p.date, p.uploadedAt),
+      p.origen === "retiro"
+        ? versionDay(p.date)
+        : unSoloDia || dias[i] === dias[i - 1]
+          ? versionTime(p.uploadedAt)
+          : versionLabel(p.date, p.uploadedAt),
     volumeM3: p.volumeM3,
     analysisId: p.analysisId,
+    origen: p.origen ?? "medicion",
   }));
+
+  const hayRetiros = points.some((p) => p.origen === "retiro");
 
   // Cifras de cabecera. El gráfico muestra la forma de la curva, pero la
   // pregunta que se hace primero frente a una zona es "cuánto hay hoy y cuánto
   // cambió", y eso obligaba a leer el eje y restar a ojo.
   const volumenInicial = zoneTotals(versions[0].analyses[versions[0].analyses.length - 1]).volumeM3;
-  const volumenActual = zoneTotals(
-    versions[versions.length - 1].analyses[versions[versions.length - 1].analyses.length - 1],
-  ).volumeM3;
+  // **El último punto de la SERIE, no el último análisis**, porque un retiro
+  // posterior al vuelo cambia cuánto queda en el lugar y es lo que la cifra
+  // dice. Sin retiros son el mismo valor: la serie termina en el último
+  // análisis de la última versión.
+  const volumenActual = points.length > 0 ? points[points.length - 1].volumeM3 : 0;
   const delta = volumenActual - volumenInicial;
   // Sin base no hay porcentaje que calcular: una zona que partió en cero y
   // creció no tiene "aumento de X%", tiene un valor nuevo.
@@ -168,10 +198,54 @@ export function ZoneEvolution({
             type="monotone"
             stroke="var(--color-volumeM3)"
             strokeWidth={2}
-            dot={{ r: 3 }}
+            // **El punto dice de dónde salió la cifra, por forma y por color.**
+            // Un retiro y una medición conviven en el mismo eje porque miden lo
+            // mismo, pero no merecen la misma confianza: una la calculó el
+            // algoritmo sobre el ortomosaico y la otra la anotó la cuadrilla al
+            // terminar la jornada. Por forma además de por color, porque a 6 px
+            // dos tonos verdes no se distinguen y para quien no diferencia ese
+            // par no se distinguen nunca.
+            dot={(props: { cx?: number; cy?: number; key?: string; payload?: unknown }) => {
+              const { cx, cy, key } = props;
+              const origen = (props.payload as { origen?: string } | undefined)?.origen;
+              if (cx == null || cy == null) return <g key={key} />;
+              if (origen === "retiro") {
+                return (
+                  <rect
+                    key={key}
+                    x={cx - 3}
+                    y={cy - 3}
+                    width={6}
+                    height={6}
+                    fill={COLOR_RETIRO}
+                    stroke={COLOR_RETIRO}
+                  />
+                );
+              }
+              return <circle key={key} cx={cx} cy={cy} r={3} fill="var(--color-volumeM3)" />;
+            }}
           />
         </LineChart>
       </ChartContainer>
+
+      {/* La leyenda se dibuja SOLO cuando hay dos orígenes que distinguir. Con
+          una sola clase de punto no explica nada y ocupa una fila. */}
+      {hayRetiros && (
+        <div className="flex items-center gap-4 text-[0.63rem] text-muted-foreground">
+          <span className="flex items-center gap-1.5">
+            <span
+              className="h-2 w-2 rounded-full"
+              style={{ background: "var(--chart-1)" }}
+              aria-hidden="true"
+            />
+            Medición del vuelo
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2 w-2" style={{ background: COLOR_RETIRO }} aria-hidden="true" />
+            Retiro registrado por la cuadrilla
+          </span>
+        </div>
+      )}
 
       {/* AC1, la cadena completa de versiones, ordenada cronológicamente.
           AC4, click en una versión abre su análisis en el visor. */}

@@ -381,6 +381,21 @@ Las zonas reemplazadas por un análisis más reciente de la misma zona física (
 
 > La cantidad que declara quien llama **no** es el volumen retirado. La planilla trae las dos columnas y en sus hojas coinciden porque se llenan al final del día, pero son dos hechos distintos: acá solo se captura el primero.
 
+### Ciclo de vida de una ruta (`/planificacion/rutas` y `/planificacion/historial`): HDU5.2
+
+34. El mapa abre mostrando **los tres tipos de lugar**: las paradas cargadas (sólidas, cada una con el color de su fila en el panel), las zonas con vuelo sin cargar y las zonas sin vuelo (las dos últimas huecas)
+35. **Cargar paradas** pide el volumen a retirar de cada una y dice, para las que no puede cargar, por qué no
+36. **Convoyes por punto** (de 1 a 4) reparte la flota de un punto entre varios convoyes que salen a la vez. Va en 1 por omisión: cada convoy cuesta una matriz y una geometría más contra el proveedor de rutas
+37. Al generar, **el plan se guarda** con estado `generada`, y aparece en el historial
+38. **Despachar** una ruta la pasa a `en curso` y **sus vehículos dejan de estar disponibles** para rutas nuevas
+39. **Terminar** una ruta abre el cierre del retiro: cuánto salió de cada parada, y si se atendió completa. Se puede cerrar sin anotar cifras
+40. **Editar** una ruta la precarga en el diálogo de generación y la regenera reemplazando el registro, solo mientras siga `generada`
+41. **Historial** (`/planificacion/historial`) las lista todas agrupadas por día, con su advertencia de que es un historial
+
+> **Un vehículo ocupado no se marca como no disponible.** La marca `disponible` es información que declaró una persona, y pisarla haría imposible distinguir "está en el taller" de "está en un retiro". La ocupación se deriva de las rutas en curso.
+
+> **Una ruta que no se puede cerrar retiene sus vehículos para siempre.** Por eso "cerrar sin registrar" existe y tiene su propio botón: el costo de un cierre sin cifras es mucho menor que el de una ruta eternamente en curso.
+
 ---
 
 ## Estructura del proyecto
@@ -401,6 +416,7 @@ CondorFinder/
 │   │   ├── Obligatorio.tsx         ← El asterisco de campo obligatorio, con su texto para lectores
 │   │   ├── RenameDialog.tsx        ← Renombrar una zona o una versión
 │   │   ├── RouteTimeline.tsx       ← HDU5: el recorrido como secuencia de tramos y paradas
+│   │   ├── CerrarRutaDialog.tsx    ← HDU5.2: cuánto salió de verdad de cada parada
 │   │   ├── ZoneZoomDialog.tsx      ← Vista ampliada de una zona, compartida entre vistas
 │   │   └── ui/                     ← Componentes shadcn/ui
 │   ├── lib/                        ← Servicios y utilidades del frontend
@@ -418,6 +434,8 @@ CondorFinder/
 │   │   ├── itinerario.ts           ← Cliente del itinerario semanal (HDU14)
 │   │   ├── puntosDiarios.ts        ← Cliente de retiros del día (HDU15)
 │   │   ├── crewState.ts            ← La cuadrilla declarada al generar (HDU5.1, localStorage)
+│   │   ├── rutaState.ts            ← Lo que una pestaña tiene cargado en /rutas (sessionStorage)
+│   │   ├── routePlans.ts           ← Cliente de rutas guardadas e historial (HDU5.2)
 │   │   ├── volumeReport.ts         ← Aritmética compartida del informe y la evolución
 │   │   └── pdfReport.ts            ← Informe PDF con gráficos vectoriales (HDU9)
 │   ├── routes/                     ← Vistas principales (file-based routing)
@@ -430,13 +448,15 @@ CondorFinder/
 │   │       ├── planificacion.recursos.tsx          ← HDU6: puntos de origen
 │   │       ├── planificacion.recursos_.$pointId.tsx ← HDU8: la flota de un punto
 │   │       ├── planificacion.itinerario.tsx        ← HDU14: itinerario semanal
+│   │       ├── planificacion.historial.tsx         ← HDU5.2: historial de rutas, por día
 │   │       └── planificacion.rutas.tsx             ← HDU5 + HDU15: ruta óptima y retiros del día
 │   └── styles.css                  ← Estilos globales, tokens del tema, overlays de mapa
 ├── backendModel/
 │   ├── orquestador.py       ← API FastAPI principal (pipeline + wiring de routers)
 │   ├── auth.py               ← Login/sesión (JWT en cookie httpOnly)
 │   ├── resources.py          ← Puntos y recursos (HDU6)
-│   ├── routing.py            ← Generación de ruta (HDU5 + HDU5.1)
+│   ├── routing.py            ← Generación de ruta (HDU5 + HDU5.1 + HDU5.2)
+│   ├── route_plans.py        ← Rutas guardadas, estados, ocupación y retiros (HDU5.2)
 │   ├── osrm_client.py        ← Matriz de tiempos y geometría de calles (OSRM)
 │   ├── routes_provider.py    ← Elige entre OSRM y Google Routes sin que routing.py lo sepa
 │   ├── google_routes_client.py ← Tiempos con tráfico (HDU5.1/AC5, apagado por omisión)
@@ -463,7 +483,7 @@ CondorFinder/
 │       ├── model/best.pt     ← Pesos del modelo entrenado
 │       └── output/           ← PNG del mapa y JSON de detecciones por tarea
 ├── docs/
-│   └── unificacion-puntos-zonas.md  ← Plan de entrada a HDU5.2 (ver Sprint 3)
+│   └── unificacion-puntos-zonas.md  ← Versión ANTERIOR del plan de HDU5.2, desactualizada
 ├── docker-compose.yml        ← Despliegue en la VM: backend, NodeODM y Caddy
 ├── Caddyfile                 ← TLS real en el origen (Let's Encrypt)
 ├── package.json
@@ -754,7 +774,7 @@ Se suman dos cosas más: **AC1 y AC2 seguirían siendo nuestros igual** (que dos
 
 ## Estado de Sprint 3
 
-Historias comprometidas: **HDU14** (itinerario semanal de puntos permanentes), **HDU15** (puntos diarios de retiro) y el **inicio de sesión federado**, que no es una historia con criterios sino la corrección de un riesgo de seguridad.
+Historias comprometidas: **HDU14** (itinerario semanal de puntos permanentes), **HDU15** (puntos diarios de retiro), **HDU5.2** (unificación de puntos y zonas) y el **inicio de sesión federado**, que no es una historia con criterios sino la corrección de un riesgo de seguridad.
 
 ### Inicio de sesión federado
 
@@ -787,13 +807,34 @@ El sistema tenía un único usuario sembrado desde el `.env`, con contraseña co
 > - **El formulario de un punto permanente pide más que nombre, dirección e imagen**: también barrio, tipo (Microbasural o VIRS) y frecuencia de atención, que son los campos de la planilla municipal y lo que después permite ordenar el catálogo.
 > - **El campo de imagen se quitó.** El AC habla de "opcionalmente una imagen", pero la imagen que de verdad le corresponde a un lugar en este sistema es su **mapa unificado**, que sale del vuelo y no de la galería de alguien. Dos imágenes para lo mismo dejaban la pregunta de cuál manda. La tabla muestra la del vuelo cuando existe, y un hueco cuando no, que es información: dice que falta volarlo.
 
-### Lo que estas historias dejaron planteado y no resuelven
+### HDU5.2: unificación de puntos y zonas
 
-Los puntos permanentes y los diarios **no entran todavía a la ruta generada**: se ven en el mapa y se editan, que es lo que piden sus criterios, pero `_load_route_stops` resuelve paradas solo desde análisis guardados. Un punto sin vuelo no tiene volumen, peso ni clases de residuo, y todo el reparto por capacidad de HDU5.1 descansa en esas tres cosas.
+Cierra lo que HDU14 y HDU15 dejaron planteado: un punto permanente y una zona volada eran dos cosas distintas según dónde se las mirara, y ninguna de las dos podía entrar a una ruta sin volumen medido.
 
-Tampoco existe el **registro de lo retirado** (cuántos m³ y con qué camión), que es la primera tabla de cada hoja diaria de la planilla municipal.
+**La decisión de fondo es que el lugar existe primero y el vuelo se le cuelga.** De ahí que solo entren a una ruta las paradas con datos (un análisis guardado, o un punto diario con volumen declarado), lo que elimina la pregunta de dónde sale el volumen de un punto que nadie midió.
 
-Las dos cosas, más la unificación completa de puntos y zonas, están desarrolladas en [`docs/unificacion-puntos-zonas.md`](docs/unificacion-puntos-zonas.md) como entrada a **HDU5.2**.
+| Criterio de aceptación | Estado |
+|---|---|
+| La pestaña de rutas muestra todos los puntos importantes con los que se generarán las rutas y los vehículos | ✅ Cumplido |
+| Se solicita una estimación de volumen retirado por punto, si es necesario | ✅ Cumplido |
+| "Editar" un punto registrado permite modificar o eliminar datos de una zona | ✅ Cumplido |
+| Generar rutas crea un número de rutas para la recolección de esos puntos | ✅ Cumplido (ver nota) |
+| "Editar" una ruta generada permite modificarla o eliminarla | ✅ Cumplido |
+| Una pestaña de historial de rutas las muestra todas, ordenadas por día, advirtiendo que es un historial | ✅ Cumplido |
+
+> **La nota sobre el cuarto criterio, que conviene tener a mano en la defensa.** La flota real de la municipalidad está en **un solo punto de origen** (Gral. José San Martín 2730), y el reparto es por punto, así que con los datos reales se genera **un** recorrido con N viajes dentro. Un viaje no es una ruta: es el mismo convoy volviendo al relleno. El criterio dice "un número de rutas", y uno es un número. Lo que lo hace visible con los datos reales son los **convoyes paralelos**: el diálogo de generación permite despachar de 1 a 4 convoyes del mismo punto, con la flota repartida entre ellos, y entonces el plan trae varios recorridos simultáneos. Va en 1 por omisión porque cada convoy cuesta una matriz y una geometría más contra el proveedor de rutas.
+
+**Lo que trajo, en orden:**
+
+- **Un vuelo declara su punto antes de subir imágenes**, y ese punto vive en el documento de la tarea (`zone_id`), no solo en el navegador: apagar la máquina con el análisis pendiente ya no desliga el vuelo de su lugar.
+- **Las paradas de una ruta son tipadas** (`analysis` o `punto_diario`), con su volumen a retirar declarado. Un punto diario no tiene peso medido, y eso significa "no medido", no cero.
+- **Una zona se puede visitar varias veces** en el mismo plan, y lo que lo acota es la jornada: el convoy vuelve al relleno y sale otra vez. Lo que no se alcanza a retirar queda como pendiente de la zona en vez de descartarla entera.
+- **Un plan generado se guarda** (colección `route_plans`), con su estado (`generada → en curso → terminada`, o `cancelada`), y se puede editar mientras no haya salido a la calle. Editar es regenerar: el diálogo se precarga con lo que se usó y el registro se reemplaza.
+- **Un vehículo asignado a una ruta en curso no se considera para rutas nuevas.** Es estado derivado: nunca escribe la marca `disponible`, que es información que declaró una persona.
+- **Al terminar una ruta se registra cuánto salió de cada parada**, que es la primera tabla de cada hoja diaria de la planilla municipal. Se puede cerrar sin anotar nada, porque una ruta que no se puede cerrar retiene sus vehículos para siempre.
+- **El volumen de una zona descuenta lo retirado después de medirla**, y el análisis guardado no se toca: la resta ocurre al mostrar. Un retiro y una medición van a la misma línea de tiempo, distinguidos por su origen, y es lo que le da historial de volumen a los 54 puntos permanentes sin volarle el dron a ninguno.
+
+> **Dos cosas que esta historia NO resuelve, y hay que decirlo.** No hay proceso que vigile relojes: el paso de una ruta a "terminada" lo marca una persona, porque en terreno pasan cosas que el sistema no ve. Y el **convoy** sigue sin modelarse: la municipalidad confirmó que ningún retiro se hace a mano y que un microbasural necesita retroexcavadora más minicargador o frontal más retroexcavadora, pero eso no está en ningún criterio de ninguna historia y es alcance a acordar con el equipo.
 
 ---
 

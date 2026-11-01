@@ -53,7 +53,8 @@ import {
   type DuplicateCandidate,
 } from "@/lib/analysisStore";
 import { RenameDialog } from "@/components/RenameDialog";
-import { buildVersions, type ZoneVersion } from "@/lib/volumeReport";
+import { buildVersions, type RetiroDeZona, type ZoneVersion } from "@/lib/volumeReport";
+import { listarRetiros } from "@/lib/routePlans";
 import { VersionBar } from "@/components/VersionBar";
 import { ReportPreview } from "@/components/ReportPreview";
 import { borrarArchivosDeVersion } from "@/lib/versionCleanup";
@@ -445,6 +446,18 @@ function AnalysisPage() {
    *  aparecía de golpe un momento después y empujaba el contenido. */
   const [versionsLoading, setVersionsLoading] = useState(false);
   const [evolutionOpen, setEvolutionOpen] = useState(false);
+  /** Los retiros de esta zona, para la línea de tiempo de la evolución y para el
+   *  informe (pieza 2.5 de HDU5.2).
+   *
+   *  **Se piden cuando se conoce la zona, no al abrir cada diálogo.** Los dos
+   *  caminos que los usan son botones distintos, y pedirlos en cada uno dejaría
+   *  dos lugares donde recordar hacerlo; es además una consulta indexada por
+   *  `zoneId` que casi siempre vuelve vacía.
+   *
+   *  Un fallo deja la lista vacía y las dos salidas quedan como antes, con solo
+   *  las mediciones: perder el detalle de los retiros es molesto, perder la
+   *  evolución entera por una consulta caída sería peor. */
+  const [retirosZona, setRetirosZona] = useState<RetiroDeZona[]>([]);
   const [reportOpen, setReportOpen] = useState(false);
   /** Sube cada vez que se aplica un análisis. Se usa como `key` del mapa y de
    *  la lista de zonas para que React los reemplace y su animación de entrada
@@ -891,14 +904,31 @@ function AnalysisPage() {
     }
   };
 
-  /** Trae las demás capturas de la zona para poder navegar entre ellas. */
+  /** Trae las demás capturas de la zona para poder navegar entre ellas, y los
+   *  retiros registrados de ese lugar.
+   *
+   *  Los retiros van acá y no en un efecto propio porque esta función es el
+   *  único lugar del que esta vista se enteró de que hay una zona: la llaman el
+   *  montaje, el cambio de captura, el renombrado y el borrado. Con un efecto
+   *  aparte habría dos definiciones de "cuándo se sabe cuál es la zona". */
   const cargarVersionesDeLaZona = (zona: string | null) => {
     if (!zona) {
       setVersions([]);
       setVersionsLoading(false);
       setZoneNameLoading(false);
+      setRetirosZona([]);
       return;
     }
+
+    listarRetiros(zona)
+      .then((rs) =>
+        setRetirosZona(
+          rs.map((r) => ({ fecha: r.fecha, volumenRetiradoM3: r.volumenRetiradoM3 })),
+        ),
+      )
+      // Degrada a vacío: sin esto el gráfico y el informe quedan como estaban
+      // antes de que existieran los retiros, con solo las mediciones.
+      .catch(() => setRetirosZona([]));
     setVersionsLoading(true);
     setZoneNameLoading(true);
     listAnalyses()
@@ -2231,6 +2261,7 @@ function AnalysisPage() {
                   analysisCount: zoneAnalyses.length,
                 },
                 analyses: zoneAnalyses,
+                retiros: retirosZona,
               }]
             : null
         }
@@ -2265,6 +2296,7 @@ function AnalysisPage() {
                   analysisCount: zoneAnalyses.length,
                 }}
                 analyses={zoneAnalyses}
+                retiros={retirosZona}
                 onOpenAnalysis={(id) => {
                   const record = zoneAnalyses.find((a) => a.id === id);
                   if (record) aplicarAnalisis(record);
