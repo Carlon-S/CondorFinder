@@ -432,6 +432,92 @@ async def listar_rutas(
     return [_fila(d) async for d in cursor]
 
 
+# **`/retiros` y `/retiros/por-zona` van ANTES de `/{plan_id}`, y no es cosmético.**
+#
+# FastAPI resuelve las rutas en el orden en que se declaran, y `GET /{plan_id}`
+# coincide con CUALQUIER segmento único. Con `/retiros` declarado después, la
+# petición llegaba a `obtener_ruta` con `plan_id="retiros"`, que respondía 400 por
+# id inválido. El cliente se traga ese error (degrada a lista vacía a propósito,
+# para no tumbar la pantalla), así que el síntoma no era un error sino un
+# gráfico de evolución que nunca recibía un solo retiro: "Sin versiones
+# anteriores" en una zona con retiros registrados.
+#
+# `/retiros/por-zona` sí funcionaba, porque tiene dos segmentos y `/{plan_id}`
+# no los captura; por eso Vista Principal mostraba bien "-N retirado" mientras
+# el gráfico seguía vacío. La prueba `probar_route_plans.py` verifica este orden.
+
+@router.get("/retiros/por-zona")
+async def retiros_por_zona(
+    current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
+):
+    """Cuánto se ha retirado de cada zona, y desde cuándo.
+
+    En UNA agregación, por el mismo motivo que `/fechas`: Vista Principal
+    muestra 54 lugares, y preguntar por cada uno serían 54 viajes a Mongo en
+    cada apertura.
+
+    Devuelve además la fecha del retiro MÁS RECIENTE, que es lo que permite
+    descontar solo los posteriores a la última medición: un retiro anterior al
+    vuelo ya está reflejado en lo que el dron vio.
+
+    **Va declarada antes de `/{plan_id}`** o ese parámetro la captura.
+    """
+    cursor = await get_db().retiros.aggregate(
+        [
+            {"$match": {"zoneId": {"$ne": None}, "volumenRetiradoM3": {"$ne": None}}},
+            {
+                "$group": {
+                    "_id": "$zoneId",
+                    "total": {"$sum": "$volumenRetiradoM3"},
+                    "ultimo": {"$max": "$fecha"},
+                    "veces": {"$sum": 1},
+                }
+            },
+        ]
+    )
+    return [
+        {
+            "zoneId": d["_id"],
+            "totalM3": round(d["total"], 2),
+            "ultimo": _iso_utc(d.get("ultimo")),
+            "veces": d["veces"],
+        }
+        async for d in cursor
+    ]
+
+
+@router.get("/retiros")
+async def listar_retiros(
+    zoneId: str | None = Query(None),
+    limite: int = Query(200, ge=1, le=1000),
+    current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
+):
+    """Los retiros registrados, de los más recientes a los más antiguos.
+
+    Con `zoneId` son los de un lugar, que es lo que su línea de tiempo necesita
+    para graficarlos junto a las mediciones por dron.
+    """
+    filtro: dict[str, Any] = {}
+    if zoneId:
+        filtro["zoneId"] = zoneId
+    cursor = get_db().retiros.find(filtro).sort("fecha", -1).limit(limite)
+    return [
+        {
+            "id": str(d["_id"]),
+            "fecha": _iso_utc(d["fecha"]),
+            "planId": d.get("planId"),
+            "kind": d.get("kind"),
+            "stopId": d.get("stopId"),
+            "nombre": d.get("nombre"),
+            "zoneId": d.get("zoneId"),
+            "volumenPlanificadoM3": d.get("volumenPlanificadoM3"),
+            "volumenRetiradoM3": d.get("volumenRetiradoM3"),
+            "completado": d.get("completado", True),
+        }
+        async for d in cursor
+    ]
+
+
 @router.get("/{plan_id}")
 async def obtener_ruta(
     plan_id: str,
@@ -744,78 +830,6 @@ async def cerrar_ruta(
         {"paradas": len(registros)},
     )
     return {"ok": True, "estado": ESTADO_TERMINADA, "retiros": len(registros)}
-
-
-@router.get("/retiros/por-zona")
-async def retiros_por_zona(
-    current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
-):
-    """Cuánto se ha retirado de cada zona, y desde cuándo.
-
-    En UNA agregación, por el mismo motivo que `/fechas`: Vista Principal
-    muestra 54 lugares, y preguntar por cada uno serían 54 viajes a Mongo en
-    cada apertura.
-
-    Devuelve además la fecha del retiro MÁS RECIENTE, que es lo que permite
-    descontar solo los posteriores a la última medición: un retiro anterior al
-    vuelo ya está reflejado en lo que el dron vio.
-
-    **Va declarada antes de `/{plan_id}`** o ese parámetro la captura.
-    """
-    cursor = await get_db().retiros.aggregate(
-        [
-            {"$match": {"zoneId": {"$ne": None}, "volumenRetiradoM3": {"$ne": None}}},
-            {
-                "$group": {
-                    "_id": "$zoneId",
-                    "total": {"$sum": "$volumenRetiradoM3"},
-                    "ultimo": {"$max": "$fecha"},
-                    "veces": {"$sum": 1},
-                }
-            },
-        ]
-    )
-    return [
-        {
-            "zoneId": d["_id"],
-            "totalM3": round(d["total"], 2),
-            "ultimo": _iso_utc(d.get("ultimo")),
-            "veces": d["veces"],
-        }
-        async for d in cursor
-    ]
-
-
-@router.get("/retiros")
-async def listar_retiros(
-    zoneId: str | None = Query(None),
-    limite: int = Query(200, ge=1, le=1000),
-    current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
-):
-    """Los retiros registrados, de los más recientes a los más antiguos.
-
-    Con `zoneId` son los de un lugar, que es lo que su línea de tiempo necesita
-    para graficarlos junto a las mediciones por dron.
-    """
-    filtro: dict[str, Any] = {}
-    if zoneId:
-        filtro["zoneId"] = zoneId
-    cursor = get_db().retiros.find(filtro).sort("fecha", -1).limit(limite)
-    return [
-        {
-            "id": str(d["_id"]),
-            "fecha": _iso_utc(d["fecha"]),
-            "planId": d.get("planId"),
-            "kind": d.get("kind"),
-            "stopId": d.get("stopId"),
-            "nombre": d.get("nombre"),
-            "zoneId": d.get("zoneId"),
-            "volumenPlanificadoM3": d.get("volumenPlanificadoM3"),
-            "volumenRetiradoM3": d.get("volumenRetiradoM3"),
-            "completado": d.get("completado", True),
-        }
-        async for d in cursor
-    ]
 
 
 # =============================================================================
