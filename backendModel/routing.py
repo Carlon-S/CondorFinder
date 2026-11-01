@@ -1522,7 +1522,56 @@ def _partir_en_convoyes(punto: dict, cuantos: int) -> list[dict]:
     return convoyes
 
 
-def _repartir_por_carga(convoyes: list[dict], stops: list[dict]) -> dict[str, list[dict]]:
+def _capacidad_de_viaje(
+    convoy: dict,
+    stops: list[dict],
+    personal: dict[str, list[str]] | None,
+) -> tuple[float, list[str]]:
+    """Cuántos m³ carga UN viaje de este convoy con estas paradas, y quién va.
+
+    **Replica el despacho real de `_build_subroute`, no lo aproxima.** El
+    reequilibrio de convoyes estimaba los viajes con la capacidad de TODA la
+    flota del convoy (50 m³), y lo que de verdad sale por viaje es lo que el
+    convoy despacha: se dimensiona por la parada más grande, acotada por lo que
+    el punto tiene, y si la cuadrilla no alcanza se baja el objetivo a la mitad
+    hasta que algo se pueda tripular. Con dos conductores y dos peonetas cada
+    convoy solo puede tripular UN AMPLIROLL, o sea 20 m³ por viaje, y 45 m³
+    eran tres viajes, no uno. Con la capacidad equivocada el reparto 45/45
+    parecía óptimo, el reequilibrio no encontraba nada que mejorar y el plan
+    salía con seis viajes cuando cinco eran posibles.
+
+    Devuelve `(0.0, [])` cuando nada se puede despachar. El segundo valor son los
+    nombres de quienes quedan asignados, para que el llamador los descuente del
+    pool antes de evaluar el convoy siguiente: la cuadrilla es del PLAN y el
+    handler la consume en el mismo orden.
+
+    No considera autonomía ni la clase de residuo (`clase_dominante`): son
+    filtros que dependen de la geometría y del tipo, y simularlos acá obligaría
+    a pedir la matriz de OSRM para repartir. El efecto es una estimación que
+    puede errar por arriba, no una que prometa algo falso.
+    """
+    tope = _point_truck_capacity(convoy)
+    if tope <= 0 or not stops:
+        return 0.0, []
+    volumen, peso = _carga_de_un_viaje(stops, tope)
+    camiones = _trucks_used(convoy, volumen, peso, None, personal)
+    objetivo = volumen
+    while not camiones and objetivo > _MINIMO_RETIRO_M3:
+        objetivo *= 0.5
+        peso *= 0.5
+        camiones = _trucks_used(convoy, max(objetivo, _MINIMO_RETIRO_M3), peso, None, personal)
+    if not camiones:
+        return 0.0, []
+    capacidad = sum(c.get("capacity_m3", 0) or 0 for c in camiones)
+    nombres = [p["nombre"] for c in camiones for p in c.get("crew_asignada", [])]
+    return float(capacidad), nombres
+
+
+def _repartir_por_carga(
+    convoyes: list[dict],
+    stops: list[dict],
+    personal: dict[str, list[str]] | None = None,
+) -> dict[str, list[dict]]:
     """Reparte las paradas entre convoyes que salen del MISMO lugar.
 
     **No se puede usar `_split_stops_by_nearest`**: ese asigna cada zona al
@@ -1543,11 +1592,23 @@ def _repartir_por_carga(convoyes: list[dict], stops: list[dict]) -> dict[str, li
     hacía otro para retirar 10, cuando esos 15 cabían en un viaje que ya se
     estaba haciendo.
 
-    Por eso el refinamiento optimiza los VIAJES, con la cantidad por convoy
-    aproximada como `ceil(volumen / capacidad)`. Es una aproximación por abajo
-    (el orden real de las paradas lo decide `_best_stop_order`, que enumera
-    permutaciones y puede necesitar uno más), pero es la cota que ese enumerador
+    Por eso el refinamiento optimiza los VIAJES, y los cuenta con lo que cada
+    convoy **despacha de verdad** (`_capacidad_de_viaje()`), no con la capacidad
+    de su flota: con dos conductores y dos peonetas declarados cada convoy tripula
+    un solo AMPLIROLL, o sea 20 m³ por viaje aunque su flota sume 50. La primera
+    versión usaba la flota completa, veía "45 m³ en 50 m³ = un viaje" por convoy,
+    daba el reparto 45/45 por óptimo y no movía nada: el plan salía con seis
+    viajes cuando cinco eran posibles.
+
+    La cantidad de viajes por convoy se aproxima como `ceil(volumen / capacidad)`.
+    Es una cota por abajo (el orden real de las paradas lo decide
+    `_best_stop_order`, y con varias zonas mayores que el camión el resto de una
+    puede no encajar con la siguiente), pero es el mínimo que ese enumerador
     alcanza cuando puede, así que optimizar contra ella no promete nada falso.
+
+    **El pool de personal se consume en el orden de los convoyes**, igual que el
+    handler: lo que el primero se queda no lo tiene el segundo. Por eso el costo
+    de un reparto se evalúa de corrido sobre todos los convoyes y no uno por uno.
 
     **Es una búsqueda local que solo ACEPTA MEJORAS**, no un óptimo: se prueba
     mover cada zona a cada otro convoy y se queda con el primer movimiento que
@@ -1563,12 +1624,78 @@ def _repartir_por_carga(convoyes: list[dict], stops: list[dict]) -> dict[str, li
         por_convoy[elegido].append(zona)
         carga[elegido] += zona["volumeM3"]
 
-    # La capacidad de UN viaje de cada convoy. Sin ella (nadie declaró m³) no
-    # hay viajes que contar y el reparto por volumen es lo único que se puede
-    # hacer, así que el refinamiento se saltea entero.
-    capacidad = {str(c["_id"]): _point_truck_capacity(c) for c in convoyes}
-    if any(v <= 0 for v in capacidad.values()):
+    # Sin flota con capacidad declarada no hay viajes que contar: el reparto por
+    # volumen es lo único que se puede hacer y el refinamiento se saltea entero.
+    if any(_point_truck_capacity(c) <= 0 for c in convoyes):
         return por_convoy
+
+    # Los resultados de `_capacidad_de_viaje` se guardan: es la parte cara, y el
+    # mismo convoy con las mismas paradas y el mismo pool se vuelve a evaluar en
+    # casi cada movimiento candidato.
+    memo: dict[tuple, tuple[float, list[str]]] = {}
+
+    def capacidad_con(c: dict, zonas: list[dict], pool: dict[str, list[str]] | None):
+        clave = (
+            str(c["_id"]),
+            tuple(sorted(str(z.get("stopId")) + "|" + str(z["volumeM3"]) for z in zonas)),
+            None if pool is None else tuple((r, tuple(n)) for r, n in sorted(pool.items())),
+        )
+        if clave not in memo:
+            memo[clave] = _capacidad_de_viaje(c, zonas, pool)
+        return memo[clave]
+
+    def coste(asignacion: dict[str, list[dict]]) -> tuple[int, float]:
+        """(viajes totales, carga del convoy más cargado) de un reparto.
+
+        Primero los viajes, que son el trabajo real de la jornada; después la
+        carga máxima, para desempatar hacia el reparto más parejo entre dos que
+        cuestan lo mismo. Un convoy que no puede despachar nada pero tiene
+        paradas cuesta un viaje por cada capacidad mínima, o sea lo bastante como
+        para que ningún movimiento lo deje así."""
+        pool = None if personal is None else {r: list(n) for r, n in personal.items()}
+        viajes = 0
+        mayor = 0.0
+        for c in convoyes:
+            zonas = asignacion[str(c["_id"])]
+            volumen = sum(z["volumeM3"] for z in zonas)
+            mayor = max(mayor, volumen)
+            if volumen <= 1e-9:
+                continue
+            cap, nombres = capacidad_con(c, zonas, pool)
+            if cap <= 0:
+                viajes += 10_000
+                continue
+            viajes += math.ceil(volumen / cap - 1e-9)
+            if pool is not None:
+                for rol in pool:
+                    pool[rol] = [n for n in pool[rol] if n not in nombres]
+        return (viajes, mayor)
+
+    # Tope de vueltas: cada una mueve una zona, así que sin mejora posible se
+    # corta sola. El límite solo evita un ciclo si dos movimientos se cancelaran
+    # entre sí por un empate numérico.
+    for _ in range(len(stops) * len(ids) + 1):
+        actual = coste(por_convoy)
+        mejor: tuple[tuple[int, float], str, str, dict] | None = None
+        for origen in ids:
+            for zona in list(por_convoy[origen]):
+                for destino in ids:
+                    if destino == origen:
+                        continue
+                    por_convoy[origen].remove(zona)
+                    por_convoy[destino].append(zona)
+                    candidato = coste(por_convoy)
+                    por_convoy[destino].remove(zona)
+                    por_convoy[origen].append(zona)
+                    if candidato < actual and (mejor is None or candidato < mejor[0]):
+                        mejor = (candidato, origen, destino, zona)
+        if mejor is None:
+            break
+        _, origen, destino, zona = mejor
+        por_convoy[origen].remove(zona)
+        por_convoy[destino].append(zona)
+
+    return por_convoy
 
     def viajes_de(cid: str, volumen: float) -> int:
         return math.ceil(volumen / capacidad[cid] - 1e-9) if volumen > 1e-9 else 0
@@ -2703,7 +2830,7 @@ async def generate_route(
     elif payload.convoyesPorPunto > 1:
         # Todos los convoyes salen de la MISMA coordenada, así que el reparto
         # por cercanía no distingue nada: se reparte por carga.
-        stops_by_point = _repartir_por_carga(origin_group, stops_que_caben)
+        stops_by_point = _repartir_por_carga(origin_group, stops_que_caben, personal_restante)
     else:
         stops_by_point = _split_stops_by_nearest(origin_group, stops_que_caben)
 
