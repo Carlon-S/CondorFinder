@@ -242,14 +242,42 @@ class RutaGuardadaOut(BaseModel):
     cerradaEn: str | None = None
 
 
+#: El día se cuenta en hora de Chile, no en UTC. Mongo resuelve esta zona con su
+#: propia base (la misma de Atlas), así que el horario de verano e invierno
+#: salen bien sin depender de que la imagen de Docker traiga `tzdata`.
+_ZONA_DIA = "America/Santiago"
+
+
+def _iso_utc(valor: datetime | None) -> str | None:
+    """La fecha como ISO 8601 **con zona horaria explícita**.
+
+    **Este era el defecto de la hora desfasada en el historial.** El cliente de
+    Mongo no usa `tz_aware`, así que los datetime vuelven SIN zona, y su
+    `isoformat()` salía como `2026-11-01T22:12:00` sin sufijo. Un navegador lee
+    una fecha sin sufijo como hora LOCAL, no como UTC: el reloj en UTC se
+    mostraba como si fuera hora de Chile y toda hora del historial aparecía tres
+    horas adelantada (cuatro en invierno). Peor, a partir de las 21:00 la ruta
+    se agrupaba bajo el día siguiente.
+
+    Los datetime se guardan SIEMPRE en UTC (`datetime.now(timezone.utc)`), así
+    que a uno sin zona se le pone UTC, que es lo que es. Se emiten milisegundos y
+    no microsegundos porque son los únicos que el estándar de JavaScript
+    garantiza leer en todos los navegadores.
+    """
+    if not valor:
+        return None
+    if valor.tzinfo is None:
+        valor = valor.replace(tzinfo=timezone.utc)
+    return valor.astimezone(timezone.utc).isoformat(timespec="milliseconds")
+
+
 def _fila(doc: dict) -> RutaGuardadaOut:
     def iso(campo: str) -> str | None:
-        valor = doc.get(campo)
-        return valor.isoformat() if valor else None
+        return _iso_utc(doc.get(campo))
 
     return RutaGuardadaOut(
         id=str(doc["_id"]),
-        fecha=doc["fecha"].isoformat(),
+        fecha=_iso_utc(doc["fecha"]) or "",
         estado=doc.get("estado", ESTADO_GENERADA),
         resumen=doc.get("resumen") or {},
         editadoEn=iso("editadoEn"),
@@ -276,7 +304,19 @@ async def dias_con_rutas(
         [
             {
                 "$group": {
-                    "_id": {"$dateToString": {"format": "%Y-%m-%d", "date": "$fecha"}},
+                    # **Con la zona de Chile.** Sin `timezone`, Mongo agrupa por
+                    # día UTC: una ruta de las 21:30 en Santiago (00:30 UTC del
+                    # día siguiente) quedaba contada en el día siguiente en la
+                    # tira de atajos, mientras la lista, que agrupa en hora de
+                    # Chile, la dejaba en su día. Las dos tienen que decir lo
+                    # mismo.
+                    "_id": {
+                        "$dateToString": {
+                            "format": "%Y-%m-%d",
+                            "date": "$fecha",
+                            "timezone": _ZONA_DIA,
+                        }
+                    },
                     "total": {"$sum": 1},
                 }
             },
@@ -322,13 +362,25 @@ async def listar_rutas(
     filtro: dict[str, Any] = {}
     if estado:
         filtro["estado"] = estado
-    rango: dict[str, Any] = {}
+    # **El filtro por día se compara contra el día de CHILE de cada ruta**, no
+    # contra límites en UTC. `desde`/`hasta` llegan como `YYYY-MM-DD` tomados de
+    # los atajos, o sea días de Santiago; interpretarlos como UTC dejaba fuera
+    # las rutas de 21:00 a 24:00 de ese día (que en UTC ya son el siguiente) y
+    # metía las de 21:00 a 24:00 del día anterior. Como el texto `YYYY-MM-DD`
+    # ordena igual que la fecha, alcanza con comparar cadenas, y la conversión de
+    # zona (verano e invierno incluidos) la hace Mongo.
     if desde:
-        rango["$gte"] = _inicio_del_dia(desde)
+        _validar_dia(desde)
     if hasta:
-        rango["$lt"] = _fin_del_dia(hasta)
-    if rango:
-        filtro["fecha"] = rango
+        _validar_dia(hasta)
+    dia_expr = {"$dateToString": {"format": "%Y-%m-%d", "date": "$fecha", "timezone": _ZONA_DIA}}
+    condiciones = []
+    if desde:
+        condiciones.append({"$gte": [dia_expr, desde]})
+    if hasta:
+        condiciones.append({"$lte": [dia_expr, hasta]})
+    if condiciones:
+        filtro["$expr"] = {"$and": condiciones} if len(condiciones) > 1 else condiciones[0]
 
     cursor = (
         get_db()
@@ -673,7 +725,7 @@ async def retiros_por_zona(
         {
             "zoneId": d["_id"],
             "totalM3": round(d["total"], 2),
-            "ultimo": d["ultimo"].isoformat() if d.get("ultimo") else None,
+            "ultimo": _iso_utc(d.get("ultimo")),
             "veces": d["veces"],
         }
         async for d in cursor
@@ -698,7 +750,7 @@ async def listar_retiros(
     return [
         {
             "id": str(d["_id"]),
-            "fecha": d["fecha"].isoformat(),
+            "fecha": _iso_utc(d["fecha"]),
             "planId": d.get("planId"),
             "kind": d.get("kind"),
             "stopId": d.get("stopId"),
@@ -757,26 +809,14 @@ async def unidades_ocupadas() -> set[str]:
 # =============================================================================
 # AYUDANTES DE FECHA
 # =============================================================================
-# El filtro del historial llega como `YYYY-MM-DD` y las fechas se guardan como
-# datetime en UTC, así que un día es un rango y no una igualdad.
+# El filtro del historial llega como `YYYY-MM-DD`, un día de CHILE. Las fechas se
+# guardan como datetime en UTC y se comparan contra el día de Santiago dentro de
+# Mongo (ver `listar_rutas`), que es lo que mantiene bien el cambio de horario.
 
 
-def _inicio_del_dia(dia: str) -> datetime:
-    return _parsear(dia)
-
-
-def _fin_del_dia(dia: str) -> datetime:
-    """El instante en que empieza el día SIGUIENTE, para comparar con `$lt`.
-
-    No las 23:59:59 del mismo día: con `$lt` eso deja fuera el último segundo, y
-    con `$lte` deja fuera los microsegundos posteriores. Un día entero se expresa
-    como "menor que el inicio del siguiente" y no hay instante que se escape.
-    """
-    return _parsear(dia) + timedelta(days=1)
-
-
-def _parsear(dia: str) -> datetime:
+def _validar_dia(dia: str) -> None:
+    """Rechaza con 400 lo que no sea `YYYY-MM-DD`, que es lo que se compara."""
     try:
-        return datetime.strptime(dia, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        datetime.strptime(dia, "%Y-%m-%d")
     except ValueError:
         raise HTTPException(status_code=400, detail="La fecha debe ser YYYY-MM-DD")

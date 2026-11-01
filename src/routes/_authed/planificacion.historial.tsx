@@ -524,7 +524,9 @@ function FilaRuta({
                   ? `${cifra(r.volumenRetiradoM3)} m³ retirados de ${cifra(r.volumenM3)}`
                   : `${cifra(r.volumenRetiradoM3)} m³ retirados`
                 : r.volumenM3 != null
-                  ? `${cifra(r.volumenM3)} m³`
+                  ? // Una ruta ya cerrada sin cifra dice "planificados": con solo
+                    // "40 m³" parecía lo que salió, y nadie lo midió.
+                    `${cifra(r.volumenM3)} m³${ruta.estado === "terminada" ? " planificados" : ""}`
                   : null,
               r.distanciaKm != null ? `${cifra(r.distanciaKm)} km` : null,
               r.duracionHoras != null ? `${cifra(r.duracionHoras)} h` : null,
@@ -685,7 +687,16 @@ function DetalleRuta({ ruta, onVolver }: { ruta: RutaGuardadaCompleta; onVolver:
         <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
           <Cifra
             icono={Trash2}
-            etiqueta={ruta.resumen.volumenRetiradoM3 != null ? "Retirado" : "Volumen"}
+            // **"Planificado" y no "Volumen" cuando la ruta se cerró sin cifra.**
+            // La tarjeta mostraba lo planificado bajo el rótulo "Volumen", y en
+            // una ruta ya terminada eso se leía como lo que salió.
+            etiqueta={
+              ruta.resumen.volumenRetiradoM3 != null
+                ? "Retirado"
+                : ruta.estado === "terminada"
+                  ? "Planificado"
+                  : "Volumen"
+            }
             valor={
               ruta.resumen.volumenRetiradoM3 != null
                 ? `${cifra(ruta.resumen.volumenRetiradoM3)} m³`
@@ -697,7 +708,19 @@ function DetalleRuta({ ruta, onVolver }: { ruta: RutaGuardadaCompleta; onVolver:
               ruta.resumen.volumenRetiradoM3 != null && ruta.resumen.volumenM3 != null
                 ? `se planificaron ${cifra(ruta.resumen.volumenM3)} m³`
                 : ruta.estado === "terminada"
-                  ? "se cerró sin registrar"
+                  ? // **Dos cierres distintos que daban el mismo texto.** "Cerrar
+                    // sin registrar" no guarda ninguna parada; "Cerrar y
+                    // registrar" con todos los campos vacíos SÍ guarda cada una
+                    // (con su casilla de completo) pero sin volumen medido.
+                    // Decir "se cerró sin registrar" en el segundo contradice lo
+                    // que se hizo: hay un registro por parada, falta la cifra.
+                    (ruta.resumen.paradasRegistradas ?? 0) > 0
+                    ? `${entero(ruta.resumen.paradasRegistradas ?? 0)} parada${
+                        ruta.resumen.paradasRegistradas === 1 ? "" : "s"
+                      } registrada${
+                        ruta.resumen.paradasRegistradas === 1 ? "" : "s"
+                      }, sin volumen medido`
+                    : "se cerró sin registrar"
                   : undefined
             }
           />

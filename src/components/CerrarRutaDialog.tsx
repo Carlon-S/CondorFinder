@@ -197,6 +197,20 @@ export function CerrarRutaDialog({
           </ul>
         )}
 
+        {/* **Todos los campos en blanco es un cierre a medias, y conviene decirlo
+            antes de confirmar.** No es lo mismo que "Cerrar sin registrar":
+            acá cada parada SÍ queda registrada (con su casilla de completo),
+            pero sin volumen, así que ninguna zona cambia su cifra. Sin este
+            aviso el resultado sorprende: parece que se anotó algo y el volumen
+            de la zona no se mueve. */}
+        {filas.length > 0 && filas.every((f) => f.retirado.trim() === "") && (
+          <p className="rounded-md border border-warning-strong/40 bg-warning/10 px-3 py-2 text-[0.6875rem] leading-relaxed text-warning-strong">
+            Dejaste todos los volúmenes en blanco. Se guardará cada parada con su casilla de
+            completo, pero sin cifra de retiro, así que el volumen de las zonas no cambiará. Si no
+            hay nada que anotar, usa <strong>Cerrar sin registrar</strong>.
+          </p>
+        )}
+
         <DialogFooter className="gap-2 sm:justify-between">
           {/* La salida sin cifras, con su propio botón y no escondida. Una ruta
               que no se puede cerrar queda en curso para siempre, y una en curso
