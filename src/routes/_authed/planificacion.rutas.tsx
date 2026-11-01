@@ -881,13 +881,12 @@ function RutasPage() {
   /** Saca UN recorrido del plan, con su trazo del mapa. El resto del plan
    *  sigue en pie, que es la diferencia con descartar la ruta entera.
    *
-   *  Las paradas de ese recorrido NO se quitan, y no es un olvido: hoy
-   *  `route.stops` llega como una lista plana sin dueño, así que la vista no
-   *  tiene cómo saber cuáles eran suyas. Cuando el backend mande `stopOrders`
-   *  por segmento (ya está declarado en routePlan.ts), esta función las quita
-   *  también. Con un solo punto de origen, que es el caso de hoy, descartar el
-   *  único recorrido equivale a descartar el plan, así que la diferencia no se
-   *  nota todavía. */
+   *  **Se lleva también sus paradas**, ahora que el backend manda `stopOrders`
+   *  por segmento. Antes no podía: `route.stops` llegaba como una lista plana
+   *  sin dueño, así que descartar un recorrido dejaba sus paradas contadas en
+   *  los totales y dibujadas en el mapa. Con un solo punto de origen no se
+   *  notaba, porque descartar el único recorrido equivale a descartar el plan;
+   *  con los convoyes paralelos sí. */
   const descartarRecorrido = (indice: number) => {
     const quedan = (routeSegments ?? []).filter((_, i) => i !== indice);
     if (quedan.length === 0) {
@@ -895,6 +894,14 @@ function RutasPage() {
       return;
     }
     const sinEl = <T,>(xs: T[] | null) => (xs ? xs.filter((_, i) => i !== indice) : null);
+    // Las paradas del recorrido que se va. Un plan guardado antes de que
+    // existiera `stopOrders` no lo trae, y ahí se conservan todas: perderlas
+    // sería peor que dejarlas de más, porque no hay forma de saber cuáles eran.
+    const suyas = routeSegments?.[indice]?.stopOrders;
+    if (suyas && suyas.length > 0) {
+      const fuera = new Set(suyas);
+      setRouteStops((prev) => (prev ? prev.filter((s) => !fuera.has(s.order)) : prev));
+    }
     setRouteSegments(quedan);
     setRouteOutboundPaths(sinEl(routeOutboundPaths));
     setRouteDisposalPaths(sinEl(routeDisposalPaths));

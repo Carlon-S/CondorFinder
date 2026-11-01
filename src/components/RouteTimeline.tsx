@@ -250,6 +250,15 @@ export function RouteTimeline({
   salida,
 }: {
   segment: RoutePlanSegment;
+  /** Las paradas del PLAN COMPLETO. El componente se queda con las suyas.
+   *
+   *  **El filtrado vive acá y no en quien llama**, y eso es lo que corrige el
+   *  defecto: las dos vistas que montan este componente (`/rutas` y el
+   *  historial) le pasaban la lista entera, lo que era correcto por accidente
+   *  mientras un plan tenía un solo recorrido. Con los convoyes paralelos cada
+   *  recorrido dibujaba la unión de las paradas. Arreglarlo en los dos lugares
+   *  habría dejado la misma regla escrita dos veces, lista para separarse en el
+   *  tercero. */
   stops: RoutePlanStop[];
   /** Resuelve qué zona es cada parada. Es una FUNCIÓN y no un mapa por id
    *  porque un plan viejo puede no traer `stopId` en la parada, así que
@@ -268,6 +277,27 @@ export function RouteTimeline({
 }) {
   const { legs } = segment;
   const vehiculos = segment.vehicles ?? [];
+  // ── Las paradas de ESTE recorrido ──
+  //
+  // Tres caminos, en orden de confianza. El primero es el único que no deduce
+  // nada: el backend dice cuáles son suyas. El segundo es para los planes
+  // guardados antes de ese campo, y sale de los saltos, que ya traen el `order`
+  // de destino de cada uno. El tercero es la lista entera, que es exactamente
+  // como se veía ese plan el día que se guardó, así que un historial viejo no
+  // cambia de contenido por este arreglo.
+  const propias = (() => {
+    if (segment.stopOrders && segment.stopOrders.length > 0) {
+      const porOrden = new Map(stops.map((s) => [s.order, s]));
+      // Se recorre `stopOrders` y no `stops` porque ese arreglo YA está en orden
+      // de visita, y es el orden en que la cuadrilla las va a hacer.
+      return segment.stopOrders
+        .map((o) => porOrden.get(o))
+        .filter((s): s is RoutePlanStop => s !== undefined);
+    }
+    const deLosSaltos = new Set((legs ?? []).map((l) => l.toOrder));
+    if (deLosSaltos.size > 0) return stops.filter((s) => deLosSaltos.has(s.order));
+    return stops;
+  })();
   const filas: Fila[] = [];
   // Reloj acumulado del recorrido, en horas desde la salida. Va sumando cada
   // tramo a medida que se arman las filas, así que cada nodo conoce la hora a
@@ -324,7 +354,7 @@ export function RouteTimeline({
   const descargas = segment.disposals ?? [];
   const viajes = segment.trips ?? 1;
 
-  stops.forEach((stop, i) => {
+  propias.forEach((stop, i) => {
     // **El depósito intermedio va ANTES de la parada que abre el viaje nuevo.**
     //
     // Es el reflejo exacto de cómo el backend lo decidió: el convoy no puede
@@ -333,9 +363,9 @@ export function RouteTimeline({
     // el separador quedaría del lado equivocado y el tiempo del depósito se
     // sumaría a la llegada de la parada que ya ocurrió.
     const viajeDeEsta = stop.trip ?? 1;
-    const viajeAnterior = i > 0 ? (stops[i - 1].trip ?? 1) : viajeDeEsta;
+    const viajeAnterior = i > 0 ? (propias[i - 1].trip ?? 1) : viajeDeEsta;
     if (viajeDeEsta !== viajeAnterior) {
-      const descarga = descargas.find((d) => d.afterOrder === stops[i - 1].order);
+      const descarga = descargas.find((d) => d.afterOrder === propias[i - 1].order);
       filas.push({
         marcador: null,
         contenido: (
@@ -381,7 +411,7 @@ export function RouteTimeline({
     }
 
     const datos = datosDeParada?.(stop);
-    const tramo = buscarTramo(legs, i === 0 ? null : stops[i - 1].order, stop.order);
+    const tramo = buscarTramo(legs, i === 0 ? null : propias[i - 1].order, stop.order);
     transcurrido += tramo?.durationHours ?? (i === 0 ? segment.outboundDurationHours : 0);
     filas.push({
       marcador: null,
@@ -558,7 +588,11 @@ export function RouteTimeline({
     marcador: null,
     contenido: (
       <Tramo
-        tramo={buscarTramo(legs, stops.length > 0 ? stops[stops.length - 1].order : null, null)}
+        tramo={buscarTramo(
+          legs,
+          propias.length > 0 ? propias[propias.length - 1].order : null,
+          null,
+        )}
         respaldo={{
           distanceKm: segment.returnDistanceKm,
           durationHours: segment.returnDurationHours,
@@ -570,7 +604,7 @@ export function RouteTimeline({
 
   const tramoRegreso = buscarTramo(
     legs,
-    stops.length > 0 ? stops[stops.length - 1].order : null,
+    propias.length > 0 ? propias[propias.length - 1].order : null,
     null,
   );
   transcurrido += tramoRegreso?.durationHours ?? segment.returnDurationHours;

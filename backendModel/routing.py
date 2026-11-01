@@ -312,6 +312,20 @@ class RouteSegmentOut(BaseModel):
     frontend como distancia/tiempo, no hace falta mandarla aparte)."""
     originName: str
     trucksUsed: int
+    #: Los `order` de las paradas de ESTA sub-ruta, en orden de visita.
+    #:
+    #: **Sin esto la vista no puede saber qué paradas le tocan a cada
+    #: recorrido.** `stops` es la lista del plan completo, numerada de corrido
+    #: entre todas las sub-rutas, y mientras hubo una sola por plan pasarle la
+    #: lista entera era correcto por accidente. Con los convoyes paralelos
+    #: (pieza 2.3) hay dos, y los dos mostraban la unión de las paradas, con los
+    #: tramos de la mitad ajena en blanco y el contador de viajes reiniciándose.
+    #:
+    #: Se manda en vez de dejar que la vista lo deduzca de `legs[].toOrder`:
+    #: eso ataría qué parada es de quién a que la geometría haya llegado
+    #: completa, y un proveedor que devuelve menos saltos dejaría paradas sin
+    #: dueño. Acá ya está calculado (`ordenes_sub`), así que no cuesta nada.
+    stopOrders: list[int] = []
     # ── AC7 de HDU5.1 ──
     # **Todos** los vehículos del tramo, cada uno con su patente, su tipo, su
     # capacidad, su foto y su propia dotación.
@@ -1763,28 +1777,56 @@ async def _best_stop_order(
         """
         vol = volumen_de(idx)
         peso = peso_de(idx)
-        # **Las DOS magnitudes deciden cuántas visitas**, no solo el volumen. La
-        # densidad cambia con el tipo de residuo, así que una zona de escombros
-        # puede necesitar dos viajes por peso aunque entre de sobra en metros
-        # cúbicos. Partir solo por volumen dejaría esa carga por sobre el límite
-        # en toneladas del convoy en cada visita.
-        por_volumen = (
-            math.ceil(vol / capacidad_m3) if capacidad_m3 and capacidad_m3 > 0 and vol > 0 else 1
-        )
-        por_peso = (
-            math.ceil(peso / capacidad_ton)
-            if capacidad_ton and capacidad_ton > 0 and peso > 0
-            else 1
-        )
-        visitas = max(1, por_volumen, por_peso)
-        if visitas == 1:
+        # **Las DOS magnitudes deciden cuánto entra en una pasada**, no solo el
+        # volumen. La densidad cambia con el tipo de residuo, así que una zona de
+        # escombros puede necesitar dos viajes por peso aunque entre de sobra en
+        # metros cúbicos. Se toma la fracción de la zona que el convoy carga de
+        # una vez según el límite que primero se agote, y **las dos magnitudes
+        # escalan juntas**: con el peso completo contra una carga parcial,
+        # `desborda()` insertaría un depósito que no corresponde.
+        fraccion = 1.0
+        if capacidad_m3 and capacidad_m3 > 0 and vol > 0:
+            fraccion = min(fraccion, capacidad_m3 / vol)
+        if capacidad_ton and capacidad_ton > 0 and peso > 0:
+            fraccion = min(fraccion, capacidad_ton / peso)
+        if fraccion >= 1.0:
             return [(vol, peso)]
-        visitas = min(visitas, _MAX_VISITAS_POR_ZONA)
-        # Porciones IGUALES y no "llenar hasta el tope y dejar el resto": un
-        # último viaje con cuatro metros cúbicos obliga a hacer el mismo
-        # recorrido por una carga ridícula, y repartir parejo deja todas las
-        # pasadas del mismo tamaño sin cambiar cuántas son.
-        return [(vol / visitas, peso / visitas)] * visitas
+
+        # **Se LLENA el camión y el resto queda para la pasada siguiente**, en vez
+        # de repartir la zona en porciones iguales. Una zona de 30 m³ con un
+        # camión de 20 da 20 y 10, no 15 y 15.
+        #
+        # Se hizo al revés primero, con el argumento de que un último viaje de
+        # cuatro metros cúbicos obliga a hacer el mismo recorrido por una carga
+        # ridícula. Es un argumento incompleto: **el resto no viaja solo**, lo
+        # recoge `repartir()` junto con la zona siguiente si entra, que es
+        # precisamente lo que las porciones iguales impiden. Con una zona de 30 y
+        # otra de 8 contra un camión de 20, llenar da 20 | 10+8 = DOS viajes y
+        # repartir parejo da 15 | 15 | 8 = TRES. Y donde no hay nada que juntar,
+        # las dos estrategias dan los mismos viajes, así que llenar nunca es peor.
+        #
+        # Es además lo que hace la cuadrilla, y lo que vuelve verificable el plan
+        # en terreno: "20 m³ en un camión de 20" se comprueba mirando la tolva, y
+        # "15 en un camión de 20" se lee como un error de cálculo.
+        visitas = math.ceil(1 / fraccion)
+        if visitas > _MAX_VISITAS_POR_ZONA:
+            # Tope de seguridad, no regla de negocio: con una zona de 4.582 m³ y
+            # un convoy de 40 hay que construir la lista una vez por permutación,
+            # y el recorte por horas va a tirar casi toda. Acá se reparte parejo
+            # a propósito: llenando, el tope dejaría las primeras completas y una
+            # última con todo el resto, o sea un viaje imposible al final.
+            visitas = _MAX_VISITAS_POR_ZONA
+            return [(vol / visitas, peso / visitas)] * visitas
+
+        llena = (vol * fraccion, peso * fraccion)
+        porciones = [llena] * (visitas - 1)
+        # El resto, por diferencia y no multiplicando, para que las porciones
+        # sumen exactamente la zona: con `vol * fraccion * (visitas - 1)` el error
+        # de coma flotante deja un sobrante que después no cuadra con lo cargado.
+        resto_vol = vol - llena[0] * (visitas - 1)
+        resto_peso = peso - llena[1] * (visitas - 1)
+        porciones.append((resto_vol, resto_peso))
+        return porciones
 
     def repartir(order: tuple[int, ...]) -> tuple[list[dict], float]:
         """El orden partido en viajes, con los metros totales del recorrido.
@@ -2873,6 +2915,7 @@ async def generate_route(
         segments.append(RouteSegmentOut(
             originName=sub["originName"],
             trucksUsed=len(camiones),
+            stopOrders=ordenes_sub,
             vehicles=vehiculos,
             disposalName=RELLENO_SANITARIO_NOMBRE,
             trips=sub.get("viajes", 1),

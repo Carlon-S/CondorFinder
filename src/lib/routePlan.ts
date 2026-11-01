@@ -235,11 +235,24 @@ export interface RoutePlanSegment {
   /** El recorrido partido en tramos, en orden. Es lo que dibuja la línea de
    *  tiempo del plan. */
   legs?: RoutePlanLeg[];
-  /** Qué paradas recorre este segmento, por su `order`. Hoy `route.stops` es
-   *  una lista plana sin dueño, así que la vista no puede saber qué paradas
-   *  pertenecen a qué recorrido: con un solo punto de origen da igual, con
-   *  varios no. Descartar un recorrido, por ejemplo, debería llevarse sus
-   *  paradas, y sin este campo solo puede quitar el trazo. */
+  /** Qué paradas recorre este segmento, por su `order`, en orden de visita.
+   *  `route.stops` es una lista plana del PLAN COMPLETO, así que sin esto la
+   *  vista no puede saber qué paradas pertenecen a qué recorrido.
+   *
+   *  **Estuvo declarado acá sin que el backend lo mandara nunca**, y el defecto
+   *  apareció el día que un plan trajo más de un recorrido (los convoyes
+   *  paralelos de la pieza 2.3 de HDU5.2): con un solo punto de origen pasarle
+   *  la lista entera a cada recorrido era correcto por accidente, y con dos los
+   *  dos dibujaban la UNIÓN de las paradas, con los tramos de la mitad ajena en
+   *  blanco (sus `legs` no existen en ese recorrido) y el contador de viajes
+   *  reiniciándose a mitad de la lista. Mismo tipo de defecto que los `legs` por
+   *  salto, que también existían en el contrato y no se generaban.
+   *
+   *  **Lo manda el backend en vez de deducirlo la vista.** Se puede sacar de
+   *  `legs[].toOrder`, y de hecho es el respaldo para los planes guardados antes
+   *  de este cambio, pero eso ata qué parada es de quién a que la geometría haya
+   *  llegado completa: un proveedor que devuelve menos saltos dejaría paradas
+   *  sin dueño. */
   stopOrders?: number[];
 }
 
