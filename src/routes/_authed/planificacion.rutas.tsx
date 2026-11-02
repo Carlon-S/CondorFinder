@@ -763,6 +763,16 @@ function RutasPage() {
   /** Las paradas a las que todavía no se les declaró un volumen válido. El
    *  botón de generar se bloquea con ellas y el diálogo las señala, en vez de
    *  dejar que el backend responda con el motivo después de la llamada. */
+  /** Búsqueda en la lista de volumen a retirar. Solo filtra lo que se VE: el
+   *  total y el aviso de "falta el volumen" siguen contando todas las paradas. */
+  const [busquedaVolumen, setBusquedaVolumen] = useState("");
+  const paradasVisibles = (() => {
+    const q = busquedaVolumen.trim().toLowerCase();
+    if (!q) return paradasParaDeclarar;
+    return paradasParaDeclarar.filter(
+      (p) => p.nombre.toLowerCase().includes(q) || p.origen.toLowerCase().includes(q),
+    );
+  })();
   const sinVolumen = paradasParaDeclarar.filter((p) => numeroDeclarado(p.id) === null);
 
   /** Si un texto calza con la búsqueda del diálogo de carga.
@@ -3971,7 +3981,7 @@ function RutasPage() {
             lista llena el resto de los campos también necesita poder alcanzarse. */}
         <DialogContent
           onOpenAutoFocus={(e) => e.preventDefault()}
-          className="flex max-h-[92vh] flex-col gap-4 sm:max-w-6xl lg:h-[88vh]"
+          className="flex max-h-[92vh] flex-col gap-4 sm:max-w-6xl"
         >
           <DialogHeader>
             <DialogTitle>Generar ruta óptima</DialogTitle>
@@ -3984,7 +3994,7 @@ function RutasPage() {
                 que el diálogo mide siempre lo mismo y Cancelar y Generar ruta
                 no se salen de la pantalla con la flota o la cuadrilla largas.
                 Debajo de `lg` se apilan y scrollea el cuerpo. */}
-            <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-3 lg:grid-rows-[minmax(0,1fr)]">
+            <div className="grid min-h-0 grid-cols-1 gap-4 lg:h-[26rem] lg:grid-cols-3 lg:grid-rows-[minmax(0,1fr)]">
               <section className="flex min-h-0 flex-col gap-3 rounded-lg border border-border/60 p-3">
                 {/* **Cuánto retirar de cada parada, obligatorio (AC4).**
                 Va PRIMERO, antes de los puntos activos y de la cuadrilla,
@@ -3998,13 +4008,29 @@ function RutasPage() {
                   <p className="text-xs font-semibold text-foreground">
                     Volumen a retirar <Obligatorio />
                   </p>
+                  {paradasParaDeclarar.length > 0 && (
+                    <div className="relative">
+                      <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        value={busquedaVolumen}
+                        onChange={(e) => setBusquedaVolumen(e.target.value)}
+                        placeholder="Buscar por nombre u origen"
+                        aria-label="Buscar entre las paradas"
+                        className="h-8 pl-8 text-xs"
+                      />
+                    </div>
+                  )}
                   {paradasParaDeclarar.length === 0 ? (
                     <p className="rounded-md border border-dashed border-border/50 py-3 text-center text-xs text-muted-foreground">
                       No hay paradas cargadas.
                     </p>
+                  ) : paradasVisibles.length === 0 ? (
+                    <p className="rounded-md border border-dashed border-border/50 py-3 text-center text-xs text-muted-foreground">
+                      Ninguna parada coincide con la búsqueda.
+                    </p>
                   ) : (
                     <ul className="max-h-64 min-h-0 flex-1 space-y-1 overflow-y-auto lg:max-h-none">
-                      {paradasParaDeclarar.map((p) => {
+                      {paradasVisibles.map((p) => {
                         const declarado = numeroDeclarado(p.id);
                         // Declarar más de lo que hay no es un error que haya que
                         // bloquear: el backend lo acota a lo medido. Pero avisarlo
@@ -4495,8 +4521,8 @@ function RutasPage() {
             </div>
             {/* Los tres parámetros de la jornada, bajo las columnas y con su
                 mismo ancho, para que el diálogo se lea como una grilla. */}
-            <div className="grid flex-shrink-0 grid-cols-1 gap-4 rounded-lg border border-border/60 p-3 lg:grid-cols-3">
-              <div className="space-y-1.5">
+            <div className="grid flex-shrink-0 grid-cols-1 gap-4 lg:grid-cols-3">
+              <div className="space-y-1.5 rounded-lg border border-border/60 p-3">
                 <label htmlFor="available-hours" className="text-xs font-semibold text-foreground">
                   Horas disponibles
                 </label>
@@ -4533,7 +4559,7 @@ function RutasPage() {
                 (la flota real tiene 8 unidades de carga y 21 en total), y un campo
                 libre invita a escribir un 12 que el backend va a recortar sin que
                 nadie entienda por qué. */}
-              <div className="space-y-1.5">
+              <div className="space-y-1.5 rounded-lg border border-border/60 p-3">
                 <div className="flex items-baseline justify-between gap-2">
                   <label className="text-xs font-semibold text-foreground">
                     Convoyes por punto
@@ -4573,7 +4599,7 @@ function RutasPage() {
                 )}
               </div>
 
-              <div className="space-y-1.5">
+              <div className="space-y-1.5 rounded-lg border border-border/60 p-3">
                 <label className="text-xs font-semibold text-foreground">
                   Tipo de basura prioritario
                 </label>
