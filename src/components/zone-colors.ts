@@ -7,27 +7,75 @@
 // página en cada edición, y eso puede aparecer como un error de SSR sin
 // relación. Mismo patrón que button-variants.ts y los demás.
 //
-// Y una sola tabla para todo el sistema, porque la miran tres lugares: el visor
-// de una zona, los chips de tipo de residuo del panel de rutas y la línea de
-// tiempo. Con una copia por vista, un plástico se pinta de dos azules distintos
-// según de dónde se lo abrió.
+// Es la única tabla de colores por clase de residuo del frontend. La usan el
+// visor de una zona, la vista de análisis, la vista de carga, los chips de tipo
+// de residuo del panel de rutas y la línea de tiempo.
+//
+// Los nombres y colores de las 20 clases del modelo y de las 3 clases del modelo
+// anterior son los mismos que define `backendModel/detecting/waste_classes.py`.
 // =============================================================================
 
-/** Los mismos colores que analysis.tsx usa para las mismas clases. */
-const CLASS_COLORS: Record<string, string> = {
+/** Color de cada clase, por su nombre en español. */
+export const CLASS_COLORS: Record<string, string> = {
+  // Las 20 clases del modelo de segmentación.
+  Escombros: "#b91c1c",
   "Residuo de construcción": "#ef4444",
-  Metal: "#f97316",
-  Plástico: "#3b82f6",
-  "Residuo orgánico": "#22c55e",
+  "Fresado asfáltico": "#374151",
+  "Material de excavación": "#92400e",
+  Electrodomésticos: "#06b6d4",
+  "Equipos electrónicos": "#6366f1",
   Muebles: "#a855f7",
+  "Barriles metálicos": "#94a3b8",
+  "Envases plásticos": "#0ea5e9",
+  Madera: "#ca8a04",
+  Pallets: "#eab308",
+  Chatarra: "#78716c",
+  Plástico: "#3b82f6",
+  Vehículos: "#14b8a6",
   Neumáticos: "#64748b",
+  Papel: "#84cc16",
+  Fundición: "#d946ef",
+  Asbesto: "#ec4899",
+  Textil: "#fb7185",
+  "Residuos mezclados": "#8b5cf6",
+  // Clases del modelo anterior, que siguen apareciendo en los análisis ya
+  // guardados.
+  Metal: "#f97316",
+  "Residuo orgánico": "#22c55e",
   "Tipo de basura indefinido": "#f59e0b",
+  // Una detección que agrupa varias clases.
   "Varios tipos": "#7c3aed",
 };
 
-/** El violeta de respaldo es el mismo que usa "Varios tipos": una clase que el
- *  modelo devuelva y esta tabla no conozca se pinta como una mezcla, que es lo
- *  más honesto que se puede decir de algo sin clasificar. */
+/** Las clases que puede producir el modelo actual, en el orden de la tabla. */
+export const WASTE_CLASS_NAMES: string[] = [
+  "Escombros",
+  "Residuo de construcción",
+  "Fresado asfáltico",
+  "Material de excavación",
+  "Electrodomésticos",
+  "Equipos electrónicos",
+  "Muebles",
+  "Barriles metálicos",
+  "Envases plásticos",
+  "Madera",
+  "Pallets",
+  "Chatarra",
+  "Plástico",
+  "Vehículos",
+  "Neumáticos",
+  "Papel",
+  "Fundición",
+  "Asbesto",
+  "Textil",
+  "Residuos mezclados",
+];
+
+/** Color de una clase. Una clase que la tabla no conoce toma un tono derivado
+ *  de su nombre: el mismo nombre da siempre el mismo color. */
 export function classColor(cls: string): string {
-  return CLASS_COLORS[cls] ?? "#7c3aed";
+  if (CLASS_COLORS[cls]) return CLASS_COLORS[cls];
+  let hash = 0;
+  for (let i = 0; i < cls.length; i++) hash = (hash * 31 + cls.charCodeAt(i)) | 0;
+  return `hsl(${Math.abs(hash) % 360},75%,55%)`;
 }
