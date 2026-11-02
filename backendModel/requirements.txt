@@ -65,3 +65,6 @@ PyJWT[crypto]
 pwdlib[argon2]
 python-dotenv
 google-cloud-storage
+# Base de zonas horarias para `zoneinfo`. La imagen python:3.12-slim no la trae, y
+# sin ella `America/Santiago` no se puede resolver (itinerario.py).
+tzdata

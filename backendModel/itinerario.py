@@ -21,6 +21,7 @@ secuencia del recorrido y no un conjunto.
 """
 
 import re
+import logging
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -84,20 +85,44 @@ DIAS = ("lunes", "martes", "miercoles", "jueves", "viernes", "sabado")
 _SEMANA_RE = re.compile(r"^\d{4}-W\d{2}$")
 
 
-def semana_actual() -> str:
-    hoy = datetime.now(timezone.utc).date()
-    anio, num, _ = hoy.isocalendar()
-    return f"{anio}-W{num:02d}"
-
-
 # La semana del retiro se planifica con la comuna, no en UTC: a las 21:00 de un
 # sábado en Chile ya es domingo en UTC y la semana se daría por cerrada un día
 # antes de tiempo.
-_TZ_CHILE = timezone(timedelta(hours=-3))
+#
+# **La zona es `America/Santiago`, con su horario de verano, y no un desfase
+# fijo.** Era `timezone(timedelta(hours=-3))`, que es correcto de septiembre a
+# abril y erra una hora el resto del año: Chile está en UTC-4 en invierno. Con la
+# hora de más, entre las 23:00 y las 24:00 de cada día de invierno el sistema
+# creía que ya era mañana, o sea que el día en curso se daba por terminado una
+# hora antes de tiempo y `_exigir_editable()` rechazaba escribir sobre él.
+try:
+    from zoneinfo import ZoneInfo
+
+    _TZ_CHILE = ZoneInfo("America/Santiago")
+except Exception:  # noqa: BLE001, falta la base de zonas (`tzdata`) en este entorno
+    # Sin la base de zonas horarias no se puede resolver el horario de invierno.
+    # Se cae al desfase de verano y se avisa, en vez de impedir que el backend
+    # arranque: perder una hora en invierno es mucho mejor que no tener
+    # itinerario. `tzdata` está en requirements.txt, así que esto solo ocurre en
+    # un entorno al que todavía no se le hizo `pip install -r`.
+    logging.getLogger(__name__).warning(
+        "No se encontró la base de zonas horarias (tzdata): el itinerario usa UTC-3 fijo "
+        "y se equivoca una hora en invierno. Ejecuta `pip install -r requirements.txt`."
+    )
+    _TZ_CHILE = timezone(timedelta(hours=-3))
 
 
 def _hoy_local() -> date:
     return datetime.now(_TZ_CHILE).date()
+
+
+def semana_actual() -> str:
+    # **La semana en curso se cuenta en hora de Chile, igual que `_hoy_local()`.**
+    # Salía de la fecha UTC, y el domingo desde las 21:00 (que en UTC ya es el
+    # lunes) la grilla saltaba a la semana siguiente tres horas antes de tiempo,
+    # justo cuando se está armando el lunes.
+    anio, num, _ = _hoy_local().isocalendar()
+    return f"{anio}-W{num:02d}"
 
 
 def _lunes_de(d: date) -> date:
