@@ -55,6 +55,7 @@ backendModel/detecting/__pycache__
 backendModel/joining/finals/*
 backendModel/joining/__pycache__
 backendModel/joining/images/*
+backendModel/joining/task_images/*
 backendModel/joining/output/*
 backendModel/test.py
 backendModel/main.py

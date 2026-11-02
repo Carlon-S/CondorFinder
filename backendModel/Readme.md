@@ -5,7 +5,7 @@ API REST que orquesta el pipeline completo de procesamiento:
 1. **Carga de imágenes**, recibe y persiste las imágenes JPG del drone en `joining/images/`
 2. **Verificación de solapamiento** (`joining/Reconociemiento_solapamiento.py`), comprueba que cada par de imágenes consecutivas tenga al menos un 60% de solapamiento usando datos GPS EXIF y el FOV del drone (82.1°)
 3. **Unificación** (`joining/joinOrtho.py`), genera un ortomosaico `.tif` y un modelo 3D completo (DSM, DTM, nube de puntos) usando OpenDroneMap
-4. **Detección** (`detecting/detectingOrtho.py`), detecta categorías de basura con YOLOv8 + SAHI, genera el PNG del mapa y un JSON con las detecciones y sus coordenadas en píxeles
+4. **Detección** (`detecting/detectingOrtho.py`), detecta categorías de basura con un modelo de segmentación YOLOv8 (`bestseg.pt`) aplicado por ventanas con SAHI, genera el PNG del mapa y un JSON con las detecciones, su caja y su máscara en píxeles
 5. **Resultado**, expone el PNG del mapa y el JSON de detecciones al frontend. La tarea queda en "pendiente de análisis"
 
 El **análisis de volumen** (`detecting/volumeCalc.py`) ya NO es parte del pipeline. Se dispara aparte, con `POST /analyze/{task_id}`, cuando el trabajador entra a la vista de análisis y lo pide. Cada llamada es una medición nueva que se guarda con su propia fecha: es lo que le da historia a una zona. Antes corría solo al final del pipeline, y por eso todo reanálisis devolvía exactamente el mismo número.
@@ -44,7 +44,7 @@ backendModel/
     ├── detectingOrtho.py ← Ejecuta YOLOv8 + SAHI sobre el ortomosaico
     ├── volumeCalc.py     ← Calcula volumen/peso/área por detección usando nDSM
     ├── model/
-    │   └── best.pt       ← Pesos del modelo YOLOv8 entrenado
+    │   └── bestseg.pt    ← Pesos del modelo de segmentación YOLOv8 (20 clases)
     └── output/           ← PNG del mapa y JSON de detecciones por tarea
 ```
 
@@ -280,7 +280,7 @@ Los dos juegos de campos son **disjuntos**: el alta a mano escribe dirección, b
 | `running` | Tarea creada, iniciando pipeline |
 | `checking_overlap` | Verificando solapamiento GPS entre imágenes consecutivas |
 | `joining` | Unificando imágenes con ODM (fase más lenta) |
-| `detecting` | Detectando basura con YOLOv8 + SAHI y calculando volúmenes |
+| `detecting` | Detectando basura con el modelo de segmentación + SAHI |
 | `done` | Proceso completado, mapa, detecciones y volúmenes disponibles |
 | `cancelled` | Tarea cancelada por el usuario, se aplica en el próximo punto de control del pipeline |
 | `error` | El proceso falló, `message` contiene el detalle |
@@ -296,7 +296,7 @@ Los dos juegos de campos son **disjuntos**: el alta a mano escribe dirección, b
   "detection_count": 4,
   "analysis_status": "done",
   "analysis_message": "Análisis de volumen completado",
-  "algorithm_version": 1,
+  "algorithm_version": 2,
   "capture_date": "2026-09-15 10:32:04",
   "capture_date_estimated": false,
   "can_analyze": true
@@ -332,18 +332,109 @@ Los dos juegos de campos son **disjuntos**: el alta a mano escribe dirección, b
 
 ---
 
-## Categorías de basura detectadas
+## Detección y volumen
 
-| Clase | Color en overlay |
+### Qué hace cada etapa
+
+1. `detecting/detectingOrtho.py` corta el ortomosaico en ventanas de 640 x 640 px (con 20 % de solape), pasa cada ventana por el modelo `detecting/model/bestseg.pt` y junta los resultados. Cada objeto detectado trae una **caja** y una **máscara** (su contorno). Usa GPU si torch la ve y CPU en caso contrario.
+2. Escribe en `detecting/output/` el PNG del mapa (reducido a 10.000 px como máximo por lado), su miniatura y el JSON de detecciones.
+3. `detecting/volumeCalc.py` (`POST /analyze/{task_id}`) mide cada detección sobre el modelo de elevación normalizado (nDSM = DSM - DTM) y reescribe el mismo JSON con las cifras. Se puede repetir: parte de los campos que escribió la detección y sobrescribe los derivados.
+
+### Dos sistemas de coordenadas
+
+| Campo | Espacio | Para qué |
+|---|---|---|
+| `bbox` | Píxeles del **PNG** (ya multiplicados por `png_scale`) | La vista dibuja los recuadros sobre el PNG |
+| `polygon` | Píxeles del **ortomosaico completo** | `volumeCalc.py` lo convierte a coordenadas geográficas con la transformación del ortomosaico |
+| `geo_polygon` | Coordenadas del CRS del ortomosaico (UTM, metros) | El mapa de rutas lo reproyecta a WGS84 |
+
+`png_scale` (arriba del JSON) es el factor entre el PNG y el ortomosaico: 1,0 cuando el ortomosaico mide 10.000 px o menos por lado, y menor que 1,0 cuando se redujo. `volumeCalc.py` divide la `bbox` por `png_scale` para llevarla a píxeles del ortomosaico. Un JSON sin `png_scale` se interpreta como 1,0.
+
+### JSON de detecciones
+
+Salida de `detectingOrtho.py`:
+
+```json
+{
+  "png_scale": 1.0,
+  "detections": [
+    {
+      "id": 0,
+      "class": "Escombros",
+      "yolo_class": "Rubble",
+      "color": "#b91c1c",
+      "density_kg_m3": 1400,
+      "confidence": 0.87,
+      "bbox": { "minx": 120, "miny": 340, "maxx": 410, "maxy": 600 },
+      "polygon": [[131.5, 342.0, 200.2, 350.8, 398.0, 590.1]]
+    }
+  ]
+}
+```
+
+- `class`: nombre en español, el que ve el usuario.
+- `yolo_class`: nombre interno que el modelo da a la clase.
+- `polygon`: lista de anillos. Cada anillo es plano, `[x1, y1, x2, y2, ...]`. Una detección tiene varios anillos cuando su máscara está partida en piezas. Es `null` si la detección no trae máscara.
+
+`volumeCalc.py` agrega a cada detección:
+
+| Campo | Contenido |
 |---|---|
-| `Residuo de construcción` | Rojo |
-| `Muebles` | Naranja |
-| `Metal` | Naranja oscuro |
-| `Plástico` | Azul |
-| `Residuo orgánico` | Verde |
-| `Neumáticos` | Gris |
-| `Tipo de basura indefinido` | Amarillo |
-| `Varios tipos` | Morado |
+| `geo_polygon` | Un solo anillo `[[x, y], ...]` en coordenadas geográficas: el contorno de la pieza de mayor superficie, simplificado a una tolerancia de un píxel |
+| `area_m2` | Cantidad de píxeles del nDSM dentro de la máscara por la superficie de un píxel |
+| `ndsm_mean_m`, `ndsm_max_m` | Altura media y máxima dentro de la máscara |
+| `volume_m3` | Suma de las alturas dentro de la máscara por la superficie de un píxel |
+| `weight_kg` | `volume_m3` por `density_kg_m3` |
+
+Y escribe arriba del JSON: `crs`, `png_scale`, `ortho_center` (centro del ortomosaico) y `ortho_bounds` (su huella `[izquierda, abajo, derecha, arriba]`).
+
+### Cómo se mide una detección
+
+- Con máscara: cada anillo se convierte a coordenadas geográficas, los anillos se unen en una sola superficie y el volumen y el área se miden sobre esa superficie.
+- Sin máscara, o con una máscara sin superficie: se mide sobre el rectángulo de la caja.
+- La densidad sale de `density_kg_m3` de la detección. Si el JSON no la trae (generado con el modelo anterior), se busca por el nombre de la clase en `detecting/waste_classes.py`; una clase desconocida usa 200 kg/m³.
+
+### Qué se guarda en Mongo
+
+El análisis guardado (`/analyses`) conserva todos los campos de cada detección **excepto `polygon`**: la máscara en píxeles solo se usa al medir, y la lee `volumeCalc.py` desde el archivo JSON de la tarea. `analyses.py` la quita al recibir el análisis, porque todas las detecciones de un análisis se guardan en un único documento.
+
+### Clases
+
+`detecting/waste_classes.py` define las clases. El frontend usa los mismos nombres y colores en `src/components/zone-colors.ts`; `backendModel/scripts/probar_poligonos.py` comprueba que las dos tablas coincidan.
+
+| Clase del modelo | Nombre en español | Color | Densidad (kg/m³) |
+|---|---|---|---|
+| Rubble | Escombros | `#b91c1c` | 1400 |
+| Construction and demolition materials | Residuo de construcción | `#ef4444` | 400 |
+| Asphalt milling | Fresado asfáltico | `#374151` | 1600 |
+| Excavation materials | Material de excavación | `#92400e` | 1600 |
+| Appliances | Electrodomésticos | `#06b6d4` | 150 |
+| Electronic equipment | Equipos electrónicos | `#6366f1` | 150 |
+| Furniture | Muebles | `#a855f7` | 200 |
+| Metal barrels | Barriles metálicos | `#94a3b8` | 100 |
+| Plastic packaging | Envases plásticos | `#0ea5e9` | 80 |
+| Wood | Madera | `#ca8a04` | 300 |
+| Pallets | Pallets | `#eab308` | 150 |
+| Scrap | Chatarra | `#78716c` | 600 |
+| Plastic | Plástico | `#3b82f6` | 80 |
+| Vehicles | Vehículos | `#14b8a6` | 150 |
+| Tyres | Neumáticos | `#64748b` | 400 |
+| Paper | Papel | `#84cc16` | 100 |
+| Foundry | Fundición | `#d946ef` | 1200 |
+| Asbestos | Asbesto | `#ec4899` | 400 |
+| Textile | Textil | `#fb7185` | 100 |
+| Mixed items | Residuos mezclados | `#8b5cf6` | 200 |
+
+Clases del modelo anterior, que aparecen en los análisis guardados antes del cambio: `Metal` (`#f97316`, 600), `Residuo orgánico` (`#22c55e`, 300) y `Tipo de basura indefinido` (`#f59e0b`, 200). `Varios tipos` (`#7c3aed`) es una detección de la vista que agrupa varias clases; no existe en el backend.
+
+### Versión del cálculo
+
+`VOLUME_ALGORITHM_VERSION` (`orquestador.py`) se guarda con cada análisis.
+
+| Versión | Cálculo |
+|---|---|
+| 1 | Volumen y área sobre el rectángulo de cada detección, con 7 clases |
+| 2 | Volumen y área sobre la máscara de cada detección, con 20 clases y su densidad |
 
 ---
 

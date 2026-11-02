@@ -1134,9 +1134,9 @@ def _dotacion_de(camion: dict) -> list[str]:
 # preferencia declarada. Los otros tres son correctos y sin efecto observable.
 CLASE_POR_TIPO_ESCOMBRO: dict[str, str] = {
     "ESC": "Residuo de construcción",
-    "RAMAS": "Residuo orgánico",
+    "RAMAS": "Madera",
     "VOLUMINOSOS": "Muebles",
-    "MIXTO": "Tipo de basura indefinido",
+    "MIXTO": "Residuos mezclados",
 }
 
 

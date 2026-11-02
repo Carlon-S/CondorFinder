@@ -2,6 +2,7 @@ import rasterio
 import os
 import sys
 import numpy as np
+import torch
 from PIL import Image
 from sahi import AutoDetectionModel
 from sahi.predict import get_sliced_prediction
@@ -12,22 +13,58 @@ import json
 from pathlib import Path
 import cv2
 
+from detecting.waste_classes import info_por_clase_yolo
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(BASE_DIR, "model/best.pt")
+
+# Modelo de segmentación: por cada objeto entrega una caja y una máscara.
+MODEL_PATH = os.path.join(BASE_DIR, "model/bestseg.pt")
 OUTPUT_PATH = os.path.join(BASE_DIR, "output")
-CONF        = 0.18
 
-CLASSES = ["Residuo de construcción", "Muebles", "Metal", "Plástico", "Residuo orgánico", "Neumáticos", "Tipo de basura indefinido"]
+# Confianza mínima para aceptar una detección.
+CONF = 0.18
 
-COLORS_MAP = {
-    "Residuo de construcción": "red",
-    "Muebles":                 "orange",
-    "Metal":                   "gray",
-    "Plástico":                "blue",
-    "Residuo orgánico":        "green",
-    "Neumáticos":              "black",
-    "Tipo de basura indefinido": "purple",
-}
+# Dispositivo de inferencia: GPU si torch la ve, CPU en caso contrario.
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+# Holgura en píxeles al comprobar que una máscara cae dentro de su caja.
+MARGEN_MASCARA_PX = 3
+
+
+def _anillos_de(pred, decimales: int = 1):
+    """Anillos de la máscara de una detección, en píxeles del ortomosaico.
+
+    SAHI entrega `pred.mask.segmentation` como una lista de anillos, cada uno
+    plano: [x1, y1, x2, y2, ...]. Una detección puede tener varios anillos
+    cuando su máscara está partida en varias piezas. Devuelve `None` si la
+    detección no trae máscara o la máscara no tiene ningún anillo."""
+    if pred.mask is None:
+        return None
+    anillos = [
+        [round(float(coord), decimales) for coord in anillo]
+        for anillo in pred.mask.segmentation
+        if len(anillo) >= 6  # menos de 3 vértices no encierra una superficie
+    ]
+    return anillos or None
+
+
+def _mascara_dentro_de_caja(anillos, box) -> bool:
+    """Si todos los vértices de la máscara caen dentro de su caja (con margen).
+
+    Las dos geometrías salen de la misma predicción, así que deben coincidir. Si
+    no lo hacen, la máscara no está en las coordenadas de la imagen completa."""
+    for anillo in anillos:
+        xs = anillo[0::2]
+        ys = anillo[1::2]
+        if (
+            min(xs) < box.minx - MARGEN_MASCARA_PX
+            or max(xs) > box.maxx + MARGEN_MASCARA_PX
+            or min(ys) < box.miny - MARGEN_MASCARA_PX
+            or max(ys) > box.maxy + MARGEN_MASCARA_PX
+        ):
+            return False
+    return True
+
 
 def detect(file_name: str):
     print("Ejecutando deteccion")
@@ -47,7 +84,7 @@ def detect(file_name: str):
         model_type="yolov8",
         model_path=MODEL_PATH,
         confidence_threshold=CONF,
-        device="cuda",
+        device=DEVICE,
     )
 
     # SAHI y YOLOv8 solo aceptan RGB — la transparencia se aplica al final
@@ -90,15 +127,32 @@ def detect(file_name: str):
     thumbnail.save(f"{final}_thumb.png")
     print(f"Miniatura en {final}_thumb.png")
 
-    # Guardar detecciones en JSON con coordenadas escaladas al espacio del PNG
+    # Se escribe una entrada por detección. Dos sistemas de coordenadas:
+    #   - `bbox`: píxeles del PNG (ya multiplicados por `scale`), porque es el
+    #     espacio en que la vista dibuja los recuadros.
+    #   - `polygon`: píxeles del ortomosaico completo, que es el espacio de la
+    #     transformación geográfica con la que volumeCalc mide la máscara.
+    # `png_scale` (arriba del JSON) es el factor que relaciona los dos espacios.
     detections_list = []
+    mascaras_fuera_de_caja = 0
     for i, pred in enumerate(result.object_prediction_list):
         box = pred.bbox
-        cls = CLASSES[pred.category.id]
+        # Nombre interno que el modelo da a la clase (p. ej. "Rubble").
+        yolo_cls = pred.category.name
+        # Nombre en español, color y densidad de esa clase.
+        info = info_por_clase_yolo(yolo_cls)
         conf = round(float(pred.score.value), 3)
+
+        anillos = _anillos_de(pred)
+        if anillos is not None and not _mascara_dentro_de_caja(anillos, box):
+            mascaras_fuera_de_caja += 1
+
         detections_list.append({
             "id": i,
-            "class": cls,
+            "class": info.name_es,
+            "yolo_class": yolo_cls,
+            "color": info.color,
+            "density_kg_m3": info.density,
             "confidence": conf,
             "bbox": {
                 "minx": round(box.minx * scale),
@@ -106,12 +160,18 @@ def detect(file_name: str):
                 "maxx": round(box.maxx * scale),
                 "maxy": round(box.maxy * scale),
             },
-            "polygon": None,
+            "polygon": anillos,
         })
+
+    if mascaras_fuera_de_caja:
+        print(
+            f"AVISO: {mascaras_fuera_de_caja} máscaras tienen vértices fuera de su caja; "
+            "puede que no estén en las coordenadas de la imagen completa"
+        )
 
     json_path = f"{final}.json"
     with open(json_path, "w") as jf:
-        json.dump({"detections": detections_list}, jf, indent=2)
+        json.dump({"png_scale": scale, "detections": detections_list}, jf, indent=2)
     print(f"JSON detecciones en {json_path}")
 
     return final, len(result.object_prediction_list), json_path
