@@ -1383,9 +1383,13 @@ function TablaPuntos({
                   <TableHead className={`w-[5.5rem] ${CAB_TEXTO}`}>Mapa</TableHead>
                   <TableHead className={CAB_TEXTO}>Nombre</TableHead>
                   <TableHead className={`hidden md:table-cell ${CAB_TEXTO}`}>Dirección</TableHead>
-                  <TableHead className={`hidden lg:table-cell ${CAB_TEXTO}`}>Barrio</TableHead>
+                  <TableHead className={`hidden text-center lg:table-cell ${CAB_TEXTO}`}>
+                    Barrio
+                  </TableHead>
                   <TableHead className={`hidden lg:table-cell ${CAB_TEXTO}`}>Tipo</TableHead>
-                  <TableHead className={`hidden xl:table-cell ${CAB_TEXTO}`}>Frecuencia</TableHead>
+                  <TableHead className={`hidden text-center xl:table-cell ${CAB_TEXTO}`}>
+                    Frecuencia
+                  </TableHead>
                   {/* Las cifras de la medición vigente, las mismas que muestra
                       Vista Principal. Aparecen las cuatro juntas o ninguna: son
                       un grupo que se lee en bloque, y escalonarlas por
@@ -1510,7 +1514,7 @@ function TablaPuntos({
                         )}
                       </TableCell>
                       <TableCell
-                        className={`${CELDA} hidden text-xs text-muted-foreground lg:table-cell`}
+                        className={`${CELDA} hidden text-center text-xs text-muted-foreground lg:table-cell`}
                       >
                         {z.barrio || "-"}
                       </TableCell>
@@ -1520,7 +1524,7 @@ function TablaPuntos({
                         {z.tipo || "-"}
                       </TableCell>
                       <TableCell
-                        className={`${CELDA} hidden text-xs text-muted-foreground xl:table-cell`}
+                        className={`${CELDA} hidden text-center text-xs text-muted-foreground xl:table-cell`}
                       >
                         {z.frecuencia || "-"}
                       </TableCell>

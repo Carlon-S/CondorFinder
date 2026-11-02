@@ -69,6 +69,7 @@ import {
   X,
 } from "@/components/icons/Icons";
 import { Button } from "@/components/ui/button";
+import { BTN_FILA_SECUNDARIO } from "@/components/tabla-estilos";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
@@ -457,6 +458,10 @@ function RutasPage() {
   const [puntoDiarioAbierto, setPuntoDiarioAbierto] = useState(false);
   const [puntoDiarioEditando, setPuntoDiarioEditando] = useState<PuntoDiario | null>(null);
   const [editarPuntosAbierto, setEditarPuntosAbierto] = useState(false);
+  /** El diálogo de edición se abrió desde la lista de puntos diarios: al
+   *  cerrarse (guardando o cancelando) hay que volver a ella y no dejar al
+   *  trabajador en el mapa, que lo obliga a reabrir la lista y el día. */
+  const [volverALaLista, setVolverALaLista] = useState(false);
   /** Punto diario en espera de confirmación de borrado, o null. */
   const [puntoDiarioABorrar, setPuntoDiarioABorrar] = useState<PuntoDiario | null>(null);
 
@@ -954,14 +959,6 @@ function RutasPage() {
    *  **Colapsado por omisión.** Las 21 unidades con su foto abiertas de entrada
    *  tapan el resto del formulario, que es justo lo que el diálogo viene a
    *  confirmar. */
-  /** La flota, **desplegada por omisión**.
-   *
-   *  Nació plegada para no tapar el resto del formulario con 21 filas. Se
-   *  cambió: la dotación que cada unidad exige es la causa más frecuente de que
-   *  un plan no salga ("faltan conductores"), y plegada esa información no
-   *  existe hasta que alguien descubre que hay algo que abrir. El buscador y el
-   *  alto acotado resuelven el problema de espacio sin esconder el dato. */
-  const [flotaAbierta, setFlotaAbierta] = useState(true);
   /** Filtro de la lista de flota del diálogo de generación. */
   const [busquedaFlota, setBusquedaFlota] = useState("");
   /** El id de la unidad cuyo interruptor está en vuelo, para no dejar la fila
@@ -1691,10 +1688,6 @@ function RutasPage() {
     // La flota se pide al ABRIR y no al montar la vista: es la foto del momento
     // en que se decide, y entre que se entró a la pantalla y se aprieta generar
     // alguien pudo cambiar una disponibilidad desde /recursos.
-    // **Desplegada**, igual que el valor inicial del estado. Esta línea la
-    // cerraba en cada apertura, así que cambiar el `useState` a `true` no se
-    // notaba nunca: el diálogo se abre por acá y siempre la volvía a plegar.
-    setFlotaAbierta(true);
     setBusquedaFlota("");
     // No se espera: si tarda o falla, el diálogo abre igual y la flota
     // simplemente no marca ocupaciones. El ruteo las excluye de todos modos.
@@ -3454,7 +3447,13 @@ function RutasPage() {
       {/* HDU15: alta (AC1 a AC3) y edición de un punto suelto. */}
       <PuntoDiarioDialog
         open={puntoDiarioAbierto}
-        onOpenChange={setPuntoDiarioAbierto}
+        onOpenChange={(abierto) => {
+          setPuntoDiarioAbierto(abierto);
+          if (!abierto && volverALaLista) {
+            setVolverALaLista(false);
+            setEditarPuntosAbierto(true);
+          }
+        }}
         punto={puntoDiarioEditando}
         onGuardado={() => {
           recargarPuntosDiarios();
@@ -3464,7 +3463,15 @@ function RutasPage() {
 
       {/* HDU15/AC4: todos los puntos del día, editables de a uno. */}
       <Dialog open={editarPuntosAbierto} onOpenChange={setEditarPuntosAbierto}>
-        <DialogContent className="flex max-h-[80vh] flex-col sm:max-w-lg">
+        <DialogContent
+          className="flex max-h-[80vh] flex-col sm:max-w-lg"
+          // Radix enfoca el primer campo, el selector de día, y lo abre con el
+          // segmento de la fecha resaltado como si alguien lo hubiera elegido.
+          onOpenAutoFocus={(e) => {
+            e.preventDefault();
+            (e.currentTarget as HTMLElement | null)?.focus?.();
+          }}
+        >
           <DialogHeader>
             <DialogTitle>Puntos diarios</DialogTitle>
             <DialogDescription>Los retiros de escombros y extras de una jornada.</DialogDescription>
@@ -3651,6 +3658,7 @@ function RutasPage() {
                   type="button"
                   onClick={() => {
                     setEditarPuntosAbierto(false);
+                    setVolverALaLista(true);
                     setPuntoDiarioEditando(p);
                     setPuntoDiarioAbierto(true);
                   }}
@@ -3963,15 +3971,22 @@ function RutasPage() {
             lista llena el resto de los campos también necesita poder alcanzarse. */}
         <DialogContent
           onOpenAutoFocus={(e) => e.preventDefault()}
-          className="max-h-[90vh] max-w-2xl overflow-y-auto"
+          className="flex max-h-[92vh] flex-col gap-4 sm:max-w-6xl lg:h-[88vh]"
         >
           <DialogHeader>
             <DialogTitle>Generar ruta óptima</DialogTitle>
             <DialogDescription>Confirma los datos antes de generar la ruta.</DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4">
-            {/* **Cuánto retirar de cada parada, obligatorio (AC4).**
+          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto lg:overflow-hidden">
+            {/* Tres columnas de igual ancho: lo que se retira, con qué se
+                retira y quién lo retira. Cada una hace scroll por dentro, así
+                que el diálogo mide siempre lo mismo y Cancelar y Generar ruta
+                no se salen de la pantalla con la flota o la cuadrilla largas.
+                Debajo de `lg` se apilan y scrollea el cuerpo. */}
+            <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-3 lg:grid-rows-[minmax(0,1fr)]">
+              <section className="flex min-h-0 flex-col gap-3 rounded-lg border border-border/60 p-3">
+                {/* **Cuánto retirar de cada parada, obligatorio (AC4).**
                 Va PRIMERO, antes de los puntos activos y de la cuadrilla,
                 porque es la decisión que define el plan: sin estas cifras una
                 sola zona grande ocupa toda la capacidad y el plan termina
@@ -3979,312 +3994,530 @@ function RutasPage() {
                 Cada fila muestra cuánto hay disponible al lado del campo, que es
                 la referencia contra la que se decide; sin ella habría que ir a
                 buscarla al panel. */}
-            <div className="space-y-1.5">
-              <p className="text-xs font-medium text-muted-foreground">
-                Volumen a retirar <Obligatorio />
-              </p>
-              {paradasParaDeclarar.length === 0 ? (
-                <p className="rounded-md border border-dashed border-border/50 py-3 text-center text-xs text-muted-foreground">
-                  No hay paradas cargadas.
-                </p>
-              ) : (
-                <ul className="max-h-56 space-y-1 overflow-y-auto">
-                  {paradasParaDeclarar.map((p) => {
-                    const declarado = numeroDeclarado(p.id);
-                    // Declarar más de lo que hay no es un error que haya que
-                    // bloquear: el backend lo acota a lo medido. Pero avisarlo
-                    // evita que alguien crea que va a sacar más de lo que existe.
-                    const excede = declarado !== null && declarado > p.disponible;
-                    return (
-                      <li
-                        key={p.id}
-                        className={`flex items-center gap-2 rounded-md border p-2 ${
-                          declarado === null
-                            ? "border-warning-strong/40 bg-warning/5"
-                            : "border-border/60"
-                        }`}
-                      >
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-xs font-medium text-foreground">{p.nombre}</p>
-                          <p className="text-[0.625rem] text-muted-foreground">
-                            {p.origen} · hay {cifra(p.disponible)} m³
-                          </p>
-                          {excede && (
-                            <p className="text-[0.625rem] text-warning-strong">
-                              Declarado por sobre lo medido, se va a retirar {cifra(p.disponible)}{" "}
-                              m³
-                            </p>
-                          )}
-                          {/* El motivo exacto, en la fila que lo tiene. El aviso
+                <div className="flex min-h-0 flex-1 flex-col gap-2">
+                  <p className="text-xs font-semibold text-foreground">
+                    Volumen a retirar <Obligatorio />
+                  </p>
+                  {paradasParaDeclarar.length === 0 ? (
+                    <p className="rounded-md border border-dashed border-border/50 py-3 text-center text-xs text-muted-foreground">
+                      No hay paradas cargadas.
+                    </p>
+                  ) : (
+                    <ul className="max-h-64 min-h-0 flex-1 space-y-1 overflow-y-auto lg:max-h-none">
+                      {paradasParaDeclarar.map((p) => {
+                        const declarado = numeroDeclarado(p.id);
+                        // Declarar más de lo que hay no es un error que haya que
+                        // bloquear: el backend lo acota a lo medido. Pero avisarlo
+                        // evita que alguien crea que va a sacar más de lo que existe.
+                        const excede = declarado !== null && declarado > p.disponible;
+                        return (
+                          <li
+                            key={p.id}
+                            className={`flex items-center gap-2 rounded-md border p-2 ${
+                              declarado === null
+                                ? "border-warning-strong/40 bg-warning/5"
+                                : "border-border/60"
+                            }`}
+                          >
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-xs font-medium text-foreground">
+                                {p.nombre}
+                              </p>
+                              <p className="text-[0.625rem] text-muted-foreground">
+                                {p.origen} · hay {cifra(p.disponible)} m³
+                              </p>
+                              {excede && (
+                                <p className="text-[0.625rem] text-warning-strong">
+                                  Declarado por sobre lo medido, se va a retirar{" "}
+                                  {cifra(p.disponible)} m³
+                                </p>
+                              )}
+                              {/* El motivo exacto, en la fila que lo tiene. El aviso
                               del pie dice CUÁNTAS faltan; esto dice QUÉ pasa con
                               esta. */}
-                          {motivoDelVolumen(p.id) && (
-                            <p className="text-[0.625rem] text-warning-strong">
-                              {motivoDelVolumen(p.id)}
-                            </p>
-                          )}
-                        </div>
-                        {/* La unidad va FUERA del campo y no como marcador de
+                              {motivoDelVolumen(p.id) && (
+                                <p className="text-[0.625rem] text-warning-strong">
+                                  {motivoDelVolumen(p.id)}
+                                </p>
+                              )}
+                            </div>
+                            {/* La unidad va FUERA del campo y no como marcador de
                             posición: un `placeholder="m³"` desaparece en cuanto
                             se teclea el primer dígito, justo cuando hay una
                             cifra que necesita decir de qué unidad es. Con la
                             unidad al lado, el campo se lee "40 m³" mientras se
                             escribe. */}
-                        <span className="flex flex-shrink-0 items-center gap-1">
-                          <Input
-                            value={volumenARetirar[p.id] ?? ""}
-                            onChange={(e) =>
-                              setVolumenARetirar((prev) => ({ ...prev, [p.id]: e.target.value }))
-                            }
-                            inputMode="decimal"
-                            placeholder="0"
-                            aria-label={`Volumen a retirar de ${p.nombre}, en metros cúbicos`}
-                            className="h-8 w-20 text-right text-xs"
-                          />
-                          <span className="mono text-[0.625rem] text-muted-foreground">m³</span>
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setVolumenARetirar((prev) => ({
-                              ...prev,
-                              [p.id]: String(p.disponible),
-                            }))
-                          }
-                          className="flex-shrink-0 cursor-pointer rounded px-1.5 py-1 text-[0.625rem] text-muted-foreground hover:bg-accent hover:text-foreground"
-                          title={`Retirar todo lo que hay (${cifra(p.disponible)} m³)`}
-                        >
-                          Todo
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-              {sinVolumen.length > 0 && (
-                <p className="flex items-start gap-1.5 text-[0.6875rem] text-warning-strong">
-                  <TriangleAlert className="mt-px h-3.5 w-3.5 flex-shrink-0" />
-                  <span>
-                    Falta el volumen de {sinVolumen.length} parada
-                    {sinVolumen.length === 1 ? "" : "s"}. Cada parada se visita una sola vez y se
-                    retira exactamente lo que declares.
-                  </span>
-                </p>
-              )}
-            </div>
+                            <span className="flex flex-shrink-0 items-center gap-1">
+                              <Input
+                                value={volumenARetirar[p.id] ?? ""}
+                                onChange={(e) =>
+                                  setVolumenARetirar((prev) => ({
+                                    ...prev,
+                                    [p.id]: e.target.value,
+                                  }))
+                                }
+                                inputMode="decimal"
+                                placeholder="0"
+                                aria-label={`Volumen a retirar de ${p.nombre}, en metros cúbicos`}
+                                className="h-8 w-20 text-right text-xs"
+                              />
+                              <span className="mono text-[0.625rem] text-muted-foreground">m³</span>
+                            </span>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                setVolumenARetirar((prev) => ({
+                                  ...prev,
+                                  [p.id]: String(p.disponible),
+                                }))
+                              }
+                              className={`flex-shrink-0 ${BTN_FILA_SECUNDARIO}`}
+                              title={`Retirar todo lo que hay (${cifra(p.disponible)} m³)`}
+                            >
+                              Todo
+                            </Button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                  {sinVolumen.length > 0 && (
+                    <p className="flex items-start gap-1.5 text-[0.6875rem] text-warning-strong">
+                      <TriangleAlert className="mt-px h-3.5 w-3.5 flex-shrink-0" />
+                      <span>
+                        Falta el volumen de {sinVolumen.length} parada
+                        {sinVolumen.length === 1 ? "" : "s"}. Cada parada se visita una sola vez y
+                        se retira exactamente lo que declares.
+                      </span>
+                    </p>
+                  )}
+                </div>
 
-            {/* **AC7: la disponibilidad de la flota se decide ACÁ, antes de
+                {/* Las zonas marcadas, recordadas en el último paso antes de
+                generar. La marca se pone en la lista de zonas, que acá ya no
+                está a la vista, así que sin esta línea no habría forma de
+                confirmar que quedó puesta sin cerrar el diálogo y volver.
+
+                Solo aparece si hay alguna: una línea que dice "0 prioritarias"
+                describe el caso normal y ocupa lugar sin informar nada. */}
+                {cantidadPrioritarias > 0 && (
+                  <p className="flex items-start gap-2 rounded-md border border-warning-strong/30 bg-warning/10 px-2.5 py-2 text-[0.6875rem] leading-relaxed">
+                    <StarFill className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-warning-strong" />
+                    <span>
+                      <span className="mono tabular-nums">{cantidadPrioritarias}</span>{" "}
+                      {cantidadPrioritarias === 1 ? "zona marcada" : "zonas marcadas"} como{" "}
+                      {cantidadPrioritarias === 1 ? "prioritaria" : "prioritarias"}:{" "}
+                      {cantidadPrioritarias === 1 ? "entra" : "entran"} al plan antes que el resto y{" "}
+                      {cantidadPrioritarias === 1 ? "es la última" : "son las últimas"} en salir si
+                      hay que recortar por capacidad u horas.
+                    </span>
+                  </p>
+                )}
+              </section>
+              <section className="flex min-h-0 flex-col gap-3 rounded-lg border border-border/60 p-3">
+                {/* **AC7: la disponibilidad de la flota se decide ACÁ, antes de
                 calcular.** Plegada por omisión y mostrando el resumen que el
                 backend ya calcula: 21 filas con foto abiertas de entrada tapan
                 el resto del formulario.
                 Cada unidad con su fotografía, porque la patente identifica el
                 vehículo en la planilla y no en el patio: lo que permite ir a
                 buscarlo es verlo. */}
-            <div className="space-y-1.5">
-              <button
-                type="button"
-                onClick={() => setFlotaAbierta((v) => !v)}
-                className="flex w-full cursor-pointer items-center justify-between rounded-md border border-border/60 px-2.5 py-2 text-left transition-colors hover:bg-accent"
-                aria-expanded={flotaAbierta}
-              >
-                <span className="text-xs font-medium text-foreground">
-                  Flota disponible
-                  <span className="ml-2 font-normal text-muted-foreground">
-                    {flotaDeLosActivos.filter((r) => r.disponible).length} de{" "}
-                    {flotaDeLosActivos.length} unidades
-                  </span>
-                </span>
-                <ChevronDown
-                  className={`h-3.5 w-3.5 flex-shrink-0 text-muted-foreground transition-transform duration-150 ${
-                    flotaAbierta ? "rotate-180" : ""
-                  }`}
-                />
-              </button>
-              {flotaAbierta && flotaDeLosActivos.length > 0 && (
-                <div className="relative">
-                  <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    value={busquedaFlota}
-                    onChange={(e) => setBusquedaFlota(e.target.value)}
-                    placeholder="Buscar por tipo, equipo o patente"
-                    aria-label="Buscar en la flota"
-                    className="h-8 pl-8 text-xs"
-                  />
-                </div>
-              )}
-              {flotaAbierta && (
-                <ul className="max-h-64 space-y-1 overflow-y-auto">
-                  {flotaDeLosActivos.length === 0 ? (
-                    <li className="rounded-md border border-dashed border-border/50 py-3 text-center text-xs text-muted-foreground">
-                      Los puntos activos no tienen unidades cargadas.
-                    </li>
-                  ) : flotaFiltrada.length === 0 ? (
-                    <li className="rounded-md border border-dashed border-border/50 py-3 text-center text-xs text-muted-foreground">
-                      Ninguna unidad calza con la búsqueda.
-                    </li>
-                  ) : (
-                    flotaFiltrada.map((r) => {
-                      // Pieza 2.2: este camión está en la calle, en otra ruta.
-                      // El interruptor sigue encendido (nadie lo apagó) pero el
-                      // ruteo no lo va a considerar, así que la fila tiene que
-                      // decirlo o parecería disponible sin serlo.
-                      const ocupada =
-                        unidadesEnRuta.has(r.id) ||
-                        (r.patente != null && unidadesEnRuta.has(r.patente));
-                      return (
-                        <li
-                          key={r.id}
-                          className={`flex items-center gap-2 rounded-md border p-2 ${
-                            !r.disponible || ocupada
-                              ? "border-dashed border-border/50"
-                              : "border-border/60"
-                          }`}
-                        >
-                          {r.foto ? (
-                            <img
-                              src={resourcePhotoUrl(r.foto)}
-                              alt=""
-                              loading="lazy"
-                              className={`h-9 w-12 flex-shrink-0 rounded object-cover ${
-                                r.disponible ? "" : "grayscale"
+                <div className="flex min-h-0 flex-1 flex-col gap-2">
+                  <p className="flex items-baseline justify-between gap-2 text-xs font-semibold text-foreground">
+                    <span>Flota disponible</span>
+                    <span className="mono text-[0.6875rem] font-normal tabular-nums text-muted-foreground">
+                      {flotaDeLosActivos.filter((r) => r.disponible).length} de{" "}
+                      {flotaDeLosActivos.length} unidades
+                    </span>
+                  </p>
+                  {flotaDeLosActivos.length > 0 && (
+                    <div className="relative">
+                      <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        value={busquedaFlota}
+                        onChange={(e) => setBusquedaFlota(e.target.value)}
+                        placeholder="Buscar por tipo, equipo o patente"
+                        aria-label="Buscar en la flota"
+                        className="h-8 pl-8 text-xs"
+                      />
+                    </div>
+                  )}
+                  {
+                    <ul className="max-h-64 min-h-0 flex-1 space-y-1 overflow-y-auto lg:max-h-none">
+                      {flotaDeLosActivos.length === 0 ? (
+                        <li className="rounded-md border border-dashed border-border/50 py-3 text-center text-xs text-muted-foreground">
+                          Los puntos activos no tienen unidades cargadas.
+                        </li>
+                      ) : flotaFiltrada.length === 0 ? (
+                        <li className="rounded-md border border-dashed border-border/50 py-3 text-center text-xs text-muted-foreground">
+                          Ninguna unidad calza con la búsqueda.
+                        </li>
+                      ) : (
+                        flotaFiltrada.map((r) => {
+                          // Pieza 2.2: este camión está en la calle, en otra ruta.
+                          // El interruptor sigue encendido (nadie lo apagó) pero el
+                          // ruteo no lo va a considerar, así que la fila tiene que
+                          // decirlo o parecería disponible sin serlo.
+                          const ocupada =
+                            unidadesEnRuta.has(r.id) ||
+                            (r.patente != null && unidadesEnRuta.has(r.patente));
+                          return (
+                            <li
+                              key={r.id}
+                              className={`flex items-center gap-2 rounded-md border p-2 ${
+                                !r.disponible || ocupada
+                                  ? "border-dashed border-border/50"
+                                  : "border-border/60"
                               }`}
-                            />
-                          ) : (
-                            <span className="flex h-9 w-12 flex-shrink-0 items-center justify-center rounded border border-dashed border-border/60">
-                              <Truck className="h-3.5 w-3.5 text-muted-foreground/50" />
-                            </span>
-                          )}
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-xs font-medium text-foreground">
-                              {r.tipo}
-                              {r.numero_equipo ? ` ${r.numero_equipo}` : ""}
-                            </p>
-                            <p className="text-[0.625rem] text-muted-foreground">
-                              {[
-                                r.patente,
-                                r.capacidad_m3 != null ? `${cifra(r.capacidad_m3)} m³` : null,
-                                r.capacidad_ton != null
-                                  ? `${peso(r.capacidad_ton * 1000)} kg`
-                                  : null,
-                              ]
-                                .filter(Boolean)
-                                .join(" · ")}
-                            </p>
-                            {/* **La dotación que esta unidad exige, acá y no solo
+                            >
+                              {r.foto ? (
+                                <img
+                                  src={resourcePhotoUrl(r.foto)}
+                                  alt=""
+                                  loading="lazy"
+                                  className={`h-9 w-12 flex-shrink-0 rounded object-cover ${
+                                    r.disponible ? "" : "grayscale"
+                                  }`}
+                                />
+                              ) : (
+                                <span className="flex h-9 w-12 flex-shrink-0 items-center justify-center rounded border border-dashed border-border/60">
+                                  <Truck className="h-3.5 w-3.5 text-muted-foreground/50" />
+                                </span>
+                              )}
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-xs font-medium text-foreground">
+                                  {r.tipo}
+                                  {r.numero_equipo ? ` ${r.numero_equipo}` : ""}
+                                </p>
+                                <p className="text-[0.625rem] text-muted-foreground">
+                                  {[
+                                    r.patente,
+                                    r.capacidad_m3 != null ? `${cifra(r.capacidad_m3)} m³` : null,
+                                    r.capacidad_ton != null
+                                      ? `${peso(r.capacidad_ton * 1000)} kg`
+                                      : null,
+                                  ]
+                                    .filter(Boolean)
+                                    .join(" · ")}
+                                </p>
+                                {/* **La dotación que esta unidad exige, acá y no solo
                               en su ficha.** Es la causa más frecuente de que un
                               plan no salga ("faltan conductores"), y sin verla
                               el trabajador no tiene cómo saber cuánta gente
                               declarar: con dos conductores y dos peonetas un
                               plan puede fallar y la pantalla no decía que cada
                               tolva pide un conductor y dos peonetas. */}
-                            {r.conductores_requeridos + r.peonetas_requeridas > 0 && (
-                              <p className="text-[0.625rem] text-muted-foreground">
-                                Dotación:{" "}
-                                {[
-                                  r.conductores_requeridos > 0
-                                    ? `${r.conductores_requeridos} conductor${
-                                        r.conductores_requeridos === 1 ? "" : "es"
-                                      }`
-                                    : null,
-                                  r.peonetas_requeridas > 0
-                                    ? `${r.peonetas_requeridas} peoneta${
-                                        r.peonetas_requeridas === 1 ? "" : "s"
-                                      }`
-                                    : null,
-                                ]
-                                  .filter(Boolean)
-                                  .join(", ")}
-                              </p>
-                            )}
-                          </div>
-                          {/* El interruptor sigue encendido porque nadie lo
+                                {r.conductores_requeridos + r.peonetas_requeridas > 0 && (
+                                  <p className="mt-0.5 inline-flex rounded bg-primary/10 px-1.5 py-0.5 text-[0.6875rem] font-semibold text-primary">
+                                    Dotación:&nbsp;
+                                    {[
+                                      r.conductores_requeridos > 0
+                                        ? `${r.conductores_requeridos} conductor${
+                                            r.conductores_requeridos === 1 ? "" : "es"
+                                          }`
+                                        : null,
+                                      r.peonetas_requeridas > 0
+                                        ? `${r.peonetas_requeridas} peoneta${
+                                            r.peonetas_requeridas === 1 ? "" : "s"
+                                          }`
+                                        : null,
+                                    ]
+                                      .filter(Boolean)
+                                      .join(", ")}
+                                  </p>
+                                )}
+                              </div>
+                              {/* El interruptor sigue encendido porque nadie lo
                             apagó: lo que pasa es que esa unidad está en la
                             calle. Decirlo con una insignia y no apagando el
                             interruptor es lo que mantiene separadas las dos
                             cosas, una decisión del patio y un hecho del día. */}
-                          {ocupada && (
-                            <span className="flex-shrink-0 rounded-full bg-warning/15 px-2 py-0.5 text-[0.625rem] font-medium text-warning-strong">
-                              En ruta
-                            </span>
-                          )}
-                          {cambiandoUnidad === r.id ? (
-                            <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-muted-foreground" />
-                          ) : (
-                            <Switch
-                              checked={r.disponible}
-                              onCheckedChange={() => void alternarUnidad(r)}
-                              aria-label={`${r.disponible ? "Marcar como no disponible" : "Marcar como disponible"}: ${r.tipo} ${r.patente ?? ""}`}
-                            />
-                          )}
-                        </li>
-                      );
-                    })
-                  )}
-                </ul>
-              )}
-            </div>
-
-            <div className="space-y-1.5">
-              <p className="text-xs font-medium text-muted-foreground">Puntos activos</p>
-              {loadingPoints ? (
-                <div className="flex justify-center py-3">
-                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                              {ocupada && (
+                                <span className="flex-shrink-0 rounded-full bg-warning/15 px-2 py-0.5 text-[0.625rem] font-medium text-warning-strong">
+                                  En ruta
+                                </span>
+                              )}
+                              {cambiandoUnidad === r.id ? (
+                                <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-muted-foreground" />
+                              ) : (
+                                <Switch
+                                  checked={r.disponible}
+                                  onCheckedChange={() => void alternarUnidad(r)}
+                                  aria-label={`${r.disponible ? "Marcar como no disponible" : "Marcar como disponible"}: ${r.tipo} ${r.patente ?? ""}`}
+                                />
+                              )}
+                            </li>
+                          );
+                        })
+                      )}
+                    </ul>
+                  }
                 </div>
-              ) : activePoints.length === 0 ? (
-                <p className="rounded-md border border-dashed border-border/50 py-3 text-center text-xs text-muted-foreground">
-                  No hay puntos activos. Revísalos en el bloque Puntos.
-                </p>
-              ) : (
-                // Cada punto con lo que REALMENTE aporta, no solo su nombre.
-                // Antes esta lista decía cuáles participan pero no con cuánto,
-                // así que la ruta se mandaba a generar sin saber si había
-                // capacidad para ella, y un "infeasible" después no tenía
-                // ninguna explicación a la vista.
-                <ul className="max-h-32 space-y-1 overflow-y-auto">
-                  {activePoints.map((p) => {
-                    const resumen = resumenParaRuta(recursosPorPunto[p.id] ?? [], unidadesEnRuta);
-                    return (
-                      <li
-                        key={p.id}
-                        className="flex items-baseline justify-between gap-2 rounded-md border border-border/60 bg-background/60 px-2 py-1.5 text-xs"
-                      >
-                        <span className="truncate">{p.name}</span>
-                        <span className="mono flex-shrink-0 tabular-nums text-muted-foreground">
-                          {resumen.suman.length} de {p.resource_count} suman{" "}
-                          {cifra(resumen.capacidad)} m³
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </div>
 
-            <div className="space-y-1.5">
-              <label
-                htmlFor="available-hours"
-                className="text-xs font-medium text-muted-foreground"
-              >
-                Horas disponibles
-              </label>
-              <Input
-                id="available-hours"
-                type="number"
-                min={0}
-                value={availableHours}
-                onChange={(e) => setAvailableHours(e.target.value)}
-                className={
-                  !hoursValid ? "border-destructive focus-visible:ring-destructive" : undefined
-                }
-              />
-              {!hoursValid && (
-                <p className="text-[0.625rem] text-destructive">
-                  Ingresa un número de horas mayor a 0.
-                </p>
-              )}
-            </div>
+                <div className="flex-shrink-0 space-y-1.5">
+                  <p className="text-xs font-semibold text-foreground">Puntos activos</p>
+                  {loadingPoints ? (
+                    <div className="flex justify-center py-3">
+                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : activePoints.length === 0 ? (
+                    <p className="rounded-md border border-dashed border-border/50 py-3 text-center text-xs text-muted-foreground">
+                      No hay puntos activos. Revísalos en el bloque Puntos.
+                    </p>
+                  ) : (
+                    // Cada punto con lo que REALMENTE aporta, no solo su nombre.
+                    // Antes esta lista decía cuáles participan pero no con cuánto,
+                    // así que la ruta se mandaba a generar sin saber si había
+                    // capacidad para ella, y un "infeasible" después no tenía
+                    // ninguna explicación a la vista.
+                    <ul className="max-h-24 space-y-1 overflow-y-auto">
+                      {activePoints.map((p) => {
+                        const resumen = resumenParaRuta(
+                          recursosPorPunto[p.id] ?? [],
+                          unidadesEnRuta,
+                        );
+                        return (
+                          <li
+                            key={p.id}
+                            className="flex items-baseline justify-between gap-2 rounded-md border border-border/60 bg-background/60 px-2 py-1.5 text-xs"
+                          >
+                            <span className="truncate">{p.name}</span>
+                            <span className="mono flex-shrink-0 tabular-nums text-muted-foreground">
+                              {resumen.suman.length} de {p.resource_count} suman{" "}
+                              {cifra(resumen.capacidad)} m³
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+              </section>
+              <section className="flex min-h-0 flex-col gap-3 rounded-lg border border-border/60 p-3">
+                {/* ── Personal disponible (AC1 y AC2 de HDU5.1) ──
+                Se declara acá y no en una pantalla de administración porque es
+                una decisión de ESTA jornada: la municipalidad describió su
+                operación como "se designa personal según requerimiento" y "se
+                flexibiliza por inasistencias".
 
-            {/* ── Convoyes simultáneos por punto (pieza 2.3) ──
+                La casilla, y no la papelera, es lo que cubre la inasistencia:
+                quien falta hoy vuelve mañana, y obligar a reescribir su nombre
+                convertiría una ausencia en un alta nueva. */}
+                <div className="flex min-h-0 flex-1 flex-col gap-2">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <label className="text-xs font-semibold text-foreground">
+                      Personal disponible hoy
+                    </label>
+                    {/* El resumen por rol, que es la cifra que decide qué vehículos
+                    pueden salir. Sin esto hay que contar filas a ojo en una
+                    lista que además puede estar filtrada por el buscador. */}
+                    {cuadrillaDeHoy.length > 0 && (
+                      <span className="flex items-baseline gap-2">
+                        {resumenCuadrilla
+                          .filter((r) => r.cantidad > 0)
+                          .map((r) => (
+                            <span key={r.valor} className="text-[0.625rem] text-muted-foreground">
+                              <span className="mono font-semibold tabular-nums text-foreground">
+                                {r.cantidad}
+                              </span>{" "}
+                              {r.cantidad === 1 ? r.etiqueta.toLowerCase() : r.plural}
+                            </span>
+                          ))}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* El buscador aparece recién cuando hay suficientes filas para
+                  que buscar tenga sentido: con cuatro personas es un control de
+                  más que ocupa el lugar de una de ellas. */}
+                  {cuadrilla.length > 6 && (
+                    <div className="relative">
+                      <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        value={buscandoPersonal}
+                        onChange={(e) => setBuscandoPersonal(e.target.value)}
+                        placeholder="Buscar por nombre"
+                        className="h-8 pl-8 text-xs"
+                      />
+                    </div>
+                  )}
+
+                  {cuadrilla.length === 0 ? (
+                    <p className="rounded-md border border-dashed border-border/60 px-3 py-3 text-center text-[0.6875rem] leading-relaxed text-muted-foreground">
+                      Sin personal declarado, el plan no restringe por dotación y la ruta se genera
+                      igual.
+                      {dotacionNecesaria.length > 0 && (
+                        <>
+                          {" "}
+                          Para tripular toda la flota disponible harían falta{" "}
+                          <span className="font-medium text-foreground">
+                            {dotacionNecesaria
+                              .map(
+                                (r) =>
+                                  `${r.total} ${r.total === 1 ? r.etiqueta.toLowerCase() : r.plural}`,
+                              )
+                              .join(" y ")}
+                          </span>
+                          .
+                        </>
+                      )}
+                    </p>
+                  ) : cuadrillaFiltrada.length === 0 ? (
+                    <p className="rounded-md border border-dashed border-border/60 px-3 py-3 text-center text-[0.6875rem] text-muted-foreground">
+                      Nadie coincide con esa búsqueda.
+                    </p>
+                  ) : (
+                    // Alto acotado con scroll: con treinta personas el diálogo
+                    // crecería hasta sacar el botón de generar de la pantalla.
+                    <ul className="max-h-64 min-h-0 flex-1 space-y-1 overflow-y-auto pr-0.5 lg:max-h-none">
+                      {/* Primero los disponibles hoy y después el resto. El orden es
+                      estable: dentro de cada grupo se conserva el de la lista. */}
+                      {[...cuadrillaFiltrada]
+                        .sort((x, y) => Number(y.disponible) - Number(x.disponible))
+                        .map((persona) => {
+                          const repetido =
+                            persona.disponible &&
+                            repetidos.has(persona.nombre.trim().toLowerCase());
+                          // Marcada pero sin nombre, y ya se dejó el campo: no entra
+                          // al plan, y callarlo dejaría al trabajador contando a
+                          // alguien que el sistema no cuenta. Ámbar y no rojo, porque
+                          // es un dato que falta y no un error, mismo criterio que una
+                          // capacidad sin declarar.
+                          const incompleta = sinTerminar(persona);
+                          return (
+                            <li key={persona.id} className="flex items-center gap-1.5">
+                              <Checkbox
+                                checked={persona.disponible}
+                                onCheckedChange={(v) =>
+                                  cambiarPersona(persona, { disponible: v === true })
+                                }
+                                aria-label={`${persona.nombre || "Sin nombre"} disponible hoy`}
+                              />
+                              <Input
+                                value={persona.nombre}
+                                // Se escribe local y se guarda al salir del campo: una
+                                // petición por tecla sería una ráfaga contra el
+                                // servidor y haría saltar el cursor con cada respuesta.
+                                onChange={(e) =>
+                                  setCuadrilla((prev) =>
+                                    prev.map((x) =>
+                                      x.id === persona.id ? { ...x, nombre: e.target.value } : x,
+                                    ),
+                                  )
+                                }
+                                onBlur={() => {
+                                  setRecienAgregadas((prev) => {
+                                    if (!prev.has(persona.id)) return prev;
+                                    const next = new Set(prev);
+                                    next.delete(persona.id);
+                                    return next;
+                                  });
+                                  cambiarPersona(persona, {});
+                                }}
+                                placeholder="Nombre"
+                                className={`h-8 flex-1 text-xs ${
+                                  repetido
+                                    ? "border-destructive focus-visible:ring-destructive"
+                                    : incompleta
+                                      ? "border-warning-strong/60"
+                                      : ""
+                                }`}
+                              />
+                              <Select
+                                value={persona.rol}
+                                onValueChange={(v) =>
+                                  cambiarPersona(persona, { rol: v as RolPersonal })
+                                }
+                              >
+                                <SelectTrigger className="h-8 w-[7.5rem] text-xs">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {ROLES.map((r) => (
+                                    <SelectItem key={r.valor} value={r.valor}>
+                                      {r.etiqueta}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              <button
+                                type="button"
+                                onClick={() => quitarPersona(persona)}
+                                aria-label={`Quitar a ${persona.nombre || "esta persona"}`}
+                                title="Quitar de la cuadrilla"
+                                className="flex h-7 w-7 flex-shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive-strong"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </li>
+                          );
+                        })}
+                    </ul>
+                  )}
+
+                  {cuadrilla.some(sinTerminar) && (
+                    <p className="text-[0.625rem] leading-relaxed text-warning-strong">
+                      Hay personas marcadas sin nombre. No entran en el plan hasta que lo tengan: el
+                      plan identifica a cada una por su nombre para poder comprobar que nadie esté
+                      en dos vehículos.
+                    </p>
+                  )}
+
+                  {repetidos.size > 0 && (
+                    <p className="text-[0.625rem] leading-relaxed text-destructive">
+                      Hay nombres repetidos entre las personas marcadas. El plan comprueba que nadie
+                      esté en dos vehículos a la vez, y con dos filas llamadas igual esa
+                      comprobación deja de poder hacerse.
+                    </p>
+                  )}
+
+                  {/* El mismo aviso cuando hay gente cargada pero nadie marcado: es
+                  el mismo caso para el algoritmo y no se ve igual en pantalla. */}
+                  {cuadrilla.length > 0 && cuadrillaDeHoy.length === 0 && (
+                    <p className="text-[0.625rem] leading-relaxed text-muted-foreground">
+                      Sin nadie marcado la ruta se genera igual, sin restringir por dotación.
+                    </p>
+                  )}
+
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="h-8 w-full flex-shrink-0 text-xs"
+                    disabled={guardandoPersona}
+                    onClick={agregarPersona}
+                  >
+                    <Plus className="mr-1.5 h-3 w-3" /> Agregar persona
+                  </Button>
+                </div>
+              </section>
+            </div>
+            {/* Los tres parámetros de la jornada, bajo las columnas y con su
+                mismo ancho, para que el diálogo se lea como una grilla. */}
+            <div className="grid flex-shrink-0 grid-cols-1 gap-4 rounded-lg border border-border/60 p-3 lg:grid-cols-3">
+              <div className="space-y-1.5">
+                <label htmlFor="available-hours" className="text-xs font-semibold text-foreground">
+                  Horas disponibles
+                </label>
+                <Input
+                  id="available-hours"
+                  type="number"
+                  min={0}
+                  value={availableHours}
+                  onChange={(e) => setAvailableHours(e.target.value)}
+                  className={
+                    !hoursValid ? "border-destructive focus-visible:ring-destructive" : undefined
+                  }
+                />
+                {!hoursValid && (
+                  <p className="text-[0.625rem] text-destructive">
+                    Ingresa un número de horas mayor a 0.
+                  </p>
+                )}
+              </div>
+
+              {/* ── Convoyes simultáneos por punto (pieza 2.3) ──
                 Un punto con 8 camiones podía despachar UN recorrido, así que la
                 mitad del patio se quedaba parada aunque hubiera jornada de sobra.
                 Con dos convoyes, la flota se reparte y las zonas se dividen entre
@@ -4300,273 +4533,65 @@ function RutasPage() {
                 (la flota real tiene 8 unidades de carga y 21 en total), y un campo
                 libre invita a escribir un 12 que el backend va a recortar sin que
                 nadie entienda por qué. */}
-            <div className="space-y-1.5">
-              <div className="flex items-baseline justify-between gap-2">
-                <label className="text-xs font-medium text-muted-foreground">
-                  Convoyes por punto
-                </label>
-                <span className="text-[0.625rem] text-muted-foreground">
-                  {convoyes === 1 ? "Un recorrido por punto" : `${convoyes} salen a la vez`}
-                </span>
-              </div>
-              <div
-                role="radiogroup"
-                aria-label="Convoyes simultáneos por punto"
-                className="flex gap-1.5"
-              >
-                {[1, 2, 3, 4].map((n) => (
-                  <button
-                    key={n}
-                    type="button"
-                    role="radio"
-                    aria-checked={convoyes === n}
-                    onClick={() => setConvoyes(n)}
-                    className={`mono h-8 flex-1 rounded-md border text-xs tabular-nums transition-colors ${
-                      convoyes === n
-                        ? "border-primary bg-primary/10 font-semibold text-primary"
-                        : "border-border/60 text-muted-foreground hover:bg-background/60"
-                    }`}
-                  >
-                    {n}
-                  </button>
-                ))}
-              </div>
-              {convoyes > 1 && (
-                <p className="text-[0.625rem] text-warning-strong">
-                  La flota de cada punto se reparte entre {convoyes} convoyes y cada uno pide su
-                  propia dotación. Con pocos vehículos o poca gente, varios pueden quedar sin salir.
-                </p>
-              )}
-            </div>
-
-            {/* ── Personal disponible (AC1 y AC2 de HDU5.1) ──
-                Se declara acá y no en una pantalla de administración porque es
-                una decisión de ESTA jornada: la municipalidad describió su
-                operación como "se designa personal según requerimiento" y "se
-                flexibiliza por inasistencias".
-
-                La casilla, y no la papelera, es lo que cubre la inasistencia:
-                quien falta hoy vuelve mañana, y obligar a reescribir su nombre
-                convertiría una ausencia en un alta nueva. */}
-            <div className="space-y-1.5">
-              <div className="flex items-baseline justify-between gap-2">
-                <label className="text-xs font-medium text-muted-foreground">
-                  Personal disponible hoy
-                </label>
-                {/* El resumen por rol, que es la cifra que decide qué vehículos
-                    pueden salir. Sin esto hay que contar filas a ojo en una
-                    lista que además puede estar filtrada por el buscador. */}
-                {cuadrillaDeHoy.length > 0 && (
-                  <span className="flex items-baseline gap-2">
-                    {resumenCuadrilla
-                      .filter((r) => r.cantidad > 0)
-                      .map((r) => (
-                        <span key={r.valor} className="text-[0.625rem] text-muted-foreground">
-                          <span className="mono font-semibold tabular-nums text-foreground">
-                            {r.cantidad}
-                          </span>{" "}
-                          {r.cantidad === 1 ? r.etiqueta.toLowerCase() : r.plural}
-                        </span>
-                      ))}
+              <div className="space-y-1.5">
+                <div className="flex items-baseline justify-between gap-2">
+                  <label className="text-xs font-semibold text-foreground">
+                    Convoyes por punto
+                  </label>
+                  <span className="text-[0.625rem] text-muted-foreground">
+                    {convoyes === 1 ? "Un recorrido por punto" : `${convoyes} salen a la vez`}
                   </span>
+                </div>
+                <div
+                  role="radiogroup"
+                  aria-label="Convoyes simultáneos por punto"
+                  className="flex gap-1.5"
+                >
+                  {[1, 2, 3, 4].map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      role="radio"
+                      aria-checked={convoyes === n}
+                      onClick={() => setConvoyes(n)}
+                      className={`mono h-8 flex-1 cursor-pointer rounded-md border text-xs tabular-nums transition-colors ${
+                        convoyes === n
+                          ? "border-primary bg-primary/10 font-semibold text-primary"
+                          : "border-border/60 text-muted-foreground hover:border-primary/50 hover:bg-primary/5 hover:text-foreground"
+                      }`}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
+                {convoyes > 1 && (
+                  <p className="text-[0.625rem] text-warning-strong">
+                    La flota de cada punto se reparte entre {convoyes} convoyes y cada uno pide su
+                    propia dotación. Con pocos vehículos o poca gente, varios pueden quedar sin
+                    salir.
+                  </p>
                 )}
               </div>
 
-              {/* El buscador aparece recién cuando hay suficientes filas para
-                  que buscar tenga sentido: con cuatro personas es un control de
-                  más que ocupa el lugar de una de ellas. */}
-              {cuadrilla.length > 6 && (
-                <div className="relative">
-                  <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    value={buscandoPersonal}
-                    onChange={(e) => setBuscandoPersonal(e.target.value)}
-                    placeholder="Buscar por nombre"
-                    className="h-8 pl-8 text-xs"
-                  />
-                </div>
-              )}
-
-              {cuadrilla.length === 0 ? (
-                <p className="rounded-md border border-dashed border-border/60 px-3 py-3 text-center text-[0.6875rem] leading-relaxed text-muted-foreground">
-                  Sin personal declarado, el plan no restringe por dotación y la ruta se genera
-                  igual.
-                  {dotacionNecesaria.length > 0 && (
-                    <>
-                      {" "}
-                      Para tripular toda la flota disponible harían falta{" "}
-                      <span className="font-medium text-foreground">
-                        {dotacionNecesaria
-                          .map(
-                            (r) =>
-                              `${r.total} ${r.total === 1 ? r.etiqueta.toLowerCase() : r.plural}`,
-                          )
-                          .join(" y ")}
-                      </span>
-                      .
-                    </>
-                  )}
-                </p>
-              ) : cuadrillaFiltrada.length === 0 ? (
-                <p className="rounded-md border border-dashed border-border/60 px-3 py-3 text-center text-[0.6875rem] text-muted-foreground">
-                  Nadie coincide con esa búsqueda.
-                </p>
-              ) : (
-                // Alto acotado con scroll: con treinta personas el diálogo
-                // crecería hasta sacar el botón de generar de la pantalla.
-                <ul className="max-h-60 space-y-1 overflow-y-auto pr-0.5">
-                  {cuadrillaFiltrada.map((persona) => {
-                    const repetido =
-                      persona.disponible && repetidos.has(persona.nombre.trim().toLowerCase());
-                    // Marcada pero sin nombre, y ya se dejó el campo: no entra
-                    // al plan, y callarlo dejaría al trabajador contando a
-                    // alguien que el sistema no cuenta. Ámbar y no rojo, porque
-                    // es un dato que falta y no un error, mismo criterio que una
-                    // capacidad sin declarar.
-                    const incompleta = sinTerminar(persona);
-                    return (
-                      <li key={persona.id} className="flex items-center gap-1.5">
-                        <Checkbox
-                          checked={persona.disponible}
-                          onCheckedChange={(v) =>
-                            cambiarPersona(persona, { disponible: v === true })
-                          }
-                          aria-label={`${persona.nombre || "Sin nombre"} disponible hoy`}
-                        />
-                        <Input
-                          value={persona.nombre}
-                          // Se escribe local y se guarda al salir del campo: una
-                          // petición por tecla sería una ráfaga contra el
-                          // servidor y haría saltar el cursor con cada respuesta.
-                          onChange={(e) =>
-                            setCuadrilla((prev) =>
-                              prev.map((x) =>
-                                x.id === persona.id ? { ...x, nombre: e.target.value } : x,
-                              ),
-                            )
-                          }
-                          onBlur={() => {
-                            setRecienAgregadas((prev) => {
-                              if (!prev.has(persona.id)) return prev;
-                              const next = new Set(prev);
-                              next.delete(persona.id);
-                              return next;
-                            });
-                            cambiarPersona(persona, {});
-                          }}
-                          placeholder="Nombre"
-                          className={`h-8 flex-1 text-xs ${
-                            repetido
-                              ? "border-destructive focus-visible:ring-destructive"
-                              : incompleta
-                                ? "border-warning-strong/60"
-                                : ""
-                          }`}
-                        />
-                        <Select
-                          value={persona.rol}
-                          onValueChange={(v) => cambiarPersona(persona, { rol: v as RolPersonal })}
-                        >
-                          <SelectTrigger className="h-8 w-[7.5rem] text-xs">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {ROLES.map((r) => (
-                              <SelectItem key={r.valor} value={r.valor}>
-                                {r.etiqueta}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <button
-                          type="button"
-                          onClick={() => quitarPersona(persona)}
-                          aria-label={`Quitar a ${persona.nombre || "esta persona"}`}
-                          title="Quitar de la cuadrilla"
-                          className="flex h-7 w-7 flex-shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive-strong"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-
-              {cuadrilla.some(sinTerminar) && (
-                <p className="text-[0.625rem] leading-relaxed text-warning-strong">
-                  Hay personas marcadas sin nombre. No entran en el plan hasta que lo tengan: el
-                  plan identifica a cada una por su nombre para poder comprobar que nadie esté en
-                  dos vehículos.
-                </p>
-              )}
-
-              {repetidos.size > 0 && (
-                <p className="text-[0.625rem] leading-relaxed text-destructive">
-                  Hay nombres repetidos entre las personas marcadas. El plan comprueba que nadie
-                  esté en dos vehículos a la vez, y con dos filas llamadas igual esa comprobación
-                  deja de poder hacerse.
-                </p>
-              )}
-
-              {/* El mismo aviso cuando hay gente cargada pero nadie marcado: es
-                  el mismo caso para el algoritmo y no se ve igual en pantalla. */}
-              {cuadrilla.length > 0 && cuadrillaDeHoy.length === 0 && (
-                <p className="text-[0.625rem] leading-relaxed text-muted-foreground">
-                  Sin nadie marcado la ruta se genera igual, sin restringir por dotación.
-                </p>
-              )}
-
-              <Button
-                variant="secondary"
-                size="sm"
-                className="h-8 w-full text-xs"
-                disabled={guardandoPersona}
-                onClick={agregarPersona}
-              >
-                <Plus className="mr-1.5 h-3 w-3" /> Agregar persona
-              </Button>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-foreground">
+                  Tipo de basura prioritario
+                </label>
+                <Select value={priorityWasteType} onValueChange={setPriorityWasteType}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Sin prioridad</SelectItem>
+                    {WASTE_CLASSES.map((cls) => (
+                      <SelectItem key={cls} value={cls}>
+                        {cls}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground">
-                Tipo de basura prioritario
-              </label>
-              <Select value={priorityWasteType} onValueChange={setPriorityWasteType}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Sin prioridad</SelectItem>
-                  {WASTE_CLASSES.map((cls) => (
-                    <SelectItem key={cls} value={cls}>
-                      {cls}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Las zonas marcadas, recordadas en el último paso antes de
-                generar. La marca se pone en la lista de zonas, que acá ya no
-                está a la vista, así que sin esta línea no habría forma de
-                confirmar que quedó puesta sin cerrar el diálogo y volver.
-
-                Solo aparece si hay alguna: una línea que dice "0 prioritarias"
-                describe el caso normal y ocupa lugar sin informar nada. */}
-            {cantidadPrioritarias > 0 && (
-              <p className="flex items-start gap-2 rounded-md border border-warning-strong/30 bg-warning/10 px-2.5 py-2 text-[0.6875rem] leading-relaxed">
-                <StarFill className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-warning-strong" />
-                <span>
-                  <span className="mono tabular-nums">{cantidadPrioritarias}</span>{" "}
-                  {cantidadPrioritarias === 1 ? "zona marcada" : "zonas marcadas"} como{" "}
-                  {cantidadPrioritarias === 1 ? "prioritaria" : "prioritarias"}:{" "}
-                  {cantidadPrioritarias === 1 ? "entra" : "entran"} al plan antes que el resto y{" "}
-                  {cantidadPrioritarias === 1 ? "es la última" : "son las últimas"} en salir si hay
-                  que recortar por capacidad u horas.
-                </span>
-              </p>
-            )}
           </div>
 
           <DialogFooter className="sm:justify-between">
