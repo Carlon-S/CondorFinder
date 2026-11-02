@@ -62,6 +62,17 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { SortableHead } from "@/components/SortableHead";
 import { ResourceFormDialog } from "@/components/ResourceFormDialog";
 import { FiltroDropdown } from "@/components/FiltroDropdown";
+import { InsigniaEstado } from "@/components/InsigniaEstado";
+import { PaginacionTabla } from "@/components/PaginacionTabla";
+import {
+  BTN_FILA,
+  BTN_FILA_ICONO,
+  CAB_ORDEN,
+  CAB_TEXTO,
+  CELDA,
+  ENCABEZADO_FILA,
+  FILA,
+} from "@/components/tabla-estilos";
 import { notify } from "@/lib/notify";
 import {
   deleteResource,
@@ -98,20 +109,24 @@ type Campo = "estado" | "equipo" | "tipo" | "capacidad" | "peso" | "autonomia" |
  *  `table-fixed`. Con el ancho automático del navegador cada columna mide lo
  *  que mide su contenido más largo, así que "Vehículo" se comía el espacio con
  *  un "CATERPILLAR 416F2 2018" y el encabezado de capacidad se partía en dos
- *  líneas. */
+ *  líneas. Suman 100.
+ *
+ *  El ORDEN es el de Vista Principal y el de la lista de puntos: primero lo que
+ *  identifica la fila (la foto y el equipo), después su estado y al final las
+ *  cifras. Antes el estado iba primero; se movió para que las tres tablas se
+ *  lean de la misma manera. */
 const ANCHOS = {
-  estado: "w-[11%]",
   // Igual de ancha que la del lugar en la tabla de puntos: las dos muestran una
-  // foto que hay que poder reconocer, y a 4rem un camión es una mancha. Los
-  // puntos salieron de estado y acciones.
+  // foto que hay que poder reconocer, y a 4rem un camión es una mancha.
   foto: "w-[11%]",
-  equipo: "w-[15%]",
+  equipo: "w-[13%]",
   tipo: "w-[10%]",
-  capacidad: "w-[11%]",
-  peso: "w-[10%]",
-  autonomia: "w-[10%]",
+  estado: "w-[15%]",
+  capacidad: "w-[10%]",
+  peso: "w-[9%]",
+  autonomia: "w-[9%]",
   vehiculo: "w-[12%]",
-  acciones: "w-[10%]",
+  acciones: "w-[11%]",
 } as const;
 
 /** La cifra de capacidad separada de qué mide. Antes la celda decía "balde 3"
@@ -570,7 +585,14 @@ function RecursosDelPuntoPage() {
         )}
 
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-card">
-          <div className="flex flex-wrap items-center gap-2 border-b border-border px-5 py-3">
+          <div className="flex flex-wrap items-center gap-3 border-b border-border px-5 py-4">
+            {/* El título con el mismo tratamiento que "Puntos" y "Listado de
+                zonas": las tres tablas se presentan igual. */}
+            <span className="flex items-center gap-2.5 border-l-2 border-primary/50 pl-3">
+              <Truck className="h-3.5 w-3.5 text-foreground/70" />
+              <h2 className="text-sm font-semibold tracking-tight text-foreground">Flota</h2>
+            </span>
+
             {/* Disponibilidad de toda la flota, a la izquierda del buscador y
                 con el MISMO interruptor que cada fila usa en su columna Estado:
                 es la misma acción sobre todas en vez de sobre una, así que
@@ -675,23 +697,20 @@ function RecursosDelPuntoPage() {
             ) : (
               <Table className="table-fixed">
                 <TableHeader>
-                  <TableRow className="bg-muted/50 hover:bg-muted/50">
-                    <SortableHead
-                      field="estado"
-                      label="Estado"
-                      className={ANCHOS.estado}
-                      sortBy={sortBy}
-                      sortDir={sortDir}
-                      onSort={alternarOrden}
-                    />
-                    <TableHead className={ANCHOS.foto}></TableHead>
+                  {/* Los mismos encabezados que Vista Principal, el historial y la
+                      lista de puntos: tamaño, relleno y color salen de
+                      `tabla-estilos.ts`. */}
+                  <TableRow className={ENCABEZADO_FILA}>
+                    <TableHead className={`${ANCHOS.foto} ${CAB_TEXTO}`}>
+                      <span className="sr-only">Foto</span>
+                    </TableHead>
                     {/* El encabezado nombra los DOS datos de la celda: antes
                         decía solo "Equipo" y la patente aparecía abajo sin que
                         nada la anunciara. */}
                     <SortableHead
                       field="equipo"
                       label="Equipo / Patente"
-                      className={ANCHOS.equipo}
+                      className={`${ANCHOS.equipo} ${CAB_ORDEN}`}
                       sortBy={sortBy}
                       sortDir={sortDir}
                       onSort={alternarOrden}
@@ -700,10 +719,19 @@ function RecursosDelPuntoPage() {
                     <SortableHead
                       field="tipo"
                       label="Tipo"
-                      className={ANCHOS.tipo}
+                      className={`${ANCHOS.tipo} ${CAB_ORDEN}`}
                       sortBy={sortBy}
                       sortDir={sortDir}
                       onSort={alternarOrden}
+                    />
+                    <SortableHead
+                      field="estado"
+                      label="Estado"
+                      className={`${ANCHOS.estado} ${CAB_ORDEN}`}
+                      sortBy={sortBy}
+                      sortDir={sortDir}
+                      onSort={alternarOrden}
+                      align="center"
                     />
                     {/* La unidad va en la cabecera, como en el resto de las
                         tablas del sistema: repetida fila por fila descoloca las
@@ -714,35 +742,28 @@ function RecursosDelPuntoPage() {
                         PLANO, que declaran peso. No se resuelve poniéndole la
                         unidad a las 21 filas: esas dos la dicen en su propia
                         segunda línea ("kg · carga"), que ya existía para
-                        calificar la cifra. Una excepción se marca donde ocurre,
-                        no en el encabezado de todas. */}
+                        calificar la cifra. */}
                     <SortableHead
                       field="capacidad"
                       label="Capacidad"
                       unit="m³"
-                      className={ANCHOS.capacidad}
+                      className={`${ANCHOS.capacidad} ${CAB_ORDEN}`}
                       sortBy={sortBy}
                       sortDir={sortDir}
                       onSort={alternarOrden}
                       align="center"
                     />
-                    {/* El límite de PESO, en su propia columna y no dentro de
-                        la de capacidad: son dos magnitudes distintas del mismo
+                    {/* El límite de PESO, en su propia columna y no dentro de la
+                        de capacidad: son dos magnitudes distintas del mismo
                         vehículo, y el AMPLIROLL declara las dos (20 m³ y 15 t).
-                        Metidas en una sola celda, la de 15 t no se veía en
-                        ninguna parte de la tabla y había que abrir la ficha de
-                        cada unidad para encontrarla. */}
-                    {/* En kg y no en t: todo el resto del sistema habla de peso
-                        en kilos (el de cada zona, el de cada parada del plan),
-                        así que una columna en toneladas obligaba a convertir de
-                        cabeza para comparar la carga contra el límite del camión
-                        que la va a llevar. El campo guardado sigue en toneladas,
-                        que es como lo entregó la municipalidad. */}
+                        En kg y no en t: todo el resto del sistema habla de peso
+                        en kilos. El campo guardado sigue en toneladas, que es
+                        como lo entregó la municipalidad. */}
                     <SortableHead
                       field="peso"
                       label="Peso máx."
                       unit="kg"
-                      className={ANCHOS.peso}
+                      className={`${ANCHOS.peso} ${CAB_ORDEN}`}
                       sortBy={sortBy}
                       sortDir={sortDir}
                       onSort={alternarOrden}
@@ -752,13 +773,12 @@ function RecursosDelPuntoPage() {
                         la municipalidad respondió que ese límite no existe, así
                         que la columna muestra "sin límite" en las 21 filas. Se
                         incluye igual: es el único lugar donde se ve de un
-                        vistazo cuáles declaran rango sin abrir la ficha de cada
-                        unidad. */}
+                        vistazo cuáles declaran rango sin abrir la ficha. */}
                     <SortableHead
                       field="autonomia"
                       label="Autonomía"
                       unit="km"
-                      className={ANCHOS.autonomia}
+                      className={`${ANCHOS.autonomia} ${CAB_ORDEN}`}
                       sortBy={sortBy}
                       sortDir={sortDir}
                       onSort={alternarOrden}
@@ -767,12 +787,14 @@ function RecursosDelPuntoPage() {
                     <SortableHead
                       field="vehiculo"
                       label="Vehículo"
-                      className={ANCHOS.vehiculo}
+                      className={`${ANCHOS.vehiculo} ${CAB_ORDEN}`}
                       sortBy={sortBy}
                       sortDir={sortDir}
                       onSort={alternarOrden}
                     />
-                    <TableHead className={ANCHOS.acciones}></TableHead>
+                    <TableHead className={`${ANCHOS.acciones} px-3`}>
+                      <span className="sr-only">Acciones</span>
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -781,37 +803,9 @@ function RecursosDelPuntoPage() {
                     return (
                       <TableRow
                         key={r.id}
-                        className="animate-in fade-in duration-300 fill-mode-both hover:bg-card/60"
+                        className={`${FILA} animate-in fade-in duration-300 fill-mode-both`}
                       >
-                        {/* ESTADO PRIMERO, antes de la identidad: es lo que
-                            decide si esta unidad entra en una ruta. */}
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <Switch
-                              checked={r.disponible}
-                              disabled={alternando === r.id}
-                              onCheckedChange={() => alternarDisponible(r)}
-                              aria-label={
-                                r.disponible
-                                  ? `Marcar ${r.tipo} ${r.numero_equipo} como no disponible`
-                                  : `Marcar ${r.tipo} ${r.numero_equipo} como disponible`
-                              }
-                            />
-                            {alternando === r.id ? (
-                              <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
-                            ) : (
-                              <span
-                                className={`text-xs font-medium ${
-                                  r.disponible ? "text-success-strong" : "text-muted-foreground"
-                                }`}
-                              >
-                                {r.disponible ? "Disponible" : "No disponible"}
-                              </span>
-                            )}
-                          </div>
-                        </TableCell>
-
-                        <TableCell>
+                        <TableCell className={CELDA}>
                           <button
                             type="button"
                             onClick={() => r.foto && setFotoAmpliada(r.foto)}
@@ -840,7 +834,7 @@ function RecursosDelPuntoPage() {
                         {/* Centrado: son dos identificadores cortos, y alineados
                             a la izquierda quedaban pegados a la foto con el
                             resto de la celda vacía. */}
-                        <TableCell className="text-center">
+                        <TableCell className={`${CELDA} text-center`}>
                           <p className="mono text-xs font-semibold tabular-nums text-foreground">
                             {r.numero_equipo || "sin N°"}
                           </p>
@@ -849,9 +843,46 @@ function RecursosDelPuntoPage() {
                           </p>
                         </TableCell>
 
-                        <TableCell className="text-xs font-medium">{r.tipo}</TableCell>
+                        <TableCell className={`${CELDA} text-xs font-medium text-foreground`}>
+                          {r.tipo}
+                        </TableCell>
 
-                        <TableCell className="text-center">
+                        {/* La disponibilidad es una INSIGNIA, la misma de las
+                            otras tablas, y el interruptor al lado es lo que la
+                            cambia. Es lo que decide si esta unidad entra en una
+                            ruta. `flex-wrap` porque "No disponible" es la
+                            insignia más ancha y en una pantalla angosta no cabe
+                            junto al interruptor. */}
+                        <TableCell className={`${CELDA} text-center`}>
+                          <div className="flex flex-wrap items-center justify-center gap-2">
+                            <Switch
+                              checked={r.disponible}
+                              disabled={alternando === r.id}
+                              onCheckedChange={() => alternarDisponible(r)}
+                              aria-label={
+                                r.disponible
+                                  ? `Marcar ${r.tipo} ${r.numero_equipo} como no disponible`
+                                  : `Marcar ${r.tipo} ${r.numero_equipo} como disponible`
+                              }
+                            />
+                            {alternando === r.id ? (
+                              <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+                            ) : (
+                              <InsigniaEstado
+                                tono={r.disponible ? "exito" : "neutro"}
+                                title={
+                                  r.disponible
+                                    ? "Puede entrar a una ruta"
+                                    : "No entra a ninguna ruta mientras no esté disponible"
+                                }
+                              >
+                                {r.disponible ? "Disponible" : "No disponible"}
+                              </InsigniaEstado>
+                            )}
+                          </div>
+                        </TableCell>
+
+                        <TableCell className={`${CELDA} text-center`}>
                           {cap.valor !== null ? (
                             <>
                               <p className="mono text-xs font-semibold tabular-nums text-foreground">
@@ -872,11 +903,11 @@ function RecursosDelPuntoPage() {
                           )}
                         </TableCell>
 
-                        {/* Mismo criterio que la autonomía: "sin límite" solo
-                            para las familias que pueden declararlo (carga y
-                            arrastre), y `—` para las que no, que sugeriría un
-                            dato faltante en vez de uno que no aplica. */}
-                        <TableCell className="text-center">
+                        {/* "sin límite" solo para las familias que pueden
+                            declararlo (carga y arrastre), y `-` para las que no:
+                            un guion sugeriría un dato faltante en vez de uno que
+                            no aplica. */}
+                        <TableCell className={`${CELDA} text-center`}>
                           {r.capacidad_ton != null ? (
                             <p className="mono text-xs font-semibold tabular-nums text-foreground">
                               {(r.capacidad_ton * 1000).toLocaleString("es-CL")}
@@ -885,7 +916,7 @@ function RecursosDelPuntoPage() {
                             <p className="text-xs text-muted-foreground">
                               {r.familia === "carga" || r.familia === "arrastre"
                                 ? "sin límite"
-                                : "—"}
+                                : "-"}
                             </p>
                           )}
                         </TableCell>
@@ -894,46 +925,46 @@ function RecursosDelPuntoPage() {
                             un carro remolcado o una retro no declaran autonomía
                             propia, y decirles "sin límite" sugeriría que es un
                             dato que falta en vez de uno que no aplica. */}
-                        <TableCell className="text-center">
+                        <TableCell className={`${CELDA} text-center`}>
                           {r.autonomia_km != null ? (
                             <p className="mono text-xs font-semibold tabular-nums text-foreground">
                               {r.autonomia_km}
                             </p>
                           ) : (
                             <p className="text-xs text-muted-foreground">
-                              {r.familia === "carga" ? "sin límite" : "—"}
+                              {r.familia === "carga" ? "sin límite" : "-"}
                             </p>
                           )}
                         </TableCell>
 
-                        <TableCell>
+                        <TableCell className={CELDA}>
                           <p className="text-xs text-muted-foreground">
                             {[r.marca, r.modelo, r.anio].filter(Boolean).join(" ") || "-"}
                           </p>
                           <p className="text-xs text-muted-foreground/80">{dotacionTexto(r)}</p>
                         </TableCell>
 
-                        {/* "Ver recurso" y la papelera, en ese orden. El lápiz
-                            se fue de la fila: editar vive dentro de la ficha,
-                            que es donde se ve lo que se va a cambiar. Tener las
-                            dos entradas obligaba a decidir por cuál entrar
-                            antes de saber qué trae la unidad.
+                        {/* **"Ver recurso" primero y la papelera al final**,
+                            igual que "Ver" y la papelera del historial. Editar
+                            vive dentro de la ficha, que es donde se ve lo que se
+                            va a cambiar: tener las dos entradas obligaba a
+                            decidir por cuál entrar antes de saber qué trae la
+                            unidad.
 
-                            La papelera se queda afuera y no entra a la ficha
-                            porque borrar no necesita abrir nada, y enterrarla
-                            un nivel más adentro convierte una acción de una
-                            fila en una de tres pasos. Va visible siempre, igual
-                            que en la lista de zonas: escondida hasta pasar el
+                            La papelera se queda afuera porque borrar no necesita
+                            abrir nada, y enterrarla un nivel más adentro
+                            convierte una acción de una fila en una de tres
+                            pasos. Visible siempre: escondida hasta pasar el
                             cursor, solo la encuentra quien usa ratón. */}
-                        <TableCell>
-                          <div className="flex items-center justify-end gap-1">
-                            <Button size="sm" onClick={() => setEnDetalle(r)}>
+                        <TableCell className={CELDA}>
+                          <div className="flex items-center justify-start gap-1.5">
+                            <Button size="sm" className={BTN_FILA} onClick={() => setEnDetalle(r)}>
                               <Eye className="mr-1.5 h-3.5 w-3.5" /> Ver recurso
                             </Button>
                             <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-8 w-8 p-0 text-muted-foreground hover:bg-destructive/15 hover:text-destructive-strong"
+                              size="icon"
+                              variant="outline"
+                              className={BTN_FILA_ICONO}
                               onClick={() => setAEliminar(r)}
                               title="Eliminar recurso"
                               aria-label={`Eliminar ${r.tipo} ${r.numero_equipo}`}
@@ -950,50 +981,21 @@ function RecursosDelPuntoPage() {
             )}
           </div>
 
-          {/* Los controles solo aparecen cuando hay más de una página. */}
-          {visibles.length > porPagina && (
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-5 py-3">
-              <p className="text-xs text-muted-foreground">
-                Mostrando{" "}
-                <span className="mono tabular-nums text-foreground">
-                  {desde + 1}-{Math.min(desde + porPagina, visibles.length)}
-                </span>{" "}
-                de <span className="mono tabular-nums text-foreground">{visibles.length}</span>
-              </p>
-              <div className="flex items-center gap-1">
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={paginaActual === 1}
-                  onClick={() => setPagina(paginaActual - 1)}
-                >
-                  Anterior
-                </Button>
-                {Array.from({ length: totalPaginas }, (_, i) => i + 1).map((n) => (
-                  <button
-                    key={n}
-                    type="button"
-                    onClick={() => setPagina(n)}
-                    aria-current={n === paginaActual ? "page" : undefined}
-                    className={`mono h-8 w-8 cursor-pointer rounded-md text-xs tabular-nums transition-colors ${
-                      n === paginaActual
-                        ? "bg-primary text-primary-foreground"
-                        : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                    }`}
-                  >
-                    {n}
-                  </button>
-                ))}
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={paginaActual === totalPaginas}
-                  onClick={() => setPagina(paginaActual + 1)}
-                >
-                  Siguiente
-                </Button>
-              </div>
-            </div>
+          {/* La barra va SIEMPRE, incluso con una sola página, igual que en las
+              otras dos tablas. Solo aparecía cuando sobraban filas, y eso
+              cambiaba el alto de la caja que mide la paginación justo al filtrar:
+              el observador la volvía a medir y el número de filas por página
+              cambiaba solo. Con la barra fija, el alto disponible no depende de
+              cuántas filas haya. */}
+          {!cargando && recursos.length > 0 && (
+            <PaginacionTabla
+              pagina={paginaActual}
+              totalPaginas={totalPaginas}
+              desde={visibles.length === 0 ? 0 : desde + 1}
+              hasta={Math.min(desde + porPagina, visibles.length)}
+              total={visibles.length}
+              onCambiar={setPagina}
+            />
           )}
         </div>
       </main>

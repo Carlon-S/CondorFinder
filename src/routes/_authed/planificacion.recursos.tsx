@@ -72,10 +72,19 @@ import {
   setPointActive,
   type ResourcePoint,
 } from "@/lib/resources";
-import { listAnalyses, listZones, setPendingOpenId } from "@/lib/analysisStore";
-import { projectPolygonToWgs84 } from "@/lib/projection";
-import { ZoneZoomDialog, type ZoneZoomData } from "@/components/ZoneZoomDialog";
 import { FiltroDropdown } from "@/components/FiltroDropdown";
+import { InsigniaEstado } from "@/components/InsigniaEstado";
+import { PaginacionTabla } from "@/components/PaginacionTabla";
+import {
+  BTN_FILA,
+  BTN_FILA_ICONO,
+  BTN_FILA_ICONO_NEUTRO,
+  CAB_ORDEN,
+  CAB_TEXTO,
+  CELDA,
+  ENCABEZADO_FILA,
+  FILA,
+} from "@/components/tabla-estilos";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 export const Route = createFileRoute("/_authed/planificacion/recursos")({
@@ -86,38 +95,27 @@ export const Route = createFileRoute("/_authed/planificacion/recursos")({
  *  motivo que en la tabla de la flota: con el ancho automático del navegador
  *  cada columna mide lo que mide su contenido más largo, así que una dirección
  *  larga se comía el espacio y el encabezado de capacidad se partía en dos
- *  líneas. Suman 100. */
+ *  líneas. Suman 100.
+ *
+ *  El ORDEN es el de la tabla de Vista Principal: primero lo que identifica la
+ *  fila (la foto del lugar y el nombre) y después su estado. Antes el estado iba
+ *  primero, por ser lo que decide si el punto participa de una ruta; se movió
+ *  para que las tres tablas de la aplicación se lean de la misma manera. */
 const ANCHOS = {
-  estado: "w-[12%]",
-  // Más ancha que las demás desde que la celda muestra la foto real del lugar
-  // y no una miniatura de mapa: una fachada a 4rem no se reconoce. Los puntos
-  // salieron de estado y acciones, que no los necesitaban.
+  // La foto real del lugar, no una miniatura de mapa: una fachada a 4rem no se
+  // reconoce.
   lugar: "w-[13%]",
-  punto: "w-[19%]",
-  direccion: "w-[18%]",
-  recursos: "w-[11%]",
-  capacidad: "w-[13%]",
-  acciones: "w-[14%]",
+  punto: "w-[18%]",
+  estado: "w-[14%]",
+  direccion: "w-[17%]",
+  recursos: "w-[10%]",
+  capacidad: "w-[12%]",
+  acciones: "w-[16%]",
 } as const;
 
 /** Las columnas por las que se puede ordenar. La foto y las acciones quedan
  *  fuera: una imagen no tiene orden y una columna de botones tampoco. */
 type Campo = "estado" | "nombre" | "direccion" | "recursos" | "capacidad";
-
-/** Un basural guardado, dibujado en este mapa como contexto.
- *
- *  Guarda los datos y no un `GeoMapPoint` armado, porque el clic abre su mapa
- *  unificado con el MISMO visor que /rutas (`ZoneZoomDialog`), y ese necesita
- *  las detecciones y los tres totales. El `id` es el del ANÁLISIS (lo que trae
- *  la posición y las cifras) y el `nombre` es el de su ZONA. */
-interface ZonaEnMapa {
-  position: [number, number];
-  visor: ZoneZoomData;
-}
-
-/** Prefijo del id de un marcador de zona en el mapa, para distinguirlo de un
- *  punto de recurso: los dos viven en el mismo arreglo de `points`. */
-const PREFIJO_ZONA = "zona:";
 
 /** Cinco filas por página. Acá sí es un número fijo, y no la medición del alto
  *  disponible que hace la tabla de la flota: esa tabla ocupa la pantalla
@@ -145,12 +143,6 @@ function RecursosPage() {
   const [fotoAmpliada, setFotoAmpliada] = useState<ResourcePoint | null>(null);
   const [eliminando, setEliminando] = useState(false);
 
-  /** Las zonas guardadas, como contexto del mapa. Son el terreno al que hay que
-   *  ir, no algo que esta vista administre. */
-  const [zonas, setZonas] = useState<ZonaEnMapa[]>([]);
-  /** Zona cuyo mapa unificado se está mirando, o null. */
-  const [zonaAbierta, setZonaAbierta] = useState<ZoneZoomData | null>(null);
-
   const [busqueda, setBusqueda] = useState("");
   const [filtroEstado, setFiltroEstado] = useState<"todos" | "activos" | "inactivos">("todos");
   const [sortBy, setSortBy] = useState<Campo>("nombre");
@@ -172,81 +164,6 @@ function RecursosPage() {
 
   useEffect(() => {
     recargar();
-  }, []);
-
-  // Las zonas guardadas, como CONTEXTO del mapa.
-  //
-  // Un punto de origen no se ubica en el vacío: se ubica respecto de los
-  // basurales que hay que ir a retirar. Sin ellas, este mapa mostraba solo los
-  // pines de los puntos y había que irse a /rutas para saber si el punto que se
-  // estaba creando quedaba cerca o lejos del trabajo.
-  //
-  // Se cargan una vez al montar y no se vuelven a pedir: acá no se crean ni se
-  // editan zonas, así que no hay nada que pueda cambiarlas mientras la vista
-  // está abierta. Degrada en silencio porque son referencia: sin ellas el mapa
-  // sigue sirviendo para lo que esta vista hace, que es configurar puntos.
-  //
-  // El nombre sale de la colección de ZONAS y no del análisis: lo que el mapa
-  // rotula es el terreno, así que con el nombre de la medición una zona
-  // renombrada seguía apareciendo con el nombre viejo.
-  useEffect(() => {
-    Promise.all([listAnalyses(), listZones().catch(() => [])])
-      .then(([registros, zonasGuardadas]) => {
-        const nombres = new Map(zonasGuardadas.map((z) => [z.id, z.name]));
-        const resueltas: ZonaEnMapa[] = [];
-        for (const r of registros) {
-          // Las reemplazadas por una captura más nueva (HDU7) quedan fuera, igual
-          // que en /rutas: si no, una zona con tres capturas se dibujaría tres
-          // veces sobre la misma coordenada.
-          if (r.historical) continue;
-          if (!r.orthoCenter || !r.crs) continue;
-          const wgs84 = projectPolygonToWgs84([r.orthoCenter], r.crs);
-          const centro = wgs84?.[0];
-          if (!centro || !r.mapUrl) continue;
-          // Las detecciones vienen como un blob opaco en el registro guardado
-          // (ver analyses.py), así que se filtran las que no sirven para dibujar
-          // en vez de confiar en su forma: sin bbox no hay recuadro que poner.
-          const detecciones = (Array.isArray(r.detections) ? r.detections : [])
-            .filter((d): d is Record<string, never> => {
-              const det = d as { enabled?: boolean; bbox?: unknown };
-              return det.enabled !== false && !!det.bbox;
-            })
-            .map((d, i) => {
-              const det = d as unknown as {
-                id?: number;
-                class?: string;
-                volume_m3?: number;
-                weight_kg?: number;
-                area_m2?: number;
-                bbox: { minx: number; miny: number; maxx: number; maxy: number };
-              };
-              return {
-                id: det.id ?? i,
-                wasteClass: det.class ?? "Tipo de basura indefinido",
-                volumeM3: det.volume_m3 ?? null,
-                weightKg: det.weight_kg ?? null,
-                areaM2: det.area_m2 ?? null,
-                bbox: det.bbox,
-              };
-            });
-          resueltas.push({
-            position: centro,
-            visor: {
-              id: r.id,
-              name: (r.zoneId ? nombres.get(r.zoneId) : undefined) ?? r.name,
-              mapUrl: r.mapUrl,
-              detections: detecciones,
-              summary: {
-                totalVolumeM3: r.summary?.totalVolumeM3 ?? 0,
-                totalWeightKg: r.summary?.totalWeightKg ?? 0,
-                totalAreaM2: r.summary?.totalAreaM2 ?? 0,
-              },
-            },
-          });
-        }
-        setZonas(resueltas);
-      })
-      .catch(() => {});
   }, []);
 
   const totales = {
@@ -345,37 +262,24 @@ function RecursosPage() {
   const irAlPunto = (id: string) =>
     navigate({ to: "/planificacion/recursos/$pointId", params: { pointId: id } });
 
-  // Las zonas van PRIMERO para que los pines de los puntos queden dibujados
-  // encima: lo que se administra acá son los puntos, y un círculo de zona
-  // tapando el pin que se está editando esconde justo lo que se está haciendo.
+  // **El mapa dibuja SOLO los puntos de recurso, y ninguna zona.**
   //
-  // **Sin `previewImageUrl`, a propósito.** Ese campo hace que el mapa unificado
-  // aparezca al pasar el puntero, y acá eso está mal: una imagen de varios MB
-  // tapando el mapa mientras se ubica un punto estorba justo la operación de
-  // esta vista. La imagen se mira cuando se la pide, apretando la zona, igual
-  // que en /rutas.
-  const mapPoints: GeoMapPoint[] = [
-    ...zonas.map((z) => ({
-      id: `${PREFIJO_ZONA}${z.visor.id}`,
-      position: z.position,
-      label: `${z.visor.name} · ${z.visor.summary.totalVolumeM3} m³`,
-      // `kind` y no un `color`: antes el color era lo que hacía que el marcador
-      // se dibujara como zona en vez de como punto, o sea un dato de
-      // presentación decidía la semántica. Con la clase declarada, el motor
-      // elige el glifo (el punto de "medida") y el color, y esta vista deja de
-      // tener que saber de qué color va una zona.
-      kind: "zona" as const,
-    })),
-    ...points.map((p) => ({
-      id: p.id,
-      position: [p.lat, p.lng] as [number, number],
-      label: p.active
-        ? `${p.name} · ${p.capacity_m3} m³`
-        : `${p.name} (inactivo) · ${p.capacity_m3} m³`,
-      kind: "origen" as const,
-      muted: !p.active,
-    })),
-  ];
+  // Dibujaba además las zonas con vuelo, como contexto para ubicar un punto
+  // respecto del trabajo. Se quitó porque la imagen era incompleta: las zonas
+  // sin vuelo (casi todas, 52 de las 54 registradas) no tienen coordenadas
+  // medidas y no se pueden dibujar, así que el mapa mostraba dos lugares como si
+  // fueran todos. Un contexto que solo cubre una parte de lo que dice cubrir
+  // engaña más de lo que ayuda: mejor ninguno que uno a medias. Para ver las
+  // zonas, /rutas las dibuja todas, con vuelo y sin él.
+  const mapPoints: GeoMapPoint[] = points.map((p) => ({
+    id: p.id,
+    position: [p.lat, p.lng] as [number, number],
+    label: p.active
+      ? `${p.name} · ${p.capacity_m3} m³`
+      : `${p.name} (inactivo) · ${p.capacity_m3} m³`,
+    kind: "origen" as const,
+    muted: !p.active,
+  }));
 
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
@@ -445,25 +349,14 @@ function RecursosPage() {
           </aside>
 
           <section className="map-frame h-full bg-background">
-            {/* Sin retiros del día ni relleno: esta vista no los dibuja, y
-                nombrarlos prometería marcadores que acá no existen. */}
+            {/* Solo los puntos de origen, activos e inactivos: esta vista no
+                dibuja zonas, retiros del día ni relleno, y nombrarlos
+                prometería marcadores que acá no existen. */}
             <MapLegend alcance="recursos" />
             <GeoMap
               className="h-full w-full"
               points={mapPoints}
-              // Las zonas comparten el mapa pero no son puntos: su id va
-              // prefijado, y apretarlas abre su mapa unificado en vez de la
-              // ficha de un punto. Sin esta bifurcación se le mandaba a
-              // PanelPuntos la orden de abrir un punto que no existe, que es una
-              // orden de un solo uso y se quedaba pegada.
-              onPointClick={(p) => {
-                if (p.id.startsWith(PREFIJO_ZONA)) {
-                  const id = p.id.slice(PREFIJO_ZONA.length);
-                  setZonaAbierta(zonas.find((z) => z.visor.id === id)?.visor ?? null);
-                  return;
-                }
-                setPuntoSeleccionado(p.id);
-              }}
+              onPointClick={(p) => setPuntoSeleccionado(p.id)}
               marker={mapProps.marker}
               onMapClick={mapProps.onMapClick ?? undefined}
               focusPoint={mapProps.focusPoint}
@@ -540,7 +433,7 @@ function RecursosPage() {
           {/* 30rem y no 26: con la foto del lugar a 4rem de alto, cinco filas
               más la cabecera ya no entraban y la quinta quedaba bajo el scroll,
               justo cuando la paginación promete cinco. */}
-          <div className="h-[30rem] overflow-y-auto px-5 pb-5">
+          <div className="h-[30rem] overflow-y-auto px-5 pb-2">
             {loading ? (
               <div className="space-y-2 pt-4">
                 {[0, 1, 2].map((i) => (
@@ -565,36 +458,35 @@ function RecursosPage() {
             ) : (
               <Table className="table-fixed">
                 <TableHeader>
-                  {/* Los mismos encabezados ordenables que la flota y que el
-                      listado de zonas, con el mismo componente. El indicador se
-                      dibuja siempre, en los tres estados: con table-fixed el
-                      ancho ya no se mueve, pero la flecha atenuada al pasar el
-                      cursor es lo que avisa que la columna se puede ordenar.
-
-                      La unidad la pone el propio SortableHead con `unit`, así
-                      que no hay que repetir el span en mono acá. */}
-                  <TableRow className="bg-muted/50 hover:bg-muted/50">
+                  {/* El encabezado, con el tamaño, el relleno y el color del
+                      historial de rutas y de Vista Principal. El indicador de
+                      orden se dibuja siempre, en los tres estados: con
+                      table-fixed el ancho ya no se mueve, pero la flecha
+                      atenuada al pasar el cursor es lo que avisa que la columna
+                      se puede ordenar. */}
+                  <TableRow className={ENCABEZADO_FILA}>
+                    <TableHead className={`${ANCHOS.lugar} ${CAB_TEXTO}`}>Lugar</TableHead>
                     <SortableHead
-                      field="estado"
-                      label="Estado"
-                      className={ANCHOS.estado}
+                      field="nombre"
+                      label="Punto"
+                      className={`${ANCHOS.punto} ${CAB_ORDEN}`}
                       sortBy={sortBy}
                       sortDir={sortDir}
                       onSort={alternarOrden}
                     />
-                    <TableHead className={ANCHOS.lugar}>Lugar</TableHead>
                     <SortableHead
-                      field="nombre"
-                      label="Punto"
-                      className={ANCHOS.punto}
+                      field="estado"
+                      label="Estado"
+                      className={`${ANCHOS.estado} ${CAB_ORDEN}`}
                       sortBy={sortBy}
                       sortDir={sortDir}
                       onSort={alternarOrden}
+                      align="center"
                     />
                     <SortableHead
                       field="direccion"
                       label="Dirección"
-                      className={ANCHOS.direccion}
+                      className={`${ANCHOS.direccion} ${CAB_ORDEN}`}
                       sortBy={sortBy}
                       sortDir={sortDir}
                       onSort={alternarOrden}
@@ -602,7 +494,7 @@ function RecursosPage() {
                     <SortableHead
                       field="recursos"
                       label="Recursos"
-                      className={ANCHOS.recursos}
+                      className={`${ANCHOS.recursos} ${CAB_ORDEN}`}
                       sortBy={sortBy}
                       sortDir={sortDir}
                       onSort={alternarOrden}
@@ -612,67 +504,30 @@ function RecursosPage() {
                       field="capacidad"
                       label="Capacidad"
                       unit="m³"
-                      className={ANCHOS.capacidad}
+                      className={`${ANCHOS.capacidad} ${CAB_ORDEN}`}
                       sortBy={sortBy}
                       sortDir={sortDir}
                       onSort={alternarOrden}
                       align="center"
                     />
-                    <TableHead className={ANCHOS.acciones}></TableHead>
+                    <TableHead className={`${ANCHOS.acciones} px-3`}>
+                      <span className="sr-only">Acciones</span>
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {enPagina.map((p) => (
-                    <TableRow key={p.id} className="hover:bg-card/60">
-                      {/* ESTADO PRIMERO, igual que en la flota: es lo que decide
-                          si este punto participa de una ruta, antes que quién
-                          es. */}
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Switch
-                            checked={p.active}
-                            disabled={alternando === p.id}
-                            onCheckedChange={() => alternarActivo(p)}
-                            aria-label={
-                              p.active
-                                ? `Desactivar el punto ${p.name}`
-                                : `Activar el punto ${p.name}`
-                            }
-                          />
-                          {alternando === p.id ? (
-                            <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
-                          ) : (
-                            <span
-                              className={`text-xs font-medium ${
-                                p.active ? "text-success-strong" : "text-muted-foreground"
-                              }`}
-                            >
-                              {p.active ? "Activo" : "Inactivo"}
-                            </span>
-                          )}
-                        </div>
-                      </TableCell>
+                    <TableRow key={p.id} className={FILA}>
+                      {/* La foto real de la calle. Es un <button> porque se
+                          amplía al apretarla: a 16x11 se reconoce que hay un
+                          lugar, pero no si ES el patio que uno busca.
 
-                      {/* HUECO RESERVADO PARA LA FOTO DEL SECTOR.
-                          La decisión de si la foto sale de Google Street View
-                          (que cobra por imagen y exige una cuenta con
-                          facturación) está pendiente. Hasta entonces el hueco
-                          lo ocupa la vista de mapa del lugar, que es gratis y
-                          existe para todos los puntos por igual; un recuadro
-                          gris vacío reservaría el mismo espacio sin decir nada.
-                          El día que haya foto, se cambia este componente por el
-                          de la foto y no se mueve ninguna columna: el ancho ya
-                          está fijado en ANCHOS.lugar. */}
-                      <TableCell>
+                          El diálogo usa EL MISMO archivo, escalado con CSS.
+                          Pedir una versión grande sería otra URL y por lo tanto
+                          otra solicitud cobrada, así que se guarda al tamaño
+                          máximo una sola vez y se muestra chica acá. */}
+                      <TableCell className={CELDA}>
                         {p.street_view ? (
-                          // La foto real de la calle. Es un <button> porque se
-                          // amplía al apretarla: a 16x11 se reconoce que hay un
-                          // lugar, pero no si ES el patio que uno busca.
-                          //
-                          // El diálogo usa EL MISMO archivo, escalado con CSS.
-                          // Pedir una versión grande sería otra URL y por lo
-                          // tanto otra solicitud cobrada, así que se guarda al
-                          // tamaño máximo una sola vez y se muestra chica acá.
                           <button
                             type="button"
                             onClick={() => setFotoAmpliada(p)}
@@ -702,49 +557,86 @@ function RecursosPage() {
                         )}
                       </TableCell>
 
-                      <TableCell className="truncate text-xs font-medium text-foreground">
+                      <TableCell
+                        className={`${CELDA} truncate text-xs font-medium text-foreground`}
+                      >
                         {p.name}
                       </TableCell>
 
-                      <TableCell className="truncate text-xs text-muted-foreground">
+                      {/* El estado es una INSIGNIA, la misma de las otras tablas,
+                          y el interruptor al lado es lo que lo cambia. La
+                          insignia dice en qué está el punto y el interruptor es
+                          la acción: separarlos evita que un texto de color haga
+                          a la vez de dato y de botón. */}
+                      <TableCell className={`${CELDA} text-center`}>
+                        <div className="flex items-center justify-center gap-2">
+                          <Switch
+                            checked={p.active}
+                            disabled={alternando === p.id}
+                            onCheckedChange={() => alternarActivo(p)}
+                            aria-label={
+                              p.active
+                                ? `Desactivar el punto ${p.name}`
+                                : `Activar el punto ${p.name}`
+                            }
+                          />
+                          {alternando === p.id ? (
+                            <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+                          ) : (
+                            <InsigniaEstado
+                              tono={p.active ? "exito" : "neutro"}
+                              title={
+                                p.active
+                                  ? "Participa de las rutas"
+                                  : "No participa de ninguna ruta mientras esté inactivo"
+                              }
+                            >
+                              {p.active ? "Activo" : "Inactivo"}
+                            </InsigniaEstado>
+                          )}
+                        </div>
+                      </TableCell>
+
+                      <TableCell className={`${CELDA} truncate text-xs text-muted-foreground`}>
                         {[p.address === p.name ? null : p.address, p.comuna]
                           .filter(Boolean)
                           .join(", ") || "-"}
                       </TableCell>
 
-                      <TableCell className="mono text-center text-xs tabular-nums">
+                      <TableCell
+                        className={`${CELDA} mono text-center text-xs tabular-nums text-foreground`}
+                      >
                         {p.available_count} de {p.resource_count}
                       </TableCell>
 
-                      <TableCell className="mono text-center text-xs font-semibold tabular-nums text-foreground">
+                      <TableCell
+                        className={`${CELDA} mono text-center text-xs font-semibold tabular-nums text-foreground`}
+                      >
                         {p.capacity_m3}
                       </TableCell>
 
-                      {/* Las tres acciones visibles siempre, como en la lista
-                          de zonas. Estuvieron asomando al pasar el cursor y es
-                          una apuesta que solo gana con ratón: quien llega por
-                          teclado, o desde una pantalla táctil, no tiene cómo
-                          descubrir que existen. Lo que separa la principal de
-                          las otras dos no es que aparezcan, es que una lleva
-                          texto y las otras son íconos.
+                      {/* **Ver punto primero, la papelera al final**, igual que
+                          "Ver" y la papelera del historial. Las tres acciones
+                          visibles siempre: estuvieron asomando al pasar el
+                          cursor, que es una apuesta que solo gana con ratón.
 
-                          La fila entera ya NO navega. Con tres acciones en la
-                          misma fila, un clic en cualquier otro lado abría la
-                          flota sin que nadie lo pidiera, y "Ver punto" pasaba a
-                          ser un adorno que repetía lo que hacía todo lo demás. */}
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-1">
+                          La fila entera NO navega: con tres acciones en la misma
+                          fila, un clic en cualquier otro lado abría la flota sin
+                          que nadie lo pidiera. */}
+                      <TableCell className={CELDA}>
+                        <div className="flex items-center justify-start gap-1.5">
                           <Button
                             size="sm"
+                            className={BTN_FILA}
                             onClick={() => irAlPunto(p.id)}
                             title="Ver la flota de este punto"
                           >
                             <Eye className="mr-1.5 h-3.5 w-3.5" /> Ver punto
                           </Button>
                           <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-8 w-8 p-0 text-muted-foreground hover:bg-muted hover:text-foreground"
+                            size="icon"
+                            variant="outline"
+                            className={BTN_FILA_ICONO_NEUTRO}
                             onClick={() => setPuntoAEditar(p.id)}
                             title="Editar punto"
                             aria-label={`Editar el punto ${p.name}`}
@@ -752,9 +644,9 @@ function RecursosPage() {
                             <Pencil className="h-3.5 w-3.5" />
                           </Button>
                           <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-8 w-8 p-0 text-muted-foreground hover:bg-destructive/15 hover:text-destructive-strong"
+                            size="icon"
+                            variant="outline"
+                            className={BTN_FILA_ICONO}
                             onClick={() => setAEliminar(p)}
                             title="Eliminar punto"
                             aria-label={`Eliminar el punto ${p.name}`}
@@ -776,48 +668,14 @@ function RecursosPage() {
               los botones quedan deshabilitados, que ya dice que no hay a dónde
               ir. */}
           {!loading && points.length > 0 && (
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-5 py-3">
-              <p className="text-xs text-muted-foreground">
-                Mostrando{" "}
-                <span className="mono tabular-nums text-foreground">
-                  {desde + 1}-{Math.min(desde + POR_PAGINA, visibles.length)}
-                </span>{" "}
-                de <span className="mono tabular-nums text-foreground">{visibles.length}</span>
-              </p>
-              <div className="flex items-center gap-1">
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={paginaActual === 1}
-                  onClick={() => setPagina(paginaActual - 1)}
-                >
-                  Anterior
-                </Button>
-                {Array.from({ length: totalPaginas }, (_, i) => i + 1).map((n) => (
-                  <button
-                    key={n}
-                    type="button"
-                    onClick={() => setPagina(n)}
-                    aria-current={n === paginaActual ? "page" : undefined}
-                    className={`mono h-8 w-8 cursor-pointer rounded-md text-xs tabular-nums transition-colors ${
-                      n === paginaActual
-                        ? "bg-primary text-primary-foreground"
-                        : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                    }`}
-                  >
-                    {n}
-                  </button>
-                ))}
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={paginaActual === totalPaginas}
-                  onClick={() => setPagina(paginaActual + 1)}
-                >
-                  Siguiente
-                </Button>
-              </div>
-            </div>
+            <PaginacionTabla
+              pagina={paginaActual}
+              totalPaginas={totalPaginas}
+              desde={visibles.length === 0 ? 0 : desde + 1}
+              hasta={Math.min(desde + POR_PAGINA, visibles.length)}
+              total={visibles.length}
+              onCambiar={setPagina}
+            />
           )}
         </div>
       </main>
@@ -897,23 +755,6 @@ function RecursosPage() {
           )}
         </DialogContent>
       </Dialog>
-
-      {/* El mapa unificado de una zona, al apretar su círculo. El MISMO visor
-          que /rutas: antes era una versión propia con la imagen y dos cifras,
-          sin recuadros de detección ni detalle por tipo, o sea dos respuestas
-          distintas a la misma pregunta según de dónde se abriera.
-
-          Se abre a pedido y no al pasar el puntero: la imagen pesa varios MB y
-          tapaba el mapa justo mientras se está ubicando un punto, que es para lo
-          que existe esta vista. */}
-      <ZoneZoomDialog
-        zona={zonaAbierta}
-        onOpenChange={(abierto) => !abierto && setZonaAbierta(null)}
-        onVerAnalisis={(id) => {
-          setPendingOpenId(id);
-          navigate({ to: "/analysis" });
-        }}
-      />
     </div>
   );
 }

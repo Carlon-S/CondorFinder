@@ -27,6 +27,7 @@ import { useState } from "react";
 import { ChevronDown } from "@/components/icons/Icons";
 import {
   COLOR_DIARIO,
+  COLOR_INACTIVO,
   COLOR_ORIGEN,
   COLOR_SIN_VUELO,
   COLOR_ZONA_MEDIDA,
@@ -70,11 +71,28 @@ interface Fila {
 
 /** Qué clases de marcador puede mostrar cada vista.
  *
- *  `/rutas` muestra las cinco; `/recursos` no dibuja retiros del día ni el
- *  relleno, y mostrarlos ahí prometería marcadores que esa pantalla no tiene. */
+ *  `/rutas` muestra las cinco; `/recursos` dibuja solo los puntos de origen
+ *  (activos e inactivos), y mostrar lo demás ahí prometería marcadores que esa
+ *  pantalla no tiene. */
 export type AlcanceLeyenda = "rutas" | "recursos";
 
 function filasDe(alcance: AlcanceLeyenda): Fila[] {
+  // `/recursos` dibuja SOLO los puntos de origen, activos e inactivos. No dibuja
+  // zonas: las que no tienen vuelo no tienen coordenadas medidas, así que el
+  // mapa las mostraba a medias, y una leyenda que las nombrara prometería pines
+  // que esa pantalla no tiene.
+  if (alcance === "recursos") {
+    return [
+      {
+        icono: <Gota glifo={GLIFO_ORIGEN} color={COLOR_ORIGEN} />,
+        texto: "Punto de origen de la flota",
+      },
+      {
+        icono: <Gota glifo={GLIFO_ORIGEN} color={COLOR_INACTIVO} />,
+        texto: "Punto inactivo",
+      },
+    ];
+  }
   const comunes: Fila[] = [
     {
       icono: <Gota glifo={GLIFO_MEDIDA} color={COLOR_ZONA_MEDIDA} />,
@@ -89,7 +107,6 @@ function filasDe(alcance: AlcanceLeyenda): Fila[] {
       texto: "Punto de origen de la flota",
     },
   ];
-  if (alcance === "recursos") return comunes;
   return [
     ...comunes,
     { icono: <Gota glifo={GLIFO_DIARIO} color={COLOR_DIARIO} />, texto: "Retiro del día" },

@@ -104,6 +104,12 @@ import { InsigniaEstado } from "@/components/InsigniaEstado";
 import type { TonoInsignia } from "@/components/insignia-estilos";
 import { PaginacionTabla } from "@/components/PaginacionTabla";
 import {
+  BTN_FILA,
+  BTN_FILA_ICONO,
+  BTN_FILA_SECUNDARIO,
+  CAB_ORDEN,
+} from "@/components/tabla-estilos";
+import {
   clearImageState,
   saveZonaDestino,
   clearZonaDestino,
@@ -462,23 +468,6 @@ function claveDeTipo(tipo: string | undefined): Exclude<FiltroTipo, "all"> {
   if (t === "virs") return "virs";
   return "sin_tipo";
 }
-
-/** Los botones de FILA, los mismos de la tabla del historial de rutas: 1,75 rem
- *  de alto y texto de 0,6875 rem en seminegrita.
- *
- *  **Cada fila tiene UNA acción principal** (la siguiente: ver el análisis,
- *  retomar la carga, generar el mapa), con el relleno amarillo del botón por
- *  omisión. Las demás son secundarias y van con el borde y el tinte del color de
- *  la marca, y el borrado con el del peligro. Antes cada botón era distinto
- *  según el estado de la fila ("Ver Análisis" amarillo, "Ir a Carga" gris,
- *  "Evolución" gris de otro alto) y la tabla no decía cuál era el siguiente paso. */
-const BTN_FILA = "h-7 px-2.5 text-[0.6875rem] font-semibold";
-const BTN_FILA_SECUNDARIO = `${BTN_FILA} border-primary/40 bg-primary/5 text-primary hover:bg-primary/15 hover:text-primary`;
-const BTN_FILA_ICONO =
-  "h-7 w-7 border-destructive-strong/30 text-destructive-strong hover:bg-destructive/15 hover:text-destructive-strong";
-
-/** El encabezado de una columna ordenable, en el tamaño del historial. */
-const CAB_ORDEN = "text-[0.6875rem] [&>button]:px-3";
 
 /** Ancho común de la acción única de una fila.
  *
