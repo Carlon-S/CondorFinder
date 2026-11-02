@@ -35,7 +35,10 @@
 // resto de la vista.
 // =============================================================================
 
+import { useEffect, useRef } from "react";
+
 import { ImageIcon, Truck, Users, Warehouse } from "@/components/icons/Icons";
+import type { TramoDeMapa } from "@/components/route-colors";
 import type {
   RoutePlanLeg,
   RoutePlanSegment,
@@ -81,6 +84,9 @@ interface Fila {
   contenido: React.ReactNode;
   /** Hora estimada de llegada a este nodo. Solo la llevan los nodos. */
   hora?: string;
+  /** Qué tramo del mapa es esta fila, si es una fila de tramo. Es lo que
+   *  empareja la fila con su trazo: apretar uno resalta el otro. */
+  tramo?: TramoDeMapa;
 }
 
 function horas(h: number): string {
@@ -248,6 +254,9 @@ export function RouteTimeline({
   onStopClick,
   onVerFoto,
   salida,
+  color,
+  tramoActivo,
+  onTramoClick,
 }: {
   segment: RoutePlanSegment;
   /** Las paradas del PLAN COMPLETO. El componente se queda con las suyas.
@@ -274,8 +283,27 @@ export function RouteTimeline({
    *  trabajador lee la pantalla, y un plan cuyas horas cambian solo por mirarlo
    *  no es un plan. */
   salida?: Date;
+  /** El color del recorrido, para teñir el tramo resaltado. */
+  color?: string;
+  /** El tramo resaltado, elegido desde el mapa o desde esta lista. */
+  tramoActivo?: TramoDeMapa | null;
+  /** Se aprieta la fila de un tramo. Sin este manejador las filas no son
+   *  apretables. */
+  onTramoClick?: (tramo: TramoDeMapa) => void;
 }) {
   const { legs } = segment;
+  const lista = useRef<HTMLOListElement>(null);
+  // Cuando el tramo se elige desde el mapa, su fila puede estar fuera de la
+  // zona visible del panel: se la trae a la vista.
+  useEffect(() => {
+    if (!tramoActivo) return;
+    lista.current
+      ?.querySelector(`[data-tramo="${tramoActivo.tipo}-${tramoActivo.indice}"]`)
+      ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [tramoActivo]);
+  // Posición del próximo traslado dentro del recorrido (los traslados vienen
+  // aplanados, así que el orden de aparición es su índice).
+  let traslados = 0;
   const vehiculos = segment.vehicles ?? [];
   // ── Las paradas de ESTE recorrido ──
   //
@@ -368,6 +396,7 @@ export function RouteTimeline({
       const descarga = descargas.find((d) => d.afterOrder === propias[i - 1].order);
       filas.push({
         marcador: null,
+        tramo: { tipo: "descarga", indice: viajeAnterior - 1 },
         contenido: (
           <Tramo
             respaldo={
@@ -430,8 +459,14 @@ export function RouteTimeline({
         : undefined);
     const tramo = buscarTramo(legs, i === 0 ? null : propias[i - 1].order, stop.order);
     transcurrido += tramo?.durationHours ?? (i === 0 ? segment.outboundDurationHours : 0);
+    // Un tramo hacia la primera parada de un viaje es la IDA de ese viaje; hacia
+    // cualquier otra parada del mismo viaje, un traslado entre zonas.
+    const abreViaje = i === 0 || viajeDeEsta !== viajeAnterior;
     filas.push({
       marcador: null,
+      tramo: abreViaje
+        ? { tipo: "ida", indice: viajeDeEsta - 1 }
+        : { tipo: "traslado", indice: traslados++ },
       contenido: (
         <Tramo
           tramo={tramo}
@@ -503,12 +538,14 @@ export function RouteTimeline({
                 porque "tiene plástico" y "tiene 3 m³ de plástico" no dicen lo
                 mismo a quien va a cargar. */}
             {datos.wasteTypes && datos.wasteTypes.length > 0 && (
-              <span className="mt-1 flex flex-wrap items-center gap-1">
-                {datos.wasteTypes.map(([clase, vol]) => (
+              <span
+                className="mt-1 flex flex-wrap items-center gap-1"
+                title={datos.wasteTypes.map(([c, v]) => `${c}: ${cifra(v)} m³`).join("\n")}
+              >
+                {datos.wasteTypes.slice(0, 2).map(([clase, vol]) => (
                   <span
                     key={clase}
                     className="flex min-w-0 items-center gap-1.5 rounded-full bg-muted/70 py-0.5 pl-1.5 pr-2"
-                    title={`${clase}: ${cifra(vol)} m³`}
                   >
                     <span
                       className="h-2 w-2 flex-shrink-0 rounded-full"
@@ -524,6 +561,14 @@ export function RouteTimeline({
                     </span>
                   </span>
                 ))}
+                {/* El resto se resume: el detalle completo está en el
+                    tooltip y en la ficha de la zona, y cuatro píldoras por
+                    parada saturaban el recorrido. */}
+                {datos.wasteTypes.length > 2 && (
+                  <span className="mono text-[0.625rem] tabular-nums text-muted-foreground">
+                    +{datos.wasteTypes.length - 2}
+                  </span>
+                )}
               </span>
             )}
           </>
@@ -569,6 +614,7 @@ export function RouteTimeline({
     const ultima = descargas.length > 0 ? descargas[descargas.length - 1] : null;
     filas.push({
       marcador: null,
+      tramo: { tipo: "descarga", indice: viajes - 1 },
       contenido: (
         <Tramo
           respaldo={{
@@ -603,6 +649,7 @@ export function RouteTimeline({
 
   filas.push({
     marcador: null,
+    tramo: { tipo: "regreso", indice: 0 },
     contenido: (
       <Tramo
         tramo={buscarTramo(
@@ -640,37 +687,50 @@ export function RouteTimeline({
   });
 
   return (
-    <ol>
-      {filas.map((fila, i) => (
-        <li
-          key={i}
-          className={`grid gap-x-3 ${
-            salida ? "grid-cols-[2.75rem_1.75rem_1fr]" : "grid-cols-[1.75rem_1fr]"
-          }`}
-        >
-          {/* La hora va en su propia columna, a la izquierda del riel, como en
+    <ol ref={lista}>
+      {filas.map((fila, i) => {
+        const activa =
+          !!fila.tramo &&
+          tramoActivo?.tipo === fila.tramo.tipo &&
+          tramoActivo.indice === fila.tramo.indice;
+        const apretable = !!fila.tramo && !!onTramoClick;
+        return (
+          <li
+            key={i}
+            data-tramo={fila.tramo ? `${fila.tramo.tipo}-${fila.tramo.indice}` : undefined}
+            onClick={apretable ? () => onTramoClick?.(fila.tramo as TramoDeMapa) : undefined}
+            title={apretable ? "Resaltar este tramo en el mapa" : undefined}
+            style={activa && color ? { backgroundColor: `${color}1f` } : undefined}
+            className={`grid gap-x-3 rounded-md transition-colors ${
+              salida ? "grid-cols-[2.75rem_1.75rem_1fr]" : "grid-cols-[1.75rem_1fr]"
+            } ${apretable ? "cursor-pointer hover:bg-muted/50" : ""} ${
+              activa && !color ? "bg-primary/10" : ""
+            }`}
+          >
+            {/* La hora va en su propia columna, a la izquierda del riel, como en
               cualquier itinerario de transporte: alineadas en una columna se
               comparan entre sí, y metidas dentro del texto de cada parada
               habría que ir a buscarlas. Los tramos no llevan hora, solo los
               nodos: una hora describe un instante, no un trayecto. */}
-          {salida && (
-            <span className="mono pt-1 text-right text-[0.625rem] tabular-nums text-muted-foreground">
-              {fila.hora}
+            {salida && (
+              <span className="mono pt-1 text-right text-[0.625rem] tabular-nums text-muted-foreground">
+                {fila.hora}
+              </span>
+            )}
+            <span className="relative flex justify-center">
+              <span
+                className="absolute w-px bg-border"
+                style={{
+                  top: i === 0 ? MEDIO_NODO : 0,
+                  bottom: i === filas.length - 1 ? `calc(100% - ${MEDIO_NODO})` : 0,
+                }}
+              />
+              {fila.marcador}
             </span>
-          )}
-          <span className="relative flex justify-center">
-            <span
-              className="absolute w-px bg-border"
-              style={{
-                top: i === 0 ? MEDIO_NODO : 0,
-                bottom: i === filas.length - 1 ? `calc(100% - ${MEDIO_NODO})` : 0,
-              }}
-            />
-            {fila.marcador}
-          </span>
-          <span className="min-w-0">{fila.contenido}</span>
-        </li>
-      ))}
+            <span className="min-w-0">{fila.contenido}</span>
+          </li>
+        );
+      })}
     </ol>
   );
 }

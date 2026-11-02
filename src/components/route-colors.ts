@@ -53,3 +53,59 @@ export const ROUTE_DISPOSAL_OPACITY = 1;
 // que los separa del fondo del mapa sin importar qué colores tenga debajo.
 // Neutro y no azul, ahora que los trazos ya no son todos de la familia azul.
 export const ROUTE_OUTLINE_COLOR = "#1f2937";
+
+// =============================================================================
+// UN COLOR POR RECORRIDO
+//
+// Con varios convoyes el plan tiene varios recorridos, y pintar cada TRAMO de un
+// color distinto (arriba) hacía que dos recorridos se confundieran entre sí: el
+// azul de la ida del primero era el mismo azul de la ida del segundo. Ahora el
+// color identifica al RECORRIDO, y el tramo se distingue por grosor y
+// transparencia dentro de ese mismo color.
+//
+// Seis tonos repartidos por el círculo cromático, **ninguno verde** por la misma
+// razón que arriba (el mapa base pinta parques y autopistas en verde). El
+// recorrido N usa `colorDeRecorrido(N)`, y el mismo literal se imprime en su
+// tarjeta, en su selector sobre el mapa y en su leyenda, para que se empareje a
+// simple vista. Literales por el renderer de canvas.
+// =============================================================================
+
+export const ROUTE_PALETTE = [
+  "#2563eb", // azul
+  "#A21CAF", // magenta
+  "#C2410C", // naranjo quemado
+  "#0E7490", // cian oscuro
+  "#BE123C", // carmesí
+  "#6D28D9", // violeta
+] as const;
+
+export function colorDeRecorrido(indice: number): string {
+  return ROUTE_PALETTE[
+    ((indice % ROUTE_PALETTE.length) + ROUTE_PALETTE.length) % ROUTE_PALETTE.length
+  ];
+}
+
+/** Los cuatro tramos de un recorrido. */
+export type TipoTramo = "ida" | "traslado" | "descarga" | "regreso";
+
+/** Un tramo concreto: su clase y su posición dentro de esa clase, en el
+ *  recorrido que se está dibujando (`ida`/`descarga`: número de viaje desde 0;
+ *  `traslado`: salto dentro del recorrido; `regreso`: siempre 0). */
+export interface TramoDeMapa {
+  tipo: TipoTramo;
+  indice: number;
+}
+
+/** Cómo se dibuja cada tramo cuando el recorrido tiene color propio: mismo
+ *  color, distinto peso y transparencia.
+ *
+ *  - ida: pleno, sale vacío del patio.
+ *  - traslado: algo más tenue, es el camión cargando entre zonas.
+ *  - descarga: **el más grueso**, es el único tramo que se hace cargado.
+ *  - regreso: el más tenue, vuelve vacío y es el que menos hay que leer. */
+export const ESTILO_TRAMO: Record<TipoTramo, { opacity: number; weight: number }> = {
+  ida: { opacity: 1, weight: 5 },
+  traslado: { opacity: 0.6, weight: 5 },
+  descarga: { opacity: 1, weight: 8 },
+  regreso: { opacity: 0.35, weight: 5 },
+};

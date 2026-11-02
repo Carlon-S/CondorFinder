@@ -251,7 +251,16 @@ export function PuntoDiarioDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+      <DialogContent
+        className="max-h-[85vh] overflow-y-auto sm:max-w-lg"
+        // Radix enfoca el primer campo (la dirección) y selecciona su texto:
+        // al abrir un punto para verlo, la dirección aparecía resaltada y
+        // escribir la reemplazaba. El foco queda en el diálogo.
+        onOpenAutoFocus={(e) => {
+          e.preventDefault();
+          (e.currentTarget as HTMLElement | null)?.focus?.();
+        }}
+      >
         {clase === null ? (
           // ── AC1: la selección entre las dos clases ──
           <>

@@ -130,8 +130,11 @@ import {
 } from "@/components/ui/table";
 import { RELLENO_SANITARIO } from "@/lib/disposalSite";
 import { projectPolygonToWgs84 } from "@/lib/projection";
+import { colorDeRecorrido, type TramoDeMapa } from "@/components/route-colors";
 import {
   generateRoute,
+  geometriaDeRecorrido,
+  sinGeometriaDeRecorrido,
   type RoutePlanSegment,
   type RoutePlanStop,
   type RoutePlanUnassigned,
@@ -882,6 +885,13 @@ function RutasPage() {
   // se regenera la ruta, el detalle abierto apunta al recorrido equivalente del
   // plan nuevo en vez de a uno que ya no existe.
   const [rutaAbierta, setRutaAbierta] = useState<number | null>(null);
+  /** Qué recorrido se DIBUJA en el mapa cuando no hay uno abierto en detalle.
+   *  Arranca en el primero: dibujar todos juntos mezclaba los trazos de los
+   *  convoyes y no dejaba leer ninguno. Con un recorrido abierto manda ese. */
+  const [recorridoDibujado, setRecorridoDibujado] = useState(0);
+  /** El tramo resaltado, elegido apretando su trazo en el mapa o su fila en la
+   *  línea de tiempo. Es el vínculo entre los dos. */
+  const [tramoActivo, setTramoActivo] = useState<TramoDeMapa | null>(null);
   // Encuadre manual a la comuna. Es un array nuevo en cada clic a propósito:
   // FitBounds en GeoMapImpl reacciona al cambio de REFERENCIA, así que mandar
   // la misma constante no volvería a encuadrar la segunda vez.
@@ -917,10 +927,31 @@ function RutasPage() {
       const fuera = new Set(suyas);
       setRouteStops((prev) => (prev ? prev.filter((s) => !fuera.has(s.order)) : prev));
     }
+    // Los trazos del recorrido que se va, por sus cuentas de viajes y paradas.
+    // Si no cuadran (plan viejo) se cae al filtro por índice de antes.
+    const restantes = sinGeometriaDeRecorrido(
+      {
+        outbound: routeOutboundPaths,
+        transfer: routeTransferPaths,
+        disposal: routeDisposalPaths,
+        ret: routeReturnPaths,
+      },
+      routeSegments,
+      indice,
+    );
     setRouteSegments(quedan);
-    setRouteOutboundPaths(sinEl(routeOutboundPaths));
-    setRouteDisposalPaths(sinEl(routeDisposalPaths));
-    setRouteReturnPaths(sinEl(routeReturnPaths));
+    if (restantes) {
+      setRouteOutboundPaths(restantes.outbound);
+      setRouteTransferPaths(restantes.transfer);
+      setRouteDisposalPaths(restantes.disposal);
+      setRouteReturnPaths(restantes.ret);
+    } else {
+      setRouteOutboundPaths(sinEl(routeOutboundPaths));
+      setRouteDisposalPaths(sinEl(routeDisposalPaths));
+      setRouteReturnPaths(sinEl(routeReturnPaths));
+    }
+    setRecorridoDibujado(0);
+    setTramoActivo(null);
     // El detalle abierto se corrige: si se borró el que se estaba mirando se
     // vuelve a la lista, y si se borró uno anterior el índice del que queda
     // abierto se corrió en uno.
@@ -940,6 +971,8 @@ function RutasPage() {
    *  mapa quedaba con el trazo de una ruta que el panel ya no mostraba. */
   const descartarRuta = () => {
     setRutaAbierta(null);
+    setRecorridoDibujado(0);
+    setTramoActivo(null);
     setRouteStops(null);
     setRouteOutboundPaths(null);
     setRouteTransferPaths(null);
@@ -1789,6 +1822,8 @@ function RutasPage() {
       // elemento que hay. Con varios, en cambio, la lista es la información:
       // saltar al primero escondería que hay más de uno.
       setRutaAbierta(result.route.segments?.length === 1 ? 0 : null);
+      setRecorridoDibujado(0);
+      setTramoActivo(null);
       notify.success("Ruta generada", "Revisa el orden de paradas propuesto en el panel.");
     } else {
       setRouteStops(null);
@@ -1939,16 +1974,69 @@ function RutasPage() {
   // relación (hover de un marcador, abrir un diálogo, etc.), no solo al
   // generar. Memoizado sobre las referencias reales de estado, que solo
   // cambian cuando de verdad llega una ruta nueva.
+  // ── Qué recorrido se dibuja ──
+  // Uno solo: el abierto en detalle, o el elegido en el selector del mapa
+  // (el primero por omisión). Si las cuentas del plan no permiten separar sus
+  // trazos (un plan viejo), se dibuja todo como antes.
+  const indiceDibujado =
+    routeSegments && routeSegments.length > 0
+      ? Math.min(rutaAbierta ?? recorridoDibujado, routeSegments.length - 1)
+      : null;
+  const dibujo = useMemo(
+    () =>
+      indiceDibujado === null
+        ? null
+        : geometriaDeRecorrido(
+            {
+              outbound: routeOutboundPaths,
+              transfer: routeTransferPaths,
+              disposal: routeDisposalPaths,
+              ret: routeReturnPaths,
+            },
+            routeSegments,
+            indiceDibujado,
+          ),
+    [
+      indiceDibujado,
+      routeSegments,
+      routeOutboundPaths,
+      routeTransferPaths,
+      routeDisposalPaths,
+      routeReturnPaths,
+    ],
+  );
+  const trazos = dibujo
+    ? {
+        outbound: dibujo.ida,
+        transfer: dibujo.traslado,
+        disposal: dibujo.descarga,
+        ret: dibujo.regreso,
+      }
+    : {
+        outbound: routeOutboundPaths,
+        transfer: routeTransferPaths,
+        disposal: routeDisposalPaths,
+        ret: routeReturnPaths,
+      };
+  const colorDibujado = dibujo && indiceDibujado !== null ? colorDeRecorrido(indiceDibujado) : null;
+  /** Se elige qué recorrido se dibuja. Con uno abierto en detalle, el detalle
+   *  cambia con él: el mapa y el panel nunca hablan de recorridos distintos. */
+  const elegirRecorrido = (i: number) => {
+    setRecorridoDibujado(i);
+    setTramoActivo(null);
+    if (rutaAbierta !== null) setRutaAbierta(i);
+  };
+
   const routeFitPoints = useMemo<[number, number][] | null>(() => {
-    if (routeOutboundPaths || routeDisposalPaths || routeReturnPaths) {
+    if (trazos.outbound || trazos.disposal || trazos.ret) {
       return [
-        ...(routeOutboundPaths ?? []).flat(),
-        ...(routeTransferPaths ?? []).flat(),
+        ...(trazos.outbound ?? []).flat(),
+        ...(trazos.transfer ?? []).flat(),
         // El relleno queda al poniente de la comuna, bastante lejos de las
         // zonas: sin este tramo el encuadre automatico lo dejaba fuera de
         // pantalla y el plan parecia terminar en la ultima zona.
-        ...(routeDisposalPaths ?? []).flat(),
-        ...(routeReturnPaths ?? []).flat(),
+        ...(trazos.disposal ?? []).flat(),
+        ...(trazos.ret ?? []).flat(),
         // El relleno sanitario entra al encuadre de la ruta, aunque el trazo
         // todavía no pase por él. Está al poniente del casco urbano, fuera de
         // la caja con la que abre el mapa, así que sin incluirlo acá el
@@ -1959,7 +2047,7 @@ function RutasPage() {
     }
     return routePositions;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeOutboundPaths, routeTransferPaths, routeDisposalPaths, routeReturnPaths]);
+  }, [trazos.outbound, trazos.transfer, trazos.disposal, trazos.ret]);
 
   // Cifras de cabecera. Las cuatro responden la pregunta con la que se entra a
   // esta vista: con qué cuento y cuánto hay que retirar.
@@ -2203,24 +2291,6 @@ function RutasPage() {
             etiqueta="Volumen a retirar"
             valor={`${volumen(totalesCabecera.volumen)} m³`}
           />
-          {/* La holgura, que es la lectura que las dos cifras de m³ piden y
-              que nadie debería tener que hacer de cabeza. Solo aparece cuando
-              hay zonas cargadas: sin nada que retirar no hay nada que comparar. */}
-          {totalesCabecera.zonas > 0 && (
-            <div className="ml-auto flex flex-shrink-0 items-center gap-2 border-l-0 px-5 py-3.5">
-              <span
-                className={`rounded px-2 py-1 text-[0.6875rem] font-semibold ${
-                  totalesCabecera.volumen <= totalesCabecera.capacidad
-                    ? "bg-success/15 text-success-strong"
-                    : "bg-warning/15 text-warning-strong"
-                }`}
-              >
-                {totalesCabecera.volumen <= totalesCabecera.capacidad
-                  ? `Alcanza, sobran ${cifra(totalesCabecera.capacidad - totalesCabecera.volumen)} m³`
-                  : `Faltan ${cifra(totalesCabecera.volumen - totalesCabecera.capacidad)} m³ de capacidad`}
-              </span>
-            </div>
-          )}
         </div>
       </div>
 
@@ -2240,7 +2310,7 @@ function RutasPage() {
           El alto lo fija la fila: los dos bloques miden exactamente lo mismo,
           que es lo que evita el escalón al pie que deja una columna más corta
           que la otra. */}
-      <main className="grid min-h-0 flex-1 gap-5 px-6 pb-6 lg:grid-cols-[clamp(21rem,30vw,28rem)_1fr]">
+      <main className="grid min-h-0 flex-1 gap-5 px-6 pb-6 lg:grid-cols-[clamp(23rem,32vw,31rem)_1fr]">
         <section className="map-frame order-2 min-h-[24rem] min-w-0 bg-background animate-in fade-in duration-500 lg:min-h-0">
           {/* Qué significa cada pin. Va como hermana del mapa y no dentro de
               ninguna implementación: hay dos motores y cuál corre lo decide una
@@ -2255,13 +2325,25 @@ function RutasPage() {
             // dónde va la ruta y el panel dice qué pasa en ella; sin esto, la
             // única forma de pasar de uno al otro era buscar el recorrido en
             // la lista a mano.
-            onRouteClick={setRutaAbierta}
+            onRouteClick={dibujo ? undefined : setRutaAbierta}
+            // Apretar un tramo abre el detalle de su recorrido y deja
+            // resaltada la fila que le corresponde en la línea de tiempo.
+            onLegClick={
+              dibujo
+                ? (tramo) => {
+                    setTramoActivo(tramo);
+                    setRutaAbierta(indiceDibujado);
+                  }
+                : undefined
+            }
+            activeLeg={tramoActivo}
+            routeColor={colorDibujado}
             disposalSite={RELLENO_SANITARIO}
             routePositions={routePositions}
-            outboundPaths={routeOutboundPaths}
-            transferPaths={routeTransferPaths}
-            disposalPaths={routeDisposalPaths}
-            returnPaths={routeReturnPaths}
+            outboundPaths={trazos.outbound}
+            transferPaths={trazos.transfer}
+            disposalPaths={trazos.disposal}
+            returnPaths={trazos.ret}
             routeSegments={routeSegments}
             // El recentrado manual gana sobre el encuadre automático de la
             // ruta: es una acción explícita y reciente del usuario.
@@ -2288,7 +2370,60 @@ function RutasPage() {
           {/* Solo con un recorrido dibujado: sin trazo, la leyenda explicaría
               colores que no están en pantalla y ocuparía una esquina del mapa
               para no decir nada. */}
-          {routeOutboundPaths && routeOutboundPaths.length > 0 && <RouteLegend />}
+          {routeOutboundPaths && routeOutboundPaths.length > 0 && (
+            <RouteLegend color={colorDibujado} />
+          )}
+          {/* Qué recorrido se está dibujando, y el selector para cambiarlo.
+              Solo cuando el plan permite separar los trazos: si se dibujara
+              todo, un selector prometería algo que el mapa no hace. */}
+          {dibujo && routeSegments && indiceDibujado !== null && (
+            <div className="absolute left-4 top-4 z-[550] max-w-[min(26rem,60%)] rounded-lg border border-border/60 bg-background/90 px-3 py-2 shadow-md backdrop-blur">
+              <p className="flex items-center gap-1.5 text-[0.6875rem] text-foreground">
+                <span
+                  aria-hidden="true"
+                  className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
+                  style={{ backgroundColor: colorDibujado ?? undefined }}
+                />
+                <span>
+                  Dibujando el <span className="font-semibold">recorrido {indiceDibujado + 1}</span>
+                  {routeSegments.length > 1 && ` de ${routeSegments.length}`}
+                </span>
+              </p>
+              {routeSegments.length > 1 && (
+                <div
+                  className="mt-1.5 flex flex-wrap gap-1"
+                  role="radiogroup"
+                  aria-label="Recorrido dibujado"
+                >
+                  {routeSegments.map((_, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      role="radio"
+                      aria-checked={i === indiceDibujado}
+                      onClick={() => elegirRecorrido(i)}
+                      title={`Dibujar el recorrido ${i + 1}`}
+                      className={`mono flex h-6 min-w-6 cursor-pointer items-center justify-center gap-1 rounded-full border px-2 text-[0.625rem] font-semibold tabular-nums transition-colors ${
+                        i === indiceDibujado
+                          ? "text-white"
+                          : "border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground"
+                      }`}
+                      style={
+                        i === indiceDibujado
+                          ? {
+                              backgroundColor: colorDeRecorrido(i),
+                              borderColor: colorDeRecorrido(i),
+                            }
+                          : undefined
+                      }
+                    >
+                      {i + 1}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {mapDataLoading && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/60">
@@ -2353,13 +2488,17 @@ function RutasPage() {
                   hacía qué. */}
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+            <div
+              className={`min-h-0 flex-1 px-4 py-4 ${
+                rutaAbierta === null ? "flex flex-col overflow-hidden" : "overflow-y-auto"
+              }`}
+            >
               {/* ── Nivel 1: el plan completo ── */}
               {rutaAbierta === null && (
-                <div className="animate-in fade-in flex flex-col gap-5 duration-300">
-                  <div className="flex flex-col gap-2">
-                    <Button onClick={openLoadDialog} variant="secondary" className="w-full">
-                      <FolderOpen className="mr-2 h-4 w-4" /> Cargar paradas
+                <div className="animate-in fade-in flex min-h-0 flex-1 flex-col gap-4 duration-300">
+                  <div className="grid flex-shrink-0 grid-cols-2 gap-2">
+                    <Button onClick={openLoadDialog} variant="secondary" className="w-full text-xs">
+                      <FolderOpen className="mr-1.5 h-4 w-4" /> Cargar paradas
                     </Button>
                     {/* HDU15/AC1: abre la selección entre escombros y extras. */}
                     <Button
@@ -2368,9 +2507,9 @@ function RutasPage() {
                         setPuntoDiarioAbierto(true);
                       }}
                       variant="outline"
-                      className="w-full"
+                      className="w-full text-xs"
                     >
-                      <Plus className="mr-2 h-4 w-4" /> Crear punto diario
+                      <Plus className="mr-1.5 h-4 w-4" /> Crear punto diario
                     </Button>
                     {/* HDU15/AC4, más el historial. **Ya no se deshabilita sin
                         puntos de hoy**: estaba bien cuando el diálogo solo
@@ -2387,17 +2526,17 @@ function RutasPage() {
                         setFechaHistorial(hoy());
                         setEditarPuntosAbierto(true);
                       }}
-                      variant="ghost"
-                      className="w-full"
+                      variant="outline"
+                      className="col-span-2 w-full text-xs"
                     >
-                      <Pencil className="mr-2 h-4 w-4" /> Puntos diarios
+                      <Pencil className="mr-1.5 h-4 w-4" /> Puntos diarios
                       {puntosDiarios.length > 0 && ` (${puntosDiarios.length})`}
                     </Button>
                     <Button
                       onClick={openConfirm}
                       disabled={paradasCargadas === 0}
                       size="lg"
-                      className="btn-cta w-full"
+                      className="btn-cta col-span-2 w-full"
                       title={
                         paradasCargadas === 0
                           ? "Carga al menos una zona para poder generar una ruta"
@@ -2452,8 +2591,8 @@ function RutasPage() {
                     </div>
                   )}
 
-                  <section className="flex min-h-0 flex-col">
-                    <div className="mb-2 flex items-baseline justify-between gap-2">
+                  <section className="flex min-h-0 flex-1 flex-col">
+                    <div className="mb-2 flex flex-shrink-0 items-baseline justify-between gap-2">
                       {/* El conteo va en una pastilla, no entre paréntesis.
                           Un paréntesis dentro de un título se lee como una
                           aclaración de la frase, no como un dato, y además lo
@@ -2485,7 +2624,7 @@ function RutasPage() {
                         del día que elijas.
                       </p>
                     ) : (
-                      <ul className="max-h-[19rem] space-y-1.5 overflow-y-auto pr-0.5">
+                      <ul className="min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-0.5">
                         {zonasOrdenadas.map((a) => (
                           <li
                             key={a.id}
@@ -2765,8 +2904,12 @@ function RutasPage() {
                   </section>
 
                   {/* ── Recorridos generados ── */}
-                  <section>
-                    <div className="mb-2 flex items-baseline justify-between gap-2">
+                  <section
+                    className={`flex min-h-0 flex-col ${
+                      routeSegments && routeSegments.length > 0 ? "flex-1" : "flex-shrink-0"
+                    }`}
+                  >
+                    <div className="mb-2 flex flex-shrink-0 items-baseline justify-between gap-2">
                       <h3 className="flex items-center gap-2 text-xs font-semibold text-foreground">
                         Recorridos
                         <Conteo n={routeSegments?.length ?? 0} />
@@ -2803,7 +2946,7 @@ function RutasPage() {
                         Todavía no hay ningún recorrido. Se generan a partir de las zonas cargadas.
                       </p>
                     ) : (
-                      <ul className="space-y-1">
+                      <ul className="min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-0.5">
                         {routeSegments.map((seg, i) => (
                           <li key={i}>
                             {/* Misma estructura que una zona cargada: arriba
@@ -2816,7 +2959,18 @@ function RutasPage() {
                                 válido en HTML y el navegador los separa como
                                 quiere, así que el contenedor pasa a ser un div
                                 y cada acción tiene su propio botón. */}
-                            <div className="relative rounded-lg border border-border/60 bg-background/60 transition-colors hover:border-primary/40 hover:bg-primary/5">
+                            <div
+                              className={`relative rounded-lg border bg-background/60 transition-colors hover:bg-primary/5 ${
+                                i === indiceDibujado
+                                  ? ""
+                                  : "border-border/60 hover:border-primary/40"
+                              }`}
+                              style={
+                                i === indiceDibujado
+                                  ? { borderColor: colorDeRecorrido(i) }
+                                  : undefined
+                              }
+                            >
                               <button
                                 type="button"
                                 onClick={() => descartarRecorrido(i)}
@@ -2828,12 +2982,19 @@ function RutasPage() {
                               </button>
                               <button
                                 type="button"
-                                onClick={() => setRutaAbierta(i)}
+                                onClick={() => {
+                                  setRutaAbierta(i);
+                                  setRecorridoDibujado(i);
+                                  setTramoActivo(null);
+                                }}
                                 title="Ver el detalle de este recorrido"
                                 className="w-full cursor-pointer text-left"
                               >
                                 <span className="flex items-start gap-2.5 px-3 pt-2.5">
-                                  <span className="mono flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-primary/15 text-[0.625rem] font-semibold text-primary">
+                                  <span
+                                    className="mono flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-[0.625rem] font-semibold text-white"
+                                    style={{ backgroundColor: colorDeRecorrido(i) }}
+                                  >
                                     {i + 1}
                                   </span>
                                   <span className="min-w-0 flex-1">
@@ -2841,8 +3002,10 @@ function RutasPage() {
                                       {seg.originName}
                                     </span>
                                     <span className="mt-0.5 block text-[0.6875rem] text-muted-foreground">
-                                      {routeStops?.length ?? 0} parada
-                                      {routeStops?.length === 1 ? "" : "s"}
+                                      {seg.stopOrders?.length ?? routeStops?.length ?? 0} parada
+                                      {(seg.stopOrders?.length ?? routeStops?.length) === 1
+                                        ? ""
+                                        : "s"}
                                     </span>
                                   </span>
                                   <ArrowRightCircle className="mt-0.5 mr-7 h-4 w-4 flex-shrink-0 text-muted-foreground" />
@@ -2901,7 +3064,7 @@ function RutasPage() {
                       manda el campo; una lista vacía se leería como "todas
                       entraron", y eso todavía no se puede afirmar. */}
                   {unassigned && unassigned.length > 0 && (
-                    <div className="rounded-lg border border-warning/40 bg-warning/10 p-3">
+                    <div className="max-h-40 flex-shrink-0 overflow-y-auto rounded-lg border border-warning/40 bg-warning/10 p-3">
                       <p className="flex items-center gap-1.5 text-xs font-semibold">
                         <TriangleAlert className="h-3.5 w-3.5 flex-shrink-0 text-warning-strong" />
                         {unassigned.length} zona{unassigned.length === 1 ? "" : "s"} sin asignar
@@ -2986,6 +3149,9 @@ function RutasPage() {
                     salida={salidaPlan ?? undefined}
                     onStopClick={(stop) => setFocusPoint([stop.lat, stop.lng])}
                     onVerFoto={setVehiculoEnFoto}
+                    color={colorDeRecorrido(rutaAbierta)}
+                    tramoActivo={tramoActivo}
+                    onTramoClick={setTramoActivo}
                   />
 
                   <Button

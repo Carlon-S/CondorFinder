@@ -334,3 +334,108 @@ export async function generateRoute(payload: RoutePlanRequest): Promise<RoutePla
     return INFEASIBLE_FALLBACK;
   }
 }
+
+// =============================================================================
+// LA GEOMETRÍA DE UN SOLO RECORRIDO
+//
+// El plan trae los trazos de TODOS los recorridos juntos: `outboundPaths` y
+// `disposalPaths` tienen una entrada por VIAJE (no por recorrido), `transferPaths`
+// va aplanado y solo `returnPaths` es uno por recorrido. Para dibujar un
+// recorrido solo hace falta saber qué rebanada de cada lista le toca, y eso se
+// deduce de dos datos que el plan ya trae: cuántos viajes hizo (`trips`) y
+// cuántas paradas tuvo (`stopOrders`). Cada viaje tiene un primer salto y una
+// descarga, y entre paradas consecutivas de un mismo viaje hay un traslado, o
+// sea `paradas - viajes` traslados por recorrido.
+//
+// Si las cuentas no cuadran (un plan guardado antes de `stopOrders`, o un
+// proveedor que no mandó la geometría de algún salto) devuelve `null` y quien
+// llama dibuja el plan entero como antes: dibujar una rebanada corrida sería
+// pintar el tramo de otro recorrido, que es peor que pintar todos.
+// =============================================================================
+
+type Trazo = [number, number][];
+
+export interface GeometriaDeRecorrido {
+  ida: Trazo[];
+  traslado: Trazo[];
+  descarga: Trazo[];
+  regreso: Trazo[];
+}
+
+export function geometriaDeRecorrido(
+  geo: {
+    outbound: Trazo[] | null;
+    transfer: Trazo[] | null;
+    disposal: Trazo[] | null;
+    ret: Trazo[] | null;
+  },
+  segments: RoutePlanSegment[] | null,
+  indice: number,
+): GeometriaDeRecorrido | null {
+  if (!segments || indice < 0 || indice >= segments.length) return null;
+  const ida = geo.outbound ?? [];
+  const traslado = geo.transfer ?? [];
+  const descarga = geo.disposal ?? [];
+  const regreso = geo.ret ?? [];
+
+  const cuentas = segments.map((s) => {
+    const viajes = s.trips ?? 1;
+    const paradas = s.stopOrders?.length;
+    return { viajes, traslados: paradas === undefined ? null : Math.max(0, paradas - viajes) };
+  });
+  if (cuentas.some((c) => c.traslados === null)) return null;
+
+  const totalViajes = cuentas.reduce((a, c) => a + c.viajes, 0);
+  const totalTraslados = cuentas.reduce((a, c) => a + (c.traslados ?? 0), 0);
+  if (
+    totalViajes !== ida.length ||
+    totalViajes !== descarga.length ||
+    totalTraslados !== traslado.length ||
+    segments.length !== regreso.length
+  ) {
+    return null;
+  }
+
+  let v0 = 0;
+  let t0 = 0;
+  for (let i = 0; i < indice; i++) {
+    v0 += cuentas[i].viajes;
+    t0 += cuentas[i].traslados ?? 0;
+  }
+  const v1 = v0 + cuentas[indice].viajes;
+  const t1 = t0 + (cuentas[indice].traslados ?? 0);
+  return {
+    ida: ida.slice(v0, v1),
+    traslado: traslado.slice(t0, t1),
+    descarga: descarga.slice(v0, v1),
+    regreso: regreso.slice(indice, indice + 1),
+  };
+}
+
+/** Las listas de trazos SIN las de un recorrido, para cuando se lo descarta.
+ *
+ *  Antes se filtraba por el índice del recorrido, que solo vale cuando cada
+ *  recorrido hizo un único viaje: con varios viajes quitaba el trazo de otro
+ *  recorrido, y las transiciones se borraban todas. Devuelve `null` si las
+ *  cuentas no cuadran, y ahí quien llama conserva el comportamiento anterior. */
+export function sinGeometriaDeRecorrido(
+  geo: {
+    outbound: Trazo[] | null;
+    transfer: Trazo[] | null;
+    disposal: Trazo[] | null;
+    ret: Trazo[] | null;
+  },
+  segments: RoutePlanSegment[] | null,
+  indice: number,
+): { outbound: Trazo[]; transfer: Trazo[]; disposal: Trazo[]; ret: Trazo[] } | null {
+  const suya = geometriaDeRecorrido(geo, segments, indice);
+  if (!suya || !segments) return null;
+  const quitar = (todas: Trazo[] | null, propias: Trazo[]) =>
+    (todas ?? []).filter((t) => !propias.includes(t));
+  return {
+    outbound: quitar(geo.outbound, suya.ida),
+    transfer: quitar(geo.transfer, suya.traslado),
+    disposal: quitar(geo.disposal, suya.descarga),
+    ret: quitar(geo.ret, suya.regreso),
+  };
+}

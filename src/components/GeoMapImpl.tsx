@@ -24,6 +24,8 @@ import {
   ROUTE_RETURN_COLOR,
   ROUTE_RETURN_OPACITY,
   ROUTE_TRANSFER_COLOR,
+  ESTILO_TRAMO,
+  type TramoDeMapa,
 } from "@/components/route-colors";
 import {
   MAIPU_BBOX,
@@ -306,6 +308,7 @@ function RouteClickZoom({
   disposalPaths,
   returnPaths,
   onRouteClick,
+  onLegClick,
 }: {
   outboundPaths: [number, number][][] | null | undefined;
   transferPaths: [number, number][][] | null | undefined;
@@ -314,6 +317,8 @@ function RouteClickZoom({
   /** Índice del recorrido cuyo trazo se apretó. Es el mismo índice de
    *  `routeSegments`, así que la vista puede abrir su detalle. */
   onRouteClick?: (segmentIndex: number) => void;
+  /** Cuál de los tramos se apretó y su posición dentro de su clase. */
+  onLegClick?: (tramo: TramoDeMapa) => void;
 }) {
   const CLICK_TOLERANCE_PX = 20;
   const map = useMapEvents({
@@ -328,18 +333,21 @@ function RouteClickZoom({
         disposalPaths ?? [],
         returnPaths ?? [],
       ];
+      const tipos: TramoDeMapa["tipo"][] = ["ida", "traslado", "descarga", "regreso"];
       if (familias.every((f) => f.length === 0)) return;
       const clickPoint = map.latLngToContainerPoint(e.latlng);
 
       let closestDist = Infinity;
       let closestIndex = -1;
-      for (const familia of familias) {
+      let closestTramo: TramoDeMapa | null = null;
+      for (const [f, familia] of familias.entries()) {
         for (const [i, path] of familia.entries()) {
           for (const vertex of path) {
             const dist = clickPoint.distanceTo(map.latLngToContainerPoint(vertex));
             if (dist < closestDist) {
               closestDist = dist;
               closestIndex = i;
+              closestTramo = { tipo: tipos[f], indice: i };
             }
           }
         }
@@ -354,6 +362,7 @@ function RouteClickZoom({
           duration: 0.6,
         });
         if (closestIndex >= 0) onRouteClick?.(closestIndex);
+        if (closestTramo) onLegClick?.(closestTramo);
       }
     },
   });
@@ -451,6 +460,9 @@ export function GeoMapImpl({
   onMapClick,
   onPointClick,
   onRouteClick,
+  routeColor,
+  onLegClick,
+  activeLeg,
   disposalSite,
   focusPoint,
   lockToMaipu,
@@ -462,6 +474,22 @@ export function GeoMapImpl({
    *  en cuanto el mapa monta: con `lockToMaipu` el encuadre lo deciden los
    *  `bounds`, así que el zoom real casi nunca es el declarado. */
   const [zoomActual, setZoomActual] = useState(zoom);
+  /** Estilo de un tramo. Con `routeColor` el color es el del recorrido y el
+   *  tramo se distingue por peso y transparencia; sin él, cada clase de tramo
+   *  conserva su color propio (mapas de un plan guardado, por ejemplo). El tramo
+   *  activo se engrosa para que se vea cuál se eligió. */
+  const estiloDe = (
+    tipo: TramoDeMapa["tipo"],
+    i: number,
+    colorPropio: string,
+    opacidadPropia = 1,
+  ) => {
+    const activo = activeLeg?.tipo === tipo && activeLeg.indice === i;
+    const base = routeColor
+      ? { color: routeColor, ...ESTILO_TRAMO[tipo] }
+      : { color: colorPropio, opacity: opacidadPropia, weight: 5 };
+    return { ...base, weight: base.weight + (activo ? 3 : 0), opacity: activo ? 1 : base.opacity };
+  };
   const hasRealPaths =
     (outboundPaths && outboundPaths.length > 0) ||
     (transferPaths && transferPaths.length > 0) ||
@@ -577,6 +605,7 @@ export function GeoMapImpl({
         disposalPaths={disposalPaths}
         returnPaths={returnPaths}
         onRouteClick={onRouteClick}
+        onLegClick={onLegClick}
       />
       {/* El punto que se está creando o editando (lo usa `/recursos` al ubicar
           uno en el mapa). **Lleva el pin de origen y no el marcador azul por
@@ -600,28 +629,44 @@ export function GeoMapImpl({
             <Polyline
               key={`outbound-outline-${pathKey(path as [number, number][])}-${i}`}
               positions={path as [number, number][]}
-              pathOptions={{ color: ROUTE_OUTLINE_COLOR, weight: 8, opacity: 0.5 }}
+              pathOptions={{
+                color: ROUTE_OUTLINE_COLOR,
+                weight: routeColor ? 12 : 8,
+                opacity: 0.5,
+              }}
             />
           ))}
           {transferPaths?.map((path, i) => (
             <Polyline
               key={`transfer-outline-${pathKey(path as [number, number][])}-${i}`}
               positions={path as [number, number][]}
-              pathOptions={{ color: ROUTE_OUTLINE_COLOR, weight: 8, opacity: 0.5 }}
+              pathOptions={{
+                color: ROUTE_OUTLINE_COLOR,
+                weight: routeColor ? 12 : 8,
+                opacity: 0.5,
+              }}
             />
           ))}
           {disposalPaths?.map((path, i) => (
             <Polyline
               key={`disposal-outline-${pathKey(path as [number, number][])}-${i}`}
               positions={path as [number, number][]}
-              pathOptions={{ color: ROUTE_OUTLINE_COLOR, weight: 8, opacity: 0.5 }}
+              pathOptions={{
+                color: ROUTE_OUTLINE_COLOR,
+                weight: routeColor ? 12 : 8,
+                opacity: 0.5,
+              }}
             />
           ))}
           {returnPaths?.map((path, i) => (
             <Polyline
               key={`return-outline-${pathKey(path as [number, number][])}-${i}`}
               positions={path as [number, number][]}
-              pathOptions={{ color: ROUTE_OUTLINE_COLOR, weight: 8, opacity: 0.5 }}
+              pathOptions={{
+                color: ROUTE_OUTLINE_COLOR,
+                weight: routeColor ? 12 : 8,
+                opacity: 0.5,
+              }}
             />
           ))}
           {/* Ida, trazo real (calles, OSRM), azul sólido (estilo Google
@@ -634,7 +679,7 @@ export function GeoMapImpl({
               <Polyline
                 key={key}
                 positions={path as [number, number][]}
-                pathOptions={{ color: ROUTE_OUTBOUND_COLOR, weight: 5 }}
+                pathOptions={estiloDe("ida", i, ROUTE_OUTBOUND_COLOR)}
               />
             );
           })}
@@ -646,7 +691,7 @@ export function GeoMapImpl({
             <Polyline
               key={`transfer-${pathKey(path as [number, number][])}-${i}`}
               positions={path as [number, number][]}
-              pathOptions={{ color: ROUTE_TRANSFER_COLOR, weight: 5 }}
+              pathOptions={estiloDe("traslado", i, ROUTE_TRANSFER_COLOR)}
             />
           ))}
           {/* Acá iban unas burbujas permanentes sobre cada trazo, con los
@@ -669,11 +714,7 @@ export function GeoMapImpl({
               <Polyline
                 key={key}
                 positions={path as [number, number][]}
-                pathOptions={{
-                  color: ROUTE_DISPOSAL_COLOR,
-                  weight: 5,
-                  opacity: ROUTE_DISPOSAL_OPACITY,
-                }}
+                pathOptions={estiloDe("descarga", i, ROUTE_DISPOSAL_COLOR, ROUTE_DISPOSAL_OPACITY)}
               />
             );
           })}
@@ -686,11 +727,7 @@ export function GeoMapImpl({
               <Polyline
                 key={key}
                 positions={path as [number, number][]}
-                pathOptions={{
-                  color: ROUTE_RETURN_COLOR,
-                  weight: 5,
-                  opacity: ROUTE_RETURN_OPACITY,
-                }}
+                pathOptions={estiloDe("regreso", i, ROUTE_RETURN_COLOR, ROUTE_RETURN_OPACITY)}
               />
             );
           })}

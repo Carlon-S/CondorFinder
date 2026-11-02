@@ -15,6 +15,8 @@ import {
   ROUTE_RETURN_COLOR,
   ROUTE_TRANSFER_COLOR,
   ROUTE_RETURN_OPACITY,
+  ESTILO_TRAMO,
+  type TramoDeMapa,
 } from "@/components/route-colors";
 import {
   DISPOSAL_PIN,
@@ -218,6 +220,9 @@ function Trazos({
   returnPaths,
   routePositions,
   onRouteClick,
+  routeColor,
+  onLegClick,
+  activeLeg,
 }: Pick<
   GeoMapProps,
   | "outboundPaths"
@@ -226,6 +231,9 @@ function Trazos({
   | "returnPaths"
   | "routePositions"
   | "onRouteClick"
+  | "routeColor"
+  | "onLegClick"
+  | "activeLeg"
 >) {
   const map = useMap();
   const maps = useMapsLibrary("maps");
@@ -236,45 +244,66 @@ function Trazos({
 
     const trazar = (
       camino: [number, number][],
-      color: string,
-      opacidad: number,
+      colorPropio: string,
+      opacidadPropia: number,
       indice: number | null,
+      tramo: TramoDeMapa | null = null,
     ) => {
+      // Con `routeColor` el color es el del recorrido y el tramo se distingue
+      // por peso y transparencia; sin él, cada clase conserva su color propio.
+      // El tramo activo se engrosa para que se vea cuál se eligió.
+      const activo = !!tramo && activeLeg?.tipo === tramo.tipo && activeLeg.indice === tramo.indice;
+      const base =
+        routeColor && tramo
+          ? { color: routeColor, ...ESTILO_TRAMO[tramo.tipo] }
+          : { color: colorPropio, opacity: opacidadPropia, weight: 5 };
+      const grosor = base.weight + (activo ? 3 : 0);
       const path = camino.map(aLatLng);
       creadas.push(
         new maps.Polyline({
           path,
           strokeColor: ROUTE_OUTLINE_COLOR,
           strokeOpacity: 0.9,
-          strokeWeight: 9,
+          strokeWeight: grosor + 4,
           clickable: false,
           zIndex: 4,
           map,
         }),
       );
+      const clicable = (indice !== null && !!onRouteClick) || (!!tramo && !!onLegClick);
       const linea = new maps.Polyline({
         path,
-        strokeColor: color,
-        strokeOpacity: opacidad,
-        strokeWeight: 5,
-        clickable: indice !== null && !!onRouteClick,
-        zIndex: 5,
+        strokeColor: base.color,
+        strokeOpacity: activo ? 1 : base.opacity,
+        strokeWeight: grosor,
+        clickable: clicable,
+        zIndex: activo ? 6 : 5,
         map,
       });
-      if (indice !== null && onRouteClick) {
-        linea.addListener("click", () => onRouteClick(indice));
+      if (clicable) {
+        linea.addListener("click", () => {
+          if (indice !== null) onRouteClick?.(indice);
+          if (tramo) onLegClick?.(tramo);
+        });
       }
       creadas.push(linea);
     };
 
     if (outboundPaths?.length) {
-      outboundPaths.forEach((c, i) => trazar(c, ROUTE_OUTBOUND_COLOR, 1, i));
-      // Las transiciones no llevan indice de recorrido: son varias por
-      // sub-ruta y vienen aplanadas, asi que no hay a cual abrir al apretarlas.
-      // El clic sobre el recorrido se sigue atendiendo en los otros tres.
-      transferPaths?.forEach((c) => trazar(c, ROUTE_TRANSFER_COLOR, 1, null));
-      disposalPaths?.forEach((c, i) => trazar(c, ROUTE_DISPOSAL_COLOR, ROUTE_DISPOSAL_OPACITY, i));
-      returnPaths?.forEach((c, i) => trazar(c, ROUTE_RETURN_COLOR, ROUTE_RETURN_OPACITY, i));
+      outboundPaths.forEach((c, i) =>
+        trazar(c, ROUTE_OUTBOUND_COLOR, 1, i, { tipo: "ida", indice: i }),
+      );
+      // Las transiciones no llevan indice de recorrido (vienen aplanadas), pero
+      // sí su posición como tramo, que es lo que `onLegClick` necesita.
+      transferPaths?.forEach((c, i) =>
+        trazar(c, ROUTE_TRANSFER_COLOR, 1, null, { tipo: "traslado", indice: i }),
+      );
+      disposalPaths?.forEach((c, i) =>
+        trazar(c, ROUTE_DISPOSAL_COLOR, ROUTE_DISPOSAL_OPACITY, i, { tipo: "descarga", indice: i }),
+      );
+      returnPaths?.forEach((c, i) =>
+        trazar(c, ROUTE_RETURN_COLOR, ROUTE_RETURN_OPACITY, i, { tipo: "regreso", indice: i }),
+      );
     } else if (routePositions?.length) {
       // Respaldo: línea recta entre paradas cuando todavía no hay geometría
       // real. No es clickeable porque no representa un recorrido calculado.
@@ -291,6 +320,9 @@ function Trazos({
     returnPaths,
     routePositions,
     onRouteClick,
+    routeColor,
+    onLegClick,
+    activeLeg,
   ]);
 
   return null;
@@ -594,6 +626,9 @@ export function GoogleMapImpl({
   returnPaths,
   fitBoundsTo,
   onRouteClick,
+  routeColor,
+  onLegClick,
+  activeLeg,
   disposalSite,
   onMapClick,
   onPointClick,
@@ -673,6 +708,9 @@ export function GoogleMapImpl({
             returnPaths={returnPaths}
             routePositions={routePositions}
             onRouteClick={onRouteClick}
+            routeColor={routeColor}
+            onLegClick={onLegClick}
+            activeLeg={activeLeg}
           />
           <Encuadre points={fitBoundsTo} />
           <VueloAPunto target={focusPoint} />

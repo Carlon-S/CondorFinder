@@ -20,6 +20,8 @@
 // =============================================================================
 
 import {
+  ESTILO_TRAMO,
+  type TipoTramo,
   ROUTE_DISPOSAL_COLOR,
   ROUTE_OUTBOUND_COLOR,
   ROUTE_RETURN_COLOR,
@@ -33,25 +35,41 @@ const TRAMOS = [
   { color: ROUTE_RETURN_COLOR, texto: "Regreso" },
 ] as const;
 
-export function RouteLegend() {
+const ESTILO_POR_TEXTO: Record<(typeof TRAMOS)[number]["texto"], TipoTramo> = {
+  Ida: "ida",
+  Transición: "traslado",
+  "Al relleno": "descarga",
+  Regreso: "regreso",
+};
+
+export function RouteLegend({ color }: { color?: string | null }) {
   return (
     <div className="pointer-events-none absolute bottom-4 left-4 z-[550] rounded-lg border border-border/60 bg-background/90 px-3 py-2.5 shadow-md backdrop-blur">
       <p className="mb-1.5 text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">
         Tramos
       </p>
       <ul className="space-y-1">
-        {TRAMOS.map((t) => (
-          <li key={t.texto} className="flex items-center gap-2">
-            {/* Un trazo y no un cuadrado: lo que identifica es una línea sobre
-                el mapa, y su grosor es el mismo que el del trazo real. */}
-            <span
-              aria-hidden="true"
-              className="h-[3px] w-5 flex-shrink-0 rounded-full"
-              style={{ backgroundColor: t.color }}
-            />
-            <span className="text-[0.6875rem] text-foreground">{t.texto}</span>
-          </li>
-        ))}
+        {TRAMOS.map((t) => {
+          // Con color de recorrido, los cuatro tramos son ESE color y se
+          // distinguen por grosor y transparencia, igual que en el mapa.
+          const estilo = color ? ESTILO_TRAMO[ESTILO_POR_TEXTO[t.texto]] : null;
+          return (
+            <li key={t.texto} className="flex items-center gap-2">
+              {/* Un trazo y no un cuadrado: lo que identifica es una línea sobre
+                  el mapa. */}
+              <span
+                aria-hidden="true"
+                className="w-5 flex-shrink-0 rounded-full"
+                style={{
+                  backgroundColor: color ?? t.color,
+                  height: estilo ? `${estilo.weight}px` : "3px",
+                  opacity: estilo?.opacity ?? 1,
+                }}
+              />
+              <span className="text-[0.6875rem] text-foreground">{t.texto}</span>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

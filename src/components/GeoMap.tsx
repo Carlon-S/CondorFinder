@@ -1,5 +1,7 @@
 import { useEffect, useState, type ComponentType } from "react";
 
+import type { TramoDeMapa } from "@/components/route-colors";
+
 /** Qué REPRESENTA un marcador, que es lo que decide su glifo y su color.
  *
  *  **Es explícito y no se deduce**: antes las implementaciones inferían la clase
@@ -114,6 +116,16 @@ export interface GeoMapProps {
   fitBoundsTo?: [number, number][] | null;
   /** Clic sobre el trazo de un recorrido, con su índice en `routeSegments`. */
   onRouteClick?: (segmentIndex: number) => void;
+  /** Color del recorrido que se dibuja. Con él, los cuatro tramos usan ESTE
+   *  color y se distinguen por peso y transparencia (`ESTILO_TRAMO`), en vez de
+   *  uno distinto por tramo. Pensado para dibujar un solo recorrido a la vez. */
+  routeColor?: string | null;
+  /** Clic sobre un tramo concreto: cuál es y su posición dentro del recorrido
+   *  que se está dibujando. Distinto de `onRouteClick`, que dice a qué
+   *  recorrido pertenece y no cuál de sus tramos. */
+  onLegClick?: (tramo: TramoDeMapa) => void;
+  /** El tramo resaltado (el que se eligió desde el panel o con un clic). */
+  activeLeg?: TramoDeMapa | null;
   /** Sitio de disposición final, dibujado como contexto permanente. No es
    *  clickeable: es a dónde va el material, no algo que el trabajador elija. */
   disposalSite?: { name: string; position: [number, number] } | null;
