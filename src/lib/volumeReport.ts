@@ -430,7 +430,7 @@ export function evolutionSeries(
       analysisId: "",
       sourceTaskId: "",
       // `null` y no una versión inventada: un retiro no lo calculó ningún
-      // algoritmo, así que no puede disparar el aviso de algoritmos mezclados.
+      // algoritmo, así que no tiene `algorithmVersion` que mostrar.
       algorithmVersion: null,
       repeated: 0,
       origen: "retiro",
@@ -438,14 +438,4 @@ export function evolutionSeries(
   }
 
   return serie;
-}
-
-/** true si la serie mezcla análisis calculados con algoritmos distintos. En ese
- *  caso un salto de volumen puede venir de la medición y no del terreno, y
- *  tanto el gráfico como el informe tienen que advertirlo: atribuir a una
- *  limpieza un cambio que en realidad fue de precisión es peor que no informar
- *  nada. */
-export function hasMixedAlgorithms(points: EvolutionPoint[]): boolean {
-  const versiones = new Set(points.map((p) => p.algorithmVersion ?? 0));
-  return versiones.size > 1;
 }

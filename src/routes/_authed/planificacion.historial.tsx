@@ -43,6 +43,7 @@ import { Input } from "@/components/ui/input";
 import { FiltroDropdown } from "@/components/FiltroDropdown";
 import { CerrarRutaDialog } from "@/components/CerrarRutaDialog";
 import { ConfirmarBorrado } from "@/components/ConfirmarBorrado";
+import { MapaDeRuta } from "@/components/MapaDeRuta";
 import { RouteTimeline } from "@/components/RouteTimeline";
 import {
   Table,
@@ -1479,6 +1480,24 @@ function DetalleRuta({ ruta, onVolver }: { ruta: RutaGuardadaCompleta; onVolver:
           />
           <Cifra icono={Truck} etiqueta="Viajes" valor={entero(ruta.resumen.viajes)} />
         </div>
+
+        {/* **El trazo de la ruta, dibujado con lo que se guardó al generarla.**
+            El criterio y la pantalla de generación lo mostraban, y el detalle
+            del historial solo traía la línea de tiempo: quien abría una ruta
+            vieja no veía por dónde pasaba. No consulta OSRM ni Google Routes
+            (la geometría quedó guardada, ver `MapaDeRuta`), así que abrir el
+            detalle no gasta cuota de rutas. */}
+        {plan && (plan.stops ?? []).length > 0 && (
+          <section className="panel space-y-2 p-4">
+            <div className="flex items-baseline justify-between gap-2">
+              <h2 className="text-xs font-semibold text-foreground">Trazo de la ruta</h2>
+              <span className="text-[0.625rem] text-muted-foreground">
+                Es el recorrido guardado al generar el plan, no se vuelve a calcular.
+              </span>
+            </div>
+            <MapaDeRuta plan={plan} />
+          </section>
+        )}
 
         {/* **Cuánto salió de cada lugar.** Es lo que la cifra total no puede
             decir: "87 m³" no dice de dónde ni cuál lugar quedó corto. Sale del

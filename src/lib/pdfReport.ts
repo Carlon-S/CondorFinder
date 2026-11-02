@@ -378,16 +378,12 @@ async function renderReport(selections: ReportSelection[]) {
     const filasComparacion: string[][] = [];
     const puntos: { etiqueta: string; valor: number }[] = [];
     let anterior: number | null = null;
-    const algoritmos = new Set<number | null>();
     // Para poder poner en la fila cuantos analisis tiene cada captura, que es un
     // dato de la VERSION y no del punto de la serie.
     const analisisPorVuelo = new Map(versiones.map((v) => [v.sourceTaskId, v.analyses.length]));
 
     for (const punto of serie) {
       const esRetiro = punto.origen === "retiro";
-      // Un retiro no lo calculo ningun algoritmo, asi que no puede disparar el
-      // aviso de algoritmos mezclados de mas abajo.
-      if (!esRetiro) algoritmos.add(punto.algorithmVersion ?? null);
 
       const etiqueta = esRetiro
         ? `Retiro ${formatDate(punto.date)}`
@@ -438,24 +434,6 @@ async function renderReport(selections: ReportSelection[]) {
     }
     const dibujado = dibujarLinea(doc, puntos, margin, y, 515, ALTO_LINEA);
     if (dibujado > 0) y += dibujado + 14;
-
-    // Advertencia honesta: si las versiones se midieron con algoritmos
-    // distintos, parte de la variación puede venir de la medición y no del
-    // terreno. Un informe municipal que atribuye a una limpieza un cambio que
-    // fue de precisión es peor que no informar nada.
-    if (algoritmos.size > 1) {
-      doc.setFontSize(8);
-      doc.setTextColor(150, 90, 0);
-      const aviso = doc.splitTextToSize(
-        "Atención: estas versiones se midieron con distintas versiones del algoritmo de " +
-          "cálculo. Parte de la variación puede deberse a mejoras en la medición y no a un " +
-          "cambio real en el terreno.",
-        515,
-      );
-      doc.text(aviso, margin, y);
-      doc.setTextColor(0);
-      y += aviso.length * 10 + 16;
-    }
   }
 
   return doc;

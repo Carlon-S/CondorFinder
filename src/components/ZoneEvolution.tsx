@@ -23,7 +23,6 @@ import { Button } from "@/components/ui/button";
 import type { SavedAnalysisRecord, ZoneRecord } from "@/lib/analysisStore";
 import {
   evolutionSeries,
-  hasMixedAlgorithms,
   zoneHistory,
   zoneTotals,
   type RetiroDeZona,
@@ -72,7 +71,6 @@ export function ZoneEvolution({
 }) {
   const versions: ZoneVersion[] = useMemo(() => zoneHistory(zone, analyses), [zone, analyses]);
   const points = useMemo(() => evolutionSeries(versions, retiros), [versions, retiros]);
-  const mixedAlgorithms = useMemo(() => hasMixedAlgorithms(points), [points]);
 
   // AC3, una zona de una sola versión no tiene con qué compararse. Se dice
   // explícitamente en vez de dibujar un gráfico de un punto, que parece un
@@ -151,18 +149,8 @@ export function ZoneEvolution({
 
   return (
     <div className="space-y-5">
-      {mixedAlgorithms && (
-        <p className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-[0.69rem] leading-relaxed text-foreground">
-          Estas mediciones se calcularon con distintas versiones del algoritmo. Parte de la
-          variación puede venir de mejoras en la medición y no de un cambio real en el terreno.
-        </p>
-      )}
-
       <div className="grid grid-cols-3 gap-2">
-        <ResumenEvolucion
-          etiqueta="Volumen actual"
-          valor={`${volumen(volumenActual)} m³`}
-        />
+        <ResumenEvolucion etiqueta="Volumen actual" valor={`${volumen(volumenActual)} m³`} />
         <ResumenEvolucion
           etiqueta="Cambio total"
           valor={`${delta >= 0 ? "+" : ""}${volumen(delta)} m³`}
@@ -301,9 +289,7 @@ export function ZoneEvolution({
                   {esVigente && <span className="text-[0.63rem] text-success-strong">vigente</span>}
                 </div>
                 <p className="text-[0.63rem] text-muted-foreground">
-                  <span className="mono tabular-nums">
-                    {volumen(total.volumeM3)} m³
-                  </span>
+                  <span className="mono tabular-nums">{volumen(total.volumeM3)} m³</span>
                   {" · "}
                   <span className="mono tabular-nums">{version.analyses.length}</span> análisis
                 </p>
