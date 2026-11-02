@@ -4,7 +4,7 @@ from typing import Any
 from bson import ObjectId
 from bson.errors import InvalidId
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from pymongo import ReturnDocument
 from pymongo.asynchronous.database import AsyncDatabase
 from shapely.geometry import Polygon
@@ -216,6 +216,21 @@ class SavedAnalysisIn(BaseModel):
     summary: AnalysisSummaryModel | None = None
     sourceTaskId: str | None = None
     crs: str | None = None
+
+    @field_validator("detections")
+    @classmethod
+    def _sin_mascara_en_pixeles(cls, detecciones: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Quita `polygon` (la máscara en píxeles) de cada detección antes de guardar.
+
+        `polygon` solo lo usa volumeCalc.py al medir, y lo lee del archivo JSON
+        de la tarea, no de este documento. Lo que el sistema dibuja y compara
+        sale de `geo_polygon`, `bbox` y las cifras. Una máscara por detección
+        puede tener cientos de vértices, y todas las detecciones de un análisis
+        se guardan en un único documento de Mongo, que admite hasta 16 MB."""
+        return [
+            {clave: valor for clave, valor in deteccion.items() if clave != "polygon"}
+            for deteccion in detecciones
+        ]
     # Centro geográfico real del ortomosaico (volumeCalc.py::ortho_center,
     # mismo CRS que `crs`), HDU5/rutas.tsx lo usa para ubicar el círculo de
     # la zona en el mapa de forma consistente entre distintas corridas de

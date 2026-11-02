@@ -232,7 +232,11 @@ OUTPUT_DIR  = os.path.join(BASE_DIR, "detecting", "output")
 # cuando SP2 mejore la precisión, dos análisis con distinta versión no son
 # comparables como si nada hubiera cambiado. Subirlo a mano al tocar
 # volumeCalc.py de forma que altere los resultados.
-VOLUME_ALGORITHM_VERSION = 1
+#
+#   1: volumen y área medidos sobre el rectángulo de cada detección.
+#   2: volumen y área medidos sobre la máscara de cada detección (modelo de
+#      segmentación), con la densidad propia de cada una de sus 20 clases.
+VOLUME_ALGORITHM_VERSION = 2
 
 # joining/images/ es una carpeta COMPARTIDA, se reusa para cada carga nueva.
 # Si se guarda una "foto" (snapshot) de las imágenes de cada tarea aquí, se
