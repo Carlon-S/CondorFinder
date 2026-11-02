@@ -11,22 +11,51 @@ import folium
 import json
 from pathlib import Path
 import cv2
+from dataclasses import dataclass
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(BASE_DIR, "model/best.pt")
+MODEL_PATH = os.path.join(BASE_DIR, "model/bestseg.pt")
 OUTPUT_PATH = os.path.join(BASE_DIR, "output")
 CONF        = 0.18
 
-CLASSES = ["Residuo de construcción", "Muebles", "Metal", "Plástico", "Residuo orgánico", "Neumáticos", "Tipo de basura indefinido"]
+CLASSES = [
+    "Rubble", "Construction and demolition materials", "Asphalt milling",
+    "Excavation materials", "Appliances", "Electronic equipment", "Furniture",
+    "Metal barrels", "Plastic packaging", "Wood", "Pallets", "Scrap", "Plastic",
+    "Vehicles", "Tyres", "Paper", "Foundry", "Asbestos", "Textile", "Mixed items",
+]
 
-COLORS_MAP = {
-    "Residuo de construcción": "red",
-    "Muebles":                 "orange",
-    "Metal":                   "gray",
-    "Plástico":                "blue",
-    "Residuo orgánico":        "green",
-    "Neumáticos":              "black",
-    "Tipo de basura indefinido": "purple",
+@dataclass(frozen=True)
+class WasteInfo:
+    name_es: str    # Spanish display name
+    color: str      # hex color
+    density: float  # kg/m³ (bulk density, used to estimate weight from volume)
+
+# Fallback for anything not in the table
+UNKNOWN = WasteInfo("Tipo de basura indefinido", "#8404b3", 200)
+
+WASTE_MAP = {
+    # YOLO class                              name_es                      color       density
+    "Rubble":                         WasteInfo("Escombros",                 "#ff1100", 1400),
+    "Construction and demolition materials": WasteInfo("Residuo de construcción", "#d9480f", 400),
+    "Asphalt milling":                WasteInfo("Fresado asfáltico",         "#3b3b3b", 1600),
+    "Excavation materials":           WasteInfo("Material de excavación",    "#8b5a2b", 1600),
+    "Appliances":                     WasteInfo("Electrodomésticos",         "#17a2b8", 150),
+    "Electronic equipment":           WasteInfo("Equipos electrónicos",      "#6f42c1", 150),
+    "Furniture":                      WasteInfo("Muebles",                   "#ff8400", 200),
+    "Metal barrels":                  WasteInfo("Barriles metálicos",        "#7c8a99", 100),
+    "Plastic packaging":              WasteInfo("Envases plásticos",         "#4f7cff", 80),
+    "Wood":                           WasteInfo("Madera",                    "#c49a6c", 300),
+    "Pallets":                        WasteInfo("Pallets",                   "#e0b100", 150),
+    "Scrap":                          WasteInfo("Chatarra",                  "#696969", 600),
+    "Plastic":                        WasteInfo("Plástico",                  "#0228c2", 80),
+    "Vehicles":                       WasteInfo("Vehículos",                 "#00a3a3", 150),
+    "Tyres":                          WasteInfo("Neumáticos",                "#262626", 400),
+    "Paper":                          WasteInfo("Papel",                     "#9acd32", 100),
+    "Foundry":                        WasteInfo("Fundición",                 "#b5179e", 1200),
+    "Asbestos":                       WasteInfo("Asbesto",                   "#ff006e", 400),
+    "Textile":                        WasteInfo("Textil",                    "#f783ac", 100),
+    "Mixed items":                    WasteInfo("Residuos mezclados",        "#8404b3", 200),
 }
 
 def detect(file_name: str):
@@ -94,11 +123,24 @@ def detect(file_name: str):
     detections_list = []
     for i, pred in enumerate(result.object_prediction_list):
         box = pred.bbox
-        cls = CLASSES[pred.category.id]
+        yolo_cls = CLASSES[pred.category.id]
+        info = WASTE_MAP.get(yolo_cls, UNKNOWN)
         conf = round(float(pred.score.value), 3)
+
+        polygon = None
+        if pred.mask is not None:
+            polygon = [
+                [round(coord * scale) for coord in poly]
+                for poly in pred.mask.segmentation
+            ]
+            print(pred)
+
         detections_list.append({
             "id": i,
-            "class": cls,
+            "class": info.name_es,
+            "yolo_class": yolo_cls,                  
+            "color": info.color,
+            "density_kg_m3": info.density,
             "confidence": conf,
             "bbox": {
                 "minx": round(box.minx * scale),
@@ -106,7 +148,7 @@ def detect(file_name: str):
                 "maxx": round(box.maxx * scale),
                 "maxy": round(box.maxy * scale),
             },
-            "polygon": None,
+            "polygon": [poly for poly in pred.mask.segmentation] if polygon is not None else None,
         })
 
     json_path = f"{final}.json"

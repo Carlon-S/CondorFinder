@@ -6,27 +6,6 @@ from rasterstats import zonal_stats
 from shapely.geometry import Polygon, mapping
 import geopandas as gpd
 
-# kg/m³ bulk density estimates per class
-DENSITY_MAP = {
-    "Plástico":                 80,
-    "Metal":                   600,
-    "Residuo orgánico":        300,
-    "Neumáticos":              400,
-    "Muebles":                 200,
-    "Residuo de construcción": 400,
-    "Tipo de basura indefinido": 200,
-}
-
-COLORS_MAP = {
-    "Residuo de construcción":   "#ff1100",
-    "Muebles":                   "#ff8400",
-    "Metal":                     "#696969",
-    "Plástico":                  "#0228c2",
-    "Residuo orgánico":          "#02c218",
-    "Neumáticos":                "#262626",
-    "Tipo de basura indefinido": "#8404b3",
-}
-
 
 def pixels_to_geo(polygon_px, transform):
     """
@@ -140,10 +119,7 @@ def enrich(
         height_sum = stats["sum"] if stats["sum"] is not None else 0.0
         volume_m3 = round(height_sum * pixel_area_m2, 4)
 
-        cls = det["class"]
-        density = DENSITY_MAP.get(cls, 200)
-        color = COLORS_MAP.get(cls,"#000000")
-        weight_kg = round(volume_m3 * density, 2)
+        weight_kg = round(volume_m3 * int(det["density_kg_m3"]) , 2)
 
         area_m2 = round((stats["count"] or 0) * pixel_area_m2, 4)
 
@@ -153,9 +129,7 @@ def enrich(
             "ndsm_mean_m":   round(stats["mean"] or 0, 3),
             "ndsm_max_m":    round(stats["max"]  or 0, 3),
             "volume_m3":     volume_m3,
-            "density_kg_m3": density,
             "weight_kg":     weight_kg,
-            "color":         color
         })
 
         enriched.append(result)
