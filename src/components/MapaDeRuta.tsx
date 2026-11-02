@@ -27,6 +27,8 @@ import { useMemo } from "react";
 
 import { GeoMap, type GeoMapPoint } from "@/components/GeoMap";
 import { RouteLegend } from "@/components/RouteLegend";
+import { colorDeRecorrido, type TramoDeMapa } from "@/components/route-colors";
+import { geometriaDeRecorrido } from "@/lib/routePlan";
 import { RELLENO_SANITARIO } from "@/lib/disposalSite";
 import type { PlanDibujable } from "@/lib/routePlans";
 
@@ -36,19 +38,50 @@ type Trazo = [number, number][];
  *  rotularlo "(convoy 1)" en el mapa diría que hay dos patios. */
 const sinConvoy = (nombre: string) => nombre.replace(/\s*\(convoy \d+\)\s*$/i, "");
 
-export function MapaDeRuta({ plan }: { plan: PlanDibujable }) {
+export function MapaDeRuta({
+  plan,
+  recorrido = null,
+  className,
+  activeLeg,
+  onLegClick,
+}: {
+  plan: PlanDibujable;
+  /** Si viene, dibuja SOLO ese recorrido, con su color, sus paradas y su patio.
+   *  Es lo que usa el detalle del historial, igual que `/rutas`. Sin él (o si
+   *  las cuentas del plan no permiten separarlo) dibuja el plan entero. */
+  recorrido?: number | null;
+  /** Clases del contenedor. Por omisión alto fijo; el detalle lo hace llenar su
+   *  bloque. */
+  className?: string;
+  activeLeg?: TramoDeMapa | null;
+  onLegClick?: (tramo: TramoDeMapa) => void;
+}) {
   const datos = useMemo(() => {
-    const ida = (plan.outboundPaths ?? []) as Trazo[];
-    const traslados = (plan.transferPaths ?? []) as Trazo[];
-    const descarga = (plan.disposalPaths ?? []) as Trazo[];
-    const regreso = (plan.returnPaths ?? []) as Trazo[];
+    const completos = {
+      outbound: (plan.outboundPaths ?? []) as Trazo[],
+      transfer: (plan.transferPaths ?? []) as Trazo[],
+      disposal: (plan.disposalPaths ?? []) as Trazo[],
+      ret: (plan.returnPaths ?? []) as Trazo[],
+    };
+    const suya =
+      recorrido === null ? null : geometriaDeRecorrido(completos, plan.segments ?? null, recorrido);
+    const ida = suya ? suya.ida : completos.outbound;
+    const traslados = suya ? suya.traslado : completos.transfer;
+    const descarga = suya ? suya.descarga : completos.disposal;
+    const regreso = suya ? suya.regreso : completos.ret;
+    const segmentos =
+      suya && recorrido !== null ? [(plan.segments ?? [])[recorrido]] : (plan.segments ?? []);
+    const propias = suya && recorrido !== null ? (segmentos[0]?.stopOrders ?? null) : null;
+    const paradas = propias
+      ? (plan.stops ?? []).filter((s) => propias.includes(s.order))
+      : (plan.stops ?? []);
 
     // **Un marcador por LUGAR, no por visita.** Una zona que se visita tres
     // veces tiene tres paradas en la misma coordenada: dibujarlas todas apila
     // tres gotas idénticas y el tooltip del de arriba tapa a los otros.
     const vistos = new Set<string>();
     const puntos: GeoMapPoint[] = [];
-    for (const s of plan.stops ?? []) {
+    for (const s of paradas) {
       const clave = `${s.kind ?? "analysis"}:${s.stopId ?? s.order}`;
       if (vistos.has(clave)) continue;
       vistos.add(clave);
@@ -67,7 +100,7 @@ export function MapaDeRuta({ plan }: { plan: PlanDibujable }) {
     // trazo por recorrido), así que se lee de su último vértice. Deduplicado por
     // coordenada: dos convoyes salen del MISMO patio.
     const origenes = new Set<string>();
-    (plan.segments ?? []).forEach((seg, i) => {
+    segmentos.forEach((seg, i) => {
       const trazo = regreso[i];
       const fin = trazo && trazo.length > 0 ? trazo[trazo.length - 1] : null;
       if (!fin) return;
@@ -107,14 +140,15 @@ export function MapaDeRuta({ plan }: { plan: PlanDibujable }) {
       // Sin geometría real (un plan muy viejo) se une las paradas con una línea
       // recta, que es lo que `/rutas` hacía antes de tener calles. Es lo único
       // honesto: inventar un recorrido por calles sin haberlo calculado no.
-      recta: hayGeometria ? null : ((plan.stops ?? []).map((s) => [s.lat, s.lng]) as Trazo),
+      recta: hayGeometria ? null : (paradas.map((s) => [s.lat, s.lng]) as Trazo),
+      color: suya && recorrido !== null ? colorDeRecorrido(recorrido) : null,
     };
-  }, [plan]);
+  }, [plan, recorrido]);
 
   if (datos.puntos.length === 0 && !datos.hayGeometria) return null;
 
   return (
-    <div className="map-frame relative h-[26rem] overflow-hidden">
+    <div className={`map-frame relative overflow-hidden ${className ?? "h-[26rem]"}`}>
       <GeoMap
         className="h-full w-full"
         points={datos.puntos}
@@ -124,11 +158,14 @@ export function MapaDeRuta({ plan }: { plan: PlanDibujable }) {
         transferPaths={datos.hayGeometria ? datos.traslados : null}
         disposalPaths={datos.hayGeometria ? datos.descarga : null}
         returnPaths={datos.hayGeometria ? datos.regreso : null}
+        routeColor={datos.color}
+        activeLeg={activeLeg}
+        onLegClick={datos.color ? onLegClick : undefined}
         fitBoundsTo={datos.encuadre}
       />
       {/* La leyenda solo con trazo por calles: sin él explicaría colores que no
           están en pantalla. */}
-      {datos.hayGeometria && <RouteLegend />}
+      {datos.hayGeometria && <RouteLegend color={datos.color} />}
     </div>
   );
 }

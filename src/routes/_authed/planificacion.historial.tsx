@@ -47,6 +47,7 @@ import { CerrarRutaDialog } from "@/components/CerrarRutaDialog";
 import { ConfirmarBorrado } from "@/components/ConfirmarBorrado";
 import { MapaDeRuta } from "@/components/MapaDeRuta";
 import { RouteTimeline } from "@/components/RouteTimeline";
+import { colorDeRecorrido, type TramoDeMapa } from "@/components/route-colors";
 import {
   Table,
   TableBody,
@@ -1356,10 +1357,22 @@ function TablaHistorial({
 function DetalleRuta({ ruta, onVolver }: { ruta: RutaGuardadaCompleta; onVolver: () => void }) {
   const plan = ruta.plan;
   const salida = useMemo(() => new Date(ruta.fecha), [ruta.fecha]);
+  const segmentos = plan?.segments ?? [];
+  // El recorrido que se está mirando. Es el mismo para el bloque, el mapa y la
+  // línea de tiempo: nunca hablan de recorridos distintos.
+  const [sel, setSel] = useState(0);
+  const [tramoActivo, setTramoActivo] = useState<TramoDeMapa | null>(null);
+  const actual = Math.min(sel, Math.max(0, segmentos.length - 1));
+  const seg = segmentos[actual];
+  const elegir = (n: number) => {
+    setSel(n);
+    setTramoActivo(null);
+  };
+  const color = colorDeRecorrido(actual);
 
   return (
-    <div className="flex min-h-screen flex-col bg-background text-foreground">
-      <div className="flex items-center gap-3 border-b border-border/25 px-6 py-4">
+    <div className="flex min-h-screen flex-col bg-background text-foreground lg:h-screen">
+      <div className="flex flex-shrink-0 items-center gap-3 border-b border-border/25 px-6 py-3">
         <Button variant="ghost" size="icon" onClick={onVolver} aria-label="Volver al historial">
           <ArrowLeft className="h-4 w-4" />
         </Button>
@@ -1371,8 +1384,8 @@ function DetalleRuta({ ruta, onVolver }: { ruta: RutaGuardadaCompleta; onVolver:
         </div>
       </div>
 
-      <div className="flex-1 space-y-4 p-6">
-        <p className="flex items-start gap-2 rounded-lg border border-warning-strong/40 bg-warning/10 px-3 py-2 text-[0.6875rem] leading-relaxed text-warning-strong">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 px-6 py-4">
+        <p className="flex flex-shrink-0 items-start gap-2 rounded-lg border border-warning-strong/40 bg-warning/10 px-3 py-1.5 text-[0.6875rem] leading-relaxed text-warning-strong">
           <TriangleAlert className="mt-px h-3.5 w-3.5 flex-shrink-0" />
           <span>
             Plan generado el {fechaLarga(diaDe(ruta.fecha))} a las {horaDe(ruta.fecha)}. Las horas
@@ -1381,19 +1394,13 @@ function DetalleRuta({ ruta, onVolver }: { ruta: RutaGuardadaCompleta; onVolver:
         </p>
 
         {/* **El volumen faltaba, y es la cifra por la que existe el plan.**
-            Estaban paradas, distancia, duración y viajes, o sea todo menos
-            cuánta basura se mueve. Va primero por eso.
-
-            Y es DOS cifras cuando la ruta se cerró: lo planificado queda
-            congelado al generar y lo retirado es lo que la cuadrilla anotó.
-            Mostrando solo el primero, corregir una cifra al cerrar no se veía
-            en ninguna parte. */}
-        <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            Va primero por eso. Y es DOS cifras cuando la ruta se cerró: lo
+            planificado queda congelado al generar y lo retirado es lo que la
+            cuadrilla anotó. */}
+        <div className="grid flex-shrink-0 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           <Cifra
             icono={Trash2}
             // **"Planificado" y no "Volumen" cuando la ruta se cerró sin cifra.**
-            // La tarjeta mostraba lo planificado bajo el rótulo "Volumen", y en
-            // una ruta ya terminada eso se leía como lo que salió.
             etiqueta={
               ruta.resumen.volumenRetiradoM3 != null
                 ? "Retirado"
@@ -1415,9 +1422,7 @@ function DetalleRuta({ ruta, onVolver }: { ruta: RutaGuardadaCompleta; onVolver:
                   ? // **Dos cierres distintos que daban el mismo texto.** "Cerrar
                     // sin registrar" no guarda ninguna parada; "Cerrar y
                     // registrar" con todos los campos vacíos SÍ guarda cada una
-                    // (con su casilla de completo) pero sin volumen medido.
-                    // Decir "se cerró sin registrar" en el segundo contradice lo
-                    // que se hizo: hay un registro por parada, falta la cifra.
+                    // pero sin volumen medido.
                     (ruta.resumen.paradasRegistradas ?? 0) > 0
                     ? `${entero(ruta.resumen.paradasRegistradas ?? 0)} parada${
                         ruta.resumen.paradasRegistradas === 1 ? "" : "s"
@@ -1444,72 +1449,176 @@ function DetalleRuta({ ruta, onVolver }: { ruta: RutaGuardadaCompleta; onVolver:
           <Cifra icono={Truck} etiqueta="Viajes" valor={entero(ruta.resumen.viajes)} />
         </div>
 
-        {/* **El trazo de la ruta, dibujado con lo que se guardó al generarla.**
-            El criterio y la pantalla de generación lo mostraban, y el detalle
-            del historial solo traía la línea de tiempo: quien abría una ruta
-            vieja no veía por dónde pasaba. No consulta OSRM ni Google Routes
-            (la geometría quedó guardada, ver `MapaDeRuta`), así que abrir el
-            detalle no gasta cuota de rutas. */}
-        {plan && (plan.stops ?? []).length > 0 && (
-          <section className="panel space-y-2 p-4">
-            <div className="flex items-baseline justify-between gap-2">
-              <h2 className="text-xs font-semibold text-foreground">Trazo de la ruta</h2>
-              <span className="text-[0.625rem] text-muted-foreground">
-                Es el recorrido guardado al generar el plan, no se vuelve a calcular.
-              </span>
-            </div>
-            <MapaDeRuta plan={plan} />
-          </section>
-        )}
-
-        {/* **Cuánto salió de cada lugar.** Es lo que la cifra total no puede
-            decir: "87 m³" no dice de dónde ni cuál lugar quedó corto. Sale del
-            mismo desglose que la tabla del listado, así que las dos pantallas no
-            pueden contradecirse. */}
-        <section className="panel space-y-2 p-4">
-          <h2 className="text-xs font-semibold text-foreground">Retiro por lugar</h2>
-          <TablaZonas
-            zonas={zonasDeRuta(ruta.resumen.zonas, plan?.stops)}
-            estadoRuta={ruta.estado}
-          />
-        </section>
-
-        {!plan || (plan.segments ?? []).length === 0 ? (
-          <p className="rounded-lg border border-dashed border-border/60 px-4 py-8 text-center text-xs text-muted-foreground">
-            Este registro no tiene el detalle del recorrido.
-          </p>
-        ) : (
-          (plan.segments ?? []).map((seg, i) => (
-            <section key={i} className="panel space-y-3 p-4">
-              <h2 className="text-xs font-semibold text-foreground">
-                Recorrido {i + 1}
-                <span className="ml-2 font-normal text-muted-foreground">{seg.originName}</span>
-              </h2>
-              <RouteTimeline segment={seg} stops={plan.stops} salida={salida} />
+        {!plan || segmentos.length === 0 || !seg ? (
+          <>
+            <p className="rounded-lg border border-dashed border-border/60 px-4 py-8 text-center text-xs text-muted-foreground">
+              Este registro no tiene el detalle del recorrido.
+            </p>
+            <section className="panel space-y-2 p-4">
+              <h2 className="text-xs font-semibold text-foreground">Retiro por lugar</h2>
+              <TablaZonas
+                zonas={zonasDeRuta(ruta.resumen.zonas, plan?.stops)}
+                estadoRuta={ruta.estado}
+              />
             </section>
-          ))
-        )}
+          </>
+        ) : (
+          // La misma estructura que `/rutas`: el bloque de los recorridos a la
+          // izquierda y a la derecha el mapa, con lo retirado por lugar debajo.
+          // En pantalla angosta se apilan.
+          <div className="grid min-h-0 flex-1 gap-5 lg:grid-cols-[clamp(23rem,32vw,31rem)_1fr]">
+            {/* ── El bloque de los recorridos ──
+                Los recorridos son verticales (una secuencia de pasos), así que
+                no caben uno al lado del otro: se navega entre ellos como un
+                carrusel, con flechas y con el número de cada uno, y el contenido
+                entra deslizándose. */}
+            <section className="panel flex max-h-[34rem] min-h-0 flex-col overflow-hidden bg-card lg:max-h-none">
+              <div className="flex flex-shrink-0 items-center gap-2 border-b border-border/60 px-4 py-3">
+                <div className="min-w-0 flex-1">
+                  <p className="eyebrow">Recorridos</p>
+                  <h2 className="truncate font-rubik text-base font-semibold text-foreground">
+                    Recorrido {actual + 1}
+                    {segmentos.length > 1 && (
+                      <span className="ml-1.5 text-sm font-normal text-muted-foreground">
+                        de {segmentos.length}
+                      </span>
+                    )}
+                  </h2>
+                </div>
+                {segmentos.length > 1 && (
+                  <div className="flex flex-shrink-0 items-center gap-1">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-7 w-7"
+                      disabled={actual === 0}
+                      onClick={() => elegir(actual - 1)}
+                      aria-label="Recorrido anterior"
+                    >
+                      <ArrowLeft className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-7 w-7"
+                      disabled={actual >= segmentos.length - 1}
+                      onClick={() => elegir(actual + 1)}
+                      aria-label="Recorrido siguiente"
+                    >
+                      <ArrowLeft className="h-3.5 w-3.5 rotate-180" />
+                    </Button>
+                  </div>
+                )}
+              </div>
 
-        {/* Lo que quedó fuera, con su motivo tal como el plan lo escribió. Es
-            parte del registro: un plan que dejó zonas afuera y no lo dice
-            después parece haber cubierto todo. */}
-        {(plan?.unassignedZones ?? []).length > 0 && (
-          <section className="panel space-y-2 p-4">
-            <h2 className="text-xs font-semibold text-warning-strong">
-              {plan!.unassignedZones!.length} zona
-              {plan!.unassignedZones!.length === 1 ? "" : "s"} sin asignar
-            </h2>
-            <ul className="space-y-1.5">
-              {plan!.unassignedZones!.map((z, i) => (
-                <li key={i} className="rounded-md border border-border/60 px-3 py-2">
-                  <p className="text-xs font-medium text-foreground">{z.name}</p>
-                  <p className="text-[0.625rem] leading-relaxed text-muted-foreground">
-                    {z.reason}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          </section>
+              {segmentos.length > 1 && (
+                <div
+                  className="flex flex-shrink-0 flex-wrap gap-1.5 border-b border-border/60 px-4 py-2"
+                  role="radiogroup"
+                  aria-label="Recorrido"
+                >
+                  {segmentos.map((_, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      role="radio"
+                      aria-checked={i === actual}
+                      onClick={() => elegir(i)}
+                      title={`Ver el recorrido ${i + 1}`}
+                      className={`mono flex h-6 min-w-6 cursor-pointer items-center justify-center rounded-full border px-2 text-[0.625rem] font-semibold tabular-nums transition-colors ${
+                        i === actual
+                          ? "text-white"
+                          : "border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground"
+                      }`}
+                      style={
+                        i === actual
+                          ? {
+                              backgroundColor: colorDeRecorrido(i),
+                              borderColor: colorDeRecorrido(i),
+                            }
+                          : undefined
+                      }
+                    >
+                      {i + 1}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* `key` por recorrido: al cambiar, el contenido se vuelve a
+                  montar y entra deslizándose, que es lo que hace sentir el
+                  paso de un recorrido al siguiente. */}
+              <div
+                key={actual}
+                className="animate-in fade-in slide-in-from-right-4 min-h-0 flex-1 overflow-y-auto px-4 py-4 duration-300"
+              >
+                <p className="mb-3 truncate text-[0.6875rem] text-muted-foreground">
+                  <span
+                    aria-hidden="true"
+                    className="mr-1.5 inline-block h-2 w-2 rounded-full align-middle"
+                    style={{ backgroundColor: color }}
+                  />
+                  {seg.originName}
+                </p>
+                <RouteTimeline
+                  segment={seg}
+                  stops={plan.stops}
+                  salida={salida}
+                  color={color}
+                  tramoActivo={tramoActivo}
+                  onTramoClick={setTramoActivo}
+                />
+              </div>
+            </section>
+
+            {/* ── El mapa y, debajo, lo retirado por lugar ── */}
+            <div className="flex min-h-0 flex-col gap-4">
+              {/* **El trazo, dibujado con lo que se guardó al generar el plan**
+                  y solo el del recorrido elegido. No consulta OSRM ni Google
+                  Routes: la geometría quedó guardada. */}
+              <div className="min-h-[18rem] flex-1">
+                <MapaDeRuta
+                  plan={plan}
+                  recorrido={actual}
+                  className="h-full w-full"
+                  activeLeg={tramoActivo}
+                  onLegClick={setTramoActivo}
+                />
+              </div>
+
+              {/* **Cuánto salió de cada lugar.** Es lo que la cifra total no
+                  puede decir: "87 m³" no dice de dónde ni cuál lugar quedó
+                  corto. Sale del mismo desglose que la tabla del listado. */}
+              <section className="panel flex max-h-[16rem] flex-shrink-0 flex-col gap-2 overflow-y-auto p-4">
+                <h2 className="text-xs font-semibold text-foreground">Retiro por lugar</h2>
+                <TablaZonas
+                  zonas={zonasDeRuta(ruta.resumen.zonas, plan.stops)}
+                  estadoRuta={ruta.estado}
+                />
+                {/* Lo que quedó fuera, con su motivo tal como el plan lo
+                    escribió. Es parte del registro: un plan que dejó zonas
+                    afuera y no lo dice después parece haber cubierto todo. */}
+                {(plan.unassignedZones ?? []).length > 0 && (
+                  <div className="mt-2 border-t border-border/60 pt-3">
+                    <h3 className="text-xs font-semibold text-warning-strong">
+                      {plan.unassignedZones!.length} zona
+                      {plan.unassignedZones!.length === 1 ? "" : "s"} sin asignar
+                    </h3>
+                    <ul className="mt-1.5 space-y-1.5">
+                      {plan.unassignedZones!.map((z, i) => (
+                        <li key={i} className="rounded-md border border-border/60 px-3 py-2">
+                          <p className="text-xs font-medium text-foreground">{z.name}</p>
+                          <p className="text-[0.625rem] leading-relaxed text-muted-foreground">
+                            {z.reason}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </section>
+            </div>
+          </div>
         )}
       </div>
     </div>
