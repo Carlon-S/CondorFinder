@@ -61,7 +61,13 @@ export function RouteLegend({ color }: { color?: string | null }) {
                 aria-hidden="true"
                 className="w-5 flex-shrink-0 rounded-full"
                 style={{
-                  backgroundColor: color ?? t.color,
+                  // Punteado o de rayas igual que en el mapa: un gradiente
+                  // repetido, porque un borde discontinuo no controla el largo.
+                  ...(estilo?.dash && color
+                    ? {
+                        backgroundImage: `repeating-linear-gradient(90deg, ${color} 0 ${estilo.dash[0] / 2 + 1}px, transparent ${estilo.dash[0] / 2 + 1}px ${(estilo.dash[0] + estilo.dash[1]) / 2 + 1}px)`,
+                      }
+                    : { backgroundColor: color ?? t.color }),
                   height: estilo ? `${estilo.weight}px` : "3px",
                   opacity: estilo?.opacity ?? 1,
                 }}

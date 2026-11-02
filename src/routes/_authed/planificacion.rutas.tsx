@@ -131,6 +131,7 @@ import {
 import { RELLENO_SANITARIO } from "@/lib/disposalSite";
 import { projectPolygonToWgs84 } from "@/lib/projection";
 import { colorDeRecorrido, type TramoDeMapa } from "@/components/route-colors";
+import { BTN_FILA } from "@/components/tabla-estilos";
 import {
   generateRoute,
   geometriaDeRecorrido,
@@ -2980,15 +2981,24 @@ function RutasPage() {
                               >
                                 <X className="h-3 w-3" />
                               </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setRutaAbierta(i);
-                                  setRecorridoDibujado(i);
-                                  setTramoActivo(null);
+                              {/* Apretar la tarjeta ELIGE qué recorrido se dibuja;
+                                  el detalle se abre con su propio botón. Antes la
+                                  tarjeta entera abría el detalle y elegir qué ver
+                                  en el mapa no tenía gesto propio. Es un div con
+                                  rol de botón porque contiene otros botones. */}
+                              <div
+                                role="button"
+                                tabIndex={0}
+                                aria-pressed={i === indiceDibujado}
+                                onClick={() => elegirRecorrido(i)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" || e.key === " ") {
+                                    e.preventDefault();
+                                    elegirRecorrido(i);
+                                  }
                                 }}
-                                title="Ver el detalle de este recorrido"
-                                className="w-full cursor-pointer text-left"
+                                title="Dibujar este recorrido en el mapa"
+                                className="block w-full cursor-pointer text-left"
                               >
                                 <span className="flex items-start gap-2.5 px-3 pt-2.5">
                                   <span
@@ -3008,7 +3018,7 @@ function RutasPage() {
                                         : "s"}
                                     </span>
                                   </span>
-                                  <ArrowRightCircle className="mt-0.5 mr-7 h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                                  <span className="mr-7" />
                                 </span>
                                 <span className="mt-2 grid grid-cols-3 gap-2 border-t border-border/50 px-3 py-2">
                                   {/* Los TRES tramos: ida, descarga en el relleno
@@ -3049,7 +3059,39 @@ function RutasPage() {
                                     <Medida etiqueta="Viajes" valor={String(seg.trips)} unidad="" />
                                   )}
                                 </span>
-                              </button>
+                              </div>
+                              {/* El botón que abre el detalle: amarillo y con
+                                  texto, como la acción principal de las tablas.
+                                  Un ícono suelto no se leía como el camino hacia
+                                  la secuencia de pasos del recorrido. */}
+                              <div className="flex items-center justify-between gap-2 border-t border-border/50 px-3 py-2">
+                                <span className="flex items-center gap-1.5 text-[0.6875rem] text-muted-foreground">
+                                  <span
+                                    aria-hidden="true"
+                                    className="h-2 w-2 rounded-full"
+                                    style={{
+                                      backgroundColor:
+                                        i === indiceDibujado ? colorDeRecorrido(i) : "transparent",
+                                      border: `1px solid ${colorDeRecorrido(i)}`,
+                                    }}
+                                  />
+                                  {i === indiceDibujado
+                                    ? "Dibujado en el mapa"
+                                    : "Apretar para dibujar"}
+                                </span>
+                                <Button
+                                  size="sm"
+                                  className={BTN_FILA}
+                                  onClick={() => {
+                                    setRutaAbierta(i);
+                                    setRecorridoDibujado(i);
+                                    setTramoActivo(null);
+                                  }}
+                                >
+                                  Ver detalle
+                                  <ArrowRightCircle className="ml-1.5 h-3.5 w-3.5" />
+                                </Button>
+                              </div>
                             </div>
                           </li>
                         ))}

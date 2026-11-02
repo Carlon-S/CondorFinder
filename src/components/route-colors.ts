@@ -100,12 +100,19 @@ export interface TramoDeMapa {
  *  color, distinto peso y transparencia.
  *
  *  - ida: pleno, sale vacío del patio.
- *  - traslado: algo más tenue, es el camión cargando entre zonas.
+ *  - traslado: PUNTEADO, es el camión cargando entre zonas.
  *  - descarga: **el más grueso**, es el único tramo que se hace cargado.
- *  - regreso: el más tenue, vuelve vacío y es el que menos hay que leer. */
-export const ESTILO_TRAMO: Record<TipoTramo, { opacity: number; weight: number }> = {
+ *  - regreso: de RAYAS, vuelve vacío y es el que menos hay que leer.
+ *
+ *  La transparencia sola no alcanzaba para distinguirlos a zoom comunal: se
+ *  suma el estilo de línea (continua, punteada, de rayas). `dash` es [trazo,
+ *  hueco] en píxeles. */
+export const ESTILO_TRAMO: Record<
+  TipoTramo,
+  { opacity: number; weight: number; dash?: [number, number] }
+> = {
   ida: { opacity: 1, weight: 5 },
-  traslado: { opacity: 0.6, weight: 5 },
+  traslado: { opacity: 0.75, weight: 5, dash: [2, 9] },
   descarga: { opacity: 1, weight: 8 },
-  regreso: { opacity: 0.35, weight: 5 },
+  regreso: { opacity: 0.55, weight: 5, dash: [14, 10] },
 };

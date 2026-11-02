@@ -271,11 +271,31 @@ function Trazos({
         }),
       );
       const clicable = (indice !== null && !!onRouteClick) || (!!tramo && !!onLegClick);
+      // Google no tiene `dashArray`: un trazo discontinuo se arma con una línea
+      // invisible y un ícono de segmento que se repite sobre ella.
+      const dash = routeColor && tramo && !activo ? ESTILO_TRAMO[tramo.tipo].dash : undefined;
       const linea = new maps.Polyline({
         path,
         strokeColor: base.color,
-        strokeOpacity: activo ? 1 : base.opacity,
+        strokeOpacity: dash ? 0 : activo ? 1 : base.opacity,
         strokeWeight: grosor,
+        ...(dash
+          ? {
+              icons: [
+                {
+                  icon: {
+                    path: "M 0,-1 0,1",
+                    strokeColor: base.color,
+                    strokeOpacity: base.opacity,
+                    strokeWeight: grosor,
+                    scale: Math.max(1, dash[0] / 2),
+                  },
+                  offset: "0",
+                  repeat: `${dash[0] + dash[1]}px`,
+                },
+              ],
+            }
+          : {}),
         clickable: clicable,
         zIndex: activo ? 6 : 5,
         map,

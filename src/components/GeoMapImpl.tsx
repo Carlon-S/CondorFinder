@@ -488,7 +488,15 @@ export function GeoMapImpl({
     const base = routeColor
       ? { color: routeColor, ...ESTILO_TRAMO[tipo] }
       : { color: colorPropio, opacity: opacidadPropia, weight: 5 };
-    return { ...base, weight: base.weight + (activo ? 3 : 0), opacity: activo ? 1 : base.opacity };
+    const dash = routeColor ? ESTILO_TRAMO[tipo].dash : undefined;
+    return {
+      ...base,
+      weight: base.weight + (activo ? 3 : 0),
+      opacity: activo ? 1 : base.opacity,
+      // Punteado y rayas distinguen el traslado y el regreso del resto. Un
+      // trazo activo va continuo: es el que se quiere leer.
+      ...(dash && !activo ? { dashArray: `${dash[0]} ${dash[1]}`, lineCap: "butt" as const } : {}),
+    };
   };
   const hasRealPaths =
     (outboundPaths && outboundPaths.length > 0) ||

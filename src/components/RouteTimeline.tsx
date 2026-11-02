@@ -160,10 +160,13 @@ function Tramo({
   tramo,
   respaldo,
   etiqueta,
+  color,
 }: {
   tramo?: RoutePlanLeg;
   respaldo?: { distanceKm: number; durationHours: number };
   etiqueta?: string;
+  /** Color del recorrido: tiñe las pastillas para emparejarlas con su trazo. */
+  color?: string;
 }) {
   const datos = tramo ?? respaldo;
   // Sin cifras, la fila igual ocupa alto: es lo que mantiene el riel visible
@@ -171,13 +174,20 @@ function Tramo({
   if (!datos) return <span className="block h-5" />;
   return (
     <span className="flex items-center gap-2 py-2">
-      {/* Cada cifra en su pastilla. Sueltas sobre el fondo se leían como una
-          continuación del texto de la parada de arriba, cuando describen el
-          espacio ENTRE dos paradas, que es otra cosa. */}
-      <span className="mono rounded bg-muted/70 px-1.5 py-0.5 text-[0.625rem] tabular-nums text-foreground/80">
+      {/* Cada cifra en su pastilla, y ahora con peso: el minutaje y los
+          kilómetros son EL dato de un tramo, y en 0,625 rem tenue se leían
+          como una nota al pie. Más grandes, en seminegrita y teñidas con el
+          color del recorrido, que es el del trazo en el mapa. */}
+      <span
+        className="mono rounded-md px-2 py-0.5 text-xs font-semibold tabular-nums text-foreground"
+        style={{ backgroundColor: color ? `${color}24` : "var(--muted)" }}
+      >
         {horas(datos.durationHours)}
       </span>
-      <span className="mono rounded bg-muted/70 px-1.5 py-0.5 text-[0.625rem] tabular-nums text-foreground/80">
+      <span
+        className="mono rounded-md px-2 py-0.5 text-xs font-semibold tabular-nums text-foreground"
+        style={{ backgroundColor: color ? `${color}24` : "var(--muted)" }}
+      >
         {km(datos.distanceKm)}
       </span>
       {etiqueta && (
@@ -399,6 +409,7 @@ export function RouteTimeline({
         tramo: { tipo: "descarga", indice: viajeAnterior - 1 },
         contenido: (
           <Tramo
+            color={color}
             respaldo={
               descarga
                 ? { distanceKm: descarga.distanceKm, durationHours: descarga.durationHours }
@@ -469,6 +480,7 @@ export function RouteTimeline({
         : { tipo: "traslado", indice: traslados++ },
       contenido: (
         <Tramo
+          color={color}
           tramo={tramo}
           // Sin desglose por tramo, el primero hereda la ida completa: es el
           // único reparto honesto, porque el total de ida es exactamente lo
@@ -617,6 +629,7 @@ export function RouteTimeline({
       tramo: { tipo: "descarga", indice: viajes - 1 },
       contenido: (
         <Tramo
+          color={color}
           respaldo={{
             distanceKm: ultima?.distanceKm ?? segment.disposalDistanceKm ?? 0,
             durationHours: ultima?.durationHours ?? segment.disposalDurationHours ?? 0,
@@ -652,6 +665,7 @@ export function RouteTimeline({
     tramo: { tipo: "regreso", indice: 0 },
     contenido: (
       <Tramo
+        color={color}
         tramo={buscarTramo(
           legs,
           propias.length > 0 ? propias[propias.length - 1].order : null,
@@ -689,6 +703,22 @@ export function RouteTimeline({
   return (
     <ol ref={lista}>
       {filas.map((fila, i) => {
+        // Los dos NODOS que une el tramo activo: el origen (el nodo más cercano
+        // hacia atrás) y el destino (hacia adelante). Apretar un trazo tiene que
+        // decir de dónde a dónde va, no solo cuál fila es.
+        const nodoDelTramo = (() => {
+          if (!tramoActivo || fila.marcador === null) return false;
+          const a = filas.findIndex(
+            (f) =>
+              f.tramo && f.tramo.tipo === tramoActivo.tipo && f.tramo.indice === tramoActivo.indice,
+          );
+          if (a < 0) return false;
+          let antes = a - 1;
+          while (antes >= 0 && filas[antes].marcador === null) antes--;
+          let despues = a + 1;
+          while (despues < filas.length && filas[despues].marcador === null) despues++;
+          return i === antes || i === despues;
+        })();
         const activa =
           !!fila.tramo &&
           tramoActivo?.tipo === fila.tramo.tipo &&
@@ -700,11 +730,13 @@ export function RouteTimeline({
             data-tramo={fila.tramo ? `${fila.tramo.tipo}-${fila.tramo.indice}` : undefined}
             onClick={apretable ? () => onTramoClick?.(fila.tramo as TramoDeMapa) : undefined}
             title={apretable ? "Resaltar este tramo en el mapa" : undefined}
-            style={activa && color ? { backgroundColor: `${color}1f` } : undefined}
+            style={
+              (activa || nodoDelTramo) && color ? { backgroundColor: `${color}1f` } : undefined
+            }
             className={`grid gap-x-3 rounded-md transition-colors ${
               salida ? "grid-cols-[2.75rem_1.75rem_1fr]" : "grid-cols-[1.75rem_1fr]"
             } ${apretable ? "cursor-pointer hover:bg-muted/50" : ""} ${
-              activa && !color ? "bg-primary/10" : ""
+              (activa || nodoDelTramo) && !color ? "bg-primary/10" : ""
             }`}
           >
             {/* La hora va en su propia columna, a la izquierda del riel, como en
@@ -725,7 +757,16 @@ export function RouteTimeline({
                   bottom: i === filas.length - 1 ? `calc(100% - ${MEDIO_NODO})` : 0,
                 }}
               />
-              {fila.marcador}
+              {nodoDelTramo ? (
+                <span
+                  className="relative z-10 flex h-7 w-7 items-center justify-center rounded-full ring-2 ring-offset-2 ring-offset-card"
+                  style={{ ["--tw-ring-color" as string]: color ?? "var(--primary)" }}
+                >
+                  {fila.marcador}
+                </span>
+              ) : (
+                fila.marcador
+              )}
             </span>
             <span className="min-w-0">{fila.contenido}</span>
           </li>
