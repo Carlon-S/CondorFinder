@@ -67,6 +67,7 @@ import {
   type SavedAnalysisRecord,
   type AnalysisSummary,
   type ZoneRecord,
+  TIPOS_PUNTO,
 } from "@/lib/analysisStore";
 import { RenameDialog } from "@/components/RenameDialog";
 // Carga diferida por el mismo motivo que jspdf en el informe: ZoneEvolution
@@ -99,6 +100,9 @@ import {
 } from "@/lib/unify";
 import { entero } from "@/lib/formato";
 import { FiltroDropdown } from "@/components/FiltroDropdown";
+import { InsigniaEstado } from "@/components/InsigniaEstado";
+import type { TonoInsignia } from "@/components/insignia-estilos";
+import { PaginacionTabla } from "@/components/PaginacionTabla";
 import {
   clearImageState,
   saveZonaDestino,
@@ -404,6 +408,78 @@ function SinDato() {
   return <span className="block text-center text-muted-foreground/60">-</span>;
 }
 
+/** El estado de una fila, para la columna "Estado".
+ *
+ *  **Antes el estado vivía en una etiqueta pegada al nombre de la zona**, y solo
+ *  para tres de los cuatro (una zona con análisis no decía nada). Era la forma
+ *  de leerlo más cara de la tabla: había que buscar una etiqueta dentro de una
+ *  celda de texto, y la que decía "Sin vuelo" ocupaba el lugar del nombre.
+ *  Ahora es una columna, con la misma insignia que el historial de rutas, y
+ *  cada fila dice SIEMPRE en qué punto está.
+ *
+ *  Un análisis reemplazado por uno más reciente (HDU7) es "Histórico" aunque su
+ *  estado de fondo siga siendo `done`: es lo que el filtro "Historial" muestra. */
+function estadoDeFila(z: ZoneRow): { tono: TonoInsignia; texto: string; title: string } {
+  if (z.historical) {
+    return {
+      tono: "neutro",
+      texto: "Histórico",
+      title: "Lo reemplazó una captura más reciente de la misma zona",
+    };
+  }
+  switch (z.state) {
+    case "done":
+      return { tono: "exito", texto: "Con análisis", title: "Tiene una medición guardada" };
+    case "in_progress":
+      return { tono: "info", texto: "En progreso", title: "Se está generando el mapa unificado" };
+    case "pending_analysis":
+      return {
+        tono: "aviso",
+        texto: "Pendiente",
+        title: "El mapa está listo: falta analizarlo y guardarlo",
+      };
+    default:
+      return {
+        tono: "neutro",
+        texto: "Sin vuelo",
+        title: "Lugar registrado al que todavía no se le voló el dron",
+      };
+  }
+}
+
+/** Por qué tipo se filtra: los dos que la municipalidad usa en su planilla, más
+ *  "sin clasificar" para lo que no trae ninguno.
+ *
+ *  **"Sin clasificar" existe porque la mitad de las filas no tienen tipo.** Una
+ *  zona nacida de un vuelo no pasó por el formulario de alta, y las tareas en
+ *  curso todavía no son una zona. Con solo "Microbasural" y "VIRS", esas filas
+ *  no se podían encontrar por ningún filtro de tipo. */
+type FiltroTipo = "all" | "microbasural" | "virs" | "sin_tipo";
+
+function claveDeTipo(tipo: string | undefined): Exclude<FiltroTipo, "all"> {
+  const t = (tipo ?? "").trim().toLowerCase();
+  if (t === "microbasural") return "microbasural";
+  if (t === "virs") return "virs";
+  return "sin_tipo";
+}
+
+/** Los botones de FILA, los mismos de la tabla del historial de rutas: 1,75 rem
+ *  de alto y texto de 0,6875 rem en seminegrita.
+ *
+ *  **Cada fila tiene UNA acción principal** (la siguiente: ver el análisis,
+ *  retomar la carga, generar el mapa), con el relleno amarillo del botón por
+ *  omisión. Las demás son secundarias y van con el borde y el tinte del color de
+ *  la marca, y el borrado con el del peligro. Antes cada botón era distinto
+ *  según el estado de la fila ("Ver Análisis" amarillo, "Ir a Carga" gris,
+ *  "Evolución" gris de otro alto) y la tabla no decía cuál era el siguiente paso. */
+const BTN_FILA = "h-7 px-2.5 text-[0.6875rem] font-semibold";
+const BTN_FILA_SECUNDARIO = `${BTN_FILA} border-primary/40 bg-primary/5 text-primary hover:bg-primary/15 hover:text-primary`;
+const BTN_FILA_ICONO =
+  "h-7 w-7 border-destructive-strong/30 text-destructive-strong hover:bg-destructive/15 hover:text-destructive-strong";
+
+/** El encabezado de una columna ordenable, en el tamaño del historial. */
+const CAB_ORDEN = "text-[0.6875rem] [&>button]:px-3";
+
 /** Ancho común de la acción única de una fila.
  *
  *  "Ir a Carga", "Ir a Análisis" y "Generar mapa" son excluyentes entre sí y
@@ -411,7 +487,7 @@ function SinDato() {
  *  natural de cada texto la columna cambiaba de tamaño al filtrar o al avanzar
  *  de página. Es el mismo motivo por el que las columnas de cifras llevan
  *  ancho fijo. */
-const ACCION_FILA = "min-w-[9.5rem] justify-center";
+const ACCION_FILA = "min-w-[8.5rem] justify-center";
 
 /** Filas por página de la tabla de zonas.
  *
@@ -460,6 +536,11 @@ function MainPage() {
   const [stateFilter, setStateFilter] = useState<"all" | ZoneState | "historical">("all");
   // Búsqueda por nombre de zona, se combina con el filtro de estado.
   const [nameQuery, setNameQuery] = useState("");
+  /** Filtro por tipo de lugar (Microbasural o VIRS). Se combina con el de estado
+   *  y con la búsqueda. */
+  const [tipoFilter, setTipoFilter] = useState<FiltroTipo>("all");
+  /** Búsqueda dentro del diálogo del informe. */
+  const [reportQuery, setReportQuery] = useState("");
   /** Página de la tabla. Con 54 puntos permanentes más las zonas voladas, el
    *  listado completo era un scroll largo donde no se sabe cuánto falta. */
   const [pagina, setPagina] = useState(0);
@@ -867,17 +948,55 @@ function MainPage() {
       );
   }, [zones]);
 
-  const visibleRows = useMemo(() => {
-    // HDU7/AC3, "historical" es el único filtro que muestra análisis
-    // reemplazados; los otros 4 (incluido "all") los excluyen siempre, así
-    // el listado principal nunca muestra una zona junto a la versión que
-    // ya la reemplazó.
-    const byState =
+  /** Los puntos que SÍ pueden ir en un informe: los que tienen al menos un
+   *  análisis guardado. Un punto registrado al que todavía no se le voló el dron
+   *  no tiene qué informar. */
+  const zonasConAnalisis = useMemo(() => {
+    const conAnalisis = new Set(savedAnalyses.map((a) => a.zoneId).filter(Boolean));
+    return zoneRecords.filter((z) => conAnalisis.has(z.id));
+  }, [savedAnalyses, zoneRecords]);
+
+  /** Lo anterior, filtrado por la búsqueda del diálogo. Busca lo que la fila
+   *  muestra (nombre y dirección) más el barrio y el tipo, que son como la
+   *  municipalidad ubica y clasifica el lugar. Sin distinguir tildes ni
+   *  mayúsculas: "maipu" tiene que encontrar "Maipú". */
+  const zonasDelInforme = useMemo(() => {
+    const q = normalize(reportQuery.trim());
+    if (q === "") return zonasConAnalisis;
+    return zonasConAnalisis.filter((z) =>
+      [z.name, z.address, z.barrio, z.comuna, z.tipo]
+        .filter((c): c is string => Boolean(c))
+        .some((c) => normalize(c).includes(q)),
+    );
+  }, [zonasConAnalisis, reportQuery]);
+
+  const todasVisiblesMarcadas =
+    zonasDelInforme.length > 0 && zonasDelInforme.every((z) => reportZoneIds.has(z.id));
+
+  /** Las filas que deja el filtro de ESTADO, antes de tipo y búsqueda.
+   *
+   *  Sale a su propio memo porque dos cosas lo necesitan: la lista visible, y el
+   *  conteo de cada opción del filtro de tipo, que tiene que describir lo que
+   *  cada opción dejaría DADO el estado elegido. Con el conteo sobre todas las
+   *  filas, "VIRS (4)" prometía cuatro y la tabla mostraba dos. */
+  const filasPorEstado = useMemo(
+    () =>
+      // HDU7/AC3, "historical" es el único filtro que muestra análisis
+      // reemplazados; los otros (incluido "all") los excluyen siempre, así el
+      // listado principal nunca muestra una zona junto a la versión que ya la
+      // reemplazó.
       stateFilter === "historical"
         ? zones.filter((r) => r.historical === true)
         : (stateFilter === "all" ? zones : zones.filter((r) => r.state === stateFilter)).filter(
             (r) => !r.historical,
-          );
+          ),
+    [zones, stateFilter],
+  );
+
+  const visibleRows = useMemo(() => {
+    const byState = filasPorEstado.filter(
+      (r) => tipoFilter === "all" || claveDeTipo(r.tipo) === tipoFilter,
+    );
     // **El buscador busca TODO lo que la fila muestra**: el nombre de la zona
     // (la línea grande), el de la medición (la chica) y la dirección (su
     // columna). Antes filtraba solo por `name`, que es el de la MEDICIÓN, así
@@ -888,7 +1007,7 @@ function MainPage() {
       query === ""
         ? byState
         : byState.filter((r) =>
-            [r.zoneName, r.name, r.address]
+            [r.zoneName, r.name, r.address, r.barrio]
               .filter((campo): campo is string => Boolean(campo))
               .some((campo) => normalize(campo).includes(query)),
           );
@@ -933,7 +1052,7 @@ function MainPage() {
     });
 
     return [...pinned, ...resto];
-  }, [zones, stateFilter, nameQuery, sortBy, sortDir]);
+  }, [filasPorEstado, tipoFilter, nameQuery, sortBy, sortDir]);
 
   /** Las opciones del filtro con el conteo de filas que dejaría cada una.
    *
@@ -967,6 +1086,22 @@ function MainPage() {
     ];
   }, [zones]);
 
+  /** Las opciones del filtro de tipo, con lo que cada una dejaría DADO el
+   *  estado elegido. */
+  const opcionesDeTipo = useMemo(() => {
+    const cuenta = (k: Exclude<FiltroTipo, "all">) =>
+      filasPorEstado.filter((r) => claveDeTipo(r.tipo) === k).length;
+    return [
+      { valor: "all" as const, etiqueta: "Todos", conteo: filasPorEstado.length },
+      ...TIPOS_PUNTO.map((tp) => ({
+        valor: claveDeTipo(tp) as Exclude<FiltroTipo, "all">,
+        etiqueta: tp,
+        conteo: cuenta(claveDeTipo(tp)),
+      })),
+      { valor: "sin_tipo" as const, etiqueta: "Sin clasificar", conteo: cuenta("sin_tipo") },
+    ];
+  }, [filasPorEstado]);
+
   /** Cambia el filtro de estado y vuelve a la primera página.
    *
    *  Las dos cosas juntas: filtrar desde la página 3 a un estado con menos
@@ -985,6 +1120,73 @@ function MainPage() {
   const pageRows = useMemo(
     () => visibleRows.slice(paginaActual * FILAS_POR_PAGINA, (paginaActual + 1) * FILAS_POR_PAGINA),
     [visibleRows, paginaActual],
+  );
+
+  /** El encabezado de la tabla, UNO solo para el esqueleto de carga y para la
+   *  tabla cargada. Estaban escritos dos veces y ya habían derivado en
+   *  encabezados distintos, y cualquier diferencia de ancho hace que las
+   *  columnas se corran justo cuando terminan de cargar los datos.
+   *
+   *  Tamaño, relleno y color son los del historial de rutas: es la tabla que
+   *  sirve de referencia. Presionar un encabezado mientras carga es inofensivo,
+   *  fija el orden y se aplica cuando llegan las filas. */
+  const cabecera = (
+    <TableHeader>
+      <TableRow className="border-b border-border/60 bg-muted/40 hover:bg-muted/40">
+        <TableHead className="w-[7.5rem] px-3" />
+        <TableHead className="px-3 text-[0.6875rem]">Zona</TableHead>
+        <TableHead className="w-[7.5rem] px-3 text-center text-[0.6875rem]">Estado</TableHead>
+        {/* La dirección es como el trabajador reconoce el lugar en la calle; el
+            nombre es como lo llama el sistema. */}
+        <TableHead className="hidden px-3 text-[0.6875rem] lg:table-cell">Dirección</TableHead>
+        {/* Barrio y Tipo son los campos con que la municipalidad agrupa y
+            clasifica sus lugares. */}
+        <TableHead className="hidden px-3 text-[0.6875rem] xl:table-cell">Barrio</TableHead>
+        <TableHead className="hidden px-3 text-[0.6875rem] xl:table-cell">Tipo</TableHead>
+        <SortableHead
+          field="fecha"
+          label="Fecha"
+          className={CAB_ORDEN}
+          sortBy={sortBy}
+          sortDir={sortDir}
+          onSort={toggleSort}
+        />
+        <SortableHead
+          field="volumen"
+          label="Volumen"
+          unit="m³"
+          className={`w-[7rem] ${CAB_ORDEN}`}
+          sortBy={sortBy}
+          sortDir={sortDir}
+          onSort={toggleSort}
+          align="center"
+        />
+        <SortableHead
+          field="peso"
+          label="Peso"
+          unit="kg"
+          className={`w-[7rem] ${CAB_ORDEN}`}
+          sortBy={sortBy}
+          sortDir={sortDir}
+          onSort={toggleSort}
+          align="center"
+        />
+        <SortableHead
+          field="area"
+          label="Área"
+          unit="m²"
+          className={`w-[7rem] ${CAB_ORDEN}`}
+          sortBy={sortBy}
+          sortDir={sortDir}
+          onSort={toggleSort}
+          align="center"
+        />
+        <TableHead className="px-3">
+          <span className="sr-only">Acciones</span>
+        </TableHead>
+        <TableHead className="w-[2.75rem] px-1" />
+      </TableRow>
+    </TableHeader>
   );
 
   return (
@@ -1068,27 +1270,37 @@ function MainPage() {
                       // vacía hasta que el recorte de página la corrige.
                       setPagina(0);
                     }}
-                    placeholder="Buscar por nombre o dirección..."
+                    placeholder="Buscar por nombre, dirección o barrio..."
                     className="h-9 w-full pl-9 text-sm"
                   />
                 </div>
               </div>
 
               <div className="flex flex-wrap items-center gap-3">
-                {/* Filtro por estado, 5 botones, uno activo a la vez.
-                  "Historial" (HDU7/AC3) es el único que muestra análisis
-                  reemplazados; los otros 4 los excluyen siempre. */}
-                {/* Seis opciones en un desplegable, no seis botones en una
-                  píldora: a ese ancho la fila de chips competía con el
-                  buscador y con los dos botones de informe, y era lo primero
-                  que se partía en dos líneas al angostar la ventana.
-                  Cada opción lleva su conteo, así que elegir el filtro ya
-                  dice cuántas filas va a dejar. */}
+                {/* Los filtros, cada uno un desplegable con el conteo de lo que
+                  dejaría. "Historial" (HDU7/AC3) es el único que muestra
+                  análisis reemplazados; los demás los excluyen siempre.
+
+                  Desplegable y no botones en una píldora: a este ancho la fila
+                  de chips competía con el buscador y con los botones, y era lo
+                  primero que se partía en dos líneas al angostar la ventana. */}
                 <FiltroDropdown
                   etiqueta="Estado"
                   valor={stateFilter}
                   opciones={opcionesDeEstado}
                   onCambio={cambiarFiltro}
+                />
+                {/* Por tipo de lugar, que es como la municipalidad clasifica lo
+                  que administra: un microbasural y un VIRS no se atienden igual.
+                  Se combina con el estado y con la búsqueda. */}
+                <FiltroDropdown
+                  etiqueta="Tipo"
+                  valor={tipoFilter}
+                  opciones={opcionesDeTipo}
+                  onCambio={(v) => {
+                    setTipoFilter(v);
+                    setPagina(0);
+                  }}
                 />
                 {/* HDU9/AC4, sin ninguna zona guardada no hay informe posible:
                   el botón queda deshabilitado y el motivo aparece al pasar el
@@ -1099,15 +1311,26 @@ function MainPage() {
                   nativo ni el disparador de Radix llegan a activarse: el
                   mensaje existía pero era inalcanzable, que es justo lo que
                   pide el criterio. Por eso el disparador va en un <span> que
-                  envuelve al botón y sí recibe el hover. */}
+                  envuelve al botón y sí recibe el hover.
+
+                  **Con borde y tinte, no el gris de "secundario"**: es una
+                  acción de la barra, al lado de "Agregar punto", y las dos
+                  tienen el mismo alto y el mismo texto que los botones de fila
+                  de la tabla. */}
                 <TooltipProvider delayDuration={150}>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <span tabIndex={savedAnalyses.length === 0 ? 0 : -1}>
                         <Button
                           size="sm"
-                          variant="secondary"
-                          onClick={() => setReportOpen(true)}
+                          variant="outline"
+                          className="border-primary/40 bg-primary/5 font-semibold text-primary hover:bg-primary/15 hover:text-primary"
+                          onClick={() => {
+                            // Cada apertura empieza sin búsqueda: arrastrar la
+                            // anterior dejaba la lista filtrada sin explicación.
+                            setReportQuery("");
+                            setReportOpen(true);
+                          }}
                           disabled={savedAnalyses.length === 0}
                         >
                           <FileText className="mr-1.5 h-3.5 w-3.5" /> Generar informe
@@ -1123,18 +1346,14 @@ function MainPage() {
                   </Tooltip>
                 </TooltipProvider>
                 {/* **"Agregar punto" y no "Agregar zona", y abre el formulario
-                  del punto en vez de un menú de dos tarjetas.**
-
-                  Las dos tarjetas eran "Zona nueva" (cargar imágenes sin
-                  declarar lugar) y "Modificar zona existente" (elegir uno de
-                  una lista). La primera es justo el camino que crea huérfanos,
-                  y la segunda quedó cubierta por el botón "Generar mapa" de
-                  cada fila, donde el lugar ya está a la vista con su dirección
-                  y sus cifras en vez de ser un nombre en una lista.
-
-                  Lo que queda es un solo gesto: se registra el lugar, y
-                  después se le cuelga el vuelo si corresponde. */}
-                <Button size="sm" onClick={() => setCrearPuntoAbierto(true)}>
+                  del punto en vez de un menú de dos tarjetas.** Se registra el
+                  lugar, y después se le cuelga el vuelo si corresponde. Es la
+                  acción principal de la barra, con el relleno amarillo. */}
+                <Button
+                  size="sm"
+                  className="font-semibold"
+                  onClick={() => setCrearPuntoAbierto(true)}
+                >
                   <Plus className="mr-1.5 h-3.5 w-3.5" /> Agregar punto
                 </Button>
               </div>
@@ -1144,103 +1363,45 @@ function MainPage() {
               <div className="flex-1 overflow-y-auto px-5 pb-5" role="status" aria-live="polite">
                 <span className="sr-only">Cargando zonas...</span>
                 <Table>
-                  <TableHeader>
-                    <TableRow className="bg-muted/50 hover:bg-muted/50">
-                      {/* El esqueleto usa LOS MISMOS SortableHead que la tabla
-                        cargada, no una copia escrita a mano. Mantener dos
-                        versiones ya había derivado en encabezados distintos, y
-                        cualquier diferencia de ancho hace que las columnas se
-                        corran justo cuando terminan de cargar los datos.
-                        Presionarlos mientras carga es inofensivo: fija el orden
-                        y se aplica cuando llegan las filas. */}
-                      <TableHead className="w-[7.5rem]"></TableHead>
-                      <TableHead>Zona</TableHead>
-                      {/* La direccion es como el trabajador reconoce el lugar
-                        en la calle; el nombre es como lo llama el sistema. */}
-                      <TableHead className="hidden lg:table-cell">Dirección</TableHead>
-                      {/* Barrio y Tipo son los campos con que la municipalidad
-                        agrupa y clasifica sus lugares. Antes solo se veían en
-                        el Itinerario, así que un punto y una zona nacida de un
-                        vuelo parecían dos cosas distintas según dónde se
-                        miraran. */}
-                      <TableHead className="hidden xl:table-cell">Barrio</TableHead>
-                      <TableHead className="hidden xl:table-cell">Tipo</TableHead>
-                      <SortableHead
-                        field="fecha"
-                        label="Fecha"
-                        sortBy={sortBy}
-                        sortDir={sortDir}
-                        onSort={toggleSort}
-                      />
-                      <SortableHead
-                        field="volumen"
-                        label="Volumen"
-                        unit="m³"
-                        className="w-[7rem]"
-                        sortBy={sortBy}
-                        sortDir={sortDir}
-                        onSort={toggleSort}
-                        align="center"
-                      />
-                      <SortableHead
-                        field="peso"
-                        label="Peso"
-                        unit="kg"
-                        className="w-[7rem]"
-                        sortBy={sortBy}
-                        sortDir={sortDir}
-                        onSort={toggleSort}
-                        align="center"
-                      />
-                      <SortableHead
-                        field="area"
-                        label="Área"
-                        unit="m²"
-                        className="w-[7rem]"
-                        sortBy={sortBy}
-                        sortDir={sortDir}
-                        onSort={toggleSort}
-                        align="center"
-                      />
-                      <TableHead className="text-right"></TableHead>
-                      <TableHead className="w-[2.75rem]"></TableHead>
-                    </TableRow>
-                  </TableHeader>
+                  {cabecera}
                   <TableBody>
                     {[0, 1, 2].map((i) => (
-                      <TableRow key={i} className="hover:bg-transparent">
-                        <TableCell>
+                      <TableRow key={i} className="border-b border-border/40 hover:bg-transparent">
+                        <TableCell className="px-3 py-3">
                           <Skeleton className="h-16 w-24" />
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="px-3 py-3">
                           <Skeleton className="h-4 w-32" />
                         </TableCell>
-                        <TableCell className="hidden lg:table-cell">
+                        <TableCell className="px-3 py-3 text-center">
+                          <Skeleton className="mx-auto h-5 w-20 rounded-full" />
+                        </TableCell>
+                        <TableCell className="hidden px-3 py-3 lg:table-cell">
                           <Skeleton className="h-4 w-40" />
                         </TableCell>
-                        <TableCell className="hidden xl:table-cell">
+                        <TableCell className="hidden px-3 py-3 xl:table-cell">
                           <Skeleton className="h-4 w-20" />
                         </TableCell>
-                        <TableCell className="hidden xl:table-cell">
+                        <TableCell className="hidden px-3 py-3 xl:table-cell">
                           <Skeleton className="h-4 w-24" />
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="px-3 py-3">
                           <Skeleton className="h-4 w-20" />
                         </TableCell>
-                        <TableCell className="text-center">
+                        <TableCell className="px-3 py-3 text-center">
                           <Skeleton className="mx-auto h-4 w-14" />
                         </TableCell>
-                        <TableCell className="text-center">
+                        <TableCell className="px-3 py-3 text-center">
                           <Skeleton className="mx-auto h-4 w-14" />
                         </TableCell>
-                        <TableCell className="text-center">
+                        <TableCell className="px-3 py-3 text-center">
                           <Skeleton className="mx-auto h-4 w-14" />
                         </TableCell>
-                        <TableCell className="text-right">
-                          <Skeleton className="ml-auto h-8 w-24" />
+                        <TableCell className="px-3 py-3">
+                          <Skeleton className="h-7 w-28" />
                         </TableCell>
-                        <TableCell>
-                          <Skeleton className="h-8 w-8" />
+                        <TableCell className="px-1 py-3">
+                          <Skeleton className="h-7 w-7" />
                         </TableCell>
                       </TableRow>
                     ))}
@@ -1252,68 +1413,17 @@ function MainPage() {
               // espacio, y con los dos quedaba un hueco doble antes del pie.
               <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-2 animate-in fade-in duration-300">
                 <Table>
-                  <TableHeader>
-                    <TableRow className="bg-muted/50 hover:bg-muted/50">
-                      <TableHead className="w-[7.5rem]"></TableHead>
-                      <TableHead>Zona</TableHead>
-                      <TableHead className="hidden lg:table-cell">Dirección</TableHead>
-                      {/* Barrio y Tipo son los campos con que la municipalidad
-                        agrupa y clasifica sus lugares. Antes solo se veían en
-                        el Itinerario, así que un punto y una zona nacida de un
-                        vuelo parecían dos cosas distintas según dónde se
-                        miraran. */}
-                      <TableHead className="hidden xl:table-cell">Barrio</TableHead>
-                      <TableHead className="hidden xl:table-cell">Tipo</TableHead>
-                      <SortableHead
-                        field="fecha"
-                        label="Fecha"
-                        sortBy={sortBy}
-                        sortDir={sortDir}
-                        onSort={toggleSort}
-                      />
-                      <SortableHead
-                        field="volumen"
-                        label="Volumen"
-                        unit="m³"
-                        className="w-[7rem]"
-                        sortBy={sortBy}
-                        sortDir={sortDir}
-                        onSort={toggleSort}
-                        align="center"
-                      />
-                      <SortableHead
-                        field="peso"
-                        label="Peso"
-                        unit="kg"
-                        className="w-[7rem]"
-                        sortBy={sortBy}
-                        sortDir={sortDir}
-                        onSort={toggleSort}
-                        align="center"
-                      />
-                      <SortableHead
-                        field="area"
-                        label="Área"
-                        unit="m²"
-                        className="w-[7rem]"
-                        sortBy={sortBy}
-                        sortDir={sortDir}
-                        onSort={toggleSort}
-                        align="center"
-                      />
-                      <TableHead className="text-right"></TableHead>
-                      <TableHead className="w-[2.75rem]"></TableHead>
-                    </TableRow>
-                  </TableHeader>
+                  {cabecera}
                   <TableBody>
                     {pageRows.map((z) => {
                       const isDeleting = deletingRowKey === z.key;
+                      const estado = estadoDeFila(z);
                       return (
                         <TableRow
                           key={z.key}
-                          className={`animate-in fade-in slide-in-from-top-1 duration-300 fill-mode-both hover:bg-card/60 transition-opacity ${isDeleting ? "pointer-events-none opacity-40" : ""}`}
+                          className={`border-b border-border/40 animate-in fade-in slide-in-from-top-1 duration-300 fill-mode-both transition-opacity ${isDeleting ? "pointer-events-none opacity-40" : ""}`}
                         >
-                          <TableCell>
+                          <TableCell className="px-3 py-3">
                             {z.mapUrl ? (
                               // detect-frame-sm: variante chica de las esquinas, la
                               // de 26px se comería una miniatura de 96x64.
@@ -1339,25 +1449,26 @@ function MainPage() {
                               </div>
                             )}
                           </TableCell>
-                          <TableCell className="font-medium">
+                          <TableCell className="px-3 py-3 text-xs font-medium text-foreground">
                             {/* El nombre de la ZONA arriba y el de la versión
                             debajo. Una fila es un análisis, pero lo que se lee
                             en esta columna es "qué terreno es", y mostrando solo
                             el nombre del análisis la tabla decía "Medición
                             02-06-2026" donde el trabajador busca "Avenida Las
-                            Industrias": la zona quedaba nombrada por su primera
-                            medición y nada en pantalla distinguía las dos cosas.
+                            Industrias".
 
                             Cae al nombre del análisis cuando no hay zona: las
                             tareas en curso todavía no tienen una, y los
-                            análisis anteriores a la migración de zonas tampoco. */}
+                            análisis anteriores a la migración de zonas tampoco.
+
+                            **El estado ya NO va pegado al nombre**: tenía su
+                            etiqueta ("Sin vuelo", "Pendiente", "En progreso")
+                            dentro de esta celda, y ahora es la columna Estado. */}
                             {(() => {
                               // Un punto permanente ES la zona, no tiene análisis
                               // del que sacarla, y su lápiz abre la EDICIÓN
                               // completa (dirección, barrio, tipo, frecuencia,
-                              // foto) y no solo el renombrado: renombrar es lo
-                              // único que se puede hacer sobre una zona nacida de
-                              // un vuelo, pero acá hay un formulario detrás.
+                              // foto) y no solo el renombrado.
                               if (z.state === "no_flight" && z.zoneId) {
                                 const permanente = zoneRecords.find((r) => r.id === z.zoneId);
                                 return (
@@ -1404,28 +1515,6 @@ function MainPage() {
                                 </>
                               );
                             })()}
-                            {z.state !== "done" && (
-                              <span
-                                className={`ml-2 rounded px-1.5 py-0.5 text-[0.5625rem] font-semibold uppercase tracking-wide ${
-                                  z.state === "in_progress"
-                                    ? "bg-primary/15 text-primary"
-                                    : z.state === "no_flight"
-                                      ? "bg-muted text-muted-foreground"
-                                      : "bg-warning/15 text-warning"
-                                }`}
-                              >
-                                {z.state === "in_progress"
-                                  ? "En progreso"
-                                  : z.state === "no_flight"
-                                    ? "Sin vuelo"
-                                    : "Pendiente"}
-                              </span>
-                            )}
-                            {z.historical && (
-                              <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[0.5625rem] font-semibold uppercase tracking-wide text-muted-foreground">
-                                Histórico
-                              </span>
-                            )}
                             {/* HDU7/AC3, solo tiene sentido bajo el filtro "Historial", los
                             demás filtros ya excluyen las filas históricas. */}
                             {z.historical && z.supersededByName && (
@@ -1434,7 +1523,12 @@ function MainPage() {
                               </p>
                             )}
                           </TableCell>
-                          <TableCell className="hidden max-w-[16rem] lg:table-cell">
+                          <TableCell className="px-3 py-3 text-center">
+                            <InsigniaEstado tono={estado.tono} title={estado.title}>
+                              {estado.texto}
+                            </InsigniaEstado>
+                          </TableCell>
+                          <TableCell className="hidden max-w-[16rem] px-3 py-3 lg:table-cell">
                             {z.address ? (
                               <span className="line-clamp-2 text-xs text-muted-foreground">
                                 {z.address}
@@ -1443,23 +1537,25 @@ function MainPage() {
                               <span className="text-xs text-muted-foreground/60">-</span>
                             )}
                           </TableCell>
-                          <TableCell className="hidden xl:table-cell">
+                          <TableCell className="hidden px-3 py-3 xl:table-cell">
                             <span className="text-xs text-muted-foreground">
                               {z.barrio || <span className="text-muted-foreground/60">-</span>}
                             </span>
                           </TableCell>
-                          <TableCell className="hidden xl:table-cell">
+                          <TableCell className="hidden px-3 py-3 xl:table-cell">
                             <span className="text-xs text-muted-foreground">
                               {z.tipo || <span className="text-muted-foreground/60">-</span>}
                             </span>
                           </TableCell>
-                          {/* Fecha arriba y hora debajo: ordenar por fecha con
-                          varias zonas del mismo día no decía cuál fue antes. */}
-                          <TableCell className="text-muted-foreground">
-                            <span className="block text-xs">
+                          {/* Fecha arriba y hora debajo, con el tratamiento de la
+                          columna Hora del historial: ordenar por fecha con varias
+                          zonas del mismo día no decía cuál fue antes. nowrap: la
+                          fecha tiene que verse completa en una línea. */}
+                          <TableCell className="whitespace-nowrap px-3 py-3">
+                            <span className="mono block text-xs font-semibold tabular-nums text-foreground">
                               {new Date(z.savedAt).toLocaleDateString("es-CL")}
                             </span>
-                            <span className="mono block text-[0.625rem] text-muted-foreground/70">
+                            <span className="mono block text-[0.625rem] tabular-nums text-muted-foreground">
                               {new Date(z.savedAt).toLocaleTimeString("es-CL", {
                                 hour: "2-digit",
                                 minute: "2-digit",
@@ -1475,150 +1571,145 @@ function MainPage() {
                           El guion de "sin dato" va CENTRADO y no alineado a la
                           derecha como las cifras: pegado al borde derecho
                           parecía un número cortado. */}
-                          <TableCell className="text-center mono tabular-nums">
+                          <TableCell className="mono px-3 py-3 text-center text-xs tabular-nums text-foreground">
                             {z.summary ? entero(z.summary.totalVolumeM3) : <SinDato />}
                             {/* **Una cifra que bajó sin explicación parece un error
                             de medición.** Si la cuadrilla ya retiró de acá, la
                             columna muestra lo que QUEDA (pieza 2.5), y esta
                             línea dice por qué no coincide con lo que el vuelo
-                            midió. Sin ella, alguien que recuerda "esa zona
-                            tenía 40 m³" concluiría que el análisis está mal. */}
+                            midió. */}
                             {z.retiradoM3 != null && (
                               <span className="block text-[0.5625rem] font-normal text-success-strong">
                                 -{entero(z.retiradoM3)} retirado
                               </span>
                             )}
                           </TableCell>
-                          <TableCell className="text-center mono tabular-nums">
+                          <TableCell className="mono px-3 py-3 text-center text-xs tabular-nums text-foreground">
                             {z.summary ? entero(z.summary.totalWeightKg) : <SinDato />}
                           </TableCell>
-                          <TableCell className="text-center mono tabular-nums">
+                          <TableCell className="mono px-3 py-3 text-center text-xs tabular-nums text-foreground">
                             {z.summary ? entero(z.summary.totalAreaM2) : <SinDato />}
                           </TableCell>
-                          <TableCell className="text-right">
-                            {z.state === "done" && (
-                              <div className="flex items-center justify-end gap-2">
-                                {/* HDU10, el botón aparece en toda zona guardada,
-                                también con una sola captura. Antes se ocultaba
-                                en ese caso, por parecer que no había nada que
-                                mostrar, pero eso dejaba el AC3 de la historia
-                                ("una zona sin versiones anteriores debe indicar
-                                que no hay con qué comparar") inalcanzable desde
-                                la interfaz: el diálogo sabía dar ese mensaje y
-                                nunca se llegaba a él. */}
-                                {(() => {
-                                  const zona = zoneOf(z.recordId);
-                                  if (!zona) return null;
-                                  return (
-                                    <Button
-                                      size="sm"
-                                      variant="secondary"
-                                      onClick={() => {
-                                        setRetirosEvolucion(null);
-                                        setEvolutionZone(zona);
-                                        // Degrada a vacío: sin los retiros el gráfico
-                                        // queda como antes (solo mediciones), y dejar
-                                        // el diálogo cargando para siempre por una
-                                        // consulta caída sería peor.
-                                        listarRetiros(zona.id)
-                                          .then((rs) =>
-                                            setRetirosEvolucion(
-                                              rs.map((r) => ({
-                                                fecha: r.fecha,
-                                                volumenRetiradoM3: r.volumenRetiradoM3,
-                                              })),
-                                            ),
-                                          )
-                                          .catch(() => setRetirosEvolucion([]));
-                                      }}
-                                      title="Ver cómo cambió el volumen de esta zona"
-                                    >
-                                      <ChartLineUp className="mr-1.5 h-3.5 w-3.5" /> Evolución
-                                    </Button>
-                                  );
-                                })()}
-                                {/* Volver a volar un lugar ya medido. Reemplaza a
-                                "Modificar zona existente", que vivía en el
-                                popup de "Agregar zona" y obligaba a reconocer
-                                el lugar por su nombre en una lista; acá está en
-                                su propia fila, con su dirección y sus cifras a
-                                la vista.
-                                Con fondo y texto, igual que "Evolución" y "Ver
-                                Análisis": estuvo como ícono suelto sin fondo y
-                                era imperceptible al lado de ellos, o sea la
-                                acción existía y no se veía. */}
-                                {z.zoneId && (
+                          {/* **La acción principal PRIMERO, las secundarias
+                          después**, igual que "Ver" en el historial. Todas
+                          alineadas a la izquierda de la celda: con `justify-end`,
+                          el botón principal quedaba en un lugar distinto según
+                          cuántas acciones tuviera la fila. */}
+                          <TableCell className="px-3 py-3">
+                            <div className="flex items-center justify-start gap-1.5">
+                              {z.state === "done" && (
+                                <>
                                   <Button
                                     size="sm"
-                                    variant="secondary"
-                                    onClick={() => goToCarga(z.zoneId)}
-                                    title="Subir un set de imágenes nuevo y generar otro mapa de este punto"
+                                    className={`${BTN_FILA} ${ACCION_FILA}`}
+                                    onClick={() => openZone(z.recordId!)}
                                   >
-                                    <Plus className="mr-1.5 h-3.5 w-3.5" /> Nuevo vuelo
+                                    <Eye className="mr-1.5 h-3.5 w-3.5" /> Ver Análisis
                                   </Button>
-                                )}
-                                <Button size="sm" onClick={() => openZone(z.recordId!)}>
-                                  <Eye className="mr-1.5 h-3.5 w-3.5" /> Ver Análisis
+                                  {/* HDU10, el botón aparece en toda zona guardada,
+                                  también con una sola captura: el diálogo sabe dar
+                                  el mensaje de "no hay con qué comparar", y
+                                  ocultarlo dejaba ese criterio inalcanzable. */}
+                                  {(() => {
+                                    const zona = zoneOf(z.recordId);
+                                    if (!zona) return null;
+                                    return (
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className={BTN_FILA_SECUNDARIO}
+                                        onClick={() => {
+                                          setRetirosEvolucion(null);
+                                          setEvolutionZone(zona);
+                                          // Degrada a vacío: sin los retiros el gráfico
+                                          // queda como antes (solo mediciones), y dejar
+                                          // el diálogo cargando para siempre por una
+                                          // consulta caída sería peor.
+                                          listarRetiros(zona.id)
+                                            .then((rs) =>
+                                              setRetirosEvolucion(
+                                                rs.map((r) => ({
+                                                  fecha: r.fecha,
+                                                  volumenRetiradoM3: r.volumenRetiradoM3,
+                                                })),
+                                              ),
+                                            )
+                                            .catch(() => setRetirosEvolucion([]));
+                                        }}
+                                        title="Ver cómo cambió el volumen de esta zona"
+                                      >
+                                        <ChartLineUp className="mr-1.5 h-3.5 w-3.5" /> Evolución
+                                      </Button>
+                                    );
+                                  })()}
+                                  {/* Volver a volar un lugar ya medido. Con borde y
+                                  texto, igual que "Evolución": estuvo como ícono
+                                  suelto sin fondo y era imperceptible. */}
+                                  {z.zoneId && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className={BTN_FILA_SECUNDARIO}
+                                      onClick={() => goToCarga(z.zoneId)}
+                                      title="Subir un set de imágenes nuevo y generar otro mapa de este punto"
+                                    >
+                                      <Plus className="mr-1.5 h-3.5 w-3.5" /> Nuevo vuelo
+                                    </Button>
+                                  )}
+                                </>
+                              )}
+                              {z.state === "in_progress" && (
+                                <Button
+                                  size="sm"
+                                  className={`${BTN_FILA} ${ACCION_FILA}`}
+                                  onClick={() => resumeInCarga(z)}
+                                >
+                                  <ArrowRightCircle className="mr-1.5 h-3.5 w-3.5" /> Ir a Carga
                                 </Button>
-                              </div>
-                            )}
-                            {z.state === "in_progress" && (
-                              <Button
-                                size="sm"
-                                variant="secondary"
-                                className={ACCION_FILA}
-                                onClick={() => resumeInCarga(z)}
-                              >
-                                <ArrowRightCircle className="mr-1.5 h-3.5 w-3.5" /> Ir a Carga
-                              </Button>
-                            )}
-                            {z.state === "pending_analysis" && (
-                              <Button
-                                size="sm"
-                                variant="secondary"
-                                className={ACCION_FILA}
-                                onClick={() => reviewPending(z)}
-                              >
-                                <ArrowRightCircle className="mr-1.5 h-3.5 w-3.5" /> Ir a Análisis
-                              </Button>
-                            )}
-                            {/* El lugar existe antes del vuelo, así que se le puede
-                            volar el dron desde su propia fila. El `zoneId`
-                            viaja a /carga y de ahí al guardado del análisis, de
-                            modo que la medición queda colgada de ESTE punto en
-                            vez de crear un lugar nuevo que después habría que
-                            reconocer como duplicado.
-
-                            Antes, la única forma de declarar la zona era el
-                            popup de "Agregar zona", o sea había que saber que
-                            el punto ya existía y buscarlo en una lista. */}
-                            {z.state === "no_flight" && z.zoneId && (
-                              <Button
-                                size="sm"
-                                variant="secondary"
-                                className={ACCION_FILA}
-                                onClick={() => goToCarga(z.zoneId)}
-                                title="Subir imágenes y generar el mapa unificado de este punto"
-                              >
-                                <ArrowRightCircle className="mr-1.5 h-3.5 w-3.5" /> Generar mapa
-                              </Button>
-                            )}
+                              )}
+                              {z.state === "pending_analysis" && (
+                                <Button
+                                  size="sm"
+                                  className={`${BTN_FILA} ${ACCION_FILA}`}
+                                  onClick={() => reviewPending(z)}
+                                >
+                                  <ArrowRightCircle className="mr-1.5 h-3.5 w-3.5" /> Ir a Análisis
+                                </Button>
+                              )}
+                              {/* El lugar existe antes del vuelo, así que se le puede
+                              volar el dron desde su propia fila. El `zoneId` viaja a
+                              /carga y de ahí al guardado del análisis, de modo que la
+                              medición queda colgada de ESTE punto en vez de crear un
+                              lugar nuevo que después habría que reconocer como
+                              duplicado. */}
+                              {z.state === "no_flight" && z.zoneId && (
+                                <Button
+                                  size="sm"
+                                  className={`${BTN_FILA} ${ACCION_FILA}`}
+                                  onClick={() => goToCarga(z.zoneId)}
+                                  title="Subir imágenes y generar el mapa unificado de este punto"
+                                >
+                                  <ArrowRightCircle className="mr-1.5 h-3.5 w-3.5" /> Generar mapa
+                                </Button>
+                              )}
+                            </div>
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="px-1 py-3">
                             {isDeleting ? (
                               <div
-                                className="flex h-8 w-8 items-center justify-center"
+                                className="flex h-7 w-7 items-center justify-center"
                                 title="Eliminando..."
                               >
                                 <Loader2 className="h-3.5 w-3.5 animate-spin text-destructive/70" />
                               </div>
                             ) : (
                               <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-8 w-8 p-0 text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
+                                size="icon"
+                                variant="outline"
+                                className={BTN_FILA_ICONO}
                                 onClick={() => setDeleteTarget(z)}
                                 title="Eliminar zona"
+                                aria-label="Eliminar zona"
                               >
                                 <Trash2 className="h-3.5 w-3.5" />
                               </Button>
@@ -1654,37 +1745,19 @@ function MainPage() {
               Se dibuja siempre que haya filas, aunque sea una sola página:
               apareciendo y desapareciendo movería la tabla al filtrar. */}
             {!loading && visibleRows.length > 0 && (
-              <div className="flex flex-shrink-0 items-center justify-between border-t border-border px-5 py-3">
-                <span className="text-[0.625rem] text-muted-foreground">
-                  {visibleRows.length} zona{visibleRows.length === 1 ? "" : "s"}
-                  {(nameQuery.trim() !== "" || stateFilter !== "all") && ` de ${zones.length}`}
-                </span>
-                <div className="flex items-center gap-2">
-                  <span className="mono text-[0.625rem] tabular-nums text-muted-foreground">
-                    {paginaActual + 1} / {paginas}
-                  </span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 w-7 p-0"
-                    disabled={paginaActual === 0}
-                    onClick={() => setPagina(paginaActual - 1)}
-                    aria-label="Página anterior"
-                  >
-                    <ArrowLeft className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 w-7 p-0"
-                    disabled={paginaActual >= paginas - 1}
-                    onClick={() => setPagina(paginaActual + 1)}
-                    aria-label="Página siguiente"
-                  >
-                    <ArrowLeft className="h-3.5 w-3.5 rotate-180" />
-                  </Button>
-                </div>
-              </div>
+              <PaginacionTabla
+                pagina={paginaActual + 1}
+                totalPaginas={paginas}
+                desde={paginaActual * FILAS_POR_PAGINA + 1}
+                hasta={Math.min((paginaActual + 1) * FILAS_POR_PAGINA, visibleRows.length)}
+                total={visibleRows.length}
+                etiqueta={
+                  nameQuery.trim() !== "" || stateFilter !== "all" || tipoFilter !== "all"
+                    ? `zonas, de ${zones.length} en total`
+                    : "zonas"
+                }
+                onCambiar={(p) => setPagina(p - 1)}
+              />
             )}
           </div>
         </section>
@@ -1700,39 +1773,64 @@ function MainPage() {
           <DialogHeader>
             <DialogTitle>Generar informe de volumen</DialogTitle>
             <DialogDescription>
-              Elige las zonas a incluir. El informe detalla el volumen total, el desglose por tipo
-              de residuo y, cuando una zona tiene más de una captura, cómo cambió entre ellas.
+              Elige los puntos a incluir. Solo aparecen los que tienen un análisis guardado. El
+              informe detalla el volumen total, el desglose por tipo de residuo y, cuando un punto
+              tiene más de una captura, cómo cambió entre ellas.
             </DialogDescription>
           </DialogHeader>
 
+          {/* **Solo los puntos CON análisis.** El listado partía de todas las
+              zonas registradas, y un punto sin vuelo (los 54 de la planilla, casi
+              todos) aparecía como elegible con "0 capturas · 0 análisis" y 0 m³:
+              se podía marcar y el informe salía sin él, sin decir por qué. */}
+          {zonasConAnalisis.length > 0 && (
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={reportQuery}
+                onChange={(e) => setReportQuery(e.target.value)}
+                placeholder="Buscar por nombre, dirección o barrio..."
+                aria-label="Buscar punto para el informe"
+                className="h-8 pl-8 text-xs"
+              />
+            </div>
+          )}
+
           {/* Barra de selección: cuántas van marcadas y el atajo para marcar o
-              desmarcar todas. Con varias zonas guardadas, armar un informe
-              completo obligaba a hacer click una por una. */}
-          {zoneRecords.length > 0 && (
+              desmarcar. **Actúa sobre lo que la búsqueda deja visible**, no sobre
+              todo el listado: con "Rebeca" escrito, "Seleccionar todas" que
+              marcara también las que no se ven es el tipo de error que se
+              descubre en el PDF. El contador, en cambio, cuenta todo lo marcado,
+              se vea o no. */}
+          {zonasConAnalisis.length > 0 && (
             <div className="flex items-center justify-between gap-2 border-y border-border/60 py-2">
               <span className="text-xs text-muted-foreground">
                 {reportZoneIds.size === 0
-                  ? "Ninguna zona seleccionada"
-                  : `${reportZoneIds.size} de ${zoneRecords.length} seleccionadas`}
+                  ? "Ningún punto seleccionado"
+                  : `${reportZoneIds.size} de ${zonasConAnalisis.length} seleccionados`}
               </span>
-              <button
-                type="button"
-                onClick={() =>
-                  setReportZoneIds((prev) =>
-                    prev.size === zoneRecords.length
-                      ? new Set()
-                      : new Set(zoneRecords.map((z) => z.id)),
-                  )
-                }
-                className="cursor-pointer text-xs text-primary transition-colors hover:underline"
-              >
-                {reportZoneIds.size === zoneRecords.length ? "Quitar todas" : "Seleccionar todas"}
-              </button>
+              {zonasDelInforme.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setReportZoneIds((prev) => {
+                      const next = new Set(prev);
+                      if (todasVisiblesMarcadas) for (const z of zonasDelInforme) next.delete(z.id);
+                      else for (const z of zonasDelInforme) next.add(z.id);
+                      return next;
+                    })
+                  }
+                  className="cursor-pointer text-xs text-primary transition-colors hover:underline"
+                >
+                  {todasVisiblesMarcadas ? "Quitar" : "Seleccionar"}{" "}
+                  {reportQuery.trim() === "" ? "todos" : `los ${zonasDelInforme.length} visibles`}
+                </button>
+              )}
             </div>
           )}
 
           <ul className="max-h-[21.25rem] space-y-1.5 overflow-y-auto pr-1">
-            {zoneRecords.map((z) => {
+            {zonasDelInforme.map((z) => {
               const deLaZona = savedAnalyses.filter((a) => a.zoneId === z.id);
               const versiones = new Set(deLaZona.map((a) => a.sourceTaskId ?? a.id)).size;
               const marcada = reportZoneIds.has(z.id);
@@ -1787,11 +1885,17 @@ function MainPage() {
                       <span className="block truncate text-sm font-medium text-foreground">
                         {z.name}
                       </span>
+                      {/* La dirección, para distinguir dos puntos que se llaman
+                          parecido y para que lo que se busca se vea. */}
+                      {z.address && (
+                        <span className="block truncate text-[0.6875rem] text-muted-foreground">
+                          {z.address}
+                        </span>
+                      )}
                       <span className="block text-[0.6875rem] text-muted-foreground">
                         <span className="mono tabular-nums">{versiones}</span>{" "}
                         {versiones === 1 ? "captura" : "capturas"} ·{" "}
-                        <span className="mono tabular-nums">{deLaZona.length}</span>{" "}
-                        {deLaZona.length === 1 ? "análisis" : "análisis"}
+                        <span className="mono tabular-nums">{deLaZona.length}</span> análisis
                       </span>
                     </span>
 
@@ -1802,13 +1906,18 @@ function MainPage() {
                 </li>
               );
             })}
-            {zoneRecords.length === 0 && (
+            {zonasConAnalisis.length === 0 && (
               <li className="flex flex-col items-center gap-2 py-8 text-center">
                 <FileText className="h-7 w-7 text-muted-foreground/40" />
-                <p className="text-sm font-medium text-foreground">No hay zonas guardadas</p>
+                <p className="text-sm font-medium text-foreground">Ningún punto tiene análisis</p>
                 <p className="max-w-xs text-xs text-muted-foreground">
-                  Guarda el análisis de una zona y aparecerá acá para incluirla en un informe.
+                  Guarda el análisis de un punto y aparecerá acá para incluirlo en un informe.
                 </p>
+              </li>
+            )}
+            {zonasConAnalisis.length > 0 && zonasDelInforme.length === 0 && (
+              <li className="py-8 text-center text-xs text-muted-foreground">
+                Ningún punto coincide con la búsqueda.
               </li>
             )}
           </ul>

@@ -41,6 +41,8 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { FiltroDropdown } from "@/components/FiltroDropdown";
+import { ESTILO_INSIGNIA, FORMA_INSIGNIA } from "@/components/insignia-estilos";
+import { PaginacionTabla } from "@/components/PaginacionTabla";
 import { CerrarRutaDialog } from "@/components/CerrarRutaDialog";
 import { ConfirmarBorrado } from "@/components/ConfirmarBorrado";
 import { MapaDeRuta } from "@/components/MapaDeRuta";
@@ -94,10 +96,10 @@ export const Route = createFileRoute("/_authed/planificacion/historial")({
  *  que una tabla que conoce uno solo habría que tocarla en cuanto exista el
  *  segundo. */
 const ESTILO_ESTADO: Record<EstadoRuta, string> = {
-  generada: "border-border bg-muted text-muted-foreground",
-  "en curso": "border-warning-strong/40 bg-warning/10 text-warning-strong",
-  terminada: "border-success-strong/40 bg-success/10 text-success-strong",
-  cancelada: "border-destructive-strong/40 bg-destructive/10 text-destructive-strong",
+  generada: ESTILO_INSIGNIA.neutro,
+  "en curso": ESTILO_INSIGNIA.aviso,
+  terminada: ESTILO_INSIGNIA.exito,
+  cancelada: ESTILO_INSIGNIA.peligro,
 };
 
 /** Cómo se llama cada salto en el botón que lo dispara.
@@ -677,49 +679,14 @@ function HistorialPage() {
               una página los botones quedan deshabilitados, que ya dice que no
               hay a dónde ir. */}
           {!cargando && rutas.length > 0 && (
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-5 py-3">
-              <p className="text-xs text-muted-foreground">
-                Mostrando{" "}
-                <span className="mono tabular-nums text-foreground">
-                  {visibles.length === 0 ? 0 : desde + 1}-
-                  {Math.min(desde + POR_PAGINA, visibles.length)}
-                </span>{" "}
-                de <span className="mono tabular-nums text-foreground">{visibles.length}</span>
-              </p>
-              <div className="flex items-center gap-1">
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={paginaActual === 1}
-                  onClick={() => setPagina(paginaActual - 1)}
-                >
-                  Anterior
-                </Button>
-                {Array.from({ length: totalPaginas }, (_, i) => i + 1).map((n) => (
-                  <button
-                    key={n}
-                    type="button"
-                    onClick={() => setPagina(n)}
-                    aria-current={n === paginaActual ? "page" : undefined}
-                    className={`mono h-8 w-8 cursor-pointer rounded-md text-xs tabular-nums transition-colors ${
-                      n === paginaActual
-                        ? "bg-primary text-primary-foreground"
-                        : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                    }`}
-                  >
-                    {n}
-                  </button>
-                ))}
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={paginaActual === totalPaginas}
-                  onClick={() => setPagina(paginaActual + 1)}
-                >
-                  Siguiente
-                </Button>
-              </div>
-            </div>
+            <PaginacionTabla
+              pagina={paginaActual}
+              totalPaginas={totalPaginas}
+              desde={visibles.length === 0 ? 0 : desde + 1}
+              hasta={Math.min(desde + POR_PAGINA, visibles.length)}
+              total={visibles.length}
+              onCambiar={setPagina}
+            />
           )}
         </div>
       </div>
@@ -883,21 +850,21 @@ function estadoDeZona(z: ZonaDeRuta, estadoRuta: EstadoRuta): { texto: string; e
   if (estadoRuta !== "terminada") {
     return {
       texto: estadoRuta === "cancelada" ? "No se hizo" : "Pendiente",
-      estilo: "border-border bg-muted text-muted-foreground",
+      estilo: ESTILO_INSIGNIA.neutro,
     };
   }
   if (z.retiradoM3 == null) {
-    return { texto: "Sin cifra", estilo: "border-border bg-muted text-muted-foreground" };
+    return { texto: "Sin cifra", estilo: ESTILO_INSIGNIA.neutro };
   }
   if (z.completado === false || z.retiradoM3 + 0.005 < z.planificadoM3) {
     return {
       texto: "Parcial",
-      estilo: "border-warning-strong/40 bg-warning/10 text-warning-strong",
+      estilo: ESTILO_INSIGNIA.aviso,
     };
   }
   return {
     texto: "Completo",
-    estilo: "border-success-strong/40 bg-success/10 text-success-strong",
+    estilo: ESTILO_INSIGNIA.exito,
   };
 }
 
@@ -991,11 +958,7 @@ function TablaZonas({ zonas, estadoRuta }: { zonas: ZonaDeRuta[]; estadoRuta: Es
                 </div>
               </td>
               <td className="py-2 pl-3 text-center">
-                <span
-                  className={`inline-block rounded-full border px-2 py-0.5 text-[0.625rem] font-medium ${est.estilo}`}
-                >
-                  {est.texto}
-                </span>
+                <span className={`${FORMA_INSIGNIA} ${est.estilo}`}>{est.texto}</span>
               </td>
             </tr>
           );
@@ -1227,7 +1190,7 @@ function TablaHistorial({
 
                 <TableCell className={`py-3 ${centro}`}>
                   <span
-                    className={`inline-block rounded-full border px-2 py-0.5 text-[0.625rem] font-medium capitalize ${
+                    className={`${FORMA_INSIGNIA} capitalize ${
                       ESTILO_ESTADO[ruta.estado] ?? ESTILO_ESTADO.generada
                     }`}
                   >
