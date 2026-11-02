@@ -78,6 +78,18 @@ import {
 import { zoneTotals } from "@/lib/volumeReport";
 import { entero } from "@/lib/formato";
 import { FiltroDropdown } from "@/components/FiltroDropdown";
+import { SortableHead } from "@/components/SortableHead";
+import { InsigniaEstado } from "@/components/InsigniaEstado";
+import { PaginacionTabla } from "@/components/PaginacionTabla";
+import {
+  BTN_FILA_ICONO,
+  BTN_FILA_ICONO_NEUTRO,
+  CAB_ORDEN,
+  CAB_TEXTO,
+  CELDA,
+  ENCABEZADO_FILA,
+  FILA,
+} from "@/components/tabla-estilos";
 import {
   DIAS,
   ROTULO_DIA,
@@ -563,8 +575,8 @@ function ItinerarioPage() {
           diaAVaciar ? (
             <>
               Se quitarán las <strong>{puntosDe(diaAVaciar).length}</strong> paradas del{" "}
-              <strong>{ROTULO_DIA[diaAVaciar].toLowerCase()}</strong>. Los puntos siguen
-              registrados en el sistema: solo dejan de estar programados ese día.
+              <strong>{ROTULO_DIA[diaAVaciar].toLowerCase()}</strong>. Los puntos siguen registrados
+              en el sistema: solo dejan de estar programados ese día.
             </>
           ) : (
             ""
@@ -1218,6 +1230,8 @@ function esPosterior(a: SavedAnalysisRecord, b: SavedAnalysisRecord): boolean {
   return new Date(a.savedAt).getTime() > new Date(b.savedAt).getTime();
 }
 
+type ColumnaOrden = "orden" | "volumen" | "peso" | "area" | "medicion";
+
 function TablaPuntos({
   catalogo,
   cifras,
@@ -1261,12 +1275,53 @@ function TablaPuntos({
     });
     return filtrar(porEstado, busqueda);
   }, [catalogo, busqueda, filtroEstado, cifras, diasPorPunto]);
-  const paginas = Math.max(1, Math.ceil(filtrados.length / POR_PAGINA));
+
+  // Orden por columna. "orden" es el del catálogo, el de antes de poder
+  // ordenar, y ninguna cabecera lo marca.
+  const [ordenPor, setOrdenPor] = useState<ColumnaOrden>("orden");
+  const [ordenDir, setOrdenDir] = useState<"asc" | "desc">("asc");
+  const alOrdenar = (campo: ColumnaOrden) => {
+    if (campo === ordenPor) setOrdenDir((d) => (d === "asc" ? "desc" : "asc"));
+    else {
+      setOrdenPor(campo);
+      // Las cifras interesan de mayor a menor, y la fecha de más reciente a
+      // más antigua; es lo que se busca casi siempre al ordenarlas.
+      setOrdenDir("desc");
+    }
+    setPagina(0);
+  };
+
+  const ordenados = useMemo(() => {
+    if (ordenPor === "orden") return filtrados;
+    const signo = ordenDir === "asc" ? 1 : -1;
+    const valor = (z: ZoneRecord): number | null => {
+      const c = cifras.get(z.id);
+      if (!c) return null;
+      if (ordenPor === "volumen") return c.volumeM3;
+      if (ordenPor === "peso") return c.weightKg;
+      if (ordenPor === "area") return c.areaM2;
+      return new Date(c.fecha).getTime();
+    };
+    return [...filtrados].sort((a, b) => {
+      const va = valor(a);
+      const vb = valor(b);
+      // Un punto sin vuelo no tiene cifra que comparar: va SIEMPRE al final,
+      // se ordene como se ordene. Al principio de un orden ascendente taparía
+      // los puntos medidos con una fila de guiones.
+      if (va === null && vb === null) return a.name.localeCompare(b.name, "es");
+      if (va === null) return 1;
+      if (vb === null) return -1;
+      if (va !== vb) return (va - vb) * signo;
+      return a.name.localeCompare(b.name, "es");
+    });
+  }, [filtrados, ordenPor, ordenDir, cifras]);
+
+  const paginas = Math.max(1, Math.ceil(ordenados.length / POR_PAGINA));
 
   // Filtrar puede dejar la página actual fuera de rango. Se corrige al
   // calcular y no con un efecto, que provocaría un render de más.
   const paginaActual = Math.min(pagina, paginas - 1);
-  const visibles = filtrados.slice(paginaActual * POR_PAGINA, (paginaActual + 1) * POR_PAGINA);
+  const visibles = ordenados.slice(paginaActual * POR_PAGINA, (paginaActual + 1) * POR_PAGINA);
 
   // Alto fijo: la tabla no cambia de tamaño al filtrar ni al cambiar de
   // página, así que nada de lo que está alrededor salta.
@@ -1324,13 +1379,13 @@ function TablaPuntos({
           <div className="px-4 pb-2 pt-2">
             <Table>
               <TableHeader>
-                <TableRow className="bg-muted/50 hover:bg-muted/50">
-                  <TableHead className="w-[5.5rem]">Mapa</TableHead>
-                  <TableHead>Nombre</TableHead>
-                  <TableHead className="hidden md:table-cell">Dirección</TableHead>
-                  <TableHead className="hidden lg:table-cell">Barrio</TableHead>
-                  <TableHead className="hidden lg:table-cell">Tipo</TableHead>
-                  <TableHead className="hidden xl:table-cell">Frecuencia</TableHead>
+                <TableRow className={ENCABEZADO_FILA}>
+                  <TableHead className={`w-[5.5rem] ${CAB_TEXTO}`}>Mapa</TableHead>
+                  <TableHead className={CAB_TEXTO}>Nombre</TableHead>
+                  <TableHead className={`hidden md:table-cell ${CAB_TEXTO}`}>Dirección</TableHead>
+                  <TableHead className={`hidden lg:table-cell ${CAB_TEXTO}`}>Barrio</TableHead>
+                  <TableHead className={`hidden lg:table-cell ${CAB_TEXTO}`}>Tipo</TableHead>
+                  <TableHead className={`hidden xl:table-cell ${CAB_TEXTO}`}>Frecuencia</TableHead>
                   {/* Las cifras de la medición vigente, las mismas que muestra
                       Vista Principal. Aparecen las cuatro juntas o ninguna: son
                       un grupo que se lee en bloque, y escalonarlas por
@@ -1341,20 +1396,51 @@ function TablaPuntos({
                       vertical, que es la razón por la que esto es una tabla. */}
                   {/* `whitespace-nowrap` y 7rem: "Volumen (m³)" se partía en
                       dos líneas y descuadraba el alto de todo el encabezado. */}
-                  <TableHead className="hidden w-[7rem] whitespace-nowrap text-center 2xl:table-cell">
-                    Volumen (m³)
-                  </TableHead>
-                  <TableHead className="hidden w-[6rem] whitespace-nowrap text-center 2xl:table-cell">
-                    Peso (kg)
-                  </TableHead>
-                  <TableHead className="hidden w-[6rem] whitespace-nowrap text-center 2xl:table-cell">
-                    Área (m²)
-                  </TableHead>
+                  <SortableHead
+                    field="volumen"
+                    label="Volumen"
+                    unit="m³"
+                    sortBy={ordenPor}
+                    sortDir={ordenDir}
+                    onSort={alOrdenar}
+                    align="center"
+                    className={`hidden w-[7.5rem] 2xl:table-cell ${CAB_ORDEN}`}
+                  />
+                  <SortableHead
+                    field="peso"
+                    label="Peso"
+                    unit="kg"
+                    sortBy={ordenPor}
+                    sortDir={ordenDir}
+                    onSort={alOrdenar}
+                    align="center"
+                    className={`hidden w-[6.5rem] 2xl:table-cell ${CAB_ORDEN}`}
+                  />
+                  <SortableHead
+                    field="area"
+                    label="Área"
+                    unit="m²"
+                    sortBy={ordenPor}
+                    sortDir={ordenDir}
+                    onSort={alOrdenar}
+                    align="center"
+                    className={`hidden w-[6.5rem] 2xl:table-cell ${CAB_ORDEN}`}
+                  />
                   {/* "Medición" y no "Fecha": en una vista de calendario, una
                       columna llamada Fecha se lee como el día programado. */}
-                  <TableHead className="hidden w-[6rem] 2xl:table-cell">Medición</TableHead>
-                  <TableHead className="text-right">En la semana</TableHead>
-                  <TableHead className="w-[4.5rem]"></TableHead>
+                  <SortableHead
+                    field="medicion"
+                    label="Medición"
+                    sortBy={ordenPor}
+                    sortDir={ordenDir}
+                    onSort={alOrdenar}
+                    align="center"
+                    className={`hidden w-[8rem] 2xl:table-cell ${CAB_ORDEN}`}
+                  />
+                  <TableHead className={`w-[8rem] text-center ${CAB_TEXTO}`}>
+                    En la semana
+                  </TableHead>
+                  <TableHead className={`w-[5rem] ${CAB_TEXTO}`}></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1371,9 +1457,9 @@ function TablaPuntos({
                         e.dataTransfer.setData(MIME, `|${z.id}`);
                         e.dataTransfer.effectAllowed = "copy";
                       }}
-                      className="cursor-grab active:cursor-grabbing"
+                      className={`cursor-grab active:cursor-grabbing ${FILA}`}
                     >
-                      <TableCell>
+                      <TableCell className={CELDA}>
                         {/* La imagen del lugar es su MAPA UNIFICADO, no una
                             foto subida a mano. La columna existe aunque
                             todavía no haya vuelo: el hueco dice que falta
@@ -1396,7 +1482,7 @@ function TablaPuntos({
                           </div>
                         )}
                       </TableCell>
-                      <TableCell className="font-medium">
+                      <TableCell className={`${CELDA} font-medium`}>
                         <div className="flex items-center gap-2">
                           <span
                             aria-hidden="true"
@@ -1411,7 +1497,7 @@ function TablaPuntos({
                           )}
                         </div>
                       </TableCell>
-                      <TableCell className="hidden max-w-[18rem] md:table-cell">
+                      <TableCell className={`${CELDA} hidden max-w-[18rem] md:table-cell`}>
                         {z.address ? (
                           <span className="line-clamp-1 text-xs text-muted-foreground">
                             {z.address}
@@ -1423,81 +1509,73 @@ function TablaPuntos({
                           </span>
                         )}
                       </TableCell>
-                      <TableCell className="hidden text-xs text-muted-foreground lg:table-cell">
+                      <TableCell
+                        className={`${CELDA} hidden text-xs text-muted-foreground lg:table-cell`}
+                      >
                         {z.barrio || "-"}
                       </TableCell>
-                      <TableCell className="hidden text-xs text-muted-foreground lg:table-cell">
+                      <TableCell
+                        className={`${CELDA} hidden text-xs text-muted-foreground lg:table-cell`}
+                      >
                         {z.tipo || "-"}
                       </TableCell>
-                      <TableCell className="hidden text-xs text-muted-foreground xl:table-cell">
+                      <TableCell
+                        className={`${CELDA} hidden text-xs text-muted-foreground xl:table-cell`}
+                      >
                         {z.frecuencia || "-"}
                       </TableCell>
-                      <TableCell className="hidden text-center 2xl:table-cell">
-                        <span className="mono text-xs tabular-nums text-foreground">
-                          {cifra ? (
-                            entero(cifra.volumeM3)
+                      {[cifra?.volumeM3, cifra?.weightKg, cifra?.areaM2].map((n, i) => (
+                        <TableCell key={i} className={`${CELDA} hidden text-center 2xl:table-cell`}>
+                          {n !== undefined ? (
+                            <span className="mono text-xs tabular-nums text-foreground">
+                              {entero(n)}
+                            </span>
                           ) : (
                             <span className="block text-center text-muted-foreground/60">-</span>
                           )}
-                        </span>
-                      </TableCell>
-                      <TableCell className="hidden text-center 2xl:table-cell">
-                        <span className="mono text-xs tabular-nums text-foreground">
-                          {cifra ? (
-                            entero(cifra.weightKg)
-                          ) : (
-                            <span className="block text-center text-muted-foreground/60">-</span>
-                          )}
-                        </span>
-                      </TableCell>
-                      <TableCell className="hidden text-center 2xl:table-cell">
-                        <span className="mono text-xs tabular-nums text-foreground">
-                          {cifra ? (
-                            entero(cifra.areaM2)
-                          ) : (
-                            <span className="block text-center text-muted-foreground/60">-</span>
-                          )}
-                        </span>
-                      </TableCell>
-                      <TableCell className="hidden 2xl:table-cell">
+                        </TableCell>
+                      ))}
+                      <TableCell className={`${CELDA} hidden text-center 2xl:table-cell`}>
                         {cifra ? (
                           <span className="mono text-xs tabular-nums text-muted-foreground">
                             {new Date(cifra.fecha).toLocaleDateString("es-CL")}
                           </span>
                         ) : (
-                          <span className="text-xs text-muted-foreground/60">Sin vuelo</span>
+                          <InsigniaEstado tono="neutro">Sin vuelo</InsigniaEstado>
                         )}
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className={`${CELDA} text-center`}>
                         {/* Contrastar esto con la frecuencia es la razón de ser
                             de la columna: un punto de "2 veces por semana" con
                             una sola visita está mal repartido. */}
-                        <span
-                          className={`mono text-xs tabular-nums ${
-                            veces === 0 ? "text-warning-strong" : "text-foreground"
-                          }`}
-                        >
-                          {veces === 0 ? "Sin programar" : `${veces} día${veces === 1 ? "" : "s"}`}
-                        </span>
+                        {veces === 0 ? (
+                          <InsigniaEstado tono="aviso">Sin programar</InsigniaEstado>
+                        ) : (
+                          <InsigniaEstado tono="info">
+                            {veces} día{veces === 1 ? "" : "s"}
+                          </InsigniaEstado>
+                        )}
                       </TableCell>
-                      <TableCell>
-                        <div className="flex justify-end gap-0.5">
-                          <button
-                            type="button"
+                      <TableCell className={CELDA}>
+                        <div className="flex justify-end gap-1.5">
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            className={BTN_FILA_ICONO_NEUTRO}
                             onClick={() => onEditar(z)}
-                            className="cursor-pointer rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
                             aria-label={`Editar ${z.name}`}
                           >
                             <Pencil className="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            type="button"
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            className={BTN_FILA_ICONO}
                             onClick={() => onEliminar(z)}
-                            className="cursor-pointer rounded p-1.5 text-muted-foreground hover:bg-destructive/15 hover:text-destructive-strong"
                             aria-label={`Eliminar ${z.name}`}
                           >
                             <Trash2 className="h-3.5 w-3.5" />
-                          </button>
+                          </Button>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -1525,37 +1603,15 @@ function TablaPuntos({
           {/* La barra se dibuja SIEMPRE, aunque haya una sola página:
               apareciendo y desapareciendo movería la tarjeta justo al filtrar.
               Mismo criterio que la tabla de recursos. */}
-          <footer className="flex items-center justify-between border-t border-border px-4 py-2.5">
-            <span className="text-[0.625rem] text-muted-foreground">
-              {filtrados.length} punto{filtrados.length === 1 ? "" : "s"}
-              {busqueda && ` de ${catalogo.length}`}
-            </span>
-            <div className="flex items-center gap-2">
-              <span className="mono text-[0.625rem] tabular-nums text-muted-foreground">
-                {paginaActual + 1} / {paginas}
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 w-7 p-0"
-                disabled={paginaActual === 0}
-                onClick={() => setPagina(paginaActual - 1)}
-                aria-label="Página anterior"
-              >
-                <ArrowLeft className="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 w-7 p-0"
-                disabled={paginaActual >= paginas - 1}
-                onClick={() => setPagina(paginaActual + 1)}
-                aria-label="Página siguiente"
-              >
-                <ArrowLeft className="h-3.5 w-3.5 rotate-180" />
-              </Button>
-            </div>
-          </footer>
+          <PaginacionTabla
+            pagina={paginaActual + 1}
+            totalPaginas={paginas}
+            desde={ordenados.length === 0 ? 0 : paginaActual * POR_PAGINA + 1}
+            hasta={paginaActual * POR_PAGINA + visibles.length}
+            total={ordenados.length}
+            onCambiar={(n) => setPagina(n - 1)}
+            etiqueta={ordenados.length === 1 ? "punto" : "puntos"}
+          />
         </>
       )}
     </section>

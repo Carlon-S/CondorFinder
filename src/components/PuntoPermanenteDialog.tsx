@@ -245,7 +245,16 @@ export function PuntoPermanenteDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+      <DialogContent
+        className="max-h-[85vh] overflow-y-auto sm:max-w-lg"
+        // Radix enfoca el primer campo y SELECCIONA su texto: al editar, el
+        // nombre abría resaltado y escribir lo borraba. Se deja el foco en el
+        // diálogo y el cursor donde el usuario lo ponga.
+        onOpenAutoFocus={(e) => {
+          e.preventDefault();
+          (e.currentTarget as HTMLElement | null)?.focus?.();
+        }}
+      >
         <DialogHeader>
           <DialogTitle>
             {!punto
