@@ -3,7 +3,8 @@ import numpy as np
 import rasterio
 from rasterio.transform import rowcol
 from rasterstats import zonal_stats
-from shapely.geometry import Polygon, mapping
+from shapely.geometry import Polygon, MultiPolygon, mapping
+from shapely.ops import unary_union
 import geopandas as gpd
 
 def flat_pixels_to_geo(flat_px, transform):
@@ -43,6 +44,72 @@ def compute_ndsm(dsm_path, dtm_path, ndsm_path):
     return ndsm_path
 
 
+def anillo_plano_a_pares(anillo_plano):
+    """Convierte un anillo plano [x1, y1, x2, y2, ...] en pares [(x1, y1), (x2, y2), ...].
+
+    Es el formato en que el modelo entrega cada pieza de una máscara. Un valor
+    suelto al final (cantidad impar de números) se descarta."""
+    return [
+        (anillo_plano[i], anillo_plano[i + 1])
+        for i in range(0, len(anillo_plano) - 1, 2)
+    ]
+
+
+def geometria_de_deteccion(det, png_scale, transform):
+    """Superficie de una detección en coordenadas geográficas, o `None` si no tiene.
+
+    Con máscara: cada anillo se convierte a coordenadas geográficas con la
+    transformación del ortomosaico y los anillos se unen en una sola geometría.
+    Sin máscara (JSON del modelo anterior o detección sin máscara): se usa el
+    rectángulo de su caja.
+
+    `png_scale` es el factor con que el PNG se redujo respecto del ortomosaico.
+    La caja está en píxeles del PNG, así que se divide por ese factor para
+    llevarla a píxeles del ortomosaico; los anillos ya están en esos píxeles."""
+    anillos = det.get("polygon")
+    if anillos:
+        piezas = []
+        for anillo in anillos:
+            coords = pixels_to_geo(anillo_plano_a_pares(anillo), transform)
+            if len(coords) < 3:
+                continue
+            pieza = Polygon(coords)
+            # Una máscara con el contorno cruzado produce un polígono inválido;
+            # buffer(0) lo reconstruye sin cruces.
+            if not pieza.is_valid:
+                pieza = pieza.buffer(0)
+            if not pieza.is_empty:
+                piezas.append(pieza)
+        if piezas:
+            return unary_union(piezas)
+
+    b = det["bbox"]
+    esquinas_png = [
+        (b["minx"], b["miny"]),
+        (b["maxx"], b["miny"]),
+        (b["maxx"], b["maxy"]),
+        (b["minx"], b["maxy"]),
+    ]
+    esquinas_ortho = [(x / png_scale, y / png_scale) for (x, y) in esquinas_png]
+    return Polygon(pixels_to_geo(esquinas_ortho, transform))
+
+
+def anillo_para_mapa(geometria, tolerancia):
+    """Un solo anillo [[x, y], ...] que representa la geometría en el mapa.
+
+    El mapa de rutas dibuja un anillo por detección. Si la geometría tiene
+    varias piezas se toma la de mayor superficie. El anillo se simplifica con
+    `tolerancia` (en unidades del CRS) para reducir la cantidad de vértices sin
+    desviarse más que esa distancia, y se entrega sin repetir el primer punto al
+    final."""
+    if isinstance(geometria, MultiPolygon):
+        geometria = max(geometria.geoms, key=lambda g: g.area)
+    simplificada = geometria.simplify(tolerancia, preserve_topology=True)
+    if simplificada.is_empty or not isinstance(simplificada, Polygon):
+        simplificada = geometria
+    return [list(punto) for punto in simplificada.exterior.coords][:-1]
+
+
 def enrich(
     detections_json_path,
     ortho_path,
@@ -51,6 +118,10 @@ def enrich(
 ):
     with open(detections_json_path) as f:
         data = json.load(f)
+
+    # Factor de reducción del PNG respecto del ortomosaico. Los JSON generados
+    # antes de este campo no lo traen: el PNG era del mismo tamaño (1.0).
+    png_scale = data.get("png_scale") or 1.0
 
     with rasterio.open(ortho_path) as ortho:
         transform = ortho.transform
@@ -74,6 +145,9 @@ def enrich(
         ortho_bounds = [bounds.left, bounds.bottom, bounds.right, bounds.top]
 
     pixel_area_m2 = abs(transform.a * transform.e)
+    # Un píxel del ortomosaico, en unidades del CRS: es la desviación máxima
+    # que se admite al simplificar el contorno que se dibuja en el mapa.
+    tolerancia_contorno = abs(transform.a)
 
     enriched = []
 
@@ -101,7 +175,7 @@ def enrich(
             shapely_poly = shapely_poly.buffer(0)
 
         stats = zonal_stats(
-            [mapping(shapely_poly)],
+            [mapping(geometria)],
             ndsm_path,
             stats=["sum", "mean", "max", "count"],
             nodata=np.nan,
@@ -109,6 +183,7 @@ def enrich(
         )[0]
 
         height_sum = stats["sum"] if stats["sum"] is not None else 0.0
+        # Volumen = suma de alturas × superficie de un píxel.
         volume_m3 = round(height_sum * pixel_area_m2, 4)
         weight_kg = round(volume_m3 * int(det["density_kg_m3"]), 2)
         area_m2 = round((stats["count"] or 0) * pixel_area_m2, 4)
@@ -125,6 +200,7 @@ def enrich(
 
     output = {
         "crs": str(crs),
+        "png_scale": png_scale,
         "ortho_center": ortho_center,
         "ortho_bounds": ortho_bounds,
         "detections": enriched,

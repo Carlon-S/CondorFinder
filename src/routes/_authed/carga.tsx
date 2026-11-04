@@ -55,6 +55,7 @@ import {
 import { listZones } from "@/lib/analysisStore";
 
 import { useNavigate } from "@tanstack/react-router";
+import { classColor } from "@/components/zone-colors";
 
 // Registro de la ruta "/carga" en TanStack Router.
 // "head" define los metadatos HTML de la página (título, descripción, OG tags).
@@ -148,33 +149,6 @@ interface Detection {
   bbox: { minx: number; miny: number; maxx: number; maxy: number };
   volume_m3: number;
   weight_kg: number | null;
-}
-
-// Color fijo por tipo de basura, no se repiten
-const CLASS_COLORS: Record<string, string> = {
-  // Nombres en español (nuevas ejecuciones)
-  "Residuo de construcción":   "#ef4444",
-  "Metal":                     "#f97316",
-  "Plástico":                  "#3b82f6",
-  "Residuo orgánico":          "#22c55e",
-  "Muebles":                   "#a855f7",
-  "Neumáticos":                "#64748b",
-  "Tipo de basura indefinido": "#f59e0b",
-  // Nombres en inglés (tareas anteriores al cambio)
-  construction_waste: "#ef4444",
-  metal:              "#f97316",
-  plastic:            "#3b82f6",
-  organic_waste:      "#22c55e",
-  furniture:          "#a855f7",
-  tyres:              "#64748b",
-  other:              "#f59e0b",
-};
-
-function classColor(cls: string): string {
-  if (CLASS_COLORS[cls]) return CLASS_COLORS[cls];
-  let hash = 0;
-  for (let i = 0; i < cls.length; i++) hash = (hash * 31 + cls.charCodeAt(i)) | 0;
-  return `hsl(${Math.abs(hash) % 360},75%,55%)`;
 }
 
 // =============================================================================

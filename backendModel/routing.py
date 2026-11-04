@@ -1134,9 +1134,9 @@ def _dotacion_de(camion: dict) -> list[str]:
 # preferencia declarada. Los otros tres son correctos y sin efecto observable.
 CLASE_POR_TIPO_ESCOMBRO: dict[str, str] = {
     "ESC": "Residuo de construcción",
-    "RAMAS": "Residuo orgánico",
+    "RAMAS": "Madera",
     "VOLUMINOSOS": "Muebles",
-    "MIXTO": "Tipo de basura indefinido",
+    "MIXTO": "Residuos mezclados",
 }
 
 
@@ -1611,10 +1611,26 @@ def _repartir_por_carga(
     de un reparto se evalúa de corrido sobre todos los convoyes y no uno por uno.
 
     **Es una búsqueda local que solo ACEPTA MEJORAS**, no un óptimo: se prueba
-    mover cada zona a cada otro convoy y se queda con el primer movimiento que
-    reduce el total de viajes (desempatando por carga más pareja). No puede
-    empeorar el reparto, y con cuatro convoyes y las zonas de una jornada
-    termina en unas pocas vueltas.
+    mover cada zona a cada otro convoy y se queda con el movimiento que mejora el
+    costo del reparto. No puede empeorar el reparto, y con cuatro convoyes y las
+    zonas de una jornada termina en unas pocas vueltas.
+
+    **El costo de un reparto son cuatro números, comparados en este orden:**
+
+    1. Convoyes que reciben paradas y no pueden despachar nada (sin flota
+       tripulable). Un reparto así deja paradas sin retirar.
+    2. Convoyes que se quedan sin paradas. Cuando el trabajador pide N convoyes
+       y hay al menos N paradas, cada convoy sale con alguna: pedir convoyes es
+       pedir recorridos que salen a la vez, y la duración del plan es la del
+       convoy más largo, no la suma. Con paradas de 30, 15, 6, 4 y 5 m³ y dos
+       convoyes, un solo convoy retira todo en 2 viajes y dos convoyes lo hacen
+       en 3 viajes en total; sin este segundo número el reparto elegía el
+       primero y el segundo convoy no salía.
+    3. Viajes totales de todos los convoyes.
+    4. Carga del convoy más cargado, para desempatar hacia el reparto más parejo.
+
+    Con menos paradas que convoyes, algún convoy queda sin paradas pase lo que
+    pase, y el segundo número no distingue repartos.
     """
     ids = [str(c["_id"]) for c in convoyes]
     por_convoy: dict[str, list[dict]] = {i: [] for i in ids}
@@ -1644,15 +1660,15 @@ def _repartir_por_carga(
             memo[clave] = _capacidad_de_viaje(c, zonas, pool)
         return memo[clave]
 
-    def coste(asignacion: dict[str, list[dict]]) -> tuple[int, float]:
-        """(viajes totales, carga del convoy más cargado) de un reparto.
+    def coste(asignacion: dict[str, list[dict]]) -> tuple[int, int, int, float]:
+        """(convoyes inviables, convoyes vacíos, viajes totales, carga máxima).
 
-        Primero los viajes, que son el trabajo real de la jornada; después la
-        carga máxima, para desempatar hacia el reparto más parejo entre dos que
-        cuestan lo mismo. Un convoy que no puede despachar nada pero tiene
-        paradas cuesta un viaje por cada capacidad mínima, o sea lo bastante como
-        para que ningún movimiento lo deje así."""
+        Los cuatro números se comparan en ese orden, ver la documentación de la
+        función. Un convoy es inviable cuando tiene paradas y no puede despachar
+        ningún vehículo; es vacío cuando no tiene ninguna parada."""
         pool = None if personal is None else {r: list(n) for r, n in personal.items()}
+        inviables = 0
+        vacios = 0
         viajes = 0
         mayor = 0.0
         for c in convoyes:
@@ -1660,23 +1676,24 @@ def _repartir_por_carga(
             volumen = sum(z["volumeM3"] for z in zonas)
             mayor = max(mayor, volumen)
             if volumen <= 1e-9:
+                vacios += 1
                 continue
             cap, nombres = capacidad_con(c, zonas, pool)
             if cap <= 0:
-                viajes += 10_000
+                inviables += 1
                 continue
             viajes += math.ceil(volumen / cap - 1e-9)
             if pool is not None:
                 for rol in pool:
                     pool[rol] = [n for n in pool[rol] if n not in nombres]
-        return (viajes, mayor)
+        return (inviables, vacios, viajes, mayor)
 
     # Tope de vueltas: cada una mueve una zona, así que sin mejora posible se
     # corta sola. El límite solo evita un ciclo si dos movimientos se cancelaran
     # entre sí por un empate numérico.
     for _ in range(len(stops) * len(ids) + 1):
         actual = coste(por_convoy)
-        mejor: tuple[tuple[int, float], str, str, dict] | None = None
+        mejor: tuple[tuple[int, int, int, float], str, str, dict] | None = None
         for origen in ids:
             for zona in list(por_convoy[origen]):
                 for destino in ids:

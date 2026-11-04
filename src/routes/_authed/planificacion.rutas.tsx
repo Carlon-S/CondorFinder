@@ -156,7 +156,7 @@ import {
   listarPuntosDiarios,
   type PuntoDiario,
 } from "@/lib/puntosDiarios";
-import { classColor } from "@/components/zone-colors";
+import { classColor, WASTE_CLASS_NAMES } from "@/components/zone-colors";
 import { reverseGeocode } from "@/lib/geocoding";
 import { notify } from "@/lib/notify";
 import { cifra, peso, volumen } from "@/lib/formato";
@@ -170,15 +170,7 @@ export const Route = createFileRoute("/_authed/planificacion/rutas")({
   component: RutasPage,
 });
 
-const WASTE_CLASSES = [
-  "Residuo de construcción",
-  "Metal",
-  "Plástico",
-  "Residuo orgánico",
-  "Muebles",
-  "Neumáticos",
-  "Tipo de basura indefinido",
-];
+const WASTE_CLASSES = WASTE_CLASS_NAMES;
 
 // Los colores por clase de residuo se mudaron a zone-colors.ts: el visor de una
 // zona lo abren esta vista y la de recursos, y una tabla por vista significaría

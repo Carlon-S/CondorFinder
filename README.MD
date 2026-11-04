@@ -318,7 +318,7 @@ Las zonas reemplazadas por un análisis más reciente de la misma zona física (
 1. Arrastra o selecciona las imágenes JPG tomadas con drone (mínimo 16)
 2. Las imágenes se suben automáticamente al backend mientras se generan sus thumbnails, el bloque de imágenes adjuntas muestra un spinner por imagen hasta que el thumbnail esté listo
 3. El sistema valida el formato y la cantidad antes de habilitar la generación
-4. Presiona **Generar mapa unificado**, el proceso pasa por cuatro fases secuenciales: verificación de solapamiento (~60%), unificación con ODM, detección con YOLOv8 y cálculo automático de volúmenes
+4. Presiona **Generar mapa unificado**, el proceso pasa por cuatro fases secuenciales: verificación de solapamiento (~60%), unificación con ODM, detección con un modelo de segmentación YOLOv8 (cada objeto con su contorno) y cálculo automático de volúmenes
 5. Al terminar, el mapa aparece en el visor con los polígonos de detección superpuestos:
    - Si se detectó basura: el mapa es clicable y navega a la vista de análisis
    - Si no se detectó basura: el mapa igual se muestra con un aviso informativo
@@ -478,9 +478,10 @@ CondorFinder/
 │   │   ├── images/                         ← Imágenes JPG cargadas por el usuario
 │   │   └── finals/                         ← Ortomosaico .tif generado por ODM
 │   └── detecting/
-│       ├── detectingOrtho.py ← Detección de basura con YOLOv8 + SAHI
-│       ├── volumeCalc.py     ← Cálculo de volumen/peso/área usando nDSM de ODM
-│       ├── model/best.pt     ← Pesos del modelo entrenado
+│       ├── detectingOrtho.py ← Detección de basura con el modelo de segmentación + SAHI
+│       ├── volumeCalc.py     ← Cálculo de volumen/peso/área sobre la máscara, usando nDSM de ODM
+│       ├── waste_classes.py  ← Tabla de las 20 clases: nombre en español, color y densidad
+│       ├── model/bestseg.pt  ← Pesos del modelo de segmentación (20 clases)
 │       └── output/           ← PNG del mapa y JSON de detecciones por tarea
 ├── docs/
 │   └── unificacion-puntos-zonas.md  ← Versión ANTERIOR del plan de HDU5.2, desactualizada
@@ -822,7 +823,7 @@ Cierra lo que HDU14 y HDU15 dejaron planteado: un punto permanente y una zona vo
 | "Editar" una ruta generada permite modificarla o eliminarla | ✅ Cumplido |
 | Una pestaña de historial de rutas las muestra todas, ordenadas por día, advirtiendo que es un historial | ✅ Cumplido |
 
-> **La nota sobre el cuarto criterio, que conviene tener a mano en la defensa.** La flota real de la municipalidad está en **un solo punto de origen** (Gral. José San Martín 2730), y el reparto es por punto, así que con los datos reales se genera **un** recorrido con N viajes dentro. Un viaje no es una ruta: es el mismo convoy volviendo al relleno. El criterio dice "un número de rutas", y uno es un número. Lo que lo hace visible con los datos reales son los **convoyes paralelos**: el diálogo de generación permite despachar de 1 a 4 convoyes del mismo punto, con la flota repartida entre ellos, y entonces el plan trae varios recorridos simultáneos. Va en 1 por omisión porque cada convoy cuesta una matriz y una geometría más contra el proveedor de rutas.
+> **La nota sobre el cuarto criterio, que conviene tener a mano en la defensa.** La flota real de la municipalidad está en **un solo punto de origen** (Gral. José San Martín 2730), y el reparto es por punto, así que con los datos reales se genera **un** recorrido con N viajes dentro. Un viaje no es una ruta: es el mismo convoy volviendo al relleno. El criterio dice "un número de rutas", y uno es un número. Lo que lo hace visible con los datos reales son los **convoyes paralelos**: el diálogo de generación permite despachar de 1 a 4 convoyes del mismo punto, con la flota repartida entre ellos, y entonces el plan trae varios recorridos simultáneos. Va en 1 por omisión porque cada convoy cuesta una matriz y una geometría más contra el proveedor de rutas. Cuando se piden N convoyes y hay al menos N paradas, los N convoyes salen con alguna parada; entre los repartos que cumplen eso se elige el de menos viajes en total. Con menos paradas que convoyes salen tantos convoyes como paradas hay. Un convoy que no se puede tripular con el personal declarado no recibe paradas.
 
 **Lo que trajo, en orden:**
 
@@ -835,6 +836,143 @@ Cierra lo que HDU14 y HDU15 dejaron planteado: un punto permanente y una zona vo
 - **El volumen de una zona descuenta lo retirado después de medirla**, y el análisis guardado no se toca: la resta ocurre al mostrar. Un retiro y una medición van a la misma línea de tiempo, distinguidos por su origen, y es lo que le da historial de volumen a los 54 puntos permanentes sin volarle el dron a ninguno.
 
 > **Dos cosas que esta historia NO resuelve, y hay que decirlo.** No hay proceso que vigile relojes: el paso de una ruta a "terminada" lo marca una persona, porque en terreno pasan cosas que el sistema no ve. Y el **convoy** sigue sin modelarse: la municipalidad confirmó que ningún retiro se hace a mano y que un microbasural necesita retroexcavadora más minicargador o frontal más retroexcavadora, pero eso no está en ningún criterio de ninguna historia y es alcance a acordar con el equipo.
+
+### Modelo de segmentación (`bestseg.pt`)
+
+La detección de basura usa un modelo YOLOv8 de **segmentación** de 20 clases. Por cada objeto entrega una caja y una máscara (su contorno), y el volumen, el área y el peso se miden sobre esa máscara. El formato del JSON de detecciones, los espacios de coordenadas y la tabla completa de clases están en [backendModel/Readme.md](backendModel/Readme.md#detección-y-volumen).
+
+#### Qué cambia en el sistema
+
+| Aspecto | Antes (versión de cálculo 1) | Ahora (versión de cálculo 2) |
+|---|---|---|
+| Modelo | `best.pt`, detección por cajas | `bestseg.pt`, segmentación con contorno por objeto |
+| Clases | 7 | 20, cada una con nombre en español, color y densidad propios |
+| Volumen y área | Sobre el rectángulo de la caja | Sobre la máscara; varias piezas de una misma máscara se miden juntas |
+| Peso | Volumen por la densidad de la clase (400 kg/m³ para construcción, 80 para plástico, etc.) | Volumen por la densidad de la clase, con valores como 1.400 kg/m³ para escombros o 1.600 para fresado asfáltico |
+| Contorno en el mapa de rutas (`geo_polygon`) | Rectángulo de 4 vértices | Un anillo simplificado a un píxel de tolerancia (de 314 vértices de máscara a 96 en el caso medido) |
+| Máscara en Mongo | No existía | Se usa al medir y no se guarda con el análisis |
+| Selector "Tipo de basura prioritario" | 7 opciones | 20 opciones |
+| Dispositivo de inferencia | `cuda` fijo | GPU si torch la detecta, CPU en caso contrario |
+
+Un análisis guardado lleva `algorithmVersion` 1 o 2. Los de versión 1 no son comparables en volumen con los de versión 2, porque se midieron sobre superficies distintas. Los análisis guardados antes siguen abriendo con sus clases de entonces.
+
+#### Origen: la rama `polygons`
+
+El modelo se incorporó a partir de la rama `polygons`, cuyo primer commit (`d4f5145`) cambiaba estos puntos:
+
+| Archivo | Líneas | Contenido |
+|---|---|---|
+| `detecting/detectingOrtho.py` | 17 | Ruta del modelo: `bestseg.pt` |
+| | 21-58 | Reemplaza la lista de 7 clases por las 20 clases YOLO y define `WasteInfo` y `WASTE_MAP` (nombre en español, color, densidad) |
+| | 126-151 | Escribe en cada detección `class` (español), `yolo_class`, `color`, `density_kg_m3` y `polygon` (máscara) |
+| `detecting/volumeCalc.py` | 9-28 | Elimina `DENSITY_MAP` y `COLORS_MAP` |
+| | 122, 131-132 | El peso usa `density_kg_m3` leído de la detección |
+| `detecting/model/bestseg.pt` | | Modelo nuevo, 94,9 MB |
+| `src/lib/analysis.ts` | 18 | Cambia el tipo de `polygon` |
+
+El commit incluía además 21 fotos de una tarea de prueba en `joining/task_images/`, retiradas por un segundo commit de la misma rama. La rama `polygons` se conserva en el repositorio como registro de ese trabajo.
+
+#### Qué se ajustó para integrarlo a `main`
+
+| Situación en `polygons` | Ajuste |
+|---|---|
+| `polygon` llega como lista de anillos planos `[x1, y1, x2, y2, …]` y `pixels_to_geo` espera pares `[x, y]`: el análisis fallaba con `ValueError: too many values to unpack` | `anillo_plano_a_pares` convierte cada anillo y `geometria_de_deteccion` une los anillos de una detección en una sola superficie |
+| La caja se guardaba en píxeles del PNG (multiplicada por `scale`) y el polígono sin escalar | El JSON guarda `png_scale`; la caja se divide por ese factor al medir y el polígono queda en píxeles del ortomosaico |
+| Un JSON sin `density_kg_m3` (generado antes del cambio) hacía fallar el cálculo | `densidad_de(clase)` busca la densidad por el nombre de la clase |
+| La clase se obtenía con `CLASSES[pred.category.id]`, que depende del orden del modelo | Se toma `pred.category.name`; el orden de las 20 clases de `bestseg.pt` se comprobó contra la tabla |
+| La densidad se truncaba con `int()` | Se usa `float()` |
+| Quedaba un `print(pred)` y `device="cuda"` fijo | Se quitó el `print`; `DEVICE` elige GPU o CPU |
+| El tipo de `polygon` en `analysis.ts` pasaba a `number[]` | El tipo original `number[][]` ya describía la lista de anillos, así que no se modificó |
+| Colores por clase repetidos en `analysis.tsx`, `carga.tsx` y `zone-colors.ts`, solo para 7 clases | Una sola tabla en `zone-colors.ts`, con los mismos colores que `waste_classes.py` |
+| Todas las detecciones de un análisis se guardan en un único documento de Mongo | `polygon` se quita antes de guardar |
+
+#### Archivos modificados
+
+Líneas de referencia en el commit de integración (`75e940f`).
+
+| Archivo | Líneas | Qué contiene |
+|---|---|---|
+| `backendModel/detecting/waste_classes.py` (nuevo) | 28 | `UNKNOWN`, valor para una clase desconocida |
+| | 32 | `WASTE_MAP`: las 20 clases del modelo |
+| | 58 | `CLASES_ANTERIORES`: Metal, Residuo orgánico y Tipo de basura indefinido |
+| | 74, 81, 90 | `info_por_clase_yolo`, `densidad_de`, `color_de` |
+| `backendModel/detecting/detectingOrtho.py` | 21, 28 | `MODEL_PATH` y `DEVICE` |
+| | 34 | `_anillos_de`: anillos de la máscara en píxeles del ortomosaico |
+| | 51 | `_mascara_dentro_de_caja`: comprueba que la máscara esté en las coordenadas de la imagen completa |
+| | 141-143 | Clase por nombre y datos de la clase |
+| | 163, 166 | Campo `polygon` y aviso de máscaras fuera de su caja |
+| | 174 | `png_scale` en el JSON |
+| `backendModel/detecting/volumeCalc.py` | 55 | `anillo_plano_a_pares` |
+| | 66 | `geometria_de_deteccion`: máscara, o caja cuando no hay máscara |
+| | 105 | `anillo_para_mapa`: un anillo simplificado |
+| | 132 | Lectura de `png_scale` (1,0 si el JSON no lo trae) |
+| | 188-191 | Densidad de la detección o de la clase |
+| | 196-210 | `geo_polygon`, `density_kg_m3`, `color` y `png_scale` en la salida |
+| `backendModel/analyses.py` | 220 | `SavedAnalysisIn._sin_mascara_en_pixeles` |
+| `backendModel/orquestador.py` | 239 | `VOLUME_ALGORITHM_VERSION = 2` |
+| `backendModel/routing.py` | 1137, 1139 | `RAMAS` pasa a "Madera" y `MIXTO` a "Residuos mezclados" |
+| `backendModel/scripts/probar_poligonos.py` (nuevo) | | 23 comprobaciones con datos sintéticos |
+| `backendModel/detecting/model/bestseg.pt` | | Único modelo del repositorio (se retiró `best.pt`) |
+| `src/components/zone-colors.ts` | | Tabla de colores de las 20 clases, las 3 anteriores y "Varios tipos"; `WASTE_CLASS_NAMES`; `classColor` |
+| `src/routes/_authed/analysis.tsx` | 103 | Importa `classColor` (la tabla local se eliminó) |
+| `src/routes/_authed/carga.tsx` | 58 | Ídem |
+| `src/routes/_authed/planificacion.rutas.tsx` | 159, 173 | `WASTE_CLASSES` sale de `WASTE_CLASS_NAMES` |
+| `.gitignore` | 58 | `backendModel/joining/task_images/*` |
+| `backendModel/Readme.md` | 335 en adelante | Sección "Detección y volumen" |
+
+#### Compatibilidad con datos anteriores
+
+- **JSON de detecciones sin `density_kg_m3`, sin `color` o sin `png_scale`:** `volumeCalc.py` usa la densidad y el color de la clase por su nombre y trata `png_scale` como 1,0. Reanalizar una tarea anterior da los mismos pesos de siempre.
+- **Clases del modelo anterior:** `Metal` (600 kg/m³), `Residuo orgánico` (300) y `Tipo de basura indefinido` (200) siguen en la tabla de densidades y de colores. `Residuo de construcción`, `Muebles`, `Plástico` y `Neumáticos` existen en la tabla nueva con el mismo nombre.
+- **Evolución e informe por tipo de residuo:** entre capturas de distinta versión aparecen nombres de clase distintos.
+
+#### Tamaño de lo que se guarda
+
+Estimación para un análisis con 96 vértices de contorno por detección:
+
+| Detecciones | Guardado ahora | Con la máscara en píxeles |
+|---|---|---|
+| 100 | ~318 KB | ~1,0 MB |
+| 500 | ~1,6 MB | ~5,2 MB |
+| 1.000 | ~3,2 MB | ~10,4 MB |
+| 2.000 | ~6,4 MB | ~20,8 MB |
+
+Mongo admite hasta 16 MB por documento. Un análisis real de 2 detecciones guardado en producción ocupa 5 KB.
+
+#### Infraestructura
+
+- La VM no tiene GPU: el contenedor instala torch solo para CPU y la detección corre en CPU.
+- `bestseg.pt` pesa 94,9 MB, bajo el límite de 100 MB por archivo de GitHub, y viaja dentro de la imagen del backend. Un modelo de más de 100 MB requiere otro mecanismo de distribución.
+- El disco de la VM es de 100 GB. Lo único que crece sin limpieza automática es `joining/task_images/` (~120 MB por vuelo de 21 fotos).
+
+#### Verificación
+
+Realizada en `condorfinder.cl`, con el backend de la VM, usando un vuelo de 21 fotos:
+
+| Comprobación | Resultado |
+|---|---|
+| Generar el mapa unificado | Completo; el ortomosaico midió 1715 x 1883 px, la detección procesó 16 ventanas y encontró 3 detecciones |
+| JSON de detecciones | `png_scale` 1,0; máscaras de 50, 314 (dos piezas) y 54 vértices |
+| Analizar volumen | Completo; `geo_polygon` de 27, 96 y 27 vértices; peso igual a volumen por densidad |
+| Analizar volumen por segunda vez | Mismas cifras |
+| Guardar el análisis | Guardó; el documento tiene 2 detecciones, 5 KB, `algorithmVersion` 2 y ninguna detección con `polygon` |
+| Reabrir lo guardado, abrir un análisis anterior al cambio, Rutas con las clases nuevas, informe y evolución | Sin errores |
+| `probar_poligonos.py` dentro del contenedor | 22 comprobaciones pasan (la de colores del frontend se omite porque la imagen no incluye `src/`; se ejecuta en el entorno de desarrollo) |
+
+No se midió el tiempo de la detección por separado (la generación completa tardó unos 11 minutos, la mayor parte en ODM), ni se probó un vuelo con cientos de detecciones.
+
+#### Límites conocidos
+
+- La confianza mínima de aceptación es `CONF = 0.18` (`detectingOrtho.py`, línea 25). En el vuelo de prueba, una detección de "Pallets" con confianza 0,27 midió 1.574 m³ y 236 t: el volumen es la altura del terreno sobre el suelo (nDSM), así que una estructura alta marcada por el modelo produce cifras altas.
+- Los pesos con densidades altas (Escombros 1.400 kg/m³, Fresado asfáltico y Material de excavación 1.600 kg/m³) hacen que el peso sea el límite que primero se agota en el reparto de vehículos de una ruta.
+- Las dos tablas de colores (`waste_classes.py` y `zone-colors.ts`) se mantienen a mano; `probar_poligonos.py` falla si no coinciden.
+
+#### Cómo agregar o cambiar una clase
+
+1. Agregar la clase en `WASTE_MAP` (`waste_classes.py`) con su nombre del modelo, nombre en español, color y densidad.
+2. Agregar el mismo nombre y color en `CLASS_COLORS` y en `WASTE_CLASS_NAMES` (`zone-colors.ts`).
+3. Ejecutar `python backendModel/scripts/probar_poligonos.py`.
+4. Si cambia la forma de medir, subir `VOLUME_ALGORITHM_VERSION` en `orquestador.py`.
 
 ---
 
@@ -854,7 +992,7 @@ Cierra lo que HDU14 y HDU15 dejaron planteado: un punto permanente y una zona vo
 | Base de datos | MongoDB Atlas (pymongo, cliente async + sync) |
 | Autenticación | OpenID Connect con PKCE contra Microsoft Entra ID y Google; sesión en JWT en cookie httpOnly (PyJWT con RS256) |
 | Unificación de imágenes | OpenDroneMap (NodeODM vía Docker) |
-| Detección de basura | YOLOv8 (Ultralytics) + SAHI |
+| Detección de basura | YOLOv8 de segmentación (Ultralytics) + SAHI |
 | Cálculo de volumen | RasterStats + GeoPandas sobre nDSM de ODM |
 | Detección de duplicados (HDU7) | Shapely (IoU real entre huellas de ortomosaico georreferenciadas, backend) |
 | Geodesia / reproyección | proj4 (UTM → WGS84, cliente) |

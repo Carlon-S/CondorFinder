@@ -2,6 +2,7 @@ import rasterio
 import os
 import sys
 import numpy as np
+import torch
 from PIL import Image
 from sahi import AutoDetectionModel
 from sahi.predict import get_sliced_prediction
@@ -13,10 +14,11 @@ from pathlib import Path
 import cv2
 from dataclasses import dataclass
 
+from detecting.waste_classes import info_por_clase_yolo
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "model/bestseg.pt")
 OUTPUT_PATH = os.path.join(BASE_DIR, "output")
-CONF        = 0.18
 
 CLASSES = [
     "Rubble", "Construction and demolition materials", "Asphalt milling",
@@ -76,7 +78,7 @@ def detect(file_name: str):
         model_type="yolov8",
         model_path=MODEL_PATH,
         confidence_threshold=CONF,
-        device="cuda",
+        device=DEVICE,
     )
 
     # SAHI y YOLOv8 solo aceptan RGB — la transparencia se aplica al final
@@ -119,8 +121,14 @@ def detect(file_name: str):
     thumbnail.save(f"{final}_thumb.png")
     print(f"Miniatura en {final}_thumb.png")
 
-    # Guardar detecciones en JSON con coordenadas escaladas al espacio del PNG
+    # Se escribe una entrada por detección. Dos sistemas de coordenadas:
+    #   - `bbox`: píxeles del PNG (ya multiplicados por `scale`), porque es el
+    #     espacio en que la vista dibuja los recuadros.
+    #   - `polygon`: píxeles del ortomosaico completo, que es el espacio de la
+    #     transformación geográfica con la que volumeCalc mide la máscara.
+    # `png_scale` (arriba del JSON) es el factor que relaciona los dos espacios.
     detections_list = []
+    mascaras_fuera_de_caja = 0
     for i, pred in enumerate(result.object_prediction_list):
         box = pred.bbox
         yolo_cls = CLASSES[pred.category.id]
@@ -151,9 +159,15 @@ def detect(file_name: str):
             "polygon": [poly for poly in pred.mask.segmentation] if polygon is not None else None,
         })
 
+    if mascaras_fuera_de_caja:
+        print(
+            f"AVISO: {mascaras_fuera_de_caja} máscaras tienen vértices fuera de su caja; "
+            "puede que no estén en las coordenadas de la imagen completa"
+        )
+
     json_path = f"{final}.json"
     with open(json_path, "w") as jf:
-        json.dump({"detections": detections_list}, jf, indent=2)
+        json.dump({"png_scale": scale, "detections": detections_list}, jf, indent=2)
     print(f"JSON detecciones en {json_path}")
 
     return final, len(result.object_prediction_list), json_path

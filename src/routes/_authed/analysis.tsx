@@ -100,6 +100,7 @@ import {
   deleteTask,
 } from "@/lib/unify";
 import { area, peso, volumen } from "@/lib/formato";
+import { classColor } from "@/components/zone-colors";
 
 // Acá vivía WEIGHT_LIMIT_KG = 5000, que descartaba toda detección de más de 5
 // toneladas antes de mostrarla. Se eliminó, y conviene saber por qué para no
@@ -184,33 +185,6 @@ function ringsToPath(rings: number[][]): string {
     .join("");
 }
 // ── colores ────────────────────────────────────────────────────────────────────
-
-const CLASS_COLORS: Record<string, string> = {
-  // Nombres en español (nuevas ejecuciones)
-  "Residuo de construcción":   "#ef4444",
-  "Metal":                     "#f97316",
-  "Plástico":                  "#3b82f6",
-  "Residuo orgánico":          "#22c55e",
-  "Muebles":                   "#a855f7",
-  "Neumáticos":                "#64748b",
-  "Tipo de basura indefinido": "#f59e0b",
-  "Varios tipos":              "#7c3aed",
-  // Nombres en inglés (tareas anteriores al cambio)
-  construction_waste: "#ef4444",
-  metal:              "#f97316",
-  plastic:            "#3b82f6",
-  organic_waste:      "#22c55e",
-  furniture:          "#a855f7",
-  tyres:              "#64748b",
-  other:              "#f59e0b",
-};
-
-function classColor(cls: string): string {
-  if (CLASS_COLORS[cls]) return CLASS_COLORS[cls];
-  let hash = 0;
-  for (let i = 0; i < cls.length; i++) hash = (hash * 31 + cls.charCodeAt(i)) | 0;
-  return `hsl(${Math.abs(hash) % 360},75%,55%)`;
-}
 
 // ── degradé de volumen verde → amarillo → rojo ─────────────────────────────
 
