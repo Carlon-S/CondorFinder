@@ -28,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -36,7 +37,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { startVolumeAnalysis, pollVolumeAnalysis, type EnrichedDetection } from "@/lib/analysis";
+import {
+  startVolumeAnalysis,
+  pollVolumeAnalysis,
+  type EnrichedDetection,
+  type ZonaManual,
+} from "@/lib/analysis";
 import {
   saveAnalysis,
   findAnalysisByName,
@@ -100,7 +106,7 @@ import {
   deleteTask,
 } from "@/lib/unify";
 import { area, peso, volumen } from "@/lib/formato";
-import { classColor } from "@/components/zone-colors";
+import { classColor, CLASS_COLORS } from "@/components/zone-colors";
 
 // Acá vivía WEIGHT_LIMIT_KG = 5000, que descartaba toda detección de más de 5
 // toneladas antes de mostrarla. Se eliminó, y conviene saber por qué para no
@@ -136,7 +142,9 @@ interface DisplayDetection {
   confidence: number;
   bbox: { minx: number; miny: number; maxx: number; maxy: number };
   polygon: null | number[][];
-  rings?: number[][]; 
+  rings?: number[][];
+  // Zona de basura dibujada a mano (HDU12). Nunca se fusiona con otra.
+  manual?: boolean;
   // Coordenadas reales (CRS proyectado del ortomosaico) de la detección
   // dominante del grupo, HDU5 las reproyecta a WGS84 para el mapa.
   geo_polygon?: number[][] | null;
@@ -152,7 +160,35 @@ function normalizeRings(polygon: unknown): number[][] {
   return rings.filter((r) => r.length >= 6); // mínimo 3 puntos
 }
 
+/** Contorno de una detección en píxeles del PNG. Las máscaras del JSON están en
+ *  píxeles del ortomosaico; el PNG se reduce con `png_scale` cuando el
+ *  ortomosaico es muy grande, así que se multiplica por ese factor. */
+function escalarAnillos(polygon: unknown, factor: number): number[][] {
+  return normalizeRings(polygon).map((r) => r.map((v) => v * factor));
+}
+
 type AreaPoint = [number, number];
+
+/** Lo que se está dibujando: el área relevante (HDU13) o una zona de basura (HDU12). */
+type TipoDibujo = "area" | "zona";
+
+/** Zona de basura dibujada y confirmada, todavía sin analizar (HDU12). */
+interface ZonaPendiente {
+  uid: string;
+  clase: string;
+  pts: AreaPoint[];
+}
+
+/** Las 20 clases del modelo, en el orden de la tabla de colores. */
+const CLASES_DE_BASURA = Object.keys(CLASS_COLORS).slice(0, 20);
+
+/** Achica un polígono hacia su centro (cada lado al 80 %), que es lo que hace
+ *  "Reducir": la superficie baja a algo más de la mitad en cada paso. */
+function reducirPoligono(pts: AreaPoint[]): AreaPoint[] {
+  const cx = pts.reduce((s, [x]) => s + x, 0) / pts.length;
+  const cy = pts.reduce((s, [, y]) => s + y, 0) / pts.length;
+  return pts.map(([x, y]) => [cx + (x - cx) * 0.8, cy + (y - cy) * 0.8] as AreaPoint);
+}
 
 function pointInPolygon(x: number, y: number, poly: AreaPoint[]): boolean {
   let inside = false;
@@ -229,6 +265,7 @@ function computeIoU(
 
 function mergeOverlapping(
   detections: EnrichedDetection[],
+  pngScale = 1,
   iouThreshold = 0.5,
 ): DisplayDetection[] {
   if (detections.length === 0) return [];
@@ -237,6 +274,8 @@ function mergeOverlapping(
   const adj: number[][] = detections.map(() => []);
   for (let i = 0; i < detections.length; i++) {
     for (let j = i + 1; j < detections.length; j++) {
+      // Una zona dibujada a mano es una decisión del trabajador y no se fusiona.
+      if (detections[i].manual || detections[j].manual) continue;
       if (computeIoU(detections[i].bbox, detections[j].bbox) >= iouThreshold) {
         adj[i].push(j);
         adj[j].push(i);
@@ -308,7 +347,8 @@ function mergeOverlapping(
       confidence: Math.max(...dets.map(d => d.confidence)),
       bbox,
       polygon:    dets[0].polygon,
-      rings:      dets.flatMap((d) => normalizeRings(d.polygon)),
+      rings:      dets.flatMap((d) => escalarAnillos(d.polygon, pngScale)),
+      manual:     dets.length === 1 && Boolean(dets[0].manual),
       geo_polygon: dets[0].geo_polygon,
       area_m2:    aggArea   || null,
       volume_m3:  aggVolume || null,
@@ -399,12 +439,58 @@ function AnalysisPage() {
 
   const [displayDetections, setDisplayDetections] = useState<DisplayDetection[]>([]);
   const [detectionsLoading, setDetectionsLoading] = useState(false);
-  const [enabledIds, setEnabledIds]               = useState<Set<number>>(new Set());
+  // Lo que el trabajador dejó activado a mano. Lo que de verdad cuenta es
+  // `enabledIds` (más abajo), que además excluye lo descartado por el área.
+  const [enabledRaw, setEnabledIds]                = useState<Set<number>>(new Set());
   const [areaMode, setAreaMode]         = useState<"idle" | "drawing">("idle");
+  const [drawKind, setDrawKind]         = useState<TipoDibujo>("area");
   const [draftPoints, setDraftPoints]   = useState<AreaPoint[]>([]);
-  const [trashDraftPoints, setDrafPoints] = useState<AreaPoint[]>([]);
   const [analysisArea, setAnalysisArea] = useState<AreaPoint[] | null>(null);
+  // HDU13: el área se puede apagar sin borrarla, y seleccionar para hacerlo.
+  const [areaActiva, setAreaActiva]               = useState(true);
+  const [areaSeleccionada, setAreaSeleccionada]   = useState(false);
+  // HDU13: detecciones fuera del área que el trabajador restauró por error.
+  const [restauradasIds, setRestauradasIds]       = useState<Set<number>>(new Set());
+  const [mostrarDescartadas, setMostrarDescartadas] = useState(false);
+  // HDU12: zonas de basura dibujadas a mano. `zonaModo` se enciende al apretar
+  // "Dibujar zona de basura" y se apaga al analizar con ellas.
+  const [zonaModo, setZonaModo]                   = useState(false);
+  const [zonasManuales, setZonasManuales]         = useState<ZonaPendiente[]>([]);
+  const [zonaPendiente, setZonaPendiente]         = useState<AreaPoint[] | null>(null);
+  const [tipoZonaOpen, setTipoZonaOpen]           = useState(false);
+  // Factor con que el PNG se redujo respecto del ortomosaico (1 = sin reducir).
+  const [pngScale, setPngScale]                   = useState(1);
   const svgRef = useRef<SVGSVGElement>(null);
+
+  // ── lo que el área relevante descarta (HDU13) ─────────────────────────────
+  //
+  // Se DERIVA del área y de las detecciones en vez de guardarse: así vale igual
+  // al analizar, al reabrir un análisis y al apagar o mover el área, y no hay
+  // un segundo estado que mantener sincronizado. Una detección cuenta como
+  // "dentro" si el centro de su recuadro cae en el área.
+  const descartadasIds = useMemo(() => {
+    if (!analysisArea || !areaActiva) return new Set<number>();
+    return new Set(
+      displayDetections
+        .filter((d) => !restauradasIds.has(d.id) && !detectionInArea(d, analysisArea))
+        .map((d) => d.id),
+    );
+  }, [displayDetections, analysisArea, areaActiva, restauradasIds]);
+
+  /** Las detecciones activas que cuentan para los totales: las que el
+   *  trabajador dejó activas y que el área no descartó. */
+  const enabledIds = useMemo(
+    () => new Set([...enabledRaw].filter((id) => !descartadasIds.has(id))),
+    [enabledRaw, descartadasIds],
+  );
+  const visibleDetections = useMemo(
+    () => displayDetections.filter((d) => !descartadasIds.has(d.id)),
+    [displayDetections, descartadasIds],
+  );
+  const descartadas = useMemo(
+    () => displayDetections.filter((d) => descartadasIds.has(d.id)),
+    [displayDetections, descartadasIds],
+  );
   const [imgNaturalSize, setImgNaturalSize]        = useState<{ w: number; h: number } | null>(null);
   // CRS proyectado del ortomosaico (HDU5), llega junto con las detecciones,
   // se guarda para poder reproyectar geo_polygon a WGS84 más adelante (en
@@ -639,13 +725,21 @@ function AnalysisPage() {
         // todas sin la marca, así que el total guardado (que solo cuenta las
         // activas) no se podía reconciliar con el detalle, y al reabrir el
         // análisis volvían todas activas y el total cambiaba.
-        detections: displayDetections.map(d => ({ ...d, enabled: enabledIds.has(d.id) })),
+        detections: displayDetections.map(d => ({
+          ...d,
+          enabled: enabledIds.has(d.id),
+          // Si el área relevante la dejó fuera. Al reabrir el análisis, una
+          // detección fuera del área con `discarded: false` es una restaurada.
+          discarded: descartadasIds.has(d.id),
+        })),
         summary: activeSummary,
         sourceTaskId: taskId ?? undefined,
         crs,
         orthoCenter,
         orthoBounds,
         analysisArea,
+        analysisAreaActive: areaActiva,
+        pngScale,
         zoneId,
         captureDate,
         captureDateEstimated,
@@ -758,36 +852,85 @@ function AnalysisPage() {
     });
   };
 
-  const allEnabled = displayDetections.length > 0 && enabledIds.size === displayDetections.length;
+  const allEnabled = visibleDetections.length > 0 && enabledIds.size === visibleDetections.length;
 
   const toggleAll = () => {
     setEnabledIds(
-      allEnabled ? new Set() : new Set(displayDetections.map(d => d.id)),
+      allEnabled ? new Set() : new Set(visibleDetections.map(d => d.id)),
     );
   };
 
-  const startDrawing = () => {
-  setDraftPoints([]);
-  setAreaMode("drawing");
-};
+  /** Empieza a dibujar un polígono: el área relevante (HDU13) o una zona de
+   *  basura (HDU12). Los dos usan el mismo modo de dibujo sobre la imagen. */
+  const startDrawing = (tipo: TipoDibujo) => {
+    setDrawKind(tipo);
+    setDraftPoints([]);
+    setZonaPendiente(null);
+    if (tipo === "zona") setZonaModo(true);
+    setAreaMode("drawing");
+  };
 
-const cancelDrawing = () => {
-  setDraftPoints([]);
-  setAreaMode("idle");
-};
+  const cancelDrawing = () => {
+    setDraftPoints([]);
+    setAreaMode("idle");
+  };
 
-const closeArea = (pts: AreaPoint[]) => {
-  setAnalysisArea(pts);
-  setDraftPoints([]);
-  setEnabledIds(new Set(displayDetections.filter(d => detectionInArea(d, pts)).map(d => d.id)));
-};
+  /** Se cerró el polígono. Un área relevante queda definida y activa; una zona
+   *  de basura queda pendiente de confirmación (HDU12). */
+  const closeArea = (pts: AreaPoint[]) => {
+    setDraftPoints([]);
+    setAreaMode("idle");
+    if (drawKind === "zona") {
+      setZonaPendiente(pts);
+      return;
+    }
+    setAnalysisArea(pts);
+    setAreaActiva(true);
+    setAreaSeleccionada(true);
+    setRestauradasIds(new Set());
+  };
 
-const clearArea = () => {
-  setAnalysisArea(null);
-  setEnabledIds(new Set(displayDetections.map(d => d.id))); // vuelve a activar todo
-};
+  const clearArea = () => {
+    setAnalysisArea(null);
+    setAreaSeleccionada(false);
+    setAreaActiva(true);
+    setRestauradasIds(new Set());
+    setMostrarDescartadas(false);
+  };
 
+  /** Activa o desactiva el área sin borrarla (HDU13). Al desactivarla se
+   *  analiza la imagen completa, así que lo que había descartado vuelve a
+   *  contar. */
+  const cambiarAreaActiva = (activa: boolean) => {
+    setAreaActiva(activa);
+    if (!activa) setEnabledIds((prev) => new Set([...prev, ...descartadasIds]));
+  };
 
+  /** Devuelve una detección descartada por el área a los totales (HDU13). */
+  const restaurarDetection = (id: number) => {
+    setRestauradasIds((prev) => new Set(prev).add(id));
+    setEnabledIds((prev) => new Set(prev).add(id));
+  };
+
+  /** Confirma la zona dibujada con el tipo elegido (HDU12). */
+  const confirmarZona = (clase: string) => {
+    if (!zonaPendiente) return;
+    setZonasManuales((prev) => [
+      ...prev,
+      { uid: `z${Date.now()}${prev.length}`, clase, pts: zonaPendiente },
+    ]);
+    setZonaPendiente(null);
+    setTipoZonaOpen(false);
+  };
+
+  /** Selecciona el área relevante si el clic cae dentro de ella. */
+  const seleccionarAreaEn = (clientX: number, clientY: number) => {
+    const svg = svgRef.current;
+    const ctm = svg?.getScreenCTM();
+    if (!svg || !ctm || !analysisArea) return;
+    const p = new DOMPoint(clientX, clientY).matrixTransform(ctm.inverse());
+    if (pointInPolygon(p.x, p.y, analysisArea)) setAreaSeleccionada((s) => !s);
+  };
 
 const addAreaPoint = (clientX: number, clientY: number) => {
   const svg = svgRef.current;
@@ -841,8 +984,8 @@ useEffect(() => {
    *  porque ese arreglo es el que se guarda y su orden es el que produjo el
    *  backend. */
   const detectionRows = useMemo(
-    () => [...displayDetections].sort((a, b) => (b.volume_m3 ?? 0) - (a.volume_m3 ?? 0)),
-    [displayDetections],
+    () => [...visibleDetections].sort((a, b) => (b.volume_m3 ?? 0) - (a.volume_m3 ?? 0)),
+    [visibleDetections],
   );
 
   /**
@@ -896,7 +1039,27 @@ useEffect(() => {
     // cuenta como activa: es como se comportaban los análisis anteriores a que
     // la selección se persistiera, así que abrirlos sigue dando lo mismo.
     setEnabledIds(new Set(detections.filter((d) => d.enabled !== false).map((d) => d.id)));
-    setAnalysisArea((record.analysisArea as [number, number][] | null | undefined) ?? null);
+    const areaGuardada = (record.analysisArea as [number, number][] | null | undefined) ?? null;
+    const activaGuardada = record.analysisAreaActive ?? true;
+    setAnalysisArea(areaGuardada);
+    setAreaActiva(activaGuardada);
+    setAreaSeleccionada(false);
+    setMostrarDescartadas(false);
+    setPngScale(record.pngScale ?? 1);
+    // Una detección fuera del área que se guardó con `discarded: false` es una
+    // que el trabajador restauró: se mantiene restaurada al reabrir.
+    setRestauradasIds(
+      new Set(
+        areaGuardada && activaGuardada
+          ? detections
+              .filter((d) => (d as { discarded?: boolean }).discarded === false && !detectionInArea(d, areaGuardada))
+              .map((d) => d.id)
+          : [],
+      ),
+    );
+    setZonasManuales([]);
+    setZonaPendiente(null);
+    setZonaModo(false);
     setDraftPoints([]);
     setAreaMode("idle");
     setCrs(record.crs);
@@ -1180,7 +1343,9 @@ useEffect(() => {
       fetch(jsonUrl)
         .then(r => r.json())
         .then(data => {
-          const merged = mergeOverlapping(data.detections ?? []);
+          const escala = data.png_scale ?? 1;
+          setPngScale(escala);
+          const merged = mergeOverlapping(data.detections ?? [], escala);
           setDisplayDetections(merged);
           setEnabledIds(new Set(merged.map(d => d.id)));
         })
@@ -1243,12 +1408,24 @@ useEffect(() => {
       return;
     }
 
+    // HDU12: con el modo de zonas de basura encendido, el análisis es para
+    // volver a medir con las zonas nuevas, y sin ninguna no hay nada que
+    // medir de nuevo. Se advierte y no se ejecuta.
+    if (zonaModo && zonasManuales.length === 0) {
+      const aviso =
+        "No hay nuevas zonas añadidas. Dibuja y confirma al menos una zona de basura para volver a analizar.";
+      setAnalysisMessage(aviso);
+      notify.warning("No hay nuevas zonas añadidas", aviso);
+      return;
+    }
+
     setStatus("running");
     setProgress(10);
     setAnalysisMessage(null);
 
     try {
-      const startResult = await startVolumeAnalysis(taskId);
+      const zonasNuevas: ZonaManual[] = zonasManuales.map((z) => ({ class: z.clase, polygon: z.pts }));
+      const startResult = await startVolumeAnalysis(taskId, zonasNuevas);
       if (startResult.status === "error") {
         setAnalysisMessage(startResult.message ?? "Error al iniciar el análisis");
         setStatus("error");
@@ -1268,12 +1445,19 @@ useEffect(() => {
 
       const response = await pollVolumeAnalysis(taskId, detectionJsonUrl, setProgress);
       if (response.status === "success") {
-        const merged = mergeOverlapping(response.detections);
+        setPngScale(response.pngScale);
+        const merged = mergeOverlapping(response.detections, response.pngScale);
         setDisplayDetections(merged);
         setEnabledIds(new Set(merged.map(d => d.id)));
-          setAnalysisArea(null);
-          setDraftPoints([]);
-          setAreaMode("idle");
+        // El área relevante se conserva: es lo que descarta las detecciones del
+        // análisis nuevo. Lo que se reinicia es lo restaurado a mano, que era de
+        // la medición anterior, y las zonas dibujadas, que ya son detecciones.
+        setRestauradasIds(new Set());
+        setZonasManuales([]);
+        setZonaPendiente(null);
+        setZonaModo(false);
+        setDraftPoints([]);
+        setAreaMode("idle");
         setCrs(response.crs || undefined);
         setOrthoCenter(response.orthoCenter ?? null);
         setOrthoBounds(response.orthoBounds ?? null);
@@ -1410,6 +1594,9 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
   if (areaMode === "drawing" && dragging && event.button === 0) {
     const moved = Math.hypot(event.clientX - dragStart.current.x, event.clientY - dragStart.current.y);
     if (moved < 4) addAreaPoint(event.clientX, event.clientY);
+  } else if (areaMode === "idle" && analysisArea && dragging && event.button === 0) {
+    const moved = Math.hypot(event.clientX - dragStart.current.x, event.clientY - dragStart.current.y);
+    if (moved < 4) seleccionarAreaEn(event.clientX, event.clientY);
   }
 };
   
@@ -1586,7 +1773,7 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                 disabled={
                   status === "running" ||
                   !usingGeneratedMap ||
-                  status === "empty" ||
+                  (status === "empty" && zonasManuales.length === 0) ||
                   !canAnalyze ||
                   readOnly ||
                   // La URL del JSON de detecciones se resuelve con una consulta
@@ -1605,6 +1792,13 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                 )}
               </Button>
 
+              {zonaModo && zonasManuales.length === 0 && (
+                <p className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-[0.69rem] leading-relaxed text-foreground">
+                  No hay nuevas zonas añadidas. Para volver a analizar, dibuja y confirma al menos una
+                  zona de basura.
+                </p>
+              )}
+
               {/* Este vuelo no se puede volver a medir: o es una versión ya
                   reemplazada, o sus modelos de elevación se liberaron. Se
                   explica el motivo en vez de dejar un botón apagado sin razón
@@ -1615,28 +1809,176 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                 </p>
               )}
 
-              <Button
-                onClick={areaMode === "drawing" ? cancelDrawing : startDrawing}
-                disabled={displayDetections.length === 0}
-                variant={areaMode === "drawing" ? "default" : "secondary"}
-                className="w-full"
-              >
-                <Crosshair className="mr-2 h-4 w-4" />
-                {areaMode === "drawing" ? "Cancelar delimitación" : analysisArea ? "Redibujar área" : "Delimitar área"}
-              </Button>
-
-              {areaMode === "drawing" && (
-                <p className="rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-[0.69rem] leading-relaxed text-muted-foreground">
-                  Haz click en el mapa para poner los puntos. Para cerrar, vuelve a hacer click
-                  en el primero. Retroceso deshace el último punto y Esc cancela.
-                </p>
-              )}
-
-              {analysisArea && areaMode === "idle" && (
-                <Button onClick={clearArea} variant="outline" size="sm" className="w-full">
-                  Quitar área y reactivar todas
+              {/* HDU13: área relevante. */}
+              <div className="space-y-2 rounded-md border border-border/60 bg-muted/20 p-2.5">
+                <p className="text-xs font-semibold text-foreground">Área relevante</p>
+                <Button
+                  onClick={areaMode === "drawing" && drawKind === "area" ? cancelDrawing : () => startDrawing("area")}
+                  disabled={!imgNaturalSize || readOnly}
+                  variant={areaMode === "drawing" && drawKind === "area" ? "default" : "secondary"}
+                  className="w-full"
+                >
+                  <Crosshair className="mr-2 h-4 w-4" />
+                  {areaMode === "drawing" && drawKind === "area"
+                    ? "Cancelar delimitación"
+                    : analysisArea
+                      ? "Redibujar área relevante"
+                      : "Delimitar área relevante"}
                 </Button>
-              )}
+
+                {areaMode === "drawing" && drawKind === "area" && (
+                  <p className="rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-[0.69rem] leading-relaxed text-muted-foreground">
+                    Haz click en el mapa para poner los puntos. Para cerrar, vuelve a hacer click
+                    en el primero. Retroceso deshace el último punto y Esc cancela.
+                  </p>
+                )}
+
+                {analysisArea && areaMode === "idle" && (
+                  <>
+                    {/* Seleccionar el área (aquí o con un clic sobre ella en el
+                        mapa) muestra el interruptor para activarla o desactivarla. */}
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      aria-pressed={areaSeleccionada}
+                      onClick={() => setAreaSeleccionada((s) => !s)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setAreaSeleccionada((s) => !s);
+                        }
+                      }}
+                      className={`cursor-pointer rounded-md border px-2.5 py-2 text-xs transition-colors ${
+                        areaSeleccionada ? "border-primary bg-primary/10" : "border-border/60 hover:bg-muted/40"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium text-foreground">
+                          {areaSeleccionada ? "Área seleccionada" : "Área delimitada"}
+                        </span>
+                        <span className={areaActiva ? "text-success-strong" : "text-muted-foreground"}>
+                          {areaActiva ? "Activa" : "Desactivada"}
+                        </span>
+                      </div>
+                      {areaSeleccionada && (
+                        <div
+                          className="mt-2 flex items-center justify-between gap-2 border-t border-border/60 pt-2"
+                          onClick={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => e.stopPropagation()}
+                        >
+                          <span className="text-muted-foreground">Usar el área en el análisis</span>
+                          <Switch checked={areaActiva} onCheckedChange={cambiarAreaActiva} />
+                        </div>
+                      )}
+                    </div>
+                    <Button onClick={clearArea} variant="outline" size="sm" className="w-full">
+                      Quitar área
+                    </Button>
+                  </>
+                )}
+              </div>
+
+              {/* HDU12: zonas de basura dibujadas a mano. */}
+              <div className="space-y-2 rounded-md border border-border/60 bg-muted/20 p-2.5">
+                <p className="text-xs font-semibold text-foreground">Zonas de basura</p>
+                <Button
+                  onClick={areaMode === "drawing" && drawKind === "zona" ? cancelDrawing : () => startDrawing("zona")}
+                  disabled={!imgNaturalSize || readOnly}
+                  variant={areaMode === "drawing" && drawKind === "zona" ? "default" : "secondary"}
+                  className="w-full"
+                >
+                  <Crosshair className="mr-2 h-4 w-4" />
+                  {areaMode === "drawing" && drawKind === "zona" ? "Cancelar dibujo" : "Dibujar zona de basura"}
+                </Button>
+
+                {areaMode === "drawing" && drawKind === "zona" && (
+                  <p className="rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-[0.69rem] leading-relaxed text-muted-foreground">
+                    Haz click en el mapa para marcar el contorno de la basura. Para cerrar la zona, vuelve a
+                    hacer click en el primer punto. Retroceso deshace el último punto y Esc cancela.
+                  </p>
+                )}
+
+                {/* La zona cerrada espera confirmación; al confirmar se pide el
+                    tipo de basura. Se puede reducir o borrar antes de confirmar. */}
+                {zonaPendiente && areaMode === "idle" && (
+                  <div className="space-y-2 rounded-md border border-success/40 bg-success/10 px-2.5 py-2">
+                    <p className="text-xs font-medium text-foreground">Zona dibujada</p>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      <Button size="sm" onClick={() => setTipoZonaOpen(true)}>Confirmar</Button>
+                      <Button size="sm" variant="secondary" onClick={() => setZonaPendiente(reducirPoligono(zonaPendiente))}>
+                        Reducir
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => setZonaPendiente(null)}>Borrar</Button>
+                    </div>
+                  </div>
+                )}
+
+                {zonasManuales.length > 0 && (
+                  <ul className="space-y-1.5">
+                    {zonasManuales.map((z) => (
+                      <li key={z.uid} className="rounded-md border border-border/60 px-2 py-1.5">
+                        <div className="flex items-center gap-1.5 text-xs">
+                          <span className="h-2.5 w-2.5 flex-shrink-0 rounded-sm" style={{ background: classColor(z.clase) }} />
+                          <span className="min-w-0 flex-1 truncate font-medium text-foreground">{z.clase}</span>
+                          <span className="text-[0.6875rem] text-muted-foreground">nueva</span>
+                        </div>
+                        <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() =>
+                              setZonasManuales((prev) =>
+                                prev.map((o) => (o.uid === z.uid ? { ...o, pts: reducirPoligono(o.pts) } : o)),
+                              )
+                            }
+                          >
+                            Reducir área
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setZonasManuales((prev) => prev.filter((o) => o.uid !== z.uid))}
+                          >
+                            Borrar
+                          </Button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {zonaModo && zonasManuales.length === 0 && !zonaPendiente && areaMode === "idle" && (
+                  <p className="text-[0.69rem] leading-relaxed text-warning">
+                    Aún no hay zonas nuevas. Dibuja y confirma al menos una para volver a analizar.
+                  </p>
+                )}
+              </div>
+
+              {/* HDU12: tipo de basura de la zona dibujada. */}
+              <Dialog open={tipoZonaOpen} onOpenChange={setTipoZonaOpen}>
+                <DialogContent className="sm:max-w-lg">
+                  <DialogHeader>
+                    <DialogTitle>Tipo de basura de la zona</DialogTitle>
+                    <DialogDescription>
+                      Elige qué tipo de basura hay en el área que dibujaste. Se medirá su volumen y su peso
+                      con la densidad de ese tipo.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="grid max-h-[50vh] grid-cols-2 gap-1.5 overflow-y-auto pr-1">
+                    {CLASES_DE_BASURA.map((clase) => (
+                      <button
+                        key={clase}
+                        type="button"
+                        onClick={() => confirmarZona(clase)}
+                        className="flex cursor-pointer items-center gap-2 rounded-md border border-border/60 px-2.5 py-2 text-left text-xs font-medium text-foreground transition-colors hover:border-primary hover:bg-primary/10"
+                      >
+                        <span className="h-2.5 w-2.5 flex-shrink-0 rounded-sm" style={{ background: classColor(clase) }} />
+                        {clase}
+                      </button>
+                    ))}
+                  </div>
+                </DialogContent>
+              </Dialog>
 
               {/* HDU4/AC1, guardar análisis. Deshabilitado en una versión ya
                   reemplazada: consultarla es válido, sobrescribirla no, porque
@@ -1727,7 +2069,7 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                     />
                     <Metric
                       label="Zonas activas"
-                      value={`${enabledIds.size} / ${displayDetections.length}`}
+                      value={`${enabledIds.size} / ${visibleDetections.length}`}
                       icon={<MapIcon className="h-4 w-4" />}
                     />
                   </div>
@@ -1907,7 +2249,7 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                           setImgNaturalSize({ w: img.naturalWidth, h: img.naturalHeight });
                         }}
                       />
-                      {imgNaturalSize && displayDetections.length > 0 && (() => {
+                      {imgNaturalSize && (displayDetections.length > 0 || analysisArea || zonasManuales.length > 0 || zonaPendiente || draftPoints.length > 0) && (() => {
                         const enabledDets = displayDetections.filter(d => enabledIds.has(d.id));
                         const vols = enabledDets.map(d => d.volume_m3 ?? 0).filter(v => v > 0);
                         const minVol = vols.length > 0 ? Math.min(...vols) : 0;
@@ -1918,6 +2260,7 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                         ? Math.min(svgEl.clientWidth / imgNaturalSize.w, svgEl.clientHeight / imgNaturalSize.h) * scale * factorRotacion
                         : 0.1; // pixeles de pantalla por pixel de imagen
                         const toPts = (pts: AreaPoint[]) => pts.map(([x, y]) => `${x},${y}`).join(" ");
+                        const colorBorrador = drawKind === "zona" ? "#22c55e" : "#38bdf8";
                         return (
                           <svg
                             ref={svgRef}
@@ -1933,7 +2276,7 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                               const bw   = d.bbox.maxx - d.bbox.minx;
                               const bh   = d.bbox.maxy - d.bbox.miny;
                               const FONT = 24;
-                              const rings = d.rings ?? normalizeRings(d.polygon);
+                              const rings = d.rings ?? escalarAnillos(d.polygon, pngScale);
                               return (
                                 <g key={d.id}>
                                   {rings.length > 0 ? (
@@ -1973,38 +2316,123 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                                 </g>
                               );
                             })}
-                            {/* área cerrada: oscurece lo de afuera y marca el borde */}
-                            {analysisArea && areaMode === "drawing" && (
+                            {/* HDU13: detecciones que el área relevante descartó, con un
+                                estilo distinto (contorno gris punteado, sin relleno). */}
+                            {mostrarDescartadas && descartadas.map(d => {
+                              const rings = d.rings ?? escalarAnillos(d.polygon, pngScale);
+                              return (
+                                <g key={`desc-${d.id}`} opacity={0.9}>
+                                  {rings.length > 0 ? (
+                                    <path
+                                      d={ringsToPath(rings)}
+                                      fill="none"
+                                      stroke="#94a3b8"
+                                      strokeWidth={2 / ppu}
+                                      strokeDasharray={`${6 / ppu} ${4 / ppu}`}
+                                      strokeLinejoin="round"
+                                    />
+                                  ) : (
+                                    <rect
+                                      x={d.bbox.minx} y={d.bbox.miny}
+                                      width={d.bbox.maxx - d.bbox.minx} height={d.bbox.maxy - d.bbox.miny}
+                                      fill="none"
+                                      stroke="#94a3b8"
+                                      strokeWidth={2 / ppu}
+                                      strokeDasharray={`${6 / ppu} ${4 / ppu}`}
+                                    />
+                                  )}
+                                  <text
+                                    x={d.bbox.minx}
+                                    y={d.bbox.miny - 6}
+                                    fontSize={22}
+                                    fill="#cbd5e1"
+                                    fontFamily="monospace"
+                                    paintOrder="stroke"
+                                    stroke="rgba(0,0,0,0.75)"
+                                    strokeWidth={5}
+                                  >
+                                    {d.class} (descartada)
+                                  </text>
+                                </g>
+                              );
+                            })}
+
+                            {/* HDU13: el área relevante. Activa oscurece lo de afuera;
+                                desactivada queda solo su contorno, en gris. Seleccionada,
+                                el contorno se engrosa. */}
+                            {analysisArea && (
                               <>
-                                <path
-                                  fillRule="evenodd"
-                                  fill="black"
-                                  fillOpacity={0.35}
-                                  d={`M0 0H${imgNaturalSize.w}V${imgNaturalSize.h}H0Z` +
-                                    `M${analysisArea.map(([x, y]) => `${x} ${y}`).join("L")}Z`}
-                                />
+                                {areaActiva && (
+                                  <path
+                                    fillRule="evenodd"
+                                    fill="black"
+                                    fillOpacity={0.35}
+                                    d={`M0 0H${imgNaturalSize.w}V${imgNaturalSize.h}H0Z` +
+                                      `M${analysisArea.map(([x, y]) => `${x} ${y}`).join("L")}Z`}
+                                  />
+                                )}
                                 <polygon
                                   points={toPts(analysisArea)}
                                   fill="none"
-                                  stroke="#38bdf8"
-                                  strokeWidth={2 / ppu}
+                                  stroke={areaActiva ? "#38bdf8" : "#94a3b8"}
+                                  strokeWidth={(areaSeleccionada ? 4 : 2) / ppu}
                                   strokeDasharray={`${8 / ppu} ${5 / ppu}`}
                                   strokeLinejoin="round"
                                 />
                               </>
                             )}
 
-                            {/* área en construcción */}
+                            {/* HDU12: zonas de basura confirmadas, todavía sin analizar. */}
+                            {zonasManuales.map(z => (
+                              <g key={z.uid}>
+                                <polygon
+                                  points={toPts(z.pts)}
+                                  fill={classColor(z.clase)}
+                                  fillOpacity={0.3}
+                                  stroke={classColor(z.clase)}
+                                  strokeWidth={2.5 / ppu}
+                                  strokeDasharray={`${8 / ppu} ${5 / ppu}`}
+                                  strokeLinejoin="round"
+                                />
+                                <text
+                                  x={Math.min(...z.pts.map(q => q[0]))}
+                                  y={Math.min(...z.pts.map(q => q[1])) - 6}
+                                  fontSize={24}
+                                  fill={classColor(z.clase)}
+                                  fontFamily="monospace"
+                                  fontWeight="700"
+                                  paintOrder="stroke"
+                                  stroke="rgba(0,0,0,0.75)"
+                                  strokeWidth={5}
+                                >
+                                  {z.clase} (nueva)
+                                </text>
+                              </g>
+                            ))}
+
+                            {/* HDU12: zona dibujada que espera confirmación. */}
+                            {zonaPendiente && (
+                              <polygon
+                                points={toPts(zonaPendiente)}
+                                fill="#22c55e"
+                                fillOpacity={0.25}
+                                stroke="#22c55e"
+                                strokeWidth={2.5 / ppu}
+                                strokeLinejoin="round"
+                              />
+                            )}
+
+                            {/* polígono en construcción */}
                             {areaMode === "drawing" && draftPoints.length > 0 && (
                               <g>
-                                <polyline points={toPts(draftPoints)} fill="none" stroke="#38bdf8" strokeWidth={2 / ppu} />
+                                <polyline points={toPts(draftPoints)} fill="none" stroke={colorBorrador} strokeWidth={2 / ppu} />
                                 {draftPoints.map(([x, y], i) => (
                                   <circle
                                     key={i}
                                     cx={x} cy={y}
                                     r={(i === 0 && draftPoints.length >= 3 ? 7 : 4) / ppu}
-                                    fill={i === 0 ? "#ffffff" : "#38bdf8"}
-                                    stroke="#0369a1"
+                                    fill={i === 0 ? "#ffffff" : colorBorrador}
+                                    stroke="#0f172a"
                                     strokeWidth={1.5 / ppu}
                                   />
                                 ))}
@@ -2174,6 +2602,7 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                         />
                         <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
                           {d.class}
+                          {d.manual && <span className="ml-1 text-[0.6875rem] font-normal text-muted-foreground">(manual)</span>}
                         </span>
                         <span className="mono flex-shrink-0 text-xs font-semibold tabular-nums text-foreground">
                           {status === "done" && hasData
@@ -2243,6 +2672,38 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                 })}
               </ul>
 
+              {/* HDU13: detecciones que el área relevante descartó. */}
+              {status === "done" && analysisArea && (
+                <div className="mt-2 border-t border-border/60 pt-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-medium text-foreground">
+                      Mostrar detecciones descartadas ({descartadas.length})
+                    </span>
+                    <Switch
+                      checked={mostrarDescartadas}
+                      onCheckedChange={setMostrarDescartadas}
+                      disabled={descartadas.length === 0}
+                    />
+                  </div>
+                  {mostrarDescartadas && descartadas.length > 0 && (
+                    <ul className="mt-1.5 space-y-1">
+                      {descartadas.map((d) => (
+                        <li key={d.id} className="flex items-center gap-1.5 rounded-md border border-dashed border-border px-1.5 py-1 text-xs">
+                          <span className="h-2.5 w-2.5 flex-shrink-0 rounded-sm opacity-50" style={{ background: classColor(d.class) }} />
+                          <span className="min-w-0 flex-1 truncate text-muted-foreground">{d.class}</span>
+                          <span className="mono flex-shrink-0 tabular-nums text-muted-foreground">
+                            {d.volume_m3 != null ? `${volumen(d.volume_m3)} m³` : "-"}
+                          </span>
+                          <Button size="sm" variant="secondary" className="h-6 px-2 text-[0.6875rem]" onClick={() => restaurarDetection(d.id)}>
+                            Restaurar
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+
               {/* Totales al pie de la columna: son los mismos de "Métricas" en
                   el panel izquierdo, y tenerlos junto al detalle es lo que
                   permite reconciliar uno con otro al activar o desactivar
@@ -2251,7 +2712,7 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                 <div className="mt-2 border-t border-border/60 pt-2">
                   <div className="flex items-center gap-2">
                     <span className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">
-                      Total ({enabledIds.size} de {displayDetections.length} activas)
+                      Total ({enabledIds.size} de {visibleDetections.length} activas)
                     </span>
                     <span className="mono flex-shrink-0 text-xs font-semibold tabular-nums text-foreground">
                       {volumen(activeSummary.totalVolumeM3)} m³
@@ -2347,11 +2808,6 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
             </div>
           )}
           </div>
-          <Button 
-            onClick={startDrawing/* Aqui logica de añadir mas zonas. Start Drawing no funciona ya que esta pensado para la logica de Delimitar*/}
-          >
-                Añadir zonas manualmente
-          </Button>
         </aside>
       </main>
 

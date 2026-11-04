@@ -126,6 +126,13 @@ export interface SavedAnalysisRecord {
    *  imagen (mismo espacio que `bbox`): [[x, y], ...]. null/ausente = sin área
    *  (todos los análisis anteriores a este campo). */
   analysisArea?: [number, number][] | null;
+  /** Si el área relevante estaba activa al guardar (HDU13). Se puede apagar sin
+   *  borrarla. Ausente en los análisis anteriores a este campo. */
+  analysisAreaActive?: boolean | null;
+  /** Factor con que el PNG del mapa se redujo respecto del ortomosaico. Las
+   *  máscaras `polygon` están en píxeles del ortomosaico y la vista las dibuja
+   *  sobre el PNG. Ausente equivale a 1. */
+  pngScale?: number | null;
 }
 
 /** Una zona geográfica seguida en el tiempo. Agrupa versiones (vuelos) y,
@@ -273,6 +280,8 @@ export async function saveAnalysis(
     uploadedAt?: string | null;
     algorithmVersion?: number | null;
     analysisArea?: [number, number][] | null;
+    analysisAreaActive?: boolean | null;
+    pngScale?: number | null;
   },
   overwriteId?: string,
 ): Promise<SaveAnalysisResult> {
@@ -293,6 +302,8 @@ export async function saveAnalysis(
       uploadedAt: data.uploadedAt ?? null,
       algorithmVersion: data.algorithmVersion ?? null,
       analysisArea: data.analysisArea ?? null,
+      analysisAreaActive: data.analysisAreaActive ?? null,
+      pngScale: data.pngScale ?? null,
     };
     const res = await fetch(
       overwriteId

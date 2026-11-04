@@ -16,7 +16,10 @@ export interface EnrichedDetection {
   confidence: number;
   bbox: { minx: number; miny: number; maxx: number; maxy: number };
   polygon: null | number[][];   // era number[]; el backend manda [[x1,y1,x2,y2,...], ...]
-  rings?: number[][]; 
+  // Contorno de todo el grupo fusionado, en píxeles del PNG. Lo calcula la vista.
+  rings?: number[][];
+  // Zona de basura dibujada a mano por el trabajador (HDU12).
+  manual?: boolean;
   // Coordenadas reales (en el CRS proyectado del ortomosaico, ver `crs` en
   // AnalyzeSuccess) — volumeCalc.py ya las calcula (backendModel/detecting/
   // volumeCalc.py:104) a partir del geotransform del .tif, HDU5 las usa para
@@ -54,6 +57,15 @@ export interface AnalyzeSuccess {
   // la imagen completa entre análisis en vez de detecciones puntuales (ver
   // backendModel/analyses.py::_find_possible_duplicate).
   orthoBounds: [number, number, number, number] | null;
+  // Factor con que el PNG se redujo respecto del ortomosaico (1 si no se redujo).
+  pngScale: number;
+}
+
+/** Una zona de basura dibujada a mano (HDU12): su tipo y sus vértices en
+ *  píxeles del PNG del mapa. */
+export interface ZonaManual {
+  class: string;
+  polygon: [number, number][];
 }
 
 export interface AnalyzeEmpty {
@@ -84,9 +96,12 @@ const SESION_CAIDA =
 
 export async function startVolumeAnalysis(
   taskId: string,
+  zonas: ZonaManual[] = [],
 ): Promise<{ status: string; message?: string }> {
   const res = await fetch(`${BACKEND_URL}/analyze/${taskId}`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ zones: zonas }),
     // **Sin esto la petición sale sin la cookie de sesión.** Toda la API exige
     // sesión con una dependencia global, así que en producción (donde el
     // backend es otro origen) el backend respondía 401 y el análisis no
@@ -168,6 +183,7 @@ export async function pollVolumeAnalysis(
         crs: jsonData.crs ?? "",
         orthoCenter: jsonData.ortho_center ?? null,
         orthoBounds: jsonData.ortho_bounds ?? null,
+        pngScale: jsonData.png_scale ?? 1,
         summary: {
           totalVolumeM3: Math.round(totalVolumeM3 * 100) / 100,
           totalWeightKg: Math.round(totalWeightKg),

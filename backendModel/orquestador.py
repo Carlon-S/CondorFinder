@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, File, Request, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from typing import List
 import shutil
 import requests
@@ -25,6 +25,7 @@ from joining import joinOrtho
 from joining import Reconociemiento_solapamiento as solapamiento
 from detecting import detectingOrtho
 from detecting import volumeCalc
+from detecting import zonas_manuales as zonas_manuales_mod
 import auth as auth_module
 import resources as resources_module
 import routing as routing_module
@@ -822,7 +823,7 @@ def liberar_archivos_de_vuelos_previos(conservar_task_id: str) -> None:
         pass
 
 
-def run_analysis(task_id: str):
+def run_analysis(task_id: str, zonas_manuales: list[dict] | None = None):
     """Calcula volumen por detección usando el nDSM del vuelo de esta tarea.
 
     Recalcula siempre, incluso si ya se había analizado antes: cada llamada es
@@ -830,6 +831,10 @@ def run_analysis(task_id: str):
     repetirla porque volumeCalc.enrich() parte de los campos crudos de cada
     detección (bbox/polygon/class) y sobrescribe los derivados, sin acumular
     sobre un resultado anterior.
+
+    `zonas_manuales` son las zonas de basura que el trabajador dibujó a mano
+    (HDU12). Se agregan al JSON de detecciones antes de medir, y quedan en el
+    archivo, así que el análisis siguiente las mide junto con las nuevas.
     """
     try:
         task_store.update_task_sync(task_id, analysis_status="running", analysis_message="Calculando volúmenes con datos del modelo 3D...")
@@ -874,6 +879,9 @@ def run_analysis(task_id: str):
                     "solo se puede consultar, no volver a medir."
                 )
 
+        if zonas_manuales:
+            zonas_manuales_mod.agregar_zonas_manuales(detections_json, zonas_manuales)
+
         volumeCalc.enrich(detections_json, ortho_path, ndsm_path, detections_json)
 
         # El JSON recién enriquecido reemplaza al que se subió con las
@@ -897,8 +905,25 @@ def run_analysis(task_id: str):
         task_store.update_task_sync(task_id, analysis_status="error", analysis_message=str(e))
 
 
+class ZonaManualIn(BaseModel):
+    """Una zona de basura dibujada a mano (HDU12)."""
+
+    # Nombre en español de la clase de basura, el mismo que muestra la vista.
+    class_: str = Field(alias="class")
+    # Vértices [[x, y], ...] en píxeles del PNG del mapa.
+    polygon: list[list[float]]
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class AnalyzeRequest(BaseModel):
+    # Zonas dibujadas desde el último análisis. Vacío en el primer análisis y
+    # cuando el trabajador no dibujó ninguna.
+    zones: list[ZonaManualIn] = []
+
+
 @app.post("/analyze/{task_id}")
-async def start_analysis(task_id: str):
+async def start_analysis(task_id: str, body: AnalyzeRequest | None = None):
     """Inicia el cálculo de volumen en background para una tarea ya completada."""
     task = await task_store.get_task(task_id)
     if not task:
@@ -928,7 +953,12 @@ async def start_analysis(task_id: str):
             ),
         }
 
-    thread = threading.Thread(target=run_analysis, args=(task_id,), daemon=True)
+    zonas = [{"class": z.class_, "polygon": z.polygon} for z in (body.zones if body else [])]
+    for zona in zonas:
+        if not zonas_manuales_mod.clase_valida(zona["class"]):
+            return {"status": "error", "message": f"Tipo de basura desconocido: {zona['class']}"}
+
+    thread = threading.Thread(target=run_analysis, args=(task_id, zonas), daemon=True)
     thread.start()
     return {"status": "running"}
 

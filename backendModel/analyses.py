@@ -246,10 +246,17 @@ class SavedAnalysisIn(BaseModel):
         16 MB. Cada anillo se simplifica a un píxel de tolerancia (no se nota en
         pantalla) y sus coordenadas se redondean a enteros. Se conservan todos
         los anillos, a diferencia de `geo_polygon`, que es uno solo."""
-        return [
-            {**d, "polygon": _comprimir_anillos(d["polygon"])} if d.get("polygon") else d
-            for d in detecciones
-        ]
+        salida = []
+        for d in detecciones:
+            d = dict(d)
+            # `polygon` es la máscara de la detección; `rings` es la de todo
+            # el grupo fusionado, ya en píxeles del PNG, que es la que dibuja
+            # la vista.
+            for clave in ("polygon", "rings"):
+                if d.get(clave):
+                    d[clave] = _comprimir_anillos(d[clave])
+            salida.append(d)
+        return salida
 
     # Centro geográfico real del ortomosaico (volumeCalc.py::ortho_center,
     # mismo CRS que `crs`), HDU5/rutas.tsx lo usa para ubicar el círculo de
@@ -265,6 +272,14 @@ class SavedAnalysisIn(BaseModel):
     # Polígono con el que el trabajador delimitó el área de análisis, en
     # píxeles de la imagen: [[x, y], ...]. None si no delimitó ninguna.
     analysisArea: list[list[float]] | None = None
+    # Si el área relevante estaba activa al guardar (HDU13). El área se puede
+    # apagar sin borrarla; None en los análisis guardados antes de este campo.
+    analysisAreaActive: bool | None = None
+    # Factor con que el PNG del mapa se redujo respecto del ortomosaico
+    # (`png_scale` del JSON de detecciones). Las máscaras `polygon` están en
+    # píxeles del ortomosaico y la vista las dibuja sobre el PNG, así que
+    # necesita este factor para reproyectarlas. None equivale a 1.
+    pngScale: float | None = None
 
 
 class DuplicateCandidate(BaseModel):
@@ -325,6 +340,8 @@ def _to_out(doc: dict) -> SavedAnalysisOut:
         orthoCenter=doc.get("orthoCenter"),
         orthoBounds=doc.get("orthoBounds"),
         analysisArea=doc.get("analysisArea"),
+        analysisAreaActive=doc.get("analysisAreaActive"),
+        pngScale=doc.get("pngScale"),
         possibleDuplicateOf=doc.get("possibleDuplicateOf"),
         possibleDuplicates=doc.get("possibleDuplicates", []),
         duplicateStatus=doc.get("duplicateStatus"),

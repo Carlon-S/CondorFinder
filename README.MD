@@ -908,7 +908,10 @@ Líneas de referencia en el commit de integración (`75e940f`).
 | | 132 | Lectura de `png_scale` (1,0 si el JSON no lo trae) |
 | | 188-191 | Densidad de la detección o de la clase |
 | | 196-210 | `geo_polygon`, `density_kg_m3`, `color` y `png_scale` en la salida |
-| `backendModel/analyses.py` | 220 | `SavedAnalysisIn._comprimir_mascara`: guarda `polygon` simplificado |
+| `backendModel/analyses.py` | 220 | `SavedAnalysisIn._comprimir_mascara`: guarda `polygon` y `rings` simplificados |
+| | | Campos `analysisAreaActive` y `pngScale` del análisis guardado |
+| `backendModel/detecting/zonas_manuales.py` (nuevo) | | Zonas de basura dibujadas a mano (HDU12): se agregan al JSON de detecciones |
+| `backendModel/orquestador.py` | | `POST /analyze/{task_id}` acepta `zones` |
 | `backendModel/orquestador.py` | 239 | `VOLUME_ALGORITHM_VERSION = 2` |
 | `backendModel/routing.py` | 1137, 1139 | `RAMAS` pasa a "Madera" y `MIXTO` a "Residuos mezclados" |
 | `backendModel/scripts/probar_poligonos.py` (nuevo) | | 23 comprobaciones con datos sintéticos |

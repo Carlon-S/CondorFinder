@@ -180,6 +180,41 @@ with tempfile.TemporaryDirectory() as carpeta:
     d = salida["detections"][0]
     comprobar(d["volume_m3"] is not None, "una máscara degenerada cae a la caja")
 
+print("zonas de basura dibujadas a mano (HDU12)")
+from detecting import zonas_manuales  # noqa: E402
+
+with tempfile.TemporaryDirectory() as carpeta:
+    ortho, ndsm, transform = crear_rasters(carpeta)
+    # El PNG se redujo a la mitad: un cuadrado de 10x10 px en el PNG son 20x20 px
+    # del ortomosaico, o sea 400 px = 100 m², y con 2 m de altura, 200 m3.
+    _, ruta = enriquecer(carpeta, ortho, ndsm, [deteccion(id=3)], png_scale=0.5)
+    cuadrado = [[0, 0], [10, 0], [10, 10], [0, 10]]
+    n = zonas_manuales.agregar_zonas_manuales(
+        ruta,
+        [
+            {"class": "Pallets", "polygon": cuadrado},
+            {"class": "Clase inventada", "polygon": cuadrado},
+            {"class": "Madera", "polygon": [[0, 0], [1, 1]]},
+        ],
+    )
+    comprobar(n == 1, "solo se agrega la zona con clase conocida y 3 vértices o más")
+    with open(ruta) as f:
+        datos = json.load(f)
+    nueva = datos["detections"][-1]
+    comprobar(nueva["id"] == 4 and len(datos["detections"]) == 2, "la zona nueva sigue a las existentes")
+    comprobar(nueva["manual"] is True and nueva["class"] == "Pallets", "queda marcada como manual, con su clase")
+    comprobar(nueva["density_kg_m3"] == densidad_de("Pallets"), "usa la densidad de su clase")
+    comprobar(nueva["polygon"] == [[0.0, 0.0, 20.0, 0.0, 20.0, 20.0, 0.0, 20.0]], "el contorno pasa a píxeles del ortomosaico")
+    salida = volumeCalc.enrich(ruta, ortho, ndsm, ruta)
+    medida = salida["detections"][-1]
+    comprobar(aprox(medida["volume_m3"], 200.0, 2.0), f"se mide como cualquier detección (dio {medida['volume_m3']})")
+    comprobar(aprox(medida["weight_kg"], medida["volume_m3"] * densidad_de("Pallets"), 0.5), "su peso usa la densidad de la clase")
+    # Segundo análisis sin zonas nuevas: las antiguas se conservan.
+    n = zonas_manuales.agregar_zonas_manuales(ruta, [])
+    with open(ruta) as f:
+        datos = json.load(f)
+    comprobar(n == 0 and len(datos["detections"]) == 2, "sin zonas nuevas, las antiguas se conservan")
+
 print("análisis guardado con la máscara comprimida")
 try:
     import analyses  # noqa: E402
