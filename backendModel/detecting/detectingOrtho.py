@@ -12,53 +12,59 @@ import folium
 import json
 from pathlib import Path
 import cv2
-from dataclasses import dataclass
 
 from detecting.waste_classes import info_por_clase_yolo
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Modelo de segmentación: por cada objeto entrega una caja y una máscara.
 MODEL_PATH = os.path.join(BASE_DIR, "model/bestseg.pt")
 OUTPUT_PATH = os.path.join(BASE_DIR, "output")
 
-CLASSES = [
-    "Rubble", "Construction and demolition materials", "Asphalt milling",
-    "Excavation materials", "Appliances", "Electronic equipment", "Furniture",
-    "Metal barrels", "Plastic packaging", "Wood", "Pallets", "Scrap", "Plastic",
-    "Vehicles", "Tyres", "Paper", "Foundry", "Asbestos", "Textile", "Mixed items",
-]
+# Confianza mínima para aceptar una detección.
+CONF = 0.18
 
-@dataclass(frozen=True)
-class WasteInfo:
-    name_es: str    # Spanish display name
-    color: str      # hex color
-    density: float  # kg/m³ (bulk density, used to estimate weight from volume)
+# Dispositivo de inferencia: GPU si torch la ve, CPU en caso contrario.
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-# Fallback for anything not in the table
-UNKNOWN = WasteInfo("Tipo de basura indefinido", "#8404b3", 200)
+# Holgura en píxeles al comprobar que una máscara cae dentro de su caja.
+MARGEN_MASCARA_PX = 3
 
-WASTE_MAP = {
-    # YOLO class                              name_es                      color       density
-    "Rubble":                         WasteInfo("Escombros",                 "#ff1100", 1400),
-    "Construction and demolition materials": WasteInfo("Residuo de construcción", "#d9480f", 400),
-    "Asphalt milling":                WasteInfo("Fresado asfáltico",         "#3b3b3b", 1600),
-    "Excavation materials":           WasteInfo("Material de excavación",    "#8b5a2b", 1600),
-    "Appliances":                     WasteInfo("Electrodomésticos",         "#17a2b8", 150),
-    "Electronic equipment":           WasteInfo("Equipos electrónicos",      "#6f42c1", 150),
-    "Furniture":                      WasteInfo("Muebles",                   "#ff8400", 200),
-    "Metal barrels":                  WasteInfo("Barriles metálicos",        "#7c8a99", 100),
-    "Plastic packaging":              WasteInfo("Envases plásticos",         "#4f7cff", 80),
-    "Wood":                           WasteInfo("Madera",                    "#c49a6c", 300),
-    "Pallets":                        WasteInfo("Pallets",                   "#e0b100", 150),
-    "Scrap":                          WasteInfo("Chatarra",                  "#696969", 600),
-    "Plastic":                        WasteInfo("Plástico",                  "#0228c2", 80),
-    "Vehicles":                       WasteInfo("Vehículos",                 "#00a3a3", 150),
-    "Tyres":                          WasteInfo("Neumáticos",                "#262626", 400),
-    "Paper":                          WasteInfo("Papel",                     "#9acd32", 100),
-    "Foundry":                        WasteInfo("Fundición",                 "#b5179e", 1200),
-    "Asbestos":                       WasteInfo("Asbesto",                   "#ff006e", 400),
-    "Textile":                        WasteInfo("Textil",                    "#f783ac", 100),
-    "Mixed items":                    WasteInfo("Residuos mezclados",        "#8404b3", 200),
-}
+
+def _anillos_de(pred, decimales: int = 1):
+    """Anillos de la máscara de una detección, en píxeles del ortomosaico.
+
+    SAHI entrega `pred.mask.segmentation` como una lista de anillos, cada uno
+    plano: [x1, y1, x2, y2, ...]. Una detección puede tener varios anillos
+    cuando su máscara está partida en varias piezas. Devuelve `None` si la
+    detección no trae máscara o la máscara no tiene ningún anillo."""
+    if pred.mask is None:
+        return None
+    anillos = [
+        [round(float(coord), decimales) for coord in anillo]
+        for anillo in pred.mask.segmentation
+        if len(anillo) >= 6  # menos de 3 vértices no encierra una superficie
+    ]
+    return anillos or None
+
+
+def _mascara_dentro_de_caja(anillos, box) -> bool:
+    """Si todos los vértices de la máscara caen dentro de su caja (con margen).
+
+    Las dos geometrías salen de la misma predicción, así que deben coincidir. Si
+    no lo hacen, la máscara no está en las coordenadas de la imagen completa."""
+    for anillo in anillos:
+        xs = anillo[0::2]
+        ys = anillo[1::2]
+        if (
+            min(xs) < box.minx - MARGEN_MASCARA_PX
+            or max(xs) > box.maxx + MARGEN_MASCARA_PX
+            or min(ys) < box.miny - MARGEN_MASCARA_PX
+            or max(ys) > box.maxy + MARGEN_MASCARA_PX
+        ):
+            return False
+    return True
+
 
 def detect(file_name: str):
     print("Ejecutando deteccion")
@@ -131,22 +137,20 @@ def detect(file_name: str):
     mascaras_fuera_de_caja = 0
     for i, pred in enumerate(result.object_prediction_list):
         box = pred.bbox
-        yolo_cls = CLASSES[pred.category.id]
-        info = WASTE_MAP.get(yolo_cls, UNKNOWN)
+        # Nombre interno que el modelo da a la clase (p. ej. "Rubble").
+        yolo_cls = pred.category.name
+        # Nombre en español, color y densidad de esa clase.
+        info = info_por_clase_yolo(yolo_cls)
         conf = round(float(pred.score.value), 3)
 
-        polygon = None
-        if pred.mask is not None:
-            polygon = [
-                [round(coord * scale) for coord in poly]
-                for poly in pred.mask.segmentation
-            ]
-            print(pred)
+        anillos = _anillos_de(pred)
+        if anillos is not None and not _mascara_dentro_de_caja(anillos, box):
+            mascaras_fuera_de_caja += 1
 
         detections_list.append({
             "id": i,
             "class": info.name_es,
-            "yolo_class": yolo_cls,                  
+            "yolo_class": yolo_cls,
             "color": info.color,
             "density_kg_m3": info.density,
             "confidence": conf,
@@ -156,7 +160,7 @@ def detect(file_name: str):
                 "maxx": round(box.maxx * scale),
                 "maxy": round(box.maxy * scale),
             },
-            "polygon": [poly for poly in pred.mask.segmentation] if polygon is not None else None,
+            "polygon": anillos,
         })
 
     if mascaras_fuera_de_caja:

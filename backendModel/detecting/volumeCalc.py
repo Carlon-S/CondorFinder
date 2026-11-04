@@ -7,13 +7,21 @@ from shapely.geometry import Polygon, MultiPolygon, mapping
 from shapely.ops import unary_union
 import geopandas as gpd
 
-def flat_pixels_to_geo(flat_px, transform):
-    """[x1, y1, x2, y2, ...] -> [(geo_x, geo_y), ...]  (used for drawing)"""
-    return [transform * (px, py) for px, py in zip(flat_px[0::2], flat_px[1::2])]
+from detecting.waste_classes import color_de, densidad_de
+
 
 def pixels_to_geo(polygon_px, transform):
-    """[[x, y], ...] -> [(geo_x, geo_y), ...]  (used for the bbox)"""
-    return [transform * (px, py) for px, py in polygon_px]
+    """
+    Convert [[x,y], ...] pixel coords to geographic coords
+    using the rasterio affine transform of the orthomosaic.
+    """
+    geo_coords = []
+    for (px, py) in polygon_px:
+        # affine: geo = transform * (col, row)
+        geo_x, geo_y = transform * (px, py)
+        geo_coords.append((geo_x, geo_y))
+    return geo_coords
+
 
 def compute_ndsm(dsm_path, dtm_path, ndsm_path):
     """
@@ -154,26 +162,15 @@ def enrich(
     for det in data["detections"]:
         result = dict(det)
 
-        # Volume: always from the bbox (unchanged logic)
-        b = det["bbox"]
-        bbox_px = [
-            [b["minx"], b["miny"]],
-            [b["maxx"], b["miny"]],
-            [b["maxx"], b["maxy"]],
-            [b["minx"], b["maxy"]],
-        ]
-        bbox_geo = pixels_to_geo(bbox_px, transform)
+        geometria = geometria_de_deteccion(det, png_scale, transform)
 
-        # Drawing: the real polygon if it exists, otherwise fall back to the bbox
-        if det["polygon"] is not None:
-            draw_geo = flat_pixels_to_geo(det["polygon"], transform)
-        else:
-            draw_geo = bbox_geo
+        if geometria is None or geometria.is_empty or geometria.area == 0:
+            result.update({"volume_m3": None, "weight_kg": None})
+            enriched.append(result)
+            continue
 
-        shapely_poly = Polygon(bbox_geo)
-        if not shapely_poly.is_valid:
-            shapely_poly = shapely_poly.buffer(0)
-
+        # Suma de la altura (nDSM) de todos los píxeles dentro de la geometría,
+        # más la cantidad de píxeles, el promedio y el máximo.
         stats = zonal_stats(
             [mapping(geometria)],
             ndsm_path,
@@ -185,17 +182,27 @@ def enrich(
         height_sum = stats["sum"] if stats["sum"] is not None else 0.0
         # Volumen = suma de alturas × superficie de un píxel.
         volume_m3 = round(height_sum * pixel_area_m2, 4)
-        weight_kg = round(volume_m3 * int(det["density_kg_m3"]), 2)
+
+        # Densidad de la detección; si el JSON no la trae (modelo anterior) se
+        # busca por el nombre de su clase.
+        densidad = det.get("density_kg_m3")
+        if densidad is None:
+            densidad = densidad_de(det["class"])
+        weight_kg = round(volume_m3 * float(densidad), 2)
+
         area_m2 = round((stats["count"] or 0) * pixel_area_m2, 4)
 
         result.update({
-            "geo_polygon":   draw_geo,   # for drawing only
+            "geo_polygon":   anillo_para_mapa(geometria, tolerancia_contorno),
             "area_m2":       area_m2,
             "ndsm_mean_m":   round(stats["mean"] or 0, 3),
             "ndsm_max_m":    round(stats["max"]  or 0, 3),
             "volume_m3":     volume_m3,
+            "density_kg_m3": float(densidad),
             "weight_kg":     weight_kg,
+            "color":         det.get("color") or color_de(det["class"]),
         })
+
         enriched.append(result)
 
     output = {

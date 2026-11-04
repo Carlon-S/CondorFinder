@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 from pymongo import ReturnDocument
 from pymongo.asynchronous.database import AsyncDatabase
-from shapely.geometry import Polygon
+from shapely.geometry import LinearRing, Polygon
 
 import auth as auth_module
 import auditoria
@@ -74,6 +74,23 @@ def get_db() -> AsyncDatabase:
 # =============================================================================
 # MODELOS
 # =============================================================================
+
+
+def _comprimir_anillos(anillos: list[list[float]]) -> list[list[int]]:
+    """Anillos planos [x1, y1, x2, y2, ...] simplificados a 1 px y en enteros.
+
+    Si la simplificación dejara un anillo con menos de 3 vértices, se conserva
+    el original redondeado."""
+    salida = []
+    for plano in anillos:
+        pares = [(plano[k], plano[k + 1]) for k in range(0, len(plano) - 1, 2)]
+        if len(pares) < 3:
+            continue
+        simple = list(LinearRing(pares).simplify(1.0, preserve_topology=False).coords)[:-1]
+        if len(simple) < 3:
+            simple = pares
+        salida.append([int(round(v)) for punto in simple for v in punto])
+    return salida
 
 class AnalysisSummaryModel(BaseModel):
     totalVolumeM3: float
@@ -219,18 +236,21 @@ class SavedAnalysisIn(BaseModel):
 
     @field_validator("detections")
     @classmethod
-    def _sin_mascara_en_pixeles(cls, detecciones: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Quita `polygon` (la máscara en píxeles) de cada detección antes de guardar.
+    def _comprimir_mascara(cls, detecciones: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Guarda `polygon` (la máscara en píxeles) con menos vértices.
 
-        `polygon` solo lo usa volumeCalc.py al medir, y lo lee del archivo JSON
-        de la tarea, no de este documento. Lo que el sistema dibuja y compara
-        sale de `geo_polygon`, `bbox` y las cifras. Una máscara por detección
-        puede tener cientos de vértices, y todas las detecciones de un análisis
-        se guardan en un único documento de Mongo, que admite hasta 16 MB."""
+        La vista de análisis dibuja cada detección con `polygon`, así que sin él
+        un análisis reabierto se vería con cajas. Pero una máscara completa puede
+        tener cientos de vértices por anillo, y todas las detecciones de un
+        análisis se guardan en un único documento de Mongo, que admite hasta
+        16 MB. Cada anillo se simplifica a un píxel de tolerancia (no se nota en
+        pantalla) y sus coordenadas se redondean a enteros. Se conservan todos
+        los anillos, a diferencia de `geo_polygon`, que es uno solo."""
         return [
-            {clave: valor for clave, valor in deteccion.items() if clave != "polygon"}
-            for deteccion in detecciones
+            {**d, "polygon": _comprimir_anillos(d["polygon"])} if d.get("polygon") else d
+            for d in detecciones
         ]
+
     # Centro geográfico real del ortomosaico (volumeCalc.py::ortho_center,
     # mismo CRS que `crs`), HDU5/rutas.tsx lo usa para ubicar el círculo de
     # la zona en el mapa de forma consistente entre distintas corridas de

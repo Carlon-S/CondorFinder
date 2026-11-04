@@ -396,7 +396,7 @@ Y escribe arriba del JSON: `crs`, `png_scale`, `ortho_center` (centro del ortomo
 
 ### Qué se guarda en Mongo
 
-El análisis guardado (`/analyses`) conserva todos los campos de cada detección **excepto `polygon`**: la máscara en píxeles solo se usa al medir, y la lee `volumeCalc.py` desde el archivo JSON de la tarea. `analyses.py` la quita al recibir el análisis, porque todas las detecciones de un análisis se guardan en un único documento.
+El análisis guardado (`/analyses`) conserva todos los campos de cada detección, incluido `polygon`, porque la vista de análisis dibuja cada detección con esa máscara. Todas las detecciones de un análisis se guardan en un único documento de Mongo (límite de 16 MB), así que `analyses.py` comprime la máscara al recibirla: conserva todos los anillos, los simplifica a un píxel de tolerancia y redondea las coordenadas a enteros. El archivo JSON de la tarea conserva la máscara completa, que es la que lee `volumeCalc.py` al medir.
 
 ### Clases
 

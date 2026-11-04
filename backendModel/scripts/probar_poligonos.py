@@ -180,24 +180,31 @@ with tempfile.TemporaryDirectory() as carpeta:
     d = salida["detections"][0]
     comprobar(d["volume_m3"] is not None, "una máscara degenerada cae a la caja")
 
-print("análisis guardado sin máscara en píxeles")
+print("análisis guardado con la máscara comprimida")
 try:
     import analyses  # noqa: E402
 
+    # Contorno de 400 vértices (círculo de radio 50) con un segundo anillo.
+    import math  # noqa: E402
+
+    circulo = [round(50 + 50 * f(2 * math.pi * k / 400), 3) for k in range(400) for f in (math.cos, math.sin)]
+    cuadrado = [0, 0, 10, 0, 10, 10, 0, 10]
     modelo = analyses.SavedAnalysisIn(
         name="prueba",
         mapUrl="/result/x.png",
         detections=[
-            {"id": 0, "class": "Muebles", "polygon": [[0, 0, 1, 0, 1, 1]], "geo_polygon": [[0, 0]]},
+            {"id": 0, "class": "Muebles", "polygon": [circulo, cuadrado], "geo_polygon": [[0, 0]]},
             {"id": 1, "class": "Madera", "polygon": None},
         ],
     )
+    d0, d1 = modelo.detections
+    comprobar(len(d0["polygon"]) == 2, "se conservan todos los anillos")
+    comprobar(len(d0["polygon"][0]) < len(circulo), f"el anillo se simplifica ({len(d0['polygon'][0]) // 2} vértices de 400)")
+    comprobar(all(isinstance(v, int) for anillo in d0["polygon"] for v in anillo), "las coordenadas son enteros")
+    comprobar(d0["polygon"][1] == cuadrado, "un anillo que ya es mínimo no cambia")
+    comprobar(d1["polygon"] is None, "una detección sin máscara sigue sin máscara")
     comprobar(
-        all("polygon" not in d for d in modelo.detections),
-        "ninguna detección guardada trae `polygon`",
-    )
-    comprobar(
-        modelo.detections[0]["geo_polygon"] == [[0, 0]] and modelo.detections[0]["class"] == "Muebles",
+        d0["geo_polygon"] == [[0, 0]] and d0["class"] == "Muebles",
         "el resto de los campos se conserva",
     )
 except Exception as e:  # el entorno no tiene las dependencias del backend completo
