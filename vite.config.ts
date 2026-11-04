@@ -84,6 +84,18 @@ export default defineConfig({
     server: { entry: "server" },
   },
   vite: {
+    build: {
+      rollupOptions: {
+        // Cuantos archivos lee Rollup a la vez (por omision, 1000).
+        //
+        // El build de Cloudflare fallaba en el tercer entorno de Vite, el del
+        // Worker, con "EMFILE: too many open files": ese entorno empaqueta
+        // lucide-react y otras librerias con miles de archivos chicos, y el
+        // contenedor de build permite pocos descriptores abiertos a la vez.
+        // Con un limite bajo Rollup los lee en tandas. Solo afecta al build.
+        maxParallelFileOps: 32,
+      },
+    },
     server: {
       proxy: Object.fromEntries(
         BACKEND_ROUTE_PREFIXES.map((prefix) => [
