@@ -135,6 +135,7 @@ interface DisplayDetection {
   confidence: number;
   bbox: { minx: number; miny: number; maxx: number; maxy: number };
   polygon: null | number[][];
+  rings?: number[][]; 
   // Coordenadas reales (CRS proyectado del ortomosaico) de la detección
   // dominante del grupo, HDU5 las reproyecta a WGS84 para el mapa.
   geo_polygon?: number[][] | null;
@@ -144,6 +145,44 @@ interface DisplayDetection {
   breakdown: ClassBreakdown[]; // desglose por clase (para visualización)
 }
 
+function normalizeRings(polygon: unknown): number[][] {
+  if (!Array.isArray(polygon) || polygon.length === 0) return [];
+  const rings = Array.isArray(polygon[0]) ? (polygon as number[][]) : [polygon as number[]];
+  return rings.filter((r) => r.length >= 6); // mínimo 3 puntos
+}
+
+type AreaPoint = [number, number];
+
+function pointInPolygon(x: number, y: number, poly: AreaPoint[]): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i];
+    const [xj, yj] = poly[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/** Una detección cuenta como "dentro" si el centro de su recuadro cae en el área.
+ *  Si prefieres otra regla (solo si está entera dentro, o si toca el área),
+ *  se cambia solo acá. */
+function detectionInArea(d: DisplayDetection, poly: AreaPoint[]): boolean {
+  return pointInPolygon(
+    (d.bbox.minx + d.bbox.maxx) / 2,
+    (d.bbox.miny + d.bbox.maxy) / 2,
+    poly,
+  );
+}
+
+function ringsToPath(rings: number[][]): string {
+  return rings
+    .map((r) => {
+      let d = `M${r[0]} ${r[1]}`;
+      for (let i = 2; i + 1 < r.length; i += 2) d += `L${r[i]} ${r[i + 1]}`;
+      return d + "Z";
+    })
+    .join("");
+}
 // ── colores ────────────────────────────────────────────────────────────────────
 
 const CLASS_COLORS: Record<string, string> = {
@@ -295,8 +334,7 @@ function mergeOverlapping(
       confidence: Math.max(...dets.map(d => d.confidence)),
       bbox,
       polygon:    dets[0].polygon,
-      // Mismo dets[0] que `polygon`, son dos representaciones de la MISMA
-      // geometría (píxel vs. real), tienen que salir de la misma detección.
+      rings:      dets.flatMap((d) => normalizeRings(d.polygon)),
       geo_polygon: dets[0].geo_polygon,
       area_m2:    aggArea   || null,
       volume_m3:  aggVolume || null,
@@ -388,6 +426,11 @@ function AnalysisPage() {
   const [displayDetections, setDisplayDetections] = useState<DisplayDetection[]>([]);
   const [detectionsLoading, setDetectionsLoading] = useState(false);
   const [enabledIds, setEnabledIds]               = useState<Set<number>>(new Set());
+  const [areaMode, setAreaMode]         = useState<"idle" | "drawing">("idle");
+  const [draftPoints, setDraftPoints]   = useState<AreaPoint[]>([]);
+  const [trashDraftPoints, setDrafPoints] = useState<AreaPoint[]>([]);
+  const [analysisArea, setAnalysisArea] = useState<AreaPoint[] | null>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
   const [imgNaturalSize, setImgNaturalSize]        = useState<{ w: number; h: number } | null>(null);
   // CRS proyectado del ortomosaico (HDU5), llega junto con las detecciones,
   // se guarda para poder reproyectar geo_polygon a WGS84 más adelante (en
@@ -628,6 +671,7 @@ function AnalysisPage() {
         crs,
         orthoCenter,
         orthoBounds,
+        analysisArea,
         zoneId,
         captureDate,
         captureDateEstimated,
@@ -652,6 +696,8 @@ function AnalysisPage() {
     saveCurrentAnalysisId(result.record.id);
     saveCurrentAnalysisName(result.record.name);
     setSaveDialogOpen(false);
+    setAreaMode("idle");
+    setDraftPoints([]);
     notify.success(
       overwriteId ? "Análisis actualizado" : "Análisis guardado",
       overwriteId
@@ -746,6 +792,63 @@ function AnalysisPage() {
     );
   };
 
+  const startDrawing = () => {
+  setDraftPoints([]);
+  setAreaMode("drawing");
+};
+
+const cancelDrawing = () => {
+  setDraftPoints([]);
+  setAreaMode("idle");
+};
+
+const closeArea = (pts: AreaPoint[]) => {
+  setAnalysisArea(pts);
+  setDraftPoints([]);
+  setEnabledIds(new Set(displayDetections.filter(d => detectionInArea(d, pts)).map(d => d.id)));
+};
+
+const clearArea = () => {
+  setAnalysisArea(null);
+  setEnabledIds(new Set(displayDetections.map(d => d.id))); // vuelve a activar todo
+};
+
+
+
+const addAreaPoint = (clientX: number, clientY: number) => {
+  const svg = svgRef.current;
+  const ctm = svg?.getScreenCTM();
+  if (!svg || !ctm || !imgNaturalSize) return;
+  const p = new DOMPoint(clientX, clientY).matrixTransform(ctm.inverse());
+  const x = Math.min(imgNaturalSize.w, Math.max(0, p.x));
+  const y = Math.min(imgNaturalSize.h, Math.max(0, p.y));
+
+  // Cerrar: click a ≤12 px de pantalla del primer punto (con ≥3 puestos).
+  if (draftPoints.length >= 3) {
+    const pxPerUnit = Math.hypot(ctm.a, ctm.b);
+    const [x0, y0] = draftPoints[0];
+    if (Math.hypot(x - x0, y - y0) * pxPerUnit <= 12) {
+      closeArea(draftPoints);
+      return;
+    }
+  }
+  setDraftPoints([...draftPoints, [x, y]]);
+};
+
+// Esc cancela, Retroceso deshace el último punto.
+useEffect(() => {
+  if (areaMode !== "drawing") return;
+  const onKey = (e: KeyboardEvent) => {
+    if ((e.target as HTMLElement | null)?.closest("input, textarea")) return;
+    if (e.key === "Escape") cancelDrawing();
+    else if (e.key === "Backspace") setDraftPoints(p => p.slice(0, -1));
+  };
+  window.addEventListener("keydown", onKey);
+  return () => window.removeEventListener("keydown", onKey);
+}, [areaMode]);
+
+
+
   /** Zonas fusionadas con su desglose por tipo a la vista. Colapsadas por
    *  omisión: sus cifras internas son casi idénticas entre sí y desplegadas
    *  siempre tapaban las filas que de verdad se comparan entre sí. */
@@ -819,6 +922,9 @@ function AnalysisPage() {
     // cuenta como activa: es como se comportaban los análisis anteriores a que
     // la selección se persistiera, así que abrirlos sigue dando lo mismo.
     setEnabledIds(new Set(detections.filter((d) => d.enabled !== false).map((d) => d.id)));
+    setAnalysisArea((record.analysisArea as [number, number][] | null | undefined) ?? null);
+    setDraftPoints([]);
+    setAreaMode("idle");
     setCrs(record.crs);
     setOrthoCenter(record.orthoCenter ?? null);
     setOrthoBounds(record.orthoBounds ?? null);
@@ -1180,6 +1286,7 @@ function AnalysisPage() {
       if (startResult.status === "unavailable") {
         setCanAnalyze(false);
         setCannotAnalyzeReason(startResult.message ?? null);
+        console.log("CannotAnalyzeReason")
         setAnalysisMessage(startResult.message ?? null);
         setStatus("error");
         return;
@@ -1190,6 +1297,9 @@ function AnalysisPage() {
         const merged = mergeOverlapping(response.detections);
         setDisplayDetections(merged);
         setEnabledIds(new Set(merged.map(d => d.id)));
+          setAnalysisArea(null);
+          setDraftPoints([]);
+          setAreaMode("idle");
         setCrs(response.crs || undefined);
         setOrthoCenter(response.orthoCenter ?? null);
         setOrthoBounds(response.orthoBounds ?? null);
@@ -1320,10 +1430,17 @@ function AnalysisPage() {
     });
   };
 
-  const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
-    event.currentTarget.releasePointerCapture(event.pointerId);
-    setDragging(false);
-  };
+const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+  event.currentTarget.releasePointerCapture(event.pointerId);
+  setDragging(false);
+  if (areaMode === "drawing" && dragging && event.button === 0) {
+    const moved = Math.hypot(event.clientX - dragStart.current.x, event.clientY - dragStart.current.y);
+    if (moved < 4) addAreaPoint(event.clientX, event.clientY);
+  }
+};
+  
+
+
 
   // ── render ─────────────────────────────────────────────────────────────────
 
@@ -1524,6 +1641,29 @@ function AnalysisPage() {
                 </p>
               )}
 
+              <Button
+                onClick={areaMode === "drawing" ? cancelDrawing : startDrawing}
+                disabled={displayDetections.length === 0}
+                variant={areaMode === "drawing" ? "default" : "secondary"}
+                className="w-full"
+              >
+                <Crosshair className="mr-2 h-4 w-4" />
+                {areaMode === "drawing" ? "Cancelar delimitación" : analysisArea ? "Redibujar área" : "Delimitar área"}
+              </Button>
+
+              {areaMode === "drawing" && (
+                <p className="rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-[0.69rem] leading-relaxed text-muted-foreground">
+                  Haz click en el mapa para poner los puntos. Para cerrar, vuelve a hacer click
+                  en el primero. Retroceso deshace el último punto y Esc cancela.
+                </p>
+              )}
+
+              {analysisArea && areaMode === "idle" && (
+                <Button onClick={clearArea} variant="outline" size="sm" className="w-full">
+                  Quitar área y reactivar todas
+                </Button>
+              )}
+
               {/* HDU4/AC1, guardar análisis. Deshabilitado en una versión ya
                   reemplazada: consultarla es válido, sobrescribirla no, porque
                   es historia de la zona y no el estado vigente del terreno. */}
@@ -1720,7 +1860,7 @@ function AnalysisPage() {
                 onPointerUp={onPointerUp}
                 onPointerCancel={() => setDragging(false)}
                 className={`h-full w-full touch-none select-none overflow-hidden animate-in fade-in zoom-in-95 duration-300 ${
-                  dragging ? "cursor-grabbing" : "cursor-grab"
+                  dragging ? "cursor-grabbing" : areaMode === "drawing" ? "cursor-crosshair" : "cursor-grab"
                 }`}
               >
                 <div
@@ -1799,8 +1939,14 @@ function AnalysisPage() {
                         const minVol = vols.length > 0 ? Math.min(...vols) : 0;
                         const maxVol = vols.length > 0 ? Math.max(...vols) : 0;
                         const hasVolData = status === "done" && maxVol > 0;
+                        const svgEl = svgRef.current;
+                        const ppu = svgEl?.clientWidth && svgEl?.clientHeight
+                        ? Math.min(svgEl.clientWidth / imgNaturalSize.w, svgEl.clientHeight / imgNaturalSize.h) * scale * factorRotacion
+                        : 0.1; // pixeles de pantalla por pixel de imagen
+                        const toPts = (pts: AreaPoint[]) => pts.map(([x, y]) => `${x},${y}`).join(" ");
                         return (
                           <svg
+                            ref={svgRef}
                             viewBox={`0 0 ${imgNaturalSize.w} ${imgNaturalSize.h}`}
                             className="absolute inset-0 h-full w-full pointer-events-none"
                             preserveAspectRatio="xMidYMid meet"
@@ -1813,17 +1959,29 @@ function AnalysisPage() {
                               const bw   = d.bbox.maxx - d.bbox.minx;
                               const bh   = d.bbox.maxy - d.bbox.miny;
                               const FONT = 24;
+                              const rings = d.rings ?? normalizeRings(d.polygon);
                               return (
                                 <g key={d.id}>
-                                  <rect
-                                    x={d.bbox.minx} y={d.bbox.miny}
-                                    width={bw} height={bh}
-                                    fill={fillColor}
-                                    fillOpacity={0.35}
-                                    stroke={strokeColor}
-                                    strokeWidth={1.5}
-                                    strokeLinejoin="round"
-                                  />
+                                  {rings.length > 0 ? (
+                                    <path
+                                      d={ringsToPath(rings)}
+                                      fill={fillColor}
+                                      fillOpacity={0.35}
+                                      stroke={strokeColor}
+                                      strokeWidth={1.5}
+                                      strokeLinejoin="round"
+                                    />
+                                  ) : (
+                                    <rect
+                                      x={d.bbox.minx} y={d.bbox.miny}
+                                      width={bw} height={bh}
+                                      fill={fillColor}
+                                      fillOpacity={0.35}
+                                      stroke={strokeColor}
+                                      strokeWidth={1.5}
+                                      strokeLinejoin="round"
+                                    />
+                                  )}
                                   <text
                                     x={d.bbox.minx}
                                     y={d.bbox.miny - 6}
@@ -1841,6 +1999,43 @@ function AnalysisPage() {
                                 </g>
                               );
                             })}
+                            {/* área cerrada: oscurece lo de afuera y marca el borde */}
+                            {analysisArea && areaMode === "drawing" && (
+                              <>
+                                <path
+                                  fillRule="evenodd"
+                                  fill="black"
+                                  fillOpacity={0.35}
+                                  d={`M0 0H${imgNaturalSize.w}V${imgNaturalSize.h}H0Z` +
+                                    `M${analysisArea.map(([x, y]) => `${x} ${y}`).join("L")}Z`}
+                                />
+                                <polygon
+                                  points={toPts(analysisArea)}
+                                  fill="none"
+                                  stroke="#38bdf8"
+                                  strokeWidth={2 / ppu}
+                                  strokeDasharray={`${8 / ppu} ${5 / ppu}`}
+                                  strokeLinejoin="round"
+                                />
+                              </>
+                            )}
+
+                            {/* área en construcción */}
+                            {areaMode === "drawing" && draftPoints.length > 0 && (
+                              <g>
+                                <polyline points={toPts(draftPoints)} fill="none" stroke="#38bdf8" strokeWidth={2 / ppu} />
+                                {draftPoints.map(([x, y], i) => (
+                                  <circle
+                                    key={i}
+                                    cx={x} cy={y}
+                                    r={(i === 0 && draftPoints.length >= 3 ? 7 : 4) / ppu}
+                                    fill={i === 0 ? "#ffffff" : "#38bdf8"}
+                                    stroke="#0369a1"
+                                    strokeWidth={1.5 / ppu}
+                                  />
+                                ))}
+                              </g>
+                            )}
                           </svg>
                         );
                       })()}
@@ -2178,6 +2373,11 @@ function AnalysisPage() {
             </div>
           )}
           </div>
+          <Button 
+            onClick={startDrawing/* Aqui logica de añadir mas zonas. Start Drawing no funciona ya que esta pensado para la logica de Delimitar*/}
+          >
+                Añadir zonas manualmente
+          </Button>
         </aside>
       </main>
 

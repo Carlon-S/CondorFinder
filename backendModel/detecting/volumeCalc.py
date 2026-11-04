@@ -6,19 +6,13 @@ from rasterstats import zonal_stats
 from shapely.geometry import Polygon, mapping
 import geopandas as gpd
 
+def flat_pixels_to_geo(flat_px, transform):
+    """[x1, y1, x2, y2, ...] -> [(geo_x, geo_y), ...]  (used for drawing)"""
+    return [transform * (px, py) for px, py in zip(flat_px[0::2], flat_px[1::2])]
 
 def pixels_to_geo(polygon_px, transform):
-    """
-    Convert [[x,y], ...] pixel coords to geographic coords
-    using the rasterio affine transform of the orthomosaic.
-    """
-    geo_coords = []
-    for (px, py) in polygon_px:
-        # affine: geo = transform * (col, row)
-        geo_x, geo_y = transform * (px, py)
-        geo_coords.append((geo_x, geo_y))
-    return geo_coords
-
+    """[[x, y], ...] -> [(geo_x, geo_y), ...]  (used for the bbox)"""
+    return [transform * (px, py) for px, py in polygon_px]
 
 def compute_ndsm(dsm_path, dtm_path, ndsm_path):
     """
@@ -86,25 +80,23 @@ def enrich(
     for det in data["detections"]:
         result = dict(det)
 
-        if det["polygon"] is None:
-            b = det["bbox"]
-            pixel_polygon = [
-                [b["minx"], b["miny"]],
-                [b["maxx"], b["miny"]],
-                [b["maxx"], b["maxy"]],
-                [b["minx"], b["maxy"]],
-            ]
+        # Volume: always from the bbox (unchanged logic)
+        b = det["bbox"]
+        bbox_px = [
+            [b["minx"], b["miny"]],
+            [b["maxx"], b["miny"]],
+            [b["maxx"], b["maxy"]],
+            [b["minx"], b["maxy"]],
+        ]
+        bbox_geo = pixels_to_geo(bbox_px, transform)
+
+        # Drawing: the real polygon if it exists, otherwise fall back to the bbox
+        if det["polygon"] is not None:
+            draw_geo = flat_pixels_to_geo(det["polygon"], transform)
         else:
-            pixel_polygon = det["polygon"]
+            draw_geo = bbox_geo
 
-        geo_coords = pixels_to_geo(pixel_polygon, transform)
-
-        if len(geo_coords) < 3:
-            result.update({"volume_m3": None, "weight_kg": None})
-            enriched.append(result)
-            continue
-
-        shapely_poly = Polygon(geo_coords)
+        shapely_poly = Polygon(bbox_geo)
         if not shapely_poly.is_valid:
             shapely_poly = shapely_poly.buffer(0)
 
@@ -118,20 +110,17 @@ def enrich(
 
         height_sum = stats["sum"] if stats["sum"] is not None else 0.0
         volume_m3 = round(height_sum * pixel_area_m2, 4)
-
-        weight_kg = round(volume_m3 * int(det["density_kg_m3"]) , 2)
-
+        weight_kg = round(volume_m3 * int(det["density_kg_m3"]), 2)
         area_m2 = round((stats["count"] or 0) * pixel_area_m2, 4)
 
         result.update({
-            "geo_polygon":   geo_coords,
+            "geo_polygon":   draw_geo,   # for drawing only
             "area_m2":       area_m2,
             "ndsm_mean_m":   round(stats["mean"] or 0, 3),
             "ndsm_max_m":    round(stats["max"]  or 0, 3),
             "volume_m3":     volume_m3,
             "weight_kg":     weight_kg,
         })
-
         enriched.append(result)
 
     output = {

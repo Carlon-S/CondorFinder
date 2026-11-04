@@ -122,6 +122,10 @@ export interface SavedAnalysisRecord {
    *  que la evolución y el informe los agrupan en vez de dibujar un punto
    *  redundante. */
   changeKind?: "primero" | "seleccion" | "algoritmo" | "sin-cambios" | null;
+  /** Polígono con que el trabajador delimitó el área a analizar, en píxeles de
+   *  imagen (mismo espacio que `bbox`): [[x, y], ...]. null/ausente = sin área
+   *  (todos los análisis anteriores a este campo). */
+  analysisArea?: [number, number][] | null;
 }
 
 /** Una zona geográfica seguida en el tiempo. Agrupa versiones (vuelos) y,
@@ -268,6 +272,7 @@ export async function saveAnalysis(
     captureDateEstimated?: boolean;
     uploadedAt?: string | null;
     algorithmVersion?: number | null;
+    analysisArea?: [number, number][] | null;
   },
   overwriteId?: string,
 ): Promise<SaveAnalysisResult> {
@@ -287,6 +292,7 @@ export async function saveAnalysis(
       captureDateEstimated: data.captureDateEstimated ?? false,
       uploadedAt: data.uploadedAt ?? null,
       algorithmVersion: data.algorithmVersion ?? null,
+      analysisArea: data.analysisArea ?? null,
     };
     const res = await fetch(
       overwriteId

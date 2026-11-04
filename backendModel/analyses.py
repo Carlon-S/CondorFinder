@@ -227,6 +227,9 @@ class SavedAnalysisIn(BaseModel):
     # entre análisis para detectar duplicados, no las detecciones puntuales
     # (ver _find_possible_duplicates).
     orthoBounds: list[float] | None = None
+    # Polígono con el que el trabajador delimitó el área de análisis, en
+    # píxeles de la imagen: [[x, y], ...]. None si no delimitó ninguna.
+    analysisArea: list[list[float]] | None = None
 
 
 class DuplicateCandidate(BaseModel):
@@ -286,6 +289,7 @@ def _to_out(doc: dict) -> SavedAnalysisOut:
         crs=doc.get("crs"),
         orthoCenter=doc.get("orthoCenter"),
         orthoBounds=doc.get("orthoBounds"),
+        analysisArea=doc.get("analysisArea"),
         possibleDuplicateOf=doc.get("possibleDuplicateOf"),
         possibleDuplicates=doc.get("possibleDuplicates", []),
         duplicateStatus=doc.get("duplicateStatus"),

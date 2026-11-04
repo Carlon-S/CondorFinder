@@ -15,7 +15,8 @@ export interface EnrichedDetection {
   class: string;
   confidence: number;
   bbox: { minx: number; miny: number; maxx: number; maxy: number };
-  polygon: null | number[];
+  polygon: null | number[][];   // era number[]; el backend manda [[x1,y1,x2,y2,...], ...]
+  rings?: number[][]; 
   // Coordenadas reales (en el CRS proyectado del ortomosaico, ver `crs` en
   // AnalyzeSuccess) — volumeCalc.py ya las calcula (backendModel/detecting/
   // volumeCalc.py:104) a partir del geotransform del .tif, HDU5 las usa para
