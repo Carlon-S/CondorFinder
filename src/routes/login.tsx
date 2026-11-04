@@ -50,6 +50,7 @@ import { Loader2, Users } from "@/components/icons/Icons";
 import { Button } from "@/components/ui/button";
 import { CLIENT_BACKEND_URL } from "@/lib/config";
 import logoOscuro from "@/assets/Logo/logo-dark-mode.svg";
+import { login } from "@/lib/auth";
 
 export const Route = createFileRoute("/login")({
   // El tipo de retorno va explícito con los dos campos OPCIONALES. Inferido,
@@ -138,6 +139,29 @@ function LoginPage() {
   const hayMicrosoft = disponibles?.proveedores.includes("microsoft") ?? false;
   const hayGoogle = disponibles?.proveedores.includes("google") ?? false;
 
+
+// inside LoginPage, with the other useState calls:
+const [usuario, setUsuario] = useState("");
+const [clave, setClave] = useState("");
+const [enviando, setEnviando] = useState(false);
+const [errorClave, setErrorClave] = useState<string | null>(null);
+
+const entrarConClave = async (e: React.FormEvent) => {
+  e.preventDefault();
+  setMotivo(undefined);
+  setErrorClave(null);
+  setEnviando(true);
+  try {
+    await login(usuario, clave); // sets the httpOnly cookie
+    // Full page load so SSR sees the new cookie. Only allow internal paths.
+    const destino = redirect && redirect.startsWith("/") && !redirect.startsWith("//") ? redirect : "/";
+    window.location.href = destino;
+  } catch (err) {
+    setErrorClave(err instanceof Error ? err.message : "No se pudo iniciar sesión.");
+    setEnviando(false);
+  }
+};
+
   return (
     <div className="login-dark relative flex min-h-screen items-center justify-center overflow-hidden px-6 py-12">
       <CampoDeDetecciones />
@@ -222,14 +246,43 @@ function LoginPage() {
           </div>
 
           {disponibles?.password && (
-            // Solo en desarrollo: en la VM `ALLOW_PASSWORD_LOGIN` no está
-            // definida y el endpoint devuelve 404, así que este aviso no
-            // aparece nunca en producción.
-            <p className="mt-5 rounded-md border border-warning/40 bg-warning/10 px-4 py-2.5 text-[0.6875rem] leading-relaxed text-muted-foreground">
-              El inicio de sesión con contraseña sigue habilitado en este servidor. Es para
-              desarrollo local y no debería estar activo en producción.
-            </p>
-          )}
+  <>
+    <p className="mt-5 rounded-md border border-warning/40 bg-warning/10 px-4 py-2.5 text-[0.6875rem] leading-relaxed text-muted-foreground">
+      El inicio de sesión con contraseña sigue habilitado en este servidor. Es para
+      desarrollo local y no debería estar activo en producción.
+    </p>
+
+    <form onSubmit={entrarConClave} className="mt-5 space-y-3 text-left">
+      <input
+        type="text"
+        required
+        autoComplete="username"
+        placeholder="Usuario"
+        value={usuario}
+        onChange={(e) => setUsuario(e.target.value)}
+        className="h-11 w-full rounded-md border border-border bg-transparent px-3 text-sm text-foreground"
+      />
+      <input
+        type="password"
+        required
+        autoComplete="current-password"
+        placeholder="Contraseña"
+        value={clave}
+        onChange={(e) => setClave(e.target.value)}
+        className="h-11 w-full rounded-md border border-border bg-transparent px-3 text-sm text-foreground"
+      />
+      {errorClave && (
+        <p className="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-xs text-destructive-strong">
+          {errorClave}
+        </p>
+      )}
+      <Button type="submit" variant="outline" className="h-11 w-full" disabled={enviando}>
+        {enviando && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+        Entrar
+      </Button>
+    </form>
+  </>
+)}
 
           {/* LA PUERTA DEL EQUIPO, DETRÁS DE UN CLIC.
               El funcionario municipal tiene que ver UN camino. Con los dos
