@@ -43,6 +43,9 @@ dist-ssr
 
 backendModel/.venv/
 backendModel/.env
+# Copias de respaldo del .env (traen los mismos secretos): nunca al repositorio.
+backendModel/.env.bak
+backendModel/.env.*.bak
 backendModel/training/
 
 # .env de la raíz (VITE_BACKEND_URL) — no es secreto, pero cada integrante

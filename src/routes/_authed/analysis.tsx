@@ -921,6 +921,19 @@ function AnalysisPage() {
     setTipoZonaOpen(false);
   };
 
+  /** Sale del modo de zonas de basura (HDU12): el trabajador se arrepintió de
+   *  dibujar. Suelta lo que estaba en construcción o esperando confirmación y
+   *  vuelve a permitir el análisis normal. Las zonas ya confirmadas se
+   *  conservan en la lista, con su "Borrar": salir del modo no las pierde. */
+  const salirModoZonas = () => {
+    setZonaModo(false);
+    setZonaPendiente(null);
+    setZonaEnEdicion(null);
+    setTipoZonaOpen(false);
+    setDraftPoints([]);
+    if (areaMode === "drawing" && drawKind === "zona") setAreaMode("idle");
+  };
+
   /** Selecciona el área relevante si el clic cae dentro de ella. */
   const seleccionarAreaEn = (clientX: number, clientY: number) => {
     const svg = svgRef.current;
@@ -1859,9 +1872,15 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
               </Button>
 
               {zonaModo && zonasManuales.length === 0 && (
-                <AvisoAmbar>
+                <AvisoAmbar
+                  accion={
+                    <Button size="sm" variant="outline" onClick={salirModoZonas}>
+                      Salir del modo de zonas
+                    </Button>
+                  }
+                >
                   No hay nuevas zonas añadidas. Para volver a analizar, dibuja y confirma al menos una
-                  zona de basura.
+                  zona de basura, o sal del modo de zonas para analizar sin ellas.
                 </AvisoAmbar>
               )}
 
@@ -2046,6 +2065,14 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
 
                 {zonaModo && zonasManuales.length === 0 && !zonaPendiente && areaMode === "idle" && (
                   <AvisoAmbar>Aún no hay zonas nuevas. Dibuja y confirma al menos una para volver a analizar.</AvisoAmbar>
+                )}
+
+                {/* Salida del modo: sin ella, apretar "Dibujar zona de basura" por
+                    error dejaba el análisis bloqueado hasta recargar la página. */}
+                {zonaModo && (
+                  <Button size="sm" variant="outline" className="w-full" onClick={salirModoZonas}>
+                    Salir del modo de zonas
+                  </Button>
                 )}
               </div>
 
@@ -3268,11 +3295,14 @@ function Metric({ label, value, icon }: { label: string; value: string; icon: Re
 /** Aviso ámbar del panel de zonas: un solo estilo para todos los avisos de HDU12.
  *  El texto va en el color normal y solo el icono lleva el ámbar fuerte, porque
  *  el ámbar de relleno no tiene contraste como texto sobre el fondo claro. */
-function AvisoAmbar({ children }: { children: React.ReactNode }) {
+function AvisoAmbar({ children, accion }: { children: React.ReactNode; accion?: React.ReactNode }) {
   return (
     <div className="flex items-start gap-2 rounded-md border border-warning/50 bg-warning/10 px-2.5 py-2 text-[0.69rem] leading-relaxed text-foreground">
       <TriangleAlert className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-warning-strong" />
-      <span>{children}</span>
+      <div className="min-w-0 flex-1">
+        <span>{children}</span>
+        {accion && <div className="mt-2">{accion}</div>}
+      </div>
     </div>
   );
 }
