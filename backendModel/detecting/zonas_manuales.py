@@ -29,6 +29,27 @@ def _clase_yolo_de(nombre_es: str) -> str:
     return "Manual"
 
 
+def quitar_zona_manual(ruta_json: str, zona_id: int) -> bool:
+    """Quita del JSON de detecciones la zona dibujada con ese id.
+
+    Solo toca detecciones marcadas `manual`: nunca una que haya entregado el
+    modelo, aunque comparta el id. Devuelve si encontró y quitó la zona.
+
+    Es lo que hace que una zona "eliminada" deje de contar: las zonas dibujadas
+    viven en el JSON del vuelo y cada análisis las vuelve a medir, así que sin
+    quitarlas de ahí volverían a aparecer en el análisis siguiente."""
+    with open(ruta_json, "r", encoding="utf-8") as f:
+        datos = json.load(f)
+    detecciones = datos.get("detections", [])
+    restantes = [d for d in detecciones if not (d.get("manual") and d.get("id") == zona_id)]
+    if len(restantes) == len(detecciones):
+        return False
+    datos["detections"] = restantes
+    with open(ruta_json, "w", encoding="utf-8") as f:
+        json.dump(datos, f, indent=2)
+    return True
+
+
 def agregar_zonas_manuales(ruta_json: str, zonas: list[dict]) -> int:
     """Agrega las zonas dibujadas al JSON de detecciones y devuelve cuántas.
 

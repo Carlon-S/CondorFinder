@@ -226,6 +226,19 @@ with tempfile.TemporaryDirectory() as carpeta:
         datos = json.load(f)
     comprobar(n == 0 and len(datos["detections"]) == 2, "sin zonas nuevas, las antiguas se conservan")
 
+    # Quitar una zona dibujada: deja de contar en el analisis siguiente.
+    comprobar(zonas_manuales.quitar_zona_manual(ruta, 3) is False, "no quita una detección del modelo aunque comparta el id")
+    comprobar(zonas_manuales.quitar_zona_manual(ruta, 99) is False, "un id que no existe no quita nada")
+    comprobar(zonas_manuales.quitar_zona_manual(ruta, 4) is True, "quita la zona dibujada con ese id")
+    with open(ruta) as f:
+        datos = json.load(f)
+    comprobar(
+        len(datos["detections"]) == 1 and not datos["detections"][0].get("manual"),
+        "quedan solo las detecciones del modelo",
+    )
+    salida = volumeCalc.enrich(ruta, ortho, ndsm, ruta)
+    comprobar(len(salida["detections"]) == 1, "el análisis siguiente ya no mide la zona quitada")
+
 print("análisis guardado con la máscara comprimida")
 try:
     import analyses  # noqa: E402
