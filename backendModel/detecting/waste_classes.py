@@ -71,11 +71,32 @@ _POR_NOMBRE_ES: dict[str, WasteInfo] = {
 }
 
 
+# Nombres internos del modelo de cajas `best.pt` (7 clases, sin máscara) y la
+# clase en español a la que corresponde cada uno. Las siete existen en las tablas
+# de arriba, así que el color y la densidad salen de ellas.
+CLASES_DE_BEST: dict[str, str] = {
+    "construction_waste": "Residuo de construcción",
+    "furniture": "Muebles",
+    "metal": "Metal",
+    "plastic": "Plástico",
+    "organic_waste": "Residuo orgánico",
+    "tyres": "Neumáticos",
+    "other": "Tipo de basura indefinido",
+}
+
+
 def info_por_clase_yolo(clase_yolo: str) -> WasteInfo:
     """Datos de una clase a partir del nombre interno del modelo.
 
-    Devuelve `UNKNOWN` si el modelo entrega una clase que la tabla no conoce."""
-    return WASTE_MAP.get(clase_yolo, UNKNOWN)
+    Reconoce los nombres de `bestseg.pt` (20 clases) y los de `best.pt` (7
+    clases). Devuelve `UNKNOWN` si el modelo entrega una clase que ninguna
+    tabla conoce."""
+    if clase_yolo in WASTE_MAP:
+        return WASTE_MAP[clase_yolo]
+    nombre_es = CLASES_DE_BEST.get(clase_yolo)
+    if nombre_es is not None:
+        return _POR_NOMBRE_ES[nombre_es]
+    return UNKNOWN
 
 
 def densidad_de(nombre_es: str) -> float:

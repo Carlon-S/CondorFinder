@@ -336,7 +336,7 @@ Los dos juegos de campos son **disjuntos**: el alta a mano escribe dirección, b
 
 ### Qué hace cada etapa
 
-1. `detecting/detectingOrtho.py` corta el ortomosaico en ventanas de 640 x 640 px (con 20 % de solape), pasa cada ventana por el modelo `detecting/model/bestseg.pt` y junta los resultados. Cada objeto detectado trae una **caja** y una **máscara** (su contorno). Usa GPU si torch la ve y CPU en caso contrario.
+1. `detecting/detectingOrtho.py` corta el ortomosaico en ventanas de 640 x 640 px (con 20 % de solape), pasa cada ventana por el modelo que indique `DETECTION_MODEL` (`best.pt`, de cajas y 7 clases, por omisión; o `bestseg.pt`, de segmentación y 20 clases) y junta los resultados. Cada objeto detectado trae una **caja** y una **máscara** (su contorno). Usa GPU si torch la ve y CPU en caso contrario.
 2. Escribe en `detecting/output/` el PNG del mapa (reducido a 10.000 px como máximo por lado), su miniatura y el JSON de detecciones.
 3. `detecting/volumeCalc.py` (`POST /analyze/{task_id}`) mide cada detección sobre el modelo de elevación normalizado (nDSM = DSM - DTM) y reescribe el mismo JSON con las cifras. Se puede repetir: parte de los campos que escribió la detección y sobrescribe los derivados.
 

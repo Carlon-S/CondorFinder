@@ -837,6 +837,14 @@ Cierra lo que HDU14 y HDU15 dejaron planteado: un punto permanente y una zona vo
 
 > **Dos cosas que esta historia NO resuelve, y hay que decirlo.** No hay proceso que vigile relojes: el paso de una ruta a "terminada" lo marca una persona, porque en terreno pasan cosas que el sistema no ve. Y el **convoy** sigue sin modelarse: la municipalidad confirmó que ningún retiro se hace a mano y que un microbasural necesita retroexcavadora más minicargador o frontal más retroexcavadora, pero eso no está en ningún criterio de ninguna historia y es alcance a acordar con el equipo.
 
+### Modelo en uso: `bestseg.pt` con pesos nuevos (04-11-2026)
+
+Los pesos de `bestseg.pt` se reemplazaron por una versión nueva, más liviana (23,9 MB en vez de 94,9 MB), de segmentación y con las mismas 20 clases. Sobre un mismo ortomosaico de prueba en CPU tardó 4 s contra 42 s del anterior. El código no cambió: el archivo conserva su nombre.
+
+`DETECTION_MODEL` en `backendModel/.env` elige el modelo: `bestseg` (por omisión) o `best`. `best.pt` es el modelo de cajas de 7 clases (`construction_waste`, `furniture`, `metal`, `plastic`, `organic_waste`, `tyres`, `other`); no entrega máscara, así que con él `polygon` es `null` y el volumen se mide sobre la caja. Sus nombres se traducen a español con `CLASES_DE_BEST` en `detecting/waste_classes.py`.
+
+Motivo del cambio de pesos: sobre el mapa de Avenida Las Industrias, los pesos anteriores entregaron 656 detecciones, 648 de ellas "Pallets".
+
 ### Modelo de segmentación (`bestseg.pt`)
 
 La detección de basura usa un modelo YOLOv8 de **segmentación** de 20 clases. Por cada objeto entrega una caja y una máscara (su contorno), y el volumen, el área y el peso se miden sobre esa máscara. El formato del JSON de detecciones, los espacios de coordenadas y la tabla completa de clases están en [backendModel/Readme.md](backendModel/Readme.md#detección-y-volumen).

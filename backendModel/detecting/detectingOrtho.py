@@ -17,8 +17,18 @@ from detecting.waste_classes import info_por_clase_yolo
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Modelo de segmentación: por cada objeto entrega una caja y una máscara.
-MODEL_PATH = os.path.join(BASE_DIR, "model/bestseg.pt")
+# Modelo de detección. Hay dos en `model/`:
+#   - `bestseg.pt`: modelo de segmentación, 20 clases. Entrega caja y máscara.
+#     Son los pesos nuevos (versión liviana, 04-11-2026), que reemplazaron a los
+#     anteriores con el mismo nombre.
+#   - `best.pt`: modelo de cajas, 7 clases. No entrega máscara, así que el
+#     volumen se mide sobre el rectángulo de la caja.
+# El que se usa lo decide la variable de entorno DETECTION_MODEL ("bestseg" o
+# "best"); sin definirla se usa `bestseg.pt`. Cualquier otro valor cae en el
+# mismo.
+MODELOS = {"bestseg": "model/bestseg.pt", "best": "model/best.pt"}
+MODELO = os.environ.get("DETECTION_MODEL", "bestseg")
+MODEL_PATH = os.path.join(BASE_DIR, MODELOS.get(MODELO, MODELOS["bestseg"]))
 OUTPUT_PATH = os.path.join(BASE_DIR, "output")
 
 # Confianza mínima para aceptar una detección.

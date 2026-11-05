@@ -180,6 +180,17 @@ with tempfile.TemporaryDirectory() as carpeta:
     d = salida["detections"][0]
     comprobar(d["volume_m3"] is not None, "una máscara degenerada cae a la caja")
 
+print("nombres de las clases de best.pt")
+from detecting.waste_classes import CLASES_DE_BEST, info_por_clase_yolo  # noqa: E402
+
+for nombre, esperado in CLASES_DE_BEST.items():
+    comprobar(info_por_clase_yolo(nombre).name_es == esperado, f"{nombre} -> {esperado}")
+comprobar(info_por_clase_yolo("Rubble").name_es == "Escombros", "los nombres de bestseg.pt siguen funcionando")
+comprobar(
+    info_por_clase_yolo("nombre inventado").name_es == "Tipo de basura indefinido",
+    "un nombre desconocido cae en 'Tipo de basura indefinido'",
+)
+
 print("zonas de basura dibujadas a mano (HDU12)")
 from detecting import zonas_manuales  # noqa: E402
 
