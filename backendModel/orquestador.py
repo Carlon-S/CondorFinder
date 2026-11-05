@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, File, Request, UploadFile, HTTPException
-from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
@@ -833,9 +832,11 @@ def run_analysis(task_id: str, zonas_manuales: list[dict] | None = None):
     detección (bbox/polygon/class) y sobrescribe los derivados, sin acumular
     sobre un resultado anterior.
 
-    `zonas_manuales` son las zonas de basura que el trabajador dibujó a mano
-    (HDU12). Se agregan al JSON de detecciones antes de medir, y quedan en el
-    archivo, así que el análisis siguiente las mide junto con las nuevas.
+    `zonas_manuales` son las zonas de basura dibujadas a mano (HDU12) que el
+    análisis debe medir: las que ya estaban en la vista más las nuevas. El JSON
+    queda con exactamente esas, y con las del modelo; las dibujadas en ensayos
+    anteriores y que la vista ya no muestra se quitan. `None` (un cliente que no
+    manda zonas) deja el archivo como está.
     """
     try:
         task_store.update_task_sync(task_id, analysis_status="running", analysis_message="Calculando volúmenes con datos del modelo 3D...")
@@ -880,9 +881,9 @@ def run_analysis(task_id: str, zonas_manuales: list[dict] | None = None):
                     "solo se puede consultar, no volver a medir."
                 )
 
-        if zonas_manuales:
-            agregadas = zonas_manuales_mod.agregar_zonas_manuales(detections_json, zonas_manuales)
-            print(f"Zonas manuales agregadas: {agregadas} de {len(zonas_manuales)}")
+        if zonas_manuales is not None:
+            quedaron = zonas_manuales_mod.reemplazar_zonas_manuales(detections_json, zonas_manuales)
+            print(f"Zonas dibujadas en el analisis: {quedaron} de {len(zonas_manuales)}")
 
         volumeCalc.enrich(detections_json, ortho_path, ndsm_path, detections_json)
 
@@ -919,9 +920,11 @@ class ZonaManualIn(BaseModel):
 
 
 class AnalyzeRequest(BaseModel):
-    # Zonas dibujadas desde el último análisis. Vacío en el primer análisis y
-    # cuando el trabajador no dibujó ninguna.
-    zones: list[ZonaManualIn] = []
+    # TODAS las zonas dibujadas que el análisis debe medir: las que la vista ya
+    # mostraba (las antiguas) más las recién dibujadas (las nuevas). El archivo
+    # de detecciones queda con exactamente esas. Vacío = ninguna zona dibujada.
+    # Ausente (None) = no tocar las que el archivo ya tenga.
+    zones: list[ZonaManualIn] | None = None
 
 
 @app.post("/analyze/{task_id}")
@@ -955,67 +958,21 @@ async def start_analysis(task_id: str, body: AnalyzeRequest | None = None):
             ),
         }
 
-    zonas = [{"class": z.class_, "polygon": z.polygon} for z in (body.zones if body else [])]
-    for zona in zonas:
+    # None = el cliente no mando zonas: el archivo de detecciones no se toca.
+    # Una lista (aunque vacia) = las zonas dibujadas que deben quedar.
+    zonas = (
+        None
+        if body is None or body.zones is None
+        else [{"class": z.class_, "polygon": z.polygon} for z in body.zones]
+    )
+    for zona in zonas or []:
         if not zonas_manuales_mod.clase_valida(zona["class"]):
             return {"status": "error", "message": f"Tipo de basura desconocido: {zona['class']}"}
 
-    print(f"Analisis solicitado con {len(zonas)} zona(s) dibujada(s)")
+    print(f"Analisis solicitado, zonas dibujadas: {'sin cambios' if zonas is None else len(zonas)}")
     thread = threading.Thread(target=run_analysis, args=(task_id, zonas), daemon=True)
     thread.start()
     return {"status": "running"}
-
-
-def _quitar_zona_manual_sync(task_id: str, zona_id: int) -> str:
-    """Quita una zona dibujada del JSON de detecciones del vuelo.
-
-    Devuelve "ok", "no_existe" (no hay una zona dibujada con ese id) o
-    "sin_archivo" (el JSON no está ni en el disco ni en el almacenamiento)."""
-    task = task_store.get_task_sync(task_id)
-    detections_json = task["detections_json_path"]
-    json_name = task.get("result_json_filename", "")
-
-    # Mismo criterio que run_analysis: la copia local se borra al subirla a GCS,
-    # así que si no está se trae de vuelta.
-    if not os.path.exists(detections_json) and json_name:
-        datos = storage_module.download_result_file(json_name)
-        if datos is None:
-            return "sin_archivo"
-        os.makedirs(os.path.dirname(detections_json), exist_ok=True)
-        with open(detections_json, "wb") as f:
-            f.write(datos)
-    if not os.path.exists(detections_json):
-        return "sin_archivo"
-
-    if not zonas_manuales_mod.quitar_zona_manual(detections_json, zona_id):
-        return "no_existe"
-
-    if json_name:
-        try:
-            storage_module.upload_result_file(detections_json, json_name, "application/json")
-        except Exception:
-            pass
-    return "ok"
-
-
-@app.delete("/analyze/{task_id}/zones/{zone_id}")
-async def quitar_zona_dibujada(task_id: str, zone_id: int):
-    """Quita una zona de basura dibujada a mano (HDU12) del vuelo.
-
-    Las zonas dibujadas se guardan en el JSON de detecciones y cada análisis las
-    mide de nuevo, así que borrarlas solo de la pantalla no basta: el análisis
-    siguiente las traería de vuelta. Este endpoint las quita del archivo."""
-    task = await task_store.get_task(task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Tarea no encontrada")
-    if task.get("analysis_status") == "running":
-        raise HTTPException(status_code=409, detail="Hay un análisis en curso. Espera a que termine.")
-    resultado = await run_in_threadpool(_quitar_zona_manual_sync, task_id, zone_id)
-    if resultado == "sin_archivo":
-        raise HTTPException(status_code=404, detail="No se encontró el archivo de detecciones de este vuelo.")
-    if resultado == "no_existe":
-        raise HTTPException(status_code=404, detail="Esa zona dibujada no existe en este vuelo.")
-    return {"status": "ok"}
 
 
 # =============================================================================

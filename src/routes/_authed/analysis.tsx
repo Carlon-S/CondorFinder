@@ -40,7 +40,6 @@ import {
 import {
   startVolumeAnalysis,
   pollVolumeAnalysis,
-  quitarZonaManual,
   type EnrichedDetection,
   type ZonaManual,
 } from "@/lib/analysis";
@@ -60,7 +59,6 @@ import {
   type DuplicateCandidate,
 } from "@/lib/analysisStore";
 import { RenameDialog } from "@/components/RenameDialog";
-import { ConfirmarBorrado } from "@/components/ConfirmarBorrado";
 import { buildVersions, type RetiroDeZona, type ZoneVersion } from "@/lib/volumeReport";
 import { listarRetiros } from "@/lib/routePlans";
 import { VersionBar } from "@/components/VersionBar";
@@ -179,6 +177,14 @@ interface ZonaPendiente {
   uid: string;
   clase: string;
   pts: AreaPoint[];
+}
+
+/** Un anillo plano [x1, y1, x2, y2, ...] como lista de puntos [x, y]. */
+function anilloComoPares(anillo: number[] | undefined): AreaPoint[] {
+  const pares: AreaPoint[] = [];
+  if (!anillo) return pares;
+  for (let i = 0; i + 1 < anillo.length; i += 2) pares.push([anillo[i], anillo[i + 1]]);
+  return pares;
 }
 
 /** Las 20 clases del modelo, en el orden de la tabla de colores. */
@@ -452,8 +458,6 @@ function AnalysisPage() {
   const [zonasManuales, setZonasManuales]         = useState<ZonaPendiente[]>([]);
   const [zonaPendiente, setZonaPendiente]         = useState<AreaPoint[] | null>(null);
   const [tipoZonaOpen, setTipoZonaOpen]           = useState(false);
-  // Zona dibujada que ya entro al analisis y que el trabajador quiere quitar.
-  const [zonaAQuitar, setZonaAQuitar]             = useState<DisplayDetection | null>(null);
   // Zona cuyo contorno se esta editando arrastrando sus puntos: "pendiente" (la
   // recien dibujada), el uid de una confirmada, o null.
   const [zonaEnEdicion, setZonaEnEdicion]         = useState<string | null>(null);
@@ -938,16 +942,10 @@ function AnalysisPage() {
     if (areaMode === "drawing" && drawKind === "zona") setAreaMode("idle");
   };
 
-  /** Quita del vuelo una zona dibujada que ya entró al análisis (HDU12). Se
-   *  quita del archivo del servidor, no solo de la lista: si no, el análisis
-   *  siguiente la volvería a medir. */
-  const quitarZonaDibujada = async (d: DisplayDetection) => {
-    if (!taskId) throw new Error("No se encontró la tarea de este vuelo.");
-    const r = await quitarZonaManual(taskId, d.id);
-    if (!r.ok) {
-      notify.error("No se pudo quitar la zona", r.message);
-      throw new Error(r.message);
-    }
+  /** Quita de la vista una zona dibujada que ya entró al análisis (HDU12).
+   *  Como el análisis mide lo que la vista muestra, basta con sacarla de la
+   *  lista: deja de contar en los totales y no se vuelve a enviar al analizar. */
+  const quitarZonaDibujada = (d: DisplayDetection) => {
     setDisplayDetections((prev) => prev.filter((x) => x.id !== d.id));
     setEnabledIds((prev) => {
       const next = new Set(prev);
@@ -959,7 +957,6 @@ function AnalysisPage() {
       next.delete(d.id);
       return next;
     });
-    notify.success("Zona quitada", "Ya no se considera en los análisis de este vuelo.");
   };
 
   /** Selecciona el área relevante si el clic cae dentro de ella. */
@@ -1517,9 +1514,20 @@ useEffect(() => {
     setAnalysisMessage(null);
 
     try {
-      const manualPrevias = displayDetections.filter((d) => d.manual).length;
+      // Lo que se analiza es lo que se ve: las zonas dibujadas que ya están en
+      // la vista (las antiguas) más las que se acaban de dibujar (las nuevas).
+      // El servidor deja exactamente esas. Las de ensayos anteriores que la vista
+      // no muestra no se miden.
+      const zonasAntiguas: ZonaManual[] = displayDetections
+        .filter((d) => d.manual)
+        .map((d) => ({
+          class: d.class,
+          polygon: anilloComoPares(d.rings?.[0] ?? escalarAnillos(d.polygon, pngScale)[0]),
+        }))
+        .filter((z) => z.polygon.length >= 3);
       const zonasNuevas: ZonaManual[] = zonasManuales.map((z) => ({ class: z.clase, polygon: z.pts }));
-      const startResult = await startVolumeAnalysis(taskId, zonasNuevas);
+      const zonasParaMedir: ZonaManual[] = [...zonasAntiguas, ...zonasNuevas];
+      const startResult = await startVolumeAnalysis(taskId, zonasParaMedir);
       if (startResult.status === "error") {
         setAnalysisMessage(startResult.message ?? "Error al iniciar el análisis");
         setStatus("error");
@@ -1551,7 +1559,7 @@ useEffect(() => {
         // el analisis volvio sin ellas (un servidor que no las conoce, o que
         // las descarto), se dejan a la vista en vez de borrarlas en silencio.
         const manualTras = response.detections.filter((d) => d.manual).length;
-        const zonasRegistradas = zonasNuevas.length === 0 || manualTras >= manualPrevias + zonasNuevas.length;
+        const zonasRegistradas = zonasNuevas.length === 0 || manualTras >= zonasParaMedir.length;
         if (zonasRegistradas) {
           setZonasManuales([]);
           setZonaPendiente(null);
@@ -2103,27 +2111,6 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                   </Button>
                 )}
               </div>
-
-              {/* HDU12: confirmacion para quitar una zona dibujada que ya se analizo. */}
-              <ConfirmarBorrado
-                abierto={zonaAQuitar !== null}
-                onOpenChange={(abierto) => {
-                  if (!abierto) setZonaAQuitar(null);
-                }}
-                titulo="Quitar zona dibujada"
-                descripcion={
-                  zonaAQuitar ? (
-                    <>
-                      Se quita la zona <strong>{zonaAQuitar.class}</strong> que dibujaste. Dejará de contar en los
-                      análisis de este vuelo, y no se puede deshacer.
-                    </>
-                  ) : null
-                }
-                etiquetaConfirmar="Quitar zona"
-                onConfirmar={async () => {
-                  if (zonaAQuitar) await quitarZonaDibujada(zonaAQuitar);
-                }}
-              />
 
               {/* HDU12: tipo de basura de la zona dibujada. */}
               <Dialog open={tipoZonaOpen} onOpenChange={setTipoZonaOpen}>
@@ -2831,10 +2818,10 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                             el modelo no: esas solo se desactivan con el ojo. */}
                         {d.manual && !readOnly && status !== "running" && (
                           <button
-                            onClick={() => setZonaAQuitar(d)}
+                            onClick={() => quitarZonaDibujada(d)}
                             className="flex-shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive-strong"
-                            title="Quitar esta zona dibujada"
-                            aria-label="Quitar esta zona dibujada"
+                            title="Quitar esta zona dibujada del análisis"
+                            aria-label="Quitar esta zona dibujada del análisis"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>

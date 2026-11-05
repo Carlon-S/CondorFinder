@@ -226,18 +226,22 @@ with tempfile.TemporaryDirectory() as carpeta:
         datos = json.load(f)
     comprobar(n == 0 and len(datos["detections"]) == 2, "sin zonas nuevas, las antiguas se conservan")
 
-    # Quitar una zona dibujada: deja de contar en el analisis siguiente.
-    comprobar(zonas_manuales.quitar_zona_manual(ruta, 3) is False, "no quita una detección del modelo aunque comparta el id")
-    comprobar(zonas_manuales.quitar_zona_manual(ruta, 99) is False, "un id que no existe no quita nada")
-    comprobar(zonas_manuales.quitar_zona_manual(ruta, 4) is True, "quita la zona dibujada con ese id")
+    # Reemplazar: el JSON queda con exactamente las zonas que se envian.
+    # (Antes de este bloque el archivo tiene la deteccion 3 del modelo y la zona dibujada 4.)
+    n = zonas_manuales.reemplazar_zonas_manuales(ruta, [{"class": "Madera", "polygon": cuadrado}])
     with open(ruta) as f:
         datos = json.load(f)
-    comprobar(
-        len(datos["detections"]) == 1 and not datos["detections"][0].get("manual"),
-        "quedan solo las detecciones del modelo",
-    )
+    manuales = [d for d in datos["detections"] if d.get("manual")]
+    comprobar(n == 1 and len(manuales) == 1, "solo queda la zona enviada")
+    comprobar(manuales[0]["class"] == "Madera", "la zona de un ensayo anterior (Pallets) ya no esta")
+    comprobar(any(d["id"] == 3 and not d.get("manual") for d in datos["detections"]), "la deteccion del modelo se conserva")
+    n = zonas_manuales.reemplazar_zonas_manuales(ruta, [])
+    with open(ruta) as f:
+        datos = json.load(f)
+    comprobar(n == 0 and not any(d.get("manual") for d in datos["detections"]), "enviar una lista vacia quita todas las dibujadas")
+    comprobar(len(datos["detections"]) == 1, "quedan solo las detecciones del modelo")
     salida = volumeCalc.enrich(ruta, ortho, ndsm, ruta)
-    comprobar(len(salida["detections"]) == 1, "el análisis siguiente ya no mide la zona quitada")
+    comprobar(len(salida["detections"]) == 1, "el análisis siguiente no mide ninguna zona dibujada")
 
 print("análisis guardado con la máscara comprimida")
 try:

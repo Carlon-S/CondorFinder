@@ -94,6 +94,8 @@ export interface WastePolygon {
 const SESION_CAIDA =
   "Tu sesión no está activa. Vuelve a iniciar sesión y reintenta el análisis.";
 
+/** Pide el análisis. `zonas` son TODAS las zonas dibujadas que debe medir (las
+ *  que la vista ya mostraba más las nuevas): el servidor deja exactamente esas. */
 export async function startVolumeAnalysis(
   taskId: string,
   zonas: ZonaManual[] = [],
@@ -118,30 +120,6 @@ export async function startVolumeAnalysis(
     };
   }
   return res.json();
-}
-
-/** Quita una zona dibujada a mano del vuelo (HDU12). Se quita del archivo de
- *  detecciones del servidor y no solo de la pantalla: cada análisis vuelve a
- *  medir las zonas que están ahí, así que una zona "eliminada" solo en pantalla
- *  reaparecería en el análisis siguiente. */
-export async function quitarZonaManual(
-  taskId: string,
-  zonaId: number,
-): Promise<{ ok: boolean; message?: string }> {
-  try {
-    const res = await fetch(`${BACKEND_URL}/analyze/${taskId}/zones/${zonaId}`, {
-      method: "DELETE",
-      credentials: "include",
-    });
-    if (res.ok) return { ok: true };
-    const cuerpo = await res.json().catch(() => null);
-    return {
-      ok: false,
-      message: res.status === 401 ? SESION_CAIDA : (cuerpo?.detail ?? `El servidor respondió ${res.status}.`),
-    };
-  } catch {
-    return { ok: false, message: "No se pudo contactar al servidor." };
-  }
 }
 
 export async function pollVolumeAnalysis(
