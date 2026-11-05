@@ -880,7 +880,8 @@ def run_analysis(task_id: str, zonas_manuales: list[dict] | None = None):
                 )
 
         if zonas_manuales:
-            zonas_manuales_mod.agregar_zonas_manuales(detections_json, zonas_manuales)
+            agregadas = zonas_manuales_mod.agregar_zonas_manuales(detections_json, zonas_manuales)
+            print(f"Zonas manuales agregadas: {agregadas} de {len(zonas_manuales)}")
 
         volumeCalc.enrich(detections_json, ortho_path, ndsm_path, detections_json)
 
@@ -958,6 +959,7 @@ async def start_analysis(task_id: str, body: AnalyzeRequest | None = None):
         if not zonas_manuales_mod.clase_valida(zona["class"]):
             return {"status": "error", "message": f"Tipo de basura desconocido: {zona['class']}"}
 
+    print(f"Analisis solicitado con {len(zonas)} zona(s) dibujada(s)")
     thread = threading.Thread(target=run_analysis, args=(task_id, zonas), daemon=True)
     thread.start()
     return {"status": "running"}

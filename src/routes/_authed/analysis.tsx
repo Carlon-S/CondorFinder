@@ -182,14 +182,6 @@ interface ZonaPendiente {
 /** Las 20 clases del modelo, en el orden de la tabla de colores. */
 const CLASES_DE_BASURA = Object.keys(CLASS_COLORS).slice(0, 20);
 
-/** Achica un polígono hacia su centro (cada lado al 80 %), que es lo que hace
- *  "Reducir": la superficie baja a algo más de la mitad en cada paso. */
-function reducirPoligono(pts: AreaPoint[]): AreaPoint[] {
-  const cx = pts.reduce((s, [x]) => s + x, 0) / pts.length;
-  const cy = pts.reduce((s, [, y]) => s + y, 0) / pts.length;
-  return pts.map(([x, y]) => [cx + (x - cx) * 0.8, cy + (y - cy) * 0.8] as AreaPoint);
-}
-
 function pointInPolygon(x: number, y: number, poly: AreaPoint[]): boolean {
   let inside = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
@@ -458,6 +450,10 @@ function AnalysisPage() {
   const [zonasManuales, setZonasManuales]         = useState<ZonaPendiente[]>([]);
   const [zonaPendiente, setZonaPendiente]         = useState<AreaPoint[] | null>(null);
   const [tipoZonaOpen, setTipoZonaOpen]           = useState(false);
+  // Zona cuyo contorno se esta editando arrastrando sus puntos: "pendiente" (la
+  // recien dibujada), el uid de una confirmada, o null.
+  const [zonaEnEdicion, setZonaEnEdicion]         = useState<string | null>(null);
+  const arrastreVertice = useRef<{ id: string; i: number } | null>(null);
   // Factor con que el PNG se redujo respecto del ortomosaico (1 = sin reducir).
   const [pngScale, setPngScale]                   = useState(1);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -866,6 +862,7 @@ function AnalysisPage() {
     setDrawKind(tipo);
     setDraftPoints([]);
     setZonaPendiente(null);
+    setZonaEnEdicion(null);
     if (tipo === "zona") setZonaModo(true);
     setAreaMode("drawing");
   };
@@ -920,6 +917,7 @@ function AnalysisPage() {
       { uid: `z${Date.now()}${prev.length}`, clase, pts: zonaPendiente },
     ]);
     setZonaPendiente(null);
+    setZonaEnEdicion(null);
     setTipoZonaOpen(false);
   };
 
@@ -930,6 +928,60 @@ function AnalysisPage() {
     if (!svg || !ctm || !analysisArea) return;
     const p = new DOMPoint(clientX, clientY).matrixTransform(ctm.inverse());
     if (pointInPolygon(p.x, p.y, analysisArea)) setAreaSeleccionada((s) => !s);
+  };
+
+  // ── edicion del contorno de una zona de basura (HDU12) ───────────────────
+  //
+  // "Reducir el area" es manual: el trabajador arrastra los puntos del
+  // contorno (los blancos) hacia donde quiera, y arrastra un punto intermedio
+  // de un lado para agregar un vertice nuevo.
+
+  /** Punto de la imagen (en pixeles del PNG) bajo el cursor, acotado a la imagen. */
+  const puntoDeEvento = (clientX: number, clientY: number): AreaPoint | null => {
+    const svg = svgRef.current;
+    const ctm = svg?.getScreenCTM();
+    if (!svg || !ctm || !imgNaturalSize) return null;
+    const p = new DOMPoint(clientX, clientY).matrixTransform(ctm.inverse());
+    return [Math.min(imgNaturalSize.w, Math.max(0, p.x)), Math.min(imgNaturalSize.h, Math.max(0, p.y))];
+  };
+
+  /** Cambia los puntos de la zona `id` ("pendiente" o el uid de una confirmada). */
+  const cambiarPuntos = (id: string, fn: (pts: AreaPoint[]) => AreaPoint[]) => {
+    if (id === "pendiente") setZonaPendiente((prev) => (prev ? fn(prev) : prev));
+    else setZonasManuales((prev) => prev.map((z) => (z.uid === id ? { ...z, pts: fn(z.pts) } : z)));
+  };
+
+  const iniciarArrastre = (e: React.PointerEvent<SVGCircleElement>, id: string, i: number) => {
+    // Sin esto el contenedor del visor lo toma como el inicio de un paneo.
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    arrastreVertice.current = { id, i };
+  };
+
+  const insertarVertice = (e: React.PointerEvent<SVGCircleElement>, id: string, i: number, x: number, y: number) => {
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    cambiarPuntos(id, (pts) => [...pts.slice(0, i + 1), [x, y] as AreaPoint, ...pts.slice(i + 1)]);
+    arrastreVertice.current = { id, i: i + 1 };
+  };
+
+  const moverArrastre = (e: React.PointerEvent<SVGCircleElement>) => {
+    const a = arrastreVertice.current;
+    if (!a) return;
+    e.stopPropagation();
+    const punto = puntoDeEvento(e.clientX, e.clientY);
+    if (!punto) return;
+    cambiarPuntos(a.id, (pts) => pts.map((q, k) => (k === a.i ? punto : q)));
+  };
+
+  const terminarArrastre = (e: React.PointerEvent<SVGCircleElement>) => {
+    e.stopPropagation();
+    arrastreVertice.current = null;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* el puntero ya se habia soltado */
+    }
   };
 
 const addAreaPoint = (clientX: number, clientY: number) => {
@@ -1424,6 +1476,7 @@ useEffect(() => {
     setAnalysisMessage(null);
 
     try {
+      const manualPrevias = displayDetections.filter((d) => d.manual).length;
       const zonasNuevas: ZonaManual[] = zonasManuales.map((z) => ({ class: z.clase, polygon: z.pts }));
       const startResult = await startVolumeAnalysis(taskId, zonasNuevas);
       if (startResult.status === "error") {
@@ -1453,9 +1506,22 @@ useEffect(() => {
         // análisis nuevo. Lo que se reinicia es lo restaurado a mano, que era de
         // la medición anterior, y las zonas dibujadas, que ya son detecciones.
         setRestauradasIds(new Set());
-        setZonasManuales([]);
-        setZonaPendiente(null);
-        setZonaModo(false);
+        // Las zonas dibujadas solo se sueltan si el servidor las registro: si
+        // el analisis volvio sin ellas (un servidor que no las conoce, o que
+        // las descarto), se dejan a la vista en vez de borrarlas en silencio.
+        const manualTras = response.detections.filter((d) => d.manual).length;
+        const zonasRegistradas = zonasNuevas.length === 0 || manualTras >= manualPrevias + zonasNuevas.length;
+        if (zonasRegistradas) {
+          setZonasManuales([]);
+          setZonaPendiente(null);
+          setZonaModo(false);
+          setZonaEnEdicion(null);
+        } else {
+          notify.error(
+            "Las zonas dibujadas no entraron al análisis",
+            "El servidor no las registró. Se conservan en pantalla para reintentar.",
+          );
+        }
         setDraftPoints([]);
         setAreaMode("idle");
         setCrs(response.crs || undefined);
@@ -1793,10 +1859,10 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
               </Button>
 
               {zonaModo && zonasManuales.length === 0 && (
-                <p className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-[0.69rem] leading-relaxed text-foreground">
+                <AvisoAmbar>
                   No hay nuevas zonas añadidas. Para volver a analizar, dibuja y confirma al menos una
                   zona de basura.
-                </p>
+                </AvisoAmbar>
               )}
 
               {/* Este vuelo no se puede volver a medir: o es una versión ya
@@ -1899,58 +1965,87 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                 )}
 
                 {/* La zona cerrada espera confirmación; al confirmar se pide el
-                    tipo de basura. Se puede reducir o borrar antes de confirmar. */}
+                    tipo de basura. Antes de confirmar se puede reducir (arrastrando
+                    los puntos del contorno) o borrar. */}
                 {zonaPendiente && areaMode === "idle" && (
-                  <div className="space-y-2 rounded-md border border-success/40 bg-success/10 px-2.5 py-2">
-                    <p className="text-xs font-medium text-foreground">Zona dibujada</p>
-                    <div className="grid grid-cols-3 gap-1.5">
-                      <Button size="sm" onClick={() => setTipoZonaOpen(true)}>Confirmar</Button>
-                      <Button size="sm" variant="secondary" onClick={() => setZonaPendiente(reducirPoligono(zonaPendiente))}>
-                        Reducir
+                  <div className="space-y-2 rounded-md border border-success/40 bg-success/10 px-2.5 py-2.5">
+                    <p className="text-xs font-semibold text-foreground">Zona dibujada</p>
+                    <Button size="sm" className="w-full" onClick={() => setTipoZonaOpen(true)}>
+                      Confirmar zona
+                    </Button>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <Button
+                        size="sm"
+                        className="px-2"
+                        variant={zonaEnEdicion === "pendiente" ? "default" : "secondary"}
+                        onClick={() => setZonaEnEdicion((z) => (z === "pendiente" ? null : "pendiente"))}
+                      >
+                        {zonaEnEdicion === "pendiente" ? "Listo" : "Reducir área"}
                       </Button>
-                      <Button size="sm" variant="outline" onClick={() => setZonaPendiente(null)}>Borrar</Button>
+                      <Button
+                        size="sm"
+                        className="px-2"
+                        variant="outline"
+                        onClick={() => {
+                          setZonaPendiente(null);
+                          setZonaEnEdicion(null);
+                        }}
+                      >
+                        Borrar
+                      </Button>
                     </div>
+                    {zonaEnEdicion === "pendiente" && (
+                      <p className="text-[0.69rem] leading-relaxed text-muted-foreground">
+                        Arrastra los puntos blancos del contorno hacia adentro para reducir el área. Un punto
+                        intermedio de un lado agrega un vértice nuevo.
+                      </p>
+                    )}
                   </div>
                 )}
 
                 {zonasManuales.length > 0 && (
                   <ul className="space-y-1.5">
                     {zonasManuales.map((z) => (
-                      <li key={z.uid} className="rounded-md border border-border/60 px-2 py-1.5">
+                      <li key={z.uid} className="rounded-md border border-border/60 px-2 py-2">
                         <div className="flex items-center gap-1.5 text-xs">
                           <span className="h-2.5 w-2.5 flex-shrink-0 rounded-sm" style={{ background: classColor(z.clase) }} />
                           <span className="min-w-0 flex-1 truncate font-medium text-foreground">{z.clase}</span>
                           <span className="text-[0.6875rem] text-muted-foreground">nueva</span>
                         </div>
-                        <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+                        <div className="mt-2 grid grid-cols-2 gap-1.5">
                           <Button
                             size="sm"
-                            variant="secondary"
-                            onClick={() =>
-                              setZonasManuales((prev) =>
-                                prev.map((o) => (o.uid === z.uid ? { ...o, pts: reducirPoligono(o.pts) } : o)),
-                              )
-                            }
+                            className="px-2"
+                            variant={zonaEnEdicion === z.uid ? "default" : "secondary"}
+                            onClick={() => setZonaEnEdicion((cur) => (cur === z.uid ? null : z.uid))}
                           >
-                            Reducir área
+                            {zonaEnEdicion === z.uid ? "Listo" : "Reducir área"}
                           </Button>
                           <Button
                             size="sm"
+                            className="px-2"
                             variant="outline"
-                            onClick={() => setZonasManuales((prev) => prev.filter((o) => o.uid !== z.uid))}
+                            onClick={() => {
+                              setZonasManuales((prev) => prev.filter((o) => o.uid !== z.uid));
+                              setZonaEnEdicion((cur) => (cur === z.uid ? null : cur));
+                            }}
                           >
                             Borrar
                           </Button>
                         </div>
+                        {zonaEnEdicion === z.uid && (
+                          <p className="mt-2 text-[0.69rem] leading-relaxed text-muted-foreground">
+                            Arrastra los puntos blancos del contorno hacia adentro para reducir el área. Un
+                            punto intermedio de un lado agrega un vértice nuevo.
+                          </p>
+                        )}
                       </li>
                     ))}
                   </ul>
                 )}
 
                 {zonaModo && zonasManuales.length === 0 && !zonaPendiente && areaMode === "idle" && (
-                  <p className="text-[0.69rem] leading-relaxed text-warning">
-                    Aún no hay zonas nuevas. Dibuja y confirma al menos una para volver a analizar.
-                  </p>
+                  <AvisoAmbar>Aún no hay zonas nuevas. Dibuja y confirma al menos una para volver a analizar.</AvisoAmbar>
                 )}
               </div>
 
@@ -2421,6 +2516,58 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                                 strokeLinejoin="round"
                               />
                             )}
+
+                            {/* HDU12: manijas para reducir o reformar el contorno de una zona. */}
+                            {zonaEnEdicion && (() => {
+                              const pts =
+                                zonaEnEdicion === "pendiente"
+                                  ? zonaPendiente
+                                  : (zonasManuales.find((z) => z.uid === zonaEnEdicion)?.pts ?? null);
+                              if (!pts) return null;
+                              const id = zonaEnEdicion;
+                              return (
+                                <g>
+                                  {pts.map(([x, y], i) => {
+                                    const [x2, y2] = pts[(i + 1) % pts.length];
+                                    const mx = (x + x2) / 2;
+                                    const my = (y + y2) / 2;
+                                    return (
+                                      <circle
+                                        key={`m${i}`}
+                                        cx={mx}
+                                        cy={my}
+                                        r={4 / ppu}
+                                        fill="#ffffff"
+                                        fillOpacity={0.55}
+                                        stroke="#0f172a"
+                                        strokeWidth={1 / ppu}
+                                        style={{ pointerEvents: "all", cursor: "copy" }}
+                                        onPointerDown={(e) => insertarVertice(e, id, i, mx, my)}
+                                        onPointerMove={moverArrastre}
+                                        onPointerUp={terminarArrastre}
+                                        onPointerCancel={terminarArrastre}
+                                      />
+                                    );
+                                  })}
+                                  {pts.map(([x, y], i) => (
+                                    <circle
+                                      key={`v${i}`}
+                                      cx={x}
+                                      cy={y}
+                                      r={6 / ppu}
+                                      fill="#ffffff"
+                                      stroke="#0f172a"
+                                      strokeWidth={1.5 / ppu}
+                                      style={{ pointerEvents: "all", cursor: "grab" }}
+                                      onPointerDown={(e) => iniciarArrastre(e, id, i)}
+                                      onPointerMove={moverArrastre}
+                                      onPointerUp={terminarArrastre}
+                                      onPointerCancel={terminarArrastre}
+                                    />
+                                  ))}
+                                </g>
+                              );
+                            })()}
 
                             {/* polígono en construcción */}
                             {areaMode === "drawing" && draftPoints.length > 0 && (
@@ -3108,10 +3255,24 @@ const statusLabel: Record<AnalysisStatus, string> = {
 
 function Metric({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
   return (
-    <div className="rounded-lg bg-background/60 px-3 py-3">
-      <div className="mb-2.5 text-primary/65 [&_svg]:h-4 [&_svg]:w-4">{icon}</div>
-      <p className="text-[0.625rem] text-muted-foreground leading-none mb-1">{label}</p>
-      <p className="mono text-base font-bold tabular-nums text-foreground">{value}</p>
+    <div className="min-w-0 rounded-lg bg-background/60 px-2.5 py-3">
+      <div className="mb-2 text-primary/65 [&_svg]:h-4 [&_svg]:w-4">{icon}</div>
+      <p className="mb-1 whitespace-nowrap text-[0.625rem] leading-none text-muted-foreground">{label}</p>
+      {/* Una sola linea y sin cortarse: con miles de detecciones las cifras
+          llegan a "4.582,63 m³", que en text-base no cabe en media columna. */}
+      <p className="mono whitespace-nowrap text-[0.8125rem] font-bold tabular-nums text-foreground">{value}</p>
+    </div>
+  );
+}
+
+/** Aviso ámbar del panel de zonas: un solo estilo para todos los avisos de HDU12.
+ *  El texto va en el color normal y solo el icono lleva el ámbar fuerte, porque
+ *  el ámbar de relleno no tiene contraste como texto sobre el fondo claro. */
+function AvisoAmbar({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex items-start gap-2 rounded-md border border-warning/50 bg-warning/10 px-2.5 py-2 text-[0.69rem] leading-relaxed text-foreground">
+      <TriangleAlert className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-warning-strong" />
+      <span>{children}</span>
     </div>
   );
 }
