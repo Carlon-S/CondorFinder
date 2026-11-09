@@ -151,6 +151,7 @@ export function VersionBar({
                   const hora = new Date(rec.savedAt).toLocaleTimeString("es-CL", {
                     hour: "2-digit",
                     minute: "2-digit",
+                    hour12: false,
                     timeZone: "America/Santiago",
                   });
 
@@ -164,7 +165,7 @@ export function VersionBar({
                         onClick={() => onSelect(rec)}
                         aria-current={activa ? "true" : undefined}
                         title={rec.name}
-                        className={`flex w-[9.5rem] flex-col gap-1.5 rounded-lg border p-2 text-left transition-all duration-200 hover:-translate-y-0.5 ${
+                        className={`flex w-[10rem] flex-col gap-1.5 rounded-lg border p-2 text-left transition-all duration-200 hover:-translate-y-0.5 ${
                           activa
                             ? "border-primary bg-primary/5 shadow-sm"
                             : "border-border/60 hover:border-border hover:bg-muted/50"
@@ -191,7 +192,7 @@ export function VersionBar({
                           )}
                         </div>
 
-                        <div className="flex items-center justify-between gap-1">
+                        <div className="flex items-center justify-between gap-1 whitespace-nowrap">
                           <span className="mono text-[0.63rem] tabular-nums text-muted-foreground">
                             {volumen(total.volumeM3)} m³
                           </span>

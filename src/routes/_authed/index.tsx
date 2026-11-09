@@ -1202,7 +1202,7 @@ function MainPage() {
           {/* KPIs generales, el primer dato que la Municipalidad necesita leer al
               entrar, por eso usa el mismo tratamiento .panel que el resto del
               sistema en vez de quedar como una tira plana. */}
-          <div className="panel mb-6 flex flex-wrap items-center divide-x divide-border/10 px-1 animate-in fade-in slide-in-from-top-2 duration-500">
+          <div className="panel mb-6 flex flex-wrap items-center divide-x divide-border/10 !rounded-none px-1 animate-in fade-in slide-in-from-top-2 duration-500">
             <Kpi
               icon={<ChartLineUp className="h-4 w-4" />}
               label="Zonas registradas"
@@ -1238,7 +1238,7 @@ function MainPage() {
           {/* Tarjeta que contiene filtros + tabla, mismo tratamiento .bg-card
               que el resto del sistema, sin duplicar el shadow pesado de
               .panel (ya lo lleva la franja de KPIs arriba). */}
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-card animate-in fade-in slide-in-from-top-2 duration-500 delay-100 fill-mode-both">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden !rounded-none border border-border bg-card animate-in fade-in slide-in-from-top-2 duration-500 delay-100 fill-mode-both">
             <div className="flex flex-wrap items-center gap-3 border-b border-border px-5 py-4">
               <div className="flex items-center gap-2.5 border-l-2 border-primary/50 pl-3">
                 <Layers className="h-3.5 w-3.5 text-foreground/70" />
