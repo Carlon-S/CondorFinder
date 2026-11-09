@@ -6,6 +6,7 @@ import {
   BarChart3,
   Boxes,
   CheckCircle2,
+  ChevronDown,
   Clock,
   Crosshair,
   Eye,
@@ -584,6 +585,13 @@ function AnalysisPage() {
   // Cómo se pintan los polígonos: por prioridad (degradé verde a rojo según el
   // volumen) o por tipo de basura (el color de cada clase).
   const [colorPorPrioridad, setColorPorPrioridad] = useState(true);
+  // Leyenda del mapa: plegada o no, y posición dentro del visor (null = esquina
+  // inferior izquierda por omisión).
+  const [leyendaPlegada, setLeyendaPlegada]       = useState(false);
+  const [leyendaPos, setLeyendaPos]               = useState<{ x: number; y: number } | null>(null);
+  const leyendaRef = useRef<HTMLDivElement>(null);
+  const seccionMapaRef = useRef<HTMLElement>(null);
+  const arrastreLeyenda = useRef<{ dx: number; dy: number } | null>(null);
   const [filtroLista, setFiltroLista]             = useState<FiltroLista>("todas");
   const [cambiarTipoOpen, setCambiarTipoOpen]     = useState(false);
   const [eliminarSelOpen, setEliminarSelOpen]     = useState(false);
@@ -1283,6 +1291,37 @@ function AnalysisPage() {
     nivelSimplificacion.current = 0;
     guardarParaDeshacer(zonaEnEdicion);
     cambiarPuntos(zonaEnEdicion, () => base);
+  };
+
+  // ── leyenda del mapa: se arrastra por su encabezado, sin salir del visor ──
+  const iniciarArrastreLeyenda = (e: React.PointerEvent<HTMLDivElement>) => {
+    const caja = leyendaRef.current;
+    const seccion = seccionMapaRef.current;
+    if (!caja || !seccion) return;
+    const r = caja.getBoundingClientRect();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    arrastreLeyenda.current = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+    // Pasa de anclada por la esquina a posición explícita.
+    const s = seccion.getBoundingClientRect();
+    setLeyendaPos({ x: r.left - s.left, y: r.top - s.top });
+  };
+  const moverLeyenda = (e: React.PointerEvent<HTMLDivElement>) => {
+    const a = arrastreLeyenda.current;
+    const caja = leyendaRef.current;
+    const seccion = seccionMapaRef.current;
+    if (!a || !caja || !seccion) return;
+    const s = seccion.getBoundingClientRect();
+    const x = Math.min(Math.max(0, e.clientX - s.left - a.dx), s.width - caja.offsetWidth);
+    const y = Math.min(Math.max(0, e.clientY - s.top - a.dy), s.height - caja.offsetHeight);
+    setLeyendaPos({ x, y });
+  };
+  const terminarArrastreLeyenda = (e: React.PointerEvent<HTMLDivElement>) => {
+    arrastreLeyenda.current = null;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* ya soltado */
+    }
   };
 
   /** Encabezado ordenable de la lista de polígonos. */
@@ -2918,7 +2957,7 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
             zoom/paneo, así que colgadas ahí escalarían con la rueda. En el
             visor quedan fijas, a 10px del borde, lejos de donde caen los
             rectángulos que dibuja el modelo dentro de la imagen. */}
-        <section className="detect-frame relative min-w-0 overflow-hidden bg-background animate-in fade-in duration-500">
+        <section ref={seccionMapaRef} className="detect-frame relative min-w-0 overflow-hidden bg-background animate-in fade-in duration-500">
           <span className="detect-corners" aria-hidden="true" />
           {usingGeneratedMap ? (
             <>
@@ -2930,64 +2969,91 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
               </div>
 
               {/* Leyenda de colores: dice qué significa el relleno de los polígonos
-                  y permite pasar de prioridad (volumen) a color por tipo. */}
+                  y permite pasar de prioridad (volumen) a color por tipo. Se
+                  pliega y se arrastra dentro del visor desde su encabezado. */}
               {status === "done" && displayDetections.length > 0 && (
-                <div className="absolute bottom-4 left-4 z-20 w-60 space-y-2 rounded-md border border-border bg-card/90 p-2.5 text-xs shadow-xl backdrop-blur">
-                  <div className="flex items-center justify-between gap-2">
+                <div
+                  ref={leyendaRef}
+                  className="absolute z-20 w-60 rounded-md border border-border bg-card/90 text-xs shadow-xl backdrop-blur"
+                  style={leyendaPos ? { left: leyendaPos.x, top: leyendaPos.y } : { left: "1rem", bottom: "1rem" }}
+                >
+                  <div
+                    onPointerDown={iniciarArrastreLeyenda}
+                    onPointerMove={moverLeyenda}
+                    onPointerUp={terminarArrastreLeyenda}
+                    onPointerCancel={terminarArrastreLeyenda}
+                    className="flex cursor-grab touch-none select-none items-center justify-between gap-2 px-2.5 py-2 active:cursor-grabbing"
+                    title="Arrastra para mover la leyenda"
+                  >
                     <span className="font-semibold text-foreground">Color de los polígonos</span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-1 rounded-md bg-muted/50 p-0.5">
-                    {([
-                      [true, "Prioridad"],
-                      [false, "Por tipo"],
-                    ] as const).map(([valor, rotulo]) => (
-                      <button
-                        key={rotulo}
-                        type="button"
-                        onClick={() => setColorPorPrioridad(valor)}
-                        aria-pressed={colorPorPrioridad === valor}
-                        className={`cursor-pointer rounded px-2 py-1 text-[0.6875rem] font-semibold transition-colors ${
-                          colorPorPrioridad === valor
-                            ? "bg-card text-foreground shadow-sm"
-                            : "text-muted-foreground hover:text-foreground"
-                        }`}
-                      >
-                        {rotulo}
-                      </button>
-                    ))}
+                    <button
+                      type="button"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={() => setLeyendaPlegada((v) => !v)}
+                      aria-expanded={!leyendaPlegada}
+                      aria-label={leyendaPlegada ? "Desplegar la leyenda" : "Plegar la leyenda"}
+                      className="flex h-5 w-5 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+                    >
+                      <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-200 ${leyendaPlegada ? "-rotate-90" : ""}`} />
+                    </button>
                   </div>
 
-                  {colorPorPrioridad ? (
-                    <div className="space-y-1">
-                      <div
-                        className="h-2.5 w-full rounded-full"
-                        style={{
-                          background: "linear-gradient(to right, rgb(34,197,94), rgb(245,158,11), rgb(239,68,68))",
-                        }}
-                      />
-                      <div className="flex items-start justify-between gap-2 text-[0.6875rem] text-muted-foreground">
-                        <span>
-                          Menor volumen
-                          <span className="mono block tabular-nums text-foreground">{volumen(rangoVolumen.min)} m³</span>
-                        </span>
-                        <span className="text-right">
-                          Mayor volumen
-                          <span className="mono block tabular-nums text-foreground">{volumen(rangoVolumen.max)} m³</span>
-                        </span>
+                  {!leyendaPlegada && (
+                    <div className="space-y-2 px-2.5 pb-2.5">
+                      <div className="grid grid-cols-2 gap-1 rounded-md bg-muted/50 p-0.5">
+                        {([
+                          [true, "Prioridad"],
+                          [false, "Por tipo"],
+                        ] as const).map(([valor, rotulo]) => (
+                          <button
+                            key={rotulo}
+                            type="button"
+                            onClick={() => setColorPorPrioridad(valor)}
+                            aria-pressed={colorPorPrioridad === valor}
+                            className={`cursor-pointer rounded px-2 py-1 text-[0.6875rem] font-semibold transition-colors ${
+                              colorPorPrioridad === valor
+                                ? "bg-card text-foreground shadow-sm"
+                                : "text-muted-foreground hover:text-foreground"
+                            }`}
+                          >
+                            {rotulo}
+                          </button>
+                        ))}
                       </div>
-                      <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
-                        Del verde al rojo sube la prioridad de retiro: los polígonos rojos son los de más volumen.
-                      </p>
+
+                      {/* Alto fijo: la leyenda no cambia de tamaño al cambiar de modo. */}
+                      <div className="h-[3.25rem]">
+                        {colorPorPrioridad ? (
+                          <div className="space-y-1.5">
+                            <div
+                              className="h-2.5 w-full rounded-full"
+                              style={{
+                                background: "linear-gradient(to right, rgb(34,197,94), rgb(245,158,11), rgb(239,68,68))",
+                              }}
+                            />
+                            <div className="flex items-start justify-between gap-2 text-[0.6875rem] text-muted-foreground">
+                              <span>
+                                Menor volumen
+                                <span className="mono block tabular-nums text-foreground">{volumen(rangoVolumen.min)} m³</span>
+                              </span>
+                              <span className="text-right">
+                                Mayor volumen
+                                <span className="mono block tabular-nums text-foreground">{volumen(rangoVolumen.max)} m³</span>
+                              </span>
+                            </div>
+                          </div>
+                        ) : (
+                          <ul className="h-full space-y-1 overflow-y-auto pr-1">
+                            {tiposPresentes.map(([clase]) => (
+                              <li key={clase} className="flex items-center gap-1.5 text-[0.6875rem] text-foreground">
+                                <span className="h-2.5 w-2.5 flex-shrink-0 rounded-sm" style={{ background: classColor(clase) }} />
+                                <span className="min-w-0 truncate">{clase}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
                     </div>
-                  ) : (
-                    <ul className="max-h-32 space-y-1 overflow-y-auto pr-1">
-                      {tiposPresentes.map(([clase]) => (
-                        <li key={clase} className="flex items-center gap-1.5 text-[0.6875rem] text-foreground">
-                          <span className="h-2.5 w-2.5 flex-shrink-0 rounded-sm" style={{ background: classColor(clase) }} />
-                          <span className="min-w-0 truncate">{clase}</span>
-                        </li>
-                      ))}
-                    </ul>
                   )}
                 </div>
               )}
