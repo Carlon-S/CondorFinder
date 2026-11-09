@@ -54,6 +54,8 @@ import {
   listAnalyses,
   listZones,
   deleteVersion,
+  deleteAnalysis,
+  makeAnalysisCurrent,
   consumePendingOpenId,
   confirmDuplicate,
   rejectDuplicate,
@@ -578,6 +580,7 @@ function AnalysisPage() {
   // volvió a medir: su volumen y su peso son los de antes del cambio.
   const [editadas, setEditadas]                   = useState<Map<number, CambioPendiente>>(new Map());
   const [ordenLista, setOrdenLista]               = useState<OrdenLista>("volumen");
+  const [ordenAsc, setOrdenAsc]                   = useState(false);
   const [filtroLista, setFiltroLista]             = useState<FiltroLista>("todas");
   const [cambiarTipoOpen, setCambiarTipoOpen]     = useState(false);
   const [eliminarSelOpen, setEliminarSelOpen]     = useState(false);
@@ -588,6 +591,16 @@ function AnalysisPage() {
   // Contorno original de lo que se está editando, para "Restaurar contorno".
   const contornoBase = useRef<Map<string, AreaPoint[]>>(new Map());
   const nivelSimplificacion = useRef(0);
+  // Contorno y marca de una detección al ENTRAR a editarla: si se sale sin haber
+  // hecho nada, se devuelve a esto y no queda como "sin medir".
+  const originalesEdicion = useRef<
+    Map<
+      number,
+      { rings: number[][] | undefined; bbox: DisplayDetection["bbox"]; yaEditada: boolean; inicial?: number[] }
+    >
+  >(new Map());
+  const edicionPrevia = useRef<string | null>(null);
+  const claseOriginal = useRef<Map<number, string>>(new Map());
   // Deshacer / rehacer de la edición de contornos: cada entrada es el contorno
   // completo de ANTES de una acción (arrastre, vértice nuevo o quitado,
   // simplificación, restauración).
@@ -1028,6 +1041,9 @@ function AnalysisPage() {
   };
 
   const clearArea = () => {
+    // Sin área, nada queda fuera de ella: los polígonos que descartaba vuelven a
+    // contar (el mismo criterio que desactivarla).
+    setEnabledIds((prev) => new Set([...prev, ...descartadasIds]));
     setAnalysisArea(null);
     setAreaSeleccionada(false);
     setAreaActiva(true);
@@ -1208,6 +1224,11 @@ function AnalysisPage() {
       setZonaEnEdicion(null);
       return;
     }
+    originalesEdicion.current.set(detSel.id, {
+      rings: detSel.rings,
+      bbox: detSel.bbox,
+      yaEditada: Boolean(editadas.get(detSel.id)?.forma),
+    });
     // Se edita UN anillo. Sin máscara, el recuadro pasa a ser el contorno.
     const rings = detSel.rings ?? escalarAnillos(detSel.polygon, pngScale);
     const b = detSel.bbox;
@@ -1228,6 +1249,8 @@ function AnalysisPage() {
       }
     }
     const nuevoAnillo = anilloDePares(pts);
+    const origen = originalesEdicion.current.get(detSel.id);
+    if (origen) origen.inicial = nuevoAnillo;
     setDisplayDetections((prev) =>
       prev.map((d) => (d.id === detSel.id ? { ...d, rings: [nuevoAnillo], bbox: cajaDePuntos(pts) } : d)),
     );
@@ -1263,7 +1286,15 @@ function AnalysisPage() {
   const cabeceraLista = (etiqueta: string, clave: OrdenLista, derecha = true) => (
     <button
       type="button"
-      onClick={() => setOrdenLista(clave)}
+      onClick={() => {
+        // Segundo clic en la misma columna invierte el sentido. Una columna
+        // nueva arranca de mayor a menor, y el tipo de A a Z.
+        if (clave === ordenLista) setOrdenAsc((v) => !v);
+        else {
+          setOrdenLista(clave);
+          setOrdenAsc(clave === "nombre");
+        }
+      }}
       className={`flex cursor-pointer items-center gap-0.5 transition-colors hover:text-foreground ${
         derecha ? "justify-end" : ""
       } ${ordenLista === clave ? "text-foreground" : ""}`}
@@ -1271,7 +1302,7 @@ function AnalysisPage() {
     >
       {etiqueta}
       <span className={`text-[0.5rem] ${ordenLista === clave ? "opacity-100" : "opacity-30"}`}>
-        {clave === "nombre" ? "▲" : "▼"}
+        {ordenLista === clave ? (ordenAsc ? "▲" : "▼") : "▼"}
       </span>
     </button>
   );
@@ -1290,7 +1321,15 @@ function AnalysisPage() {
             : d,
         ),
       );
-      setEditadas((prev) => new Map(prev).set(detSel.id, { ...prev.get(detSel.id), clase: true }));
+      if (!claseOriginal.current.has(detSel.id)) claseOriginal.current.set(detSel.id, detSel.class);
+      const vuelve = claseOriginal.current.get(detSel.id) === clase;
+      setEditadas((prev) => {
+        const next = new Map(prev);
+        const resto = { ...prev.get(detSel.id), clase: !vuelve };
+        if (!resto.clase && !resto.forma) next.delete(detSel.id);
+        else next.set(detSel.id, resto);
+        return next;
+      });
     }
     setCambiarTipoOpen(false);
   };
@@ -1502,10 +1541,11 @@ useEffect(() => {
     };
     const valor = (d: DisplayDetection) =>
       ordenLista === "peso" ? d.weight_kg ?? 0 : ordenLista === "area" ? d.area_m2 ?? 0 : d.volume_m3 ?? 0;
-    return visibleDetections.filter(pasa).sort((a, b) =>
-      ordenLista === "nombre" ? a.class.localeCompare(b.class, "es") : valor(b) - valor(a),
-    );
-  }, [visibleDetections, filtroLista, tipoActivo, ordenLista, editadas, enabledIds]);
+    return visibleDetections.filter(pasa).sort((a, b) => {
+      const asc = ordenLista === "nombre" ? a.class.localeCompare(b.class, "es") : valor(a) - valor(b);
+      return ordenAsc ? asc : -asc;
+    });
+  }, [visibleDetections, filtroLista, tipoActivo, ordenLista, ordenAsc, editadas, enabledIds]);
 
   /** Conteo de cada opción del filtro, con las mismas reglas que `detectionRows`. */
   const conteoFiltro = useMemo(
@@ -1526,8 +1566,37 @@ useEffect(() => {
   // Ctrl+Z deshace y Ctrl+Y (o Ctrl+Shift+Z) rehace mientras se edita un contorno.
   // El historial es de UNA edición: al cambiar de polígono se descarta.
   useEffect(() => {
+    const previa = edicionPrevia.current;
+    edicionPrevia.current = zonaEnEdicion;
+    if (previa && previa !== zonaEnEdicion && previa.startsWith("det:")) {
+      const id = Number(previa.slice(4));
+      const original = originalesEdicion.current.get(id);
+      // Se compara el contorno de ahora con el que tenía al abrir la edición
+      // (ya simplificado): si es el mismo, no se tocó nada.
+      const actual = displayDetections.find((d) => d.id === id)?.rings?.[0];
+      const sinCambios =
+        Boolean(original?.inicial && actual) &&
+        actual!.length === original!.inicial!.length &&
+        actual!.every((v, i) => v === original!.inicial![i]);
+      // Se abrió y se salió sin tocar nada (o se deshizo todo): vuelve a como
+      // estaba, sin quedar marcado como editado. Solo si la marca sigue puesta:
+      // si un análisis nuevo ya la limpió, esos ids son de otra medición.
+      if (original && sinCambios && editadas.get(id)?.forma && !original.yaEditada) {
+        setDisplayDetections((prev) =>
+          prev.map((d) => (d.id === id ? { ...d, rings: original.rings, bbox: original.bbox } : d)),
+        );
+        setEditadas((prev) => {
+          const next = new Map(prev);
+          const actual = next.get(id);
+          if (actual?.clase) next.set(id, { clase: true });
+          else next.delete(id);
+          return next;
+        });
+      }
+    }
     pilaDeshacer.current = [];
     pilaRehacer.current = [];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zonaEnEdicion]);
   useEffect(() => {
     if (!zonaEnEdicion) return;
@@ -1674,6 +1743,7 @@ useEffect(() => {
     // Lo seleccionado y lo editado sin medir eran de la captura anterior.
     setSeleccion(null);
     setEditadas(new Map());
+    claseOriginal.current.clear();
     setZonaEnEdicion(null);
 
     // El desglose desplegado tampoco se hereda. Los ids de detección son
@@ -1834,10 +1904,61 @@ useEffect(() => {
   };
 
   /** Cambia la captura que se está viendo, sin salir de la vista. */
-  const seleccionarVersion = (version: ZoneVersion) => {
-    // La medición más reciente de ese vuelo es su lectura vigente.
-    const ultimo = version.analyses[version.analyses.length - 1];
-    if (ultimo) aplicarAnalisis(ultimo);
+  /** Relee los análisis de la zona y devuelve la lista. */
+  const recargarAnalisisDeLaZona = async (): Promise<SavedAnalysisRecord[]> => {
+    const todos = await listAnalyses();
+    const deLaZona = todos.filter((a) => a.zoneId === zoneId);
+    setZoneAnalyses(deLaZona);
+    setVersions(buildVersions(deLaZona));
+    return deLaZona;
+  };
+
+  /** Análisis que se está por eliminar desde la barra, o null. */
+  const [analisisAEliminar, setAnalisisAEliminar] = useState<SavedAnalysisRecord | null>(null);
+
+  const pedirEliminarAnalisis = (rec: SavedAnalysisRecord) => {
+    const version = versions.find((v) => v.sourceTaskId === rec.sourceTaskId);
+    if (!version) return;
+    // Si es el único análisis de su vuelo, eliminarlo es eliminar la captura
+    // entera (mapa y archivos incluidos), que tiene su propia confirmación.
+    if (version.analyses.length > 1) setAnalisisAEliminar(rec);
+    else setVersionAEliminar(version);
+  };
+
+  const eliminarAnalisis = async (rec: SavedAnalysisRecord) => {
+    setEliminandoVersion(true);
+    try {
+      await deleteAnalysis(rec.id);
+      setAnalisisAEliminar(null);
+      const deLaZona = await recargarAnalisisDeLaZona();
+      // Si se borró el que se estaba viendo, se pasa al vigente.
+      if (rec.id === currentAnalysisId) {
+        const vigente = deLaZona.find((a) => !a.historical) ?? deLaZona[deLaZona.length - 1];
+        if (vigente) aplicarAnalisis(vigente);
+      }
+      notify.success("Análisis eliminado", "La captura y su mapa se conservan.");
+    } catch {
+      notify.error("No se pudo eliminar el análisis", "Intenta nuevamente.");
+    } finally {
+      setEliminandoVersion(false);
+    }
+  };
+
+  /** Hace vigente un análisis anterior del MISMO vuelo, sin borrar nada. */
+  const hacerVigente = async (rec: SavedAnalysisRecord) => {
+    const r = await makeAnalysisCurrent(rec.id);
+    if (!r) {
+      notify.error("No se pudo cambiar el análisis vigente", "Intenta nuevamente.");
+      return;
+    }
+    try {
+      const deLaZona = await recargarAnalisisDeLaZona();
+      const nuevo = deLaZona.find((a) => a.id === rec.id) ?? r;
+      aplicarAnalisis(nuevo);
+      notify.success("Análisis vigente actualizado", "Vista Principal y Rutas usan ahora este análisis.");
+    } catch {
+      notify.error("El cambio se hizo, pero no se pudo recargar la zona", "Actualiza la página.");
+    }
   };
 
   // ── carga inicial de detecciones al montar ─────────────────────────────────
@@ -2069,6 +2190,7 @@ useEffect(() => {
         // la medición anterior, y las zonas dibujadas, que ya son detecciones.
         setRestauradasIds(new Set());
         setEditadas(new Map());
+    claseOriginal.current.clear();
         setSeleccion(null);
         // Las zonas dibujadas solo se sueltan si el servidor las registro: si
         // el analisis volvio sin ellas (un servidor que no las conoce, o que
@@ -3303,8 +3425,9 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
 
           {/* Filtros de la lista. El orden se cambia desde los encabezados de columna. */}
           {displayDetections.length > 0 && (
-            <div className="mb-2 flex flex-shrink-0 flex-wrap items-center gap-1.5">
+            <div className="mb-3 grid flex-shrink-0 grid-cols-2 gap-2">
               <FiltroDropdown<FiltroLista>
+                className="w-full min-w-0 justify-between overflow-hidden"
                 etiqueta="Mostrar"
                 valor={filtroLista}
                 onCambio={setFiltroLista}
@@ -3317,6 +3440,7 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                 ]}
               />
               <FiltroDropdown<string>
+                className="w-full min-w-0 justify-between overflow-hidden"
                 etiqueta="Tipo"
                 valor={tipoActivo}
                 onCambio={setTipoFiltro}
@@ -3331,12 +3455,11 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
           {/* Detalle del polígono elegido. Fuera de la región que se desplaza,
               para que las acciones estén a la mano con la lista larga. */}
           {(detSel || nuevaSel) && (
-            <div className="mb-2 flex-shrink-0 space-y-2.5 rounded-lg border border-primary/40 bg-primary/5 p-3 shadow-sm animate-in fade-in duration-200">
+            <div
+              className="mb-3 flex-shrink-0 space-y-3 rounded-lg border border-l-4 border-border bg-card p-3 shadow-sm animate-in fade-in duration-200"
+              style={{ borderLeftColor: classColor(detSel?.class ?? nuevaSel?.clase ?? "") }}
+            >
               <div className="flex items-center gap-2">
-                <span
-                  className="h-3 w-3 flex-shrink-0 rounded-sm"
-                  style={{ background: classColor(detSel?.class ?? nuevaSel?.clase ?? "") }}
-                />
                 <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">
                   {detSel?.class ?? nuevaSel?.clase}
                 </span>
@@ -3358,24 +3481,23 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
               </div>
 
               {/* Las tres medidas, con la misma tipografía y la unidad junto al rótulo. */}
-              <dl className="grid grid-cols-3 gap-2 rounded-md bg-background/70 px-2.5 py-2">
+              <dl className="grid grid-cols-3 gap-2">
                 {[
                   ["Volumen", "m³", detSel ? volumen(detSel.volume_m3 ?? 0) : null],
                   ["Área", "m²", detSel ? area(detSel.area_m2 ?? 0) : null],
                   ["Peso", "kg", detSel ? peso(detSel.weight_kg ?? 0) : null],
                 ].map(([rotulo, unidad, valor]) => (
-                  <div key={rotulo} className="min-w-0">
-                    <dt className="text-[0.6875rem] text-muted-foreground">
-                      {rotulo} ({unidad})
-                    </dt>
+                  <div key={rotulo} className="min-w-0 rounded-md border border-border/60 bg-muted/30 px-2.5 py-2">
+                    <dt className="text-[0.6875rem] font-medium text-muted-foreground">{rotulo}</dt>
                     <dd
-                      className={`mono text-xs font-semibold tabular-nums ${
+                      className={`mono mt-0.5 truncate text-sm font-semibold tabular-nums ${
                         valor == null || (detSel && editadas.has(detSel.id))
                           ? "text-muted-foreground"
                           : "text-foreground"
                       }`}
                     >
                       {valor ?? "-"}
+                      <span className="ml-1 text-[0.6875rem] font-normal text-muted-foreground">{unidad}</span>
                     </dd>
                   </div>
                 ))}
@@ -3444,7 +3566,7 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
               <div className="grid grid-cols-3 gap-2">
                 <Button
                   size="sm"
-                  className="h-8 gap-1 px-2 text-xs font-semibold"
+                  className="h-9 gap-1.5 px-2 text-xs font-semibold"
                   variant={editandoEste ? "secondary" : "default"}
                   disabled={!puedeEditar}
                   onClick={alternarEdicionDeForma}
@@ -3454,16 +3576,17 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                 </Button>
                 <Button
                   size="sm"
-                  className="h-8 px-2 text-xs font-semibold"
+                  className="h-9 gap-1.5 px-2 text-xs font-semibold"
                   variant="secondary"
                   disabled={!puedeEditar}
                   onClick={() => setCambiarTipoOpen(true)}
                 >
+                  <Boxes className="h-3.5 w-3.5" />
                   Cambiar tipo
                 </Button>
                 <Button
                   size="sm"
-                  className="h-8 gap-1 border-destructive/40 px-2 text-xs font-semibold text-destructive-strong hover:bg-destructive/10"
+                  className="h-9 gap-1.5 border-destructive/40 px-2 text-xs font-semibold text-destructive-strong hover:bg-destructive/10"
                   variant="outline"
                   disabled={!puedeEditar}
                   onClick={() => setEliminarSelOpen(true)}
@@ -3842,14 +3965,44 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
           se puede plegar desde su propio encabezado. */}
       <VersionBar
         versions={versions}
-        activeTaskId={taskId}
-        onSelect={seleccionarVersion}
-        // Con una sola captura no se ofrece: eso ya no es borrar una versión,
+        activeAnalysisId={currentAnalysisId}
+        onSelect={aplicarAnalisis}
+        // Con un solo análisis no se ofrece: eso ya no es borrar un análisis,
         // es borrar la zona, y ese camino vive en Vista Principal con su
         // propia confirmación.
-        onDelete={versions.length > 1 ? setVersionAEliminar : undefined}
+        onDelete={zoneAnalyses.length > 1 ? pedirEliminarAnalisis : undefined}
+        onMakeCurrent={hacerVigente}
         loading={versionsLoading}
       />
+
+      {/* Confirmación de eliminar UN análisis (la captura y su mapa se conservan). */}
+      <AlertDialog
+        open={analisisAEliminar !== null}
+        onOpenChange={(open) => { if (!open && !eliminandoVersion) setAnalisisAEliminar(null); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Eliminar este análisis</AlertDialogTitle>
+            <AlertDialogDescription>
+              Se elimina el análisis <strong>{analisisAEliminar?.name}</strong>. La captura, su mapa y sus
+              modelos de elevación se conservan, así que el vuelo se puede volver a medir.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={eliminandoVersion}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={eliminandoVersion}
+              onClick={(e) => {
+                e.preventDefault();
+                if (analisisAEliminar) eliminarAnalisis(analisisAEliminar);
+              }}
+            >
+              {eliminandoVersion && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Eliminar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Confirmación de eliminar una captura desde la barra. */}
       <AlertDialog

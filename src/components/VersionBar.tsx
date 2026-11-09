@@ -23,7 +23,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
-import { Loader2, Trash2 } from "@/components/icons/Icons";
+import { CheckCircle2, Loader2, Trash2 } from "@/components/icons/Icons";
+import type { SavedAnalysisRecord } from "@/lib/analysisStore";
 import type { ZoneVersion } from "@/lib/volumeReport";
 import { versionLabel, zoneTotals } from "@/lib/volumeReport";
 import { volumen } from "@/lib/formato";
@@ -33,21 +34,24 @@ import { volumen } from "@/lib/formato";
 
 export function VersionBar({
   versions,
-  activeTaskId,
+  activeAnalysisId,
   onSelect,
   onDelete,
+  onMakeCurrent,
   loading = false,
 }: {
   versions: ZoneVersion[];
-  /** sourceTaskId de la versión que se está viendo. */
-  activeTaskId: string | null;
-  onSelect: (version: ZoneVersion) => void;
+  /** Id del análisis que se está viendo. */
+  activeAnalysisId: string | null;
+  onSelect: (analysis: SavedAnalysisRecord) => void;
+  /** Hacer vigente un análisis anterior del mismo vuelo. */
+  onMakeCurrent?: (analysis: SavedAnalysisRecord) => void;
   /** Eliminar una captura concreta de la zona. Sin esto solo se podía borrar
    *  desde Vista Principal, y para llegar a una versión intermedia había que
    *  saber que estaba escondida bajo el filtro "Historial". Se omite cuando la
    *  zona tiene una sola captura: eso ya no es borrar una versión, es borrar
    *  la zona, y ese camino vive en Vista Principal con su confirmación. */
-  onDelete?: (version: ZoneVersion) => void;
+  onDelete?: (analysis: SavedAnalysisRecord) => void;
   /** Las capturas se piden al backend después de montar la vista. Sin este
    *  aviso, la barra aparecía de golpe un momento después y empujaba el
    *  contenido; con él, el espacio queda reservado desde el principio. */
@@ -134,85 +138,110 @@ export function VersionBar({
               onScroll={revisarFlechas}
               className="flex justify-center gap-2 overflow-x-auto pb-1"
             >
-              {versions.map((version, i) => {
-                const ultimo = version.analyses[version.analyses.length - 1];
-                const total = zoneTotals(ultimo);
-                const activa = version.sourceTaskId === activeTaskId;
-                const vigente = i === versions.length - 1;
+              {versions
+                .flatMap((version, vi) => version.analyses.map((rec) => ({ version, vi, rec })))
+                .map(({ version, vi, rec }) => {
+                  const total = zoneTotals(rec);
+                  const activa = rec.id === activeAnalysisId;
+                  const vigente = !rec.historical;
+                  // Solo se puede elegir entre análisis del vuelo vigente: pasar a
+                  // vigente un vuelo más antiguo contradiría el orden de capturas.
+                  const puedeHacerVigente = Boolean(onMakeCurrent) && rec.historical && vi === versions.length - 1;
+                  const variosDelVuelo = version.analyses.length > 1;
+                  const hora = new Date(rec.savedAt).toLocaleTimeString("es-CL", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    timeZone: "America/Santiago",
+                  });
 
-                return (
-                  // relative: la papelera va superpuesta a la casilla, no
-                  // dentro de su <button>. Un botón anidado dentro de otro es
-                  // HTML inválido y el click del interior activa igual al
-                  // exterior, o sea que borrar habría cambiado de versión
-                  // antes de abrir la confirmación.
-                  <li key={version.sourceTaskId} className="group relative flex-shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => onSelect(version)}
-                      aria-current={activa ? "true" : undefined}
-                      className={`flex w-[9.5rem] flex-col gap-1.5 rounded-lg border p-2 text-left transition-all duration-200 hover:-translate-y-0.5 ${
-                        activa
-                          ? "border-primary bg-primary/5 shadow-sm"
-                          : "border-border/60 hover:border-border hover:bg-muted/50"
-                      }`}
-                    >
-                      <div className="detect-frame detect-frame-sm h-[3.75rem] w-full overflow-hidden rounded bg-muted">
-                        <span className="detect-corners" aria-hidden="true" />
-                        <img
-                          src={version.thumbnailUrl ?? version.mapUrl}
-                          alt={`Captura del ${versionLabel(version.captureDate, version.uploadedAt)}`}
-                          className="h-full w-full object-cover"
-                          loading="lazy"
-                        />
-                      </div>
-
-                      <div className="flex items-center justify-between gap-1">
-                        <span className="text-[0.69rem] font-semibold text-foreground">
-                          {versionLabel(version.captureDate, version.uploadedAt)}
-                        </span>
-                        {vigente ? (
-                          <span className="text-[0.63rem] text-success-strong">vigente</span>
-                        ) : (
-                          <span className="text-[0.63rem] text-muted-foreground">consulta</span>
-                        )}
-                      </div>
-
-                      <div className="flex items-center justify-between gap-1">
-                        <span className="mono text-[0.63rem] tabular-nums text-muted-foreground">
-                          {volumen(total.volumeM3)} m³
-                        </span>
-                        {/* Ninguna foto traía fecha y se usó la de carga. Sin
-                            decirlo, una fecha inventada se lee como real. */}
-                        {version.captureDateEstimated && (
-                          <span
-                            className="text-[0.63rem] text-warning"
-                            title="Ninguna foto traía fecha de captura; se usó la de carga"
-                          >
-                            estimada
-                          </span>
-                        )}
-                      </div>
-                    </button>
-
-                    {/* Aparece al pasar por encima. Siempre visible sería ruido
-                        constante sobre una acción destructiva que casi nunca se
-                        usa; y con foco de teclado también se muestra, para que
-                        no quede inalcanzable sin ratón. */}
-                    {onDelete && (
+                  return (
+                    // relative: las acciones van superpuestas a la casilla, no
+                    // dentro de su <button> (un botón dentro de otro es HTML
+                    // inválido y el clic del interior activaría el exterior).
+                    <li key={rec.id} className="group relative flex-shrink-0">
                       <button
                         type="button"
-                        onClick={() => onDelete(version)}
-                        title="Eliminar esta captura"
-                        aria-label={`Eliminar la captura del ${versionLabel(version.captureDate, version.uploadedAt)}`}
-                        className="absolute right-1 top-1 flex h-6 w-6 cursor-pointer items-center justify-center rounded-md bg-card/90 text-muted-foreground opacity-0 shadow-sm backdrop-blur transition-all duration-150 hover:bg-destructive/15 hover:text-destructive-strong focus-visible:opacity-100 group-hover:opacity-100"
+                        onClick={() => onSelect(rec)}
+                        aria-current={activa ? "true" : undefined}
+                        title={rec.name}
+                        className={`flex w-[9.5rem] flex-col gap-1.5 rounded-lg border p-2 text-left transition-all duration-200 hover:-translate-y-0.5 ${
+                          activa
+                            ? "border-primary bg-primary/5 shadow-sm"
+                            : "border-border/60 hover:border-border hover:bg-muted/50"
+                        }`}
                       >
-                        <Trash2 className="h-3.5 w-3.5" />
+                        <div className="detect-frame detect-frame-sm h-[3.75rem] w-full overflow-hidden rounded bg-muted">
+                          <span className="detect-corners" aria-hidden="true" />
+                          <img
+                            src={version.thumbnailUrl ?? version.mapUrl}
+                            alt={`Captura del ${versionLabel(version.captureDate, version.uploadedAt)}`}
+                            className="h-full w-full object-cover"
+                            loading="lazy"
+                          />
+                        </div>
+
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-[0.69rem] font-semibold text-foreground">
+                            {versionLabel(version.captureDate, version.uploadedAt)}
+                          </span>
+                          {vigente ? (
+                            <span className="text-[0.63rem] text-success-strong">vigente</span>
+                          ) : (
+                            <span className="text-[0.63rem] text-muted-foreground">consulta</span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="mono text-[0.63rem] tabular-nums text-muted-foreground">
+                            {volumen(total.volumeM3)} m³
+                          </span>
+                          {/* Varios análisis del mismo vuelo comparten fecha: la hora
+                              en que se guardó es lo que los distingue. */}
+                          {variosDelVuelo && (
+                            <span className="mono text-[0.63rem] tabular-nums text-muted-foreground" title="Hora en que se guardó este análisis">
+                              {hora}
+                            </span>
+                          )}
+                          {/* Ninguna foto traía fecha y se usó la de carga. Sin
+                              decirlo, una fecha inventada se lee como real. */}
+                          {version.captureDateEstimated && (
+                            <span
+                              className="text-[0.63rem] text-warning"
+                              title="Ninguna foto traía fecha de captura; se usó la de carga"
+                            >
+                              estimada
+                            </span>
+                          )}
+                        </div>
                       </button>
-                    )}
-                  </li>
-                );
-              })}
+
+                      {/* Aparecen al pasar por encima (y con foco de teclado):
+                          siempre visibles serían ruido constante. */}
+                      {puedeHacerVigente && (
+                        <button
+                          type="button"
+                          onClick={() => onMakeCurrent?.(rec)}
+                          title="Hacer vigente este análisis"
+                          aria-label={`Hacer vigente el análisis guardado a las ${hora}`}
+                          className="absolute left-1 top-1 flex h-6 w-6 cursor-pointer items-center justify-center rounded-md bg-card/90 text-muted-foreground opacity-0 shadow-sm backdrop-blur transition-all duration-150 hover:bg-success/15 hover:text-success-strong focus-visible:opacity-100 group-hover:opacity-100"
+                        >
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                      {onDelete && (
+                        <button
+                          type="button"
+                          onClick={() => onDelete(rec)}
+                          title="Eliminar este análisis"
+                          aria-label={`Eliminar el análisis guardado a las ${hora}`}
+                          className="absolute right-1 top-1 flex h-6 w-6 cursor-pointer items-center justify-center rounded-md bg-card/90 text-muted-foreground opacity-0 shadow-sm backdrop-blur transition-all duration-150 hover:bg-destructive/15 hover:text-destructive-strong focus-visible:opacity-100 group-hover:opacity-100"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </li>
+                  );
+                })}
             </ol>
           )}
         </div>

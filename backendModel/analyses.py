@@ -467,7 +467,10 @@ async def _reconciliar_vigencia(zone_id: str) -> None:
 
     # De la versión vigente, el análisis más reciente es al que apuntan las
     # anteriores como su reemplazo.
-    sucesor = max(vigente, key=lambda a: _momento(a.get("savedAt"), None))
+    # Si el trabajador eligió a mano cuál análisis de ese vuelo es el vigente
+    # (`vigenteElegida`), manda esa elección; si no, el más reciente.
+    elegidas = [a for a in vigente if a.get("vigenteElegida")]
+    sucesor = elegidas[0] if elegidas else max(vigente, key=lambda a: _momento(a.get("savedAt"), None))
     sucesor_id = str(sucesor["_id"])
 
     # **El actual es UN análisis, el más reciente de la versión vigente.** Una
@@ -775,6 +778,14 @@ async def create_analysis(
     result = await get_db().analyses.insert_one(doc)
     doc["_id"] = result.inserted_id
     await _release_source_task(payload.sourceTaskId)
+
+    # Un análisis nuevo es el más reciente y pasa a ser el vigente de su vuelo:
+    # cualquier elección manual anterior sobre ese vuelo queda sin efecto.
+    if doc.get("sourceTaskId"):
+        await get_db().analyses.update_many(
+            {"sourceTaskId": doc["sourceTaskId"], "_id": {"$ne": doc["_id"]}},
+            {"$set": {"vigenteElegida": False}},
+        )
 
     # Quién queda vigente en la zona, salvo que haya una pregunta pendiente.
     #
@@ -1395,6 +1406,41 @@ async def delete_analysis(
     # y el punto queda; sin este dato el aviso diría "zona eliminada" y el
     # punto seguiría ahí, listado como sin vuelo.
     return {"message": "Análisis eliminado", "zonaConservada": zona_conservada}
+
+
+@router.post("/{analysis_id}/make-current", response_model=SavedAnalysisOut)
+async def make_current(
+    analysis_id: str,
+    current_user: auth_module.UserOut = Depends(auth_module.get_current_user),
+):
+    """Elige cuál análisis de un MISMO vuelo es el vigente de su zona.
+
+    Un vuelo puede tener varios análisis (mediciones con otros polígonos, otro
+    tipo, un área delimitada). Por omisión el vigente es el más reciente; esto
+    permite volver a uno anterior sin borrar nada. Solo se puede entre análisis
+    del vuelo vigente de la zona: pasar a vigente un vuelo más antiguo
+    contradiría el orden de capturas."""
+    oid = _object_id(analysis_id)
+    doc = await get_db().analyses.find_one({"_id": oid})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Análisis no encontrado")
+    zone_id = doc.get("zoneId")
+    source = doc.get("sourceTaskId")
+    if not zone_id or not source:
+        raise HTTPException(status_code=400, detail="Este análisis no pertenece a una zona")
+
+    actual = await get_db().analyses.find_one({"zoneId": zone_id, "historical": False})
+    if actual and actual.get("sourceTaskId") != source:
+        raise HTTPException(
+            status_code=409,
+            detail="Solo se puede alternar entre análisis del mismo vuelo vigente de la zona.",
+        )
+
+    await get_db().analyses.update_many({"sourceTaskId": source}, {"$set": {"vigenteElegida": False}})
+    await get_db().analyses.update_one({"_id": oid}, {"$set": {"vigenteElegida": True}})
+    await _reconciliar_vigencia(zone_id)
+    actualizado = await get_db().analyses.find_one({"_id": oid})
+    return _to_out(actualizado)
 
 
 @router.post("/{analysis_id}/confirm-duplicate", response_model=SavedAnalysisOut)

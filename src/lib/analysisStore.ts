@@ -445,6 +445,20 @@ export async function confirmDuplicate(
   }
 }
 
+/** Elige cuál análisis de un mismo vuelo es el vigente de su zona. */
+export async function makeAnalysisCurrent(id: string): Promise<SavedAnalysisRecord | null> {
+  try {
+    const res = await fetch(`${BACKEND_URL}/analyses/${encodeURIComponent(id)}/make-current`, {
+      method: "POST",
+      credentials: "include",
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
 /**
  * AC4, el trabajador indica que son zonas distintas: ambos registros se
  * mantienen por separado, solo se cierra el aviso de posible duplicado.
