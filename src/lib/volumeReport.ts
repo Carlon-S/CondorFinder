@@ -393,15 +393,25 @@ export function evolutionSeries(
     (r) => r.volumenRetiradoM3 != null && r.volumenRetiradoM3 > 0 && r.fecha,
   );
 
-  type Item = { t: number; punto?: EvolutionPoint; retiro?: RetiroDeZona };
+  type Item = { t: number; i: number; punto?: EvolutionPoint; retiro?: RetiroDeZona };
   const mezcla: Item[] = [
-    ...puntos.map((p): Item => ({ t: new Date(p.date).getTime(), punto: p })),
-    ...utilizables.map((r): Item => ({ t: new Date(r.fecha).getTime(), retiro: r })),
+    ...puntos.map((p, i): Item => ({ t: new Date(p.date).getTime(), i, punto: p })),
+    ...utilizables.map((r, i): Item => ({ t: new Date(r.fecha).getTime(), i: puntos.length + i, retiro: r })),
   ];
   // En un empate exacto de fecha manda la MEDICIÓN: si el dron voló el mismo
   // día que pasó el camión, lo que el dron vio ya incluye el retiro, así que
   // descontarlo otra vez sería contarlo dos veces.
-  mezcla.sort((a, b) => a.t - b.t || (a.punto ? -1 : 1));
+  // **Con un desempate ESTABLE.** Dos vuelos del MISMO set de fotos comparten la
+  // fecha de captura del EXIF, y el comparador anterior daba -1 para dos
+  // mediciones empatadas, o sea un orden indefinido: la medición más nueva podía
+  // quedar antes que la vieja y el retiro se descontaba de la cifra equivocada.
+  // Ahora, en un empate manda la medición sobre el retiro y, entre iguales, el
+  // orden en que ya venían (las versiones llegan cronológicas).
+  mezcla.sort((a, b) => {
+    if (a.t !== b.t) return a.t - b.t;
+    if (!!a.punto !== !!b.punto) return a.punto ? -1 : 1;
+    return a.i - b.i;
+  });
 
   const serie: EvolutionPoint[] = [];
   // `null` mientras no haya habido ninguna medición. No es 0: un lugar sin
