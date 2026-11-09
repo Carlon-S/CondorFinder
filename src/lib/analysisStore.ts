@@ -121,7 +121,7 @@ export interface SavedAnalysisRecord {
    *  marcados "sin-cambios" repiten la cifra anterior por construcción, así
    *  que la evolución y el informe los agrupan en vez de dibujar un punto
    *  redundante. */
-  changeKind?: "primero" | "seleccion" | "algoritmo" | "sin-cambios" | null;
+  changeKind?: "primero" | "seleccion" | "algoritmo" | "poligonos" | "sin-cambios" | null;
   /** Polígono con que el trabajador delimitó el área a analizar, en píxeles de
    *  imagen (mismo espacio que `bbox`): [[x, y], ...]. null/ausente = sin área
    *  (todos los análisis anteriores a este campo). */

@@ -23,7 +23,10 @@ import {
   Search,
   Trash2,
   TriangleAlert,
+  X,
 } from "@/components/icons/Icons";
+import { FiltroDropdown } from "@/components/FiltroDropdown";
+import { ConfirmarBorrado } from "@/components/ConfirmarBorrado";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
@@ -40,6 +43,7 @@ import {
 import {
   startVolumeAnalysis,
   pollVolumeAnalysis,
+  type EdicionDeModelo,
   type EnrichedDetection,
   type ZonaManual,
 } from "@/lib/analysis";
@@ -186,6 +190,45 @@ function anilloComoPares(anillo: number[] | undefined): AreaPoint[] {
   for (let i = 0; i + 1 < anillo.length; i += 2) pares.push([anillo[i], anillo[i + 1]]);
   return pares;
 }
+
+/** Lo contrario de `anilloComoPares`: [[x, y], ...] a [x1, y1, x2, y2, ...]. */
+function anilloDePares(pts: AreaPoint[]): number[] {
+  return pts.flatMap(([x, y]) => [x, y]);
+}
+
+/** Caja que envuelve una lista de puntos, en el formato de `bbox`. */
+function cajaDePuntos(pts: AreaPoint[]) {
+  const xs = pts.map((p) => p[0]);
+  const ys = pts.map((p) => p[1]);
+  return { minx: Math.min(...xs), miny: Math.min(...ys), maxx: Math.max(...xs), maxy: Math.max(...ys) };
+}
+
+/** El anillo de mayor extensión. Un contorno se edita como UN solo anillo. */
+function anilloMayor(rings: number[][]): number[] | undefined {
+  let mejor: number[] | undefined;
+  let mayor = -1;
+  for (const r of rings) {
+    const c = cajaDePuntos(anilloComoPares(r));
+    const a = (c.maxx - c.minx) * (c.maxy - c.miny);
+    if (a > mayor) {
+      mayor = a;
+      mejor = r;
+    }
+  }
+  return mejor;
+}
+
+/** Qué polígono está seleccionado: una detección de la lista o una zona nueva. */
+type Seleccion = { tipo: "det"; id: number } | { tipo: "nueva"; uid: string } | null;
+
+/** Qué se anotó de una detección que cambió desde el último análisis. */
+interface CambioPendiente {
+  clase?: boolean;
+  forma?: boolean;
+}
+
+type OrdenLista = "volumen" | "peso" | "area" | "nombre";
+type FiltroLista = "todas" | "nuevas" | "modelo" | "sin_medir" | "desactivadas";
 
 /** Las 20 clases del modelo, en el orden de la tabla de colores. */
 const CLASES_DE_BASURA = Object.keys(CLASS_COLORS).slice(0, 20);
@@ -462,6 +505,15 @@ function AnalysisPage() {
   // recien dibujada), el uid de una confirmada, o null.
   const [zonaEnEdicion, setZonaEnEdicion]         = useState<string | null>(null);
   const arrastreVertice = useRef<{ id: string; i: number } | null>(null);
+  // Polígono elegido, ya sea tocándolo en el mapa o en la lista de la derecha.
+  const [seleccion, setSeleccion]                 = useState<Seleccion>(null);
+  // Detecciones (por id de la lista) cuyo tipo o contorno cambió y todavía no se
+  // volvió a medir: su volumen y su peso son los de antes del cambio.
+  const [editadas, setEditadas]                   = useState<Map<number, CambioPendiente>>(new Map());
+  const [ordenLista, setOrdenLista]               = useState<OrdenLista>("volumen");
+  const [filtroLista, setFiltroLista]             = useState<FiltroLista>("todas");
+  const [cambiarTipoOpen, setCambiarTipoOpen]     = useState(false);
+  const [eliminarSelOpen, setEliminarSelOpen]     = useState(false);
   // Factor con que el PNG se redujo respecto del ortomosaico (1 = sin reducir).
   const [pngScale, setPngScale]                   = useState(1);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -968,6 +1020,130 @@ function AnalysisPage() {
     if (pointInPolygon(p.x, p.y, analysisArea)) setAreaSeleccionada((s) => !s);
   };
 
+  // ── seleccion de un poligono (mapa y lista comparten el mismo estado) ──────
+
+  /** Selecciona el polígono bajo el toque. Si hay varios apilados, el de menor
+   *  extensión: así uno chico dentro de uno grande sigue siendo alcanzable.
+   *  Un toque sobre nada deselecciona. Devuelve si cayó sobre alguno. */
+  const seleccionarPoligonoEn = (clientX: number, clientY: number): boolean => {
+    const svg = svgRef.current;
+    const ctm = svg?.getScreenCTM();
+    if (!svg || !ctm) return false;
+    const p = new DOMPoint(clientX, clientY).matrixTransform(ctm.inverse());
+    const hallados: { sel: Exclude<Seleccion, null>; extension: number }[] = [];
+    const probar = (
+      sel: Exclude<Seleccion, null>,
+      anillos: AreaPoint[][],
+      caja: { minx: number; miny: number; maxx: number; maxy: number },
+    ) => {
+      const dentro =
+        anillos.length > 0
+          ? anillos.some((a) => a.length >= 3 && pointInPolygon(p.x, p.y, a))
+          : p.x >= caja.minx && p.x <= caja.maxx && p.y >= caja.miny && p.y <= caja.maxy;
+      if (dentro) hallados.push({ sel, extension: (caja.maxx - caja.minx) * (caja.maxy - caja.miny) });
+    };
+    zonasManuales.forEach((z) => probar({ tipo: "nueva", uid: z.uid }, [z.pts], cajaDePuntos(z.pts)));
+    visibleDetections.forEach((d) => {
+      if (!enabledIds.has(d.id)) return;
+      const rings = d.rings ?? escalarAnillos(d.polygon, pngScale);
+      probar({ tipo: "det", id: d.id }, rings.map(anilloComoPares), d.bbox);
+    });
+    hallados.sort((a, b) => a.extension - b.extension);
+    setSeleccion(hallados[0]?.sel ?? null);
+    return hallados.length > 0;
+  };
+
+  /** Mueve el mapa para que el centro de `caja` quede en el centro del visor. */
+  const centrarEn = (caja: { minx: number; miny: number; maxx: number; maxy: number }) => {
+    const ctm = svgRef.current?.getScreenCTM();
+    const contenedor = containerRef.current;
+    if (!ctm || !contenedor) return;
+    const s = new DOMPoint((caja.minx + caja.maxx) / 2, (caja.miny + caja.maxy) / 2).matrixTransform(ctm);
+    const r = contenedor.getBoundingClientRect();
+    // El desplazamiento es una traslación en pantalla (va antes del giro y del
+    // zoom), así que se corrige sumándole la distancia que falta.
+    setOffset((o) => ({ x: o.x + (r.left + r.width / 2 - s.x), y: o.y + (r.top + r.height / 2 - s.y) }));
+  };
+
+  /** Elegir un polígono desde la lista: lo resalta y lo trae al centro del mapa. */
+  const elegirDeLista = (
+    sel: Exclude<Seleccion, null>,
+    caja: { minx: number; miny: number; maxx: number; maxy: number },
+  ) => {
+    setSeleccion(sel);
+    setZonaEnEdicion(null);
+    centrarEn(caja);
+  };
+
+  const detSel =
+    seleccion?.tipo === "det" ? (displayDetections.find((d) => d.id === seleccion.id) ?? null) : null;
+  const nuevaSel =
+    seleccion?.tipo === "nueva" ? (zonasManuales.find((z) => z.uid === seleccion.uid) ?? null) : null;
+  const puedeEditar = !readOnly && status !== "running";
+  // Un polígono que agrupa varios tipos es varias detecciones del modelo
+  // superpuestas: se puede cambiar de tipo o eliminar entero, pero su contorno
+  // no es de nadie en particular.
+  const formaBloqueada = Boolean(detSel && !detSel.manual && detSel.ids.length > 1);
+
+  /** Activa o termina la edición del contorno del polígono seleccionado. */
+  const alternarEdicionDeForma = () => {
+    if (nuevaSel) {
+      setZonaEnEdicion((c) => (c === nuevaSel.uid ? null : nuevaSel.uid));
+      return;
+    }
+    if (!detSel || formaBloqueada) return;
+    const clave = `det:${detSel.id}`;
+    if (zonaEnEdicion === clave) {
+      setZonaEnEdicion(null);
+      return;
+    }
+    // Se edita UN anillo. Sin máscara, el recuadro pasa a ser el contorno.
+    const rings = detSel.rings ?? escalarAnillos(detSel.polygon, pngScale);
+    const b = detSel.bbox;
+    const anillo = anilloMayor(rings) ?? [b.minx, b.miny, b.maxx, b.miny, b.maxx, b.maxy, b.minx, b.maxy];
+    setDisplayDetections((prev) => prev.map((d) => (d.id === detSel.id ? { ...d, rings: [anillo] } : d)));
+    if (rings.length > 1) {
+      setEditadas((prev) => new Map(prev).set(detSel.id, { ...prev.get(detSel.id), forma: true }));
+    }
+    setZonaEnEdicion(clave);
+  };
+
+  /** Cambia el tipo de basura del polígono seleccionado. El volumen no cambia
+   *  (es geometría) pero el peso sí, porque cada tipo tiene su densidad: queda
+   *  marcado como sin medir hasta el próximo análisis. */
+  const cambiarTipoDeSeleccion = (clase: string) => {
+    if (nuevaSel) {
+      setZonasManuales((prev) => prev.map((z) => (z.uid === nuevaSel.uid ? { ...z, clase } : z)));
+    } else if (detSel && detSel.class !== clase) {
+      setDisplayDetections((prev) =>
+        prev.map((d) =>
+          d.id === detSel.id
+            ? { ...d, class: clase, classes: [clase], breakdown: d.breakdown.map((b) => ({ ...b, class: clase })) }
+            : d,
+        ),
+      );
+      setEditadas((prev) => new Map(prev).set(detSel.id, { ...prev.get(detSel.id), clase: true }));
+    }
+    setCambiarTipoOpen(false);
+  };
+
+  /** Elimina el polígono seleccionado de la vista. Una detección del modelo
+   *  eliminada no se mide en el próximo análisis; no se borra del servidor. */
+  const eliminarSeleccion = async () => {
+    if (nuevaSel) {
+      setZonasManuales((prev) => prev.filter((z) => z.uid !== nuevaSel.uid));
+    } else if (detSel) {
+      quitarZonaDibujada(detSel);
+      setEditadas((prev) => {
+        const next = new Map(prev);
+        next.delete(detSel.id);
+        return next;
+      });
+    }
+    setZonaEnEdicion(null);
+    setSeleccion(null);
+  };
+
   // ── edicion del contorno de una zona de basura (HDU12) ───────────────────
   //
   // "Reducir el area" es manual: el trabajador arrastra los puntos del
@@ -985,7 +1161,22 @@ function AnalysisPage() {
 
   /** Cambia los puntos de la zona `id` ("pendiente" o el uid de una confirmada). */
   const cambiarPuntos = (id: string, fn: (pts: AreaPoint[]) => AreaPoint[]) => {
-    if (id === "pendiente") setZonaPendiente((prev) => (prev ? fn(prev) : prev));
+    if (id.startsWith("det:")) {
+      const detId = Number(id.slice(4));
+      setDisplayDetections((prev) =>
+        prev.map((d) => {
+          if (d.id !== detId) return d;
+          const nuevos = fn(anilloComoPares(d.rings?.[0]));
+          return { ...d, rings: [anilloDePares(nuevos)], bbox: cajaDePuntos(nuevos) };
+        }),
+      );
+      setEditadas((prev) => {
+        if (prev.get(detId)?.forma) return prev;
+        const next = new Map(prev);
+        next.set(detId, { ...prev.get(detId), forma: true });
+        return next;
+      });
+    } else if (id === "pendiente") setZonaPendiente((prev) => (prev ? fn(prev) : prev));
     else setZonasManuales((prev) => prev.map((z) => (z.uid === id ? { ...z, pts: fn(z.pts) } : z)));
   };
 
@@ -1073,10 +1264,50 @@ useEffect(() => {
    *  conviene atacar el retiro. Se ordena una copia y no `displayDetections`,
    *  porque ese arreglo es el que se guarda y su orden es el que produjo el
    *  backend. */
-  const detectionRows = useMemo(
-    () => [...visibleDetections].sort((a, b) => (b.volume_m3 ?? 0) - (a.volume_m3 ?? 0)),
-    [visibleDetections],
+  const detectionRows = useMemo(() => {
+    const pasa = (d: DisplayDetection) => {
+      switch (filtroLista) {
+        case "nuevas":
+          return Boolean(d.manual);
+        case "modelo":
+          return !d.manual;
+        case "sin_medir":
+          return editadas.has(d.id);
+        case "desactivadas":
+          return !enabledIds.has(d.id);
+        default:
+          return true;
+      }
+    };
+    const valor = (d: DisplayDetection) =>
+      ordenLista === "peso" ? d.weight_kg ?? 0 : ordenLista === "area" ? d.area_m2 ?? 0 : d.volume_m3 ?? 0;
+    return visibleDetections.filter(pasa).sort((a, b) =>
+      ordenLista === "nombre" ? a.class.localeCompare(b.class, "es") : valor(b) - valor(a),
+    );
+  }, [visibleDetections, filtroLista, ordenLista, editadas, enabledIds]);
+
+  /** Conteo de cada opción del filtro, con las mismas reglas que `detectionRows`. */
+  const conteoFiltro = useMemo(
+    () => ({
+      todas: visibleDetections.length,
+      nuevas: visibleDetections.filter((d) => d.manual).length,
+      modelo: visibleDetections.filter((d) => !d.manual).length,
+      sin_medir: visibleDetections.filter((d) => editadas.has(d.id)).length,
+      desactivadas: visibleDetections.filter((d) => !enabledIds.has(d.id)).length,
+    }),
+    [visibleDetections, editadas, enabledIds],
   );
+
+  /** Cambios que todavía no entraron a una medición: las zonas nuevas y los
+   *  polígonos editados. Mientras haya alguno, lo que se ve no es lo medido. */
+  const cambiosSinAnalizar = zonasManuales.length + editadas.size;
+
+  // Al elegir un polígono en el mapa, su fila aparece en la lista.
+  useEffect(() => {
+    if (!seleccion) return;
+    const id = seleccion.tipo === "det" ? `fila-det-${seleccion.id}` : `fila-nueva-${seleccion.uid}`;
+    document.getElementById(id)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [seleccion]);
 
   /**
    * Cuántas detecciones tienen en pantalla una selección distinta a la que
@@ -1168,7 +1399,7 @@ useEffect(() => {
     setCanAnalyze(true);
     setCannotAnalyzeReason(
       record.historical
-        ? "Existe una captura más reciente de esta zona, así que este vuelo solo se puede consultar."
+        ? "Existe un análisis más reciente de esta zona, así que este se puede consultar pero no modificar."
         : null,
     );
     setStatus("done");
@@ -1192,6 +1423,11 @@ useEffect(() => {
     // de la captura anterior dejaría la nueva de costado sin que nadie lo pidiera.
     setRotacion(0);
     setImgNaturalSize(null);
+
+    // Lo seleccionado y lo editado sin medir eran de la captura anterior.
+    setSeleccion(null);
+    setEditadas(new Map());
+    setZonaEnEdicion(null);
 
     // El desglose desplegado tampoco se hereda. Los ids de detección son
     // enteros que arrancan bajo en CADA análisis, así que chocan entre
@@ -1435,7 +1671,8 @@ useEffect(() => {
         .then(data => {
           const escala = data.png_scale ?? 1;
           setPngScale(escala);
-          const merged = mergeOverlapping(data.detections ?? [], escala);
+          const vivas = ((data.detections ?? []) as EnrichedDetection[]).filter((d) => !d.quitada);
+          const merged = mergeOverlapping(vivas, escala);
           setDisplayDetections(merged);
           setEnabledIds(new Set(merged.map(d => d.id)));
         })
@@ -1527,7 +1764,28 @@ useEffect(() => {
         .filter((z) => z.polygon.length >= 3);
       const zonasNuevas: ZonaManual[] = zonasManuales.map((z) => ({ class: z.clase, polygon: z.pts }));
       const zonasParaMedir: ZonaManual[] = [...zonasAntiguas, ...zonasNuevas];
-      const startResult = await startVolumeAnalysis(taskId, zonasParaMedir);
+      // Las detecciones del modelo también son lo que la vista muestra: las
+      // que siguen en pantalla, y las que cambiaron de tipo o de contorno.
+      // Mientras la lista carga no se manda nada, o un `keepIds` vacío daría
+      // por quitado todo lo que el modelo encontró.
+      const delModelo = displayDetections.filter((d) => !d.manual);
+      const cambiosDeModelo = detectionsLoading
+        ? undefined
+        : {
+            keepIds: delModelo.flatMap((d) => d.ids ?? [d.id]),
+            edits: delModelo.flatMap((d): EdicionDeModelo[] => {
+              const e = editadas.get(d.id);
+              if (!e) return [];
+              const contorno = anilloComoPares(d.rings?.[0]);
+              const forma = e.forma && (d.ids ?? [d.id]).length === 1 && contorno.length >= 3 ? contorno : undefined;
+              return (d.ids ?? [d.id]).map((id) => ({
+                id,
+                ...(e.clase ? { class: d.class } : {}),
+                ...(forma ? { polygon: forma } : {}),
+              }));
+            }),
+          };
+      const startResult = await startVolumeAnalysis(taskId, zonasParaMedir, cambiosDeModelo);
       if (startResult.status === "error") {
         setAnalysisMessage(startResult.message ?? "Error al iniciar el análisis");
         setStatus("error");
@@ -1555,6 +1813,8 @@ useEffect(() => {
         // análisis nuevo. Lo que se reinicia es lo restaurado a mano, que era de
         // la medición anterior, y las zonas dibujadas, que ya son detecciones.
         setRestauradasIds(new Set());
+        setEditadas(new Map());
+        setSeleccion(null);
         // Las zonas dibujadas solo se sueltan si el servidor las registro: si
         // el analisis volvio sin ellas (un servidor que no las conoce, o que
         // las descarto), se dejan a la vista en vez de borrarlas en silencio.
@@ -1678,8 +1938,10 @@ useEffect(() => {
     const py    = event.clientY - rect.top;
     const mapX  = (px - offset.x) / scale;
     const mapY  = (py - offset.y) / scale;
-    const next  = Math.min(4, Math.max(0.7, scale + (event.deltaY < 0 ? 0.14 : -0.14)));
-    const ns    = Number(next.toFixed(2));
+    // Paso multiplicativo: el mismo gesto acerca lo mismo a cualquier nivel, y
+    // el tope de 24x deja ver una zona de pocos metros a nivel de pixel.
+    const next  = Math.min(24, Math.max(0.7, scale * (event.deltaY < 0 ? 1.18 : 1 / 1.18)));
+    const ns    = Number(next.toFixed(3));
     setOffset({ x: px - mapX * ns, y: py - mapY * ns });
     setScale(ns);
   };
@@ -1709,9 +1971,14 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
   if (areaMode === "drawing" && dragging && event.button === 0) {
     const moved = Math.hypot(event.clientX - dragStart.current.x, event.clientY - dragStart.current.y);
     if (moved < 4) addAreaPoint(event.clientX, event.clientY);
-  } else if (areaMode === "idle" && analysisArea && dragging && event.button === 0) {
+  } else if (areaMode === "idle" && dragging && event.button === 0 && !zonaEnEdicion) {
     const moved = Math.hypot(event.clientX - dragStart.current.x, event.clientY - dragStart.current.y);
-    if (moved < 4) seleccionarAreaEn(event.clientX, event.clientY);
+    if (moved < 4) {
+      // Un toque sobre un polígono lo selecciona; sobre nada, deselecciona. El
+      // área relevante solo se alterna si el toque no cayó en ningún polígono.
+      const sobrePoligono = seleccionarPoligonoEn(event.clientX, event.clientY);
+      if (!sobrePoligono && analysisArea) seleccionarAreaEn(event.clientX, event.clientY);
+    }
   }
 };
   
@@ -2035,7 +2302,7 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                         variant={zonaEnEdicion === "pendiente" ? "default" : "secondary"}
                         onClick={() => setZonaEnEdicion((z) => (z === "pendiente" ? null : "pendiente"))}
                       >
-                        {zonaEnEdicion === "pendiente" ? "Listo" : "Reducir área"}
+                        {zonaEnEdicion === "pendiente" ? "Listo" : "Modificar área"}
                       </Button>
                       <Button
                         size="sm"
@@ -2051,7 +2318,7 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                     </div>
                     {zonaEnEdicion === "pendiente" && (
                       <p className="text-[0.69rem] leading-relaxed text-muted-foreground">
-                        Arrastra los puntos blancos del contorno hacia adentro para reducir el área. Un punto
+                        Arrastra los puntos blancos del contorno para modificar el área. Un punto
                         intermedio de un lado agrega un vértice nuevo.
                       </p>
                     )}
@@ -2059,44 +2326,11 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                 )}
 
                 {zonasManuales.length > 0 && (
-                  <ul className="space-y-1.5">
-                    {zonasManuales.map((z) => (
-                      <li key={z.uid} className="rounded-md border border-border/60 px-2 py-2">
-                        <div className="flex items-center gap-1.5 text-xs">
-                          <span className="h-2.5 w-2.5 flex-shrink-0 rounded-sm" style={{ background: classColor(z.clase) }} />
-                          <span className="min-w-0 flex-1 truncate font-medium text-foreground">{z.clase}</span>
-                          <span className="text-[0.6875rem] text-muted-foreground">nueva</span>
-                        </div>
-                        <div className="mt-2 grid grid-cols-2 gap-1.5">
-                          <Button
-                            size="sm"
-                            className="px-2"
-                            variant={zonaEnEdicion === z.uid ? "default" : "secondary"}
-                            onClick={() => setZonaEnEdicion((cur) => (cur === z.uid ? null : z.uid))}
-                          >
-                            {zonaEnEdicion === z.uid ? "Listo" : "Reducir área"}
-                          </Button>
-                          <Button
-                            size="sm"
-                            className="px-2"
-                            variant="outline"
-                            onClick={() => {
-                              setZonasManuales((prev) => prev.filter((o) => o.uid !== z.uid));
-                              setZonaEnEdicion((cur) => (cur === z.uid ? null : cur));
-                            }}
-                          >
-                            Borrar
-                          </Button>
-                        </div>
-                        {zonaEnEdicion === z.uid && (
-                          <p className="mt-2 text-[0.69rem] leading-relaxed text-muted-foreground">
-                            Arrastra los puntos blancos del contorno hacia adentro para reducir el área. Un
-                            punto intermedio de un lado agrega un vértice nuevo.
-                          </p>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
+                  <p className="rounded-md border border-success/40 bg-success/10 px-2.5 py-2 text-[0.69rem] leading-relaxed text-foreground">
+                    {zonasManuales.length === 1 ? "1 zona nueva" : `${zonasManuales.length} zonas nuevas`} en la lista
+                    de la derecha, aún sin analizar. Tócalas ahí o en el mapa para modificar su área, cambiar su
+                    tipo o eliminarlas.
+                  </p>
                 )}
 
                 {zonaModo && zonasManuales.length === 0 && !zonaPendiente && areaMode === "idle" && (
@@ -2138,12 +2372,63 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                 </DialogContent>
               </Dialog>
 
+              {cambiosSinAnalizar > 0 && (
+                <AvisoAmbar>
+                  {cambiosSinAnalizar === 1
+                    ? "Hay 1 cambio sin analizar"
+                    : `Hay ${cambiosSinAnalizar} cambios sin analizar`}{" "}
+                  (zonas nuevas o polígonos editados). Presiona Analizar volumen para medirlos antes de guardar:
+                  lo que se guarda es lo medido.
+                </AvisoAmbar>
+              )}
+
+              <Dialog open={cambiarTipoOpen} onOpenChange={setCambiarTipoOpen}>
+                <DialogContent className="sm:max-w-lg">
+                  <DialogHeader>
+                    <DialogTitle>Cambiar el tipo de basura</DialogTitle>
+                    <DialogDescription>
+                      El volumen no cambia, pero el peso se recalcula con la densidad del tipo nuevo cuando
+                      vuelvas a analizar.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="grid max-h-[50vh] grid-cols-2 gap-1.5 overflow-y-auto pr-1">
+                    {CLASES_DE_BASURA.map((clase) => (
+                      <button
+                        key={clase}
+                        type="button"
+                        onClick={() => cambiarTipoDeSeleccion(clase)}
+                        className="flex cursor-pointer items-center gap-2 rounded-md border border-border/60 px-2.5 py-2 text-left text-xs font-medium text-foreground transition-colors hover:border-primary hover:bg-primary/10"
+                      >
+                        <span className="h-2.5 w-2.5 flex-shrink-0 rounded-sm" style={{ background: classColor(clase) }} />
+                        {clase}
+                      </button>
+                    ))}
+                  </div>
+                </DialogContent>
+              </Dialog>
+
+              <ConfirmarBorrado
+                abierto={eliminarSelOpen}
+                onOpenChange={setEliminarSelOpen}
+                titulo="Eliminar este polígono"
+                descripcion={
+                  <>
+                    Se quita {detSel?.class ?? nuevaSel?.clase ?? "el polígono"} del análisis: deja de contar en los
+                    totales y no se mide en el próximo análisis.
+                    {detSel && !detSel.manual && detSel.ids.length > 1 && (
+                      <> Este polígono agrupa {detSel.ids.length} detecciones superpuestas y se eliminan todas.</>
+                    )}
+                  </>
+                }
+                onConfirmar={eliminarSeleccion}
+              />
+
               {/* HDU4/AC1, guardar análisis. Deshabilitado en una versión ya
                   reemplazada: consultarla es válido, sobrescribirla no, porque
                   es historia de la zona y no el estado vigente del terreno. */}
               <Button
                 onClick={handleSaveClick}
-                disabled={status !== "done" || savingAnalysis || readOnly}
+                disabled={status !== "done" || savingAnalysis || readOnly || cambiosSinAnalizar > 0}
                 variant="secondary"
                 className="w-full"
               >
@@ -2580,12 +2865,41 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                               />
                             )}
 
+                            {/* El polígono elegido (en el mapa o en la lista) se
+                                resalta con un doble trazo, negro y blanco, que se
+                                lee sobre cualquier fondo. */}
+                            {(() => {
+                              let camino: string | null = null;
+                              if (detSel) {
+                                const rings = detSel.rings ?? escalarAnillos(detSel.polygon, pngScale);
+                                const b = detSel.bbox;
+                                camino =
+                                  rings.length > 0
+                                    ? ringsToPath(rings)
+                                    : `M${b.minx} ${b.miny}H${b.maxx}V${b.maxy}H${b.minx}Z`;
+                              } else if (nuevaSel) {
+                                camino = ringsToPath([anilloDePares(nuevaSel.pts)]);
+                              }
+                              if (!camino) return null;
+                              return (
+                                <g pointerEvents="none">
+                                  <path d={camino} fill="none" stroke="rgba(0,0,0,0.85)" strokeWidth={7 / ppu} strokeLinejoin="round" />
+                                  <path d={camino} fill="none" stroke="#ffffff" strokeWidth={3.5 / ppu} strokeLinejoin="round" />
+                                </g>
+                              );
+                            })()}
+
                             {/* HDU12: manijas para reducir o reformar el contorno de una zona. */}
                             {zonaEnEdicion && (() => {
                               const pts =
                                 zonaEnEdicion === "pendiente"
                                   ? zonaPendiente
-                                  : (zonasManuales.find((z) => z.uid === zonaEnEdicion)?.pts ?? null);
+                                  : zonaEnEdicion.startsWith("det:")
+                                    ? anilloComoPares(
+                                        displayDetections.find((d) => d.id === Number(zonaEnEdicion.slice(4)))
+                                          ?.rings?.[0],
+                                      )
+                                    : (zonasManuales.find((z) => z.uid === zonaEnEdicion)?.pts ?? null);
                               if (!pts) return null;
                               const id = zonaEnEdicion;
                               return (
@@ -2726,6 +3040,127 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
             </div>
           )}
 
+          {/* Orden y filtro de la lista. */}
+          {displayDetections.length > 0 && (
+            <div className="mb-2 flex flex-shrink-0 flex-wrap items-center gap-1.5">
+              <FiltroDropdown<FiltroLista>
+                etiqueta="Mostrar"
+                valor={filtroLista}
+                onCambio={setFiltroLista}
+                opciones={[
+                  { valor: "todas", etiqueta: "Todas", conteo: conteoFiltro.todas },
+                  { valor: "modelo", etiqueta: "Del modelo", conteo: conteoFiltro.modelo },
+                  { valor: "nuevas", etiqueta: "Dibujadas (nuevas)", conteo: conteoFiltro.nuevas },
+                  { valor: "sin_medir", etiqueta: "Editadas, sin medir", conteo: conteoFiltro.sin_medir },
+                  { valor: "desactivadas", etiqueta: "Desactivadas", conteo: conteoFiltro.desactivadas },
+                ]}
+              />
+              <FiltroDropdown<OrdenLista>
+                etiqueta="Ordenar"
+                valor={ordenLista}
+                onCambio={setOrdenLista}
+                opciones={[
+                  { valor: "volumen", etiqueta: "Volumen" },
+                  { valor: "peso", etiqueta: "Peso" },
+                  { valor: "area", etiqueta: "Área" },
+                  { valor: "nombre", etiqueta: "Tipo (A-Z)" },
+                ]}
+              />
+            </div>
+          )}
+
+          {/* Detalle del polígono elegido. Fuera de la región que se desplaza,
+              para que las acciones estén a la mano con la lista larga. */}
+          {(detSel || nuevaSel) && (
+            <div className="mb-2 flex-shrink-0 space-y-2 rounded-md border border-primary/40 bg-primary/5 p-2.5 animate-in fade-in duration-200">
+              <div className="flex items-center gap-1.5">
+                <span
+                  className="h-2.5 w-2.5 flex-shrink-0 rounded-sm"
+                  style={{ background: classColor(detSel?.class ?? nuevaSel?.clase ?? "") }}
+                />
+                <span className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">
+                  {detSel?.class ?? nuevaSel?.clase}
+                </span>
+                {nuevaSel && (
+                  <span className="flex-shrink-0 rounded bg-success/15 px-1.5 py-0.5 text-[0.625rem] font-semibold text-success-strong">
+                    Nueva
+                  </span>
+                )}
+                {detSel?.manual && (
+                  <span className="flex-shrink-0 rounded bg-muted px-1.5 py-0.5 text-[0.625rem] font-semibold text-muted-foreground">
+                    Dibujada
+                  </span>
+                )}
+                {detSel && editadas.has(detSel.id) && (
+                  <span className="flex-shrink-0 rounded bg-warning/15 px-1.5 py-0.5 text-[0.625rem] font-semibold text-warning-strong">
+                    Sin medir
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSeleccion(null);
+                    setZonaEnEdicion(null);
+                  }}
+                  className="flex-shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+                  aria-label="Cerrar el detalle"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <p className="mono text-[0.6875rem] tabular-nums text-muted-foreground">
+                {nuevaSel
+                  ? "Aún no contemplada en el análisis."
+                  : detSel && editadas.has(detSel.id)
+                    ? "Cifras de antes del cambio: vuelve a analizar."
+                    : detSel
+                      ? `${volumen(detSel.volume_m3 ?? 0)} m³ · ${area(detSel.area_m2 ?? 0)} m² · ${peso(detSel.weight_kg ?? 0)} kg`
+                      : ""}
+              </p>
+              {zonaEnEdicion && (
+                <p className="text-[0.69rem] leading-relaxed text-muted-foreground">
+                  Arrastra los puntos blancos del contorno para modificar el área. Un punto intermedio de un
+                  lado agrega un vértice nuevo.
+                </p>
+              )}
+              <div className="grid grid-cols-3 gap-1.5">
+                <Button
+                  size="sm"
+                  className="px-1.5 text-[0.6875rem]"
+                  variant={zonaEnEdicion && zonaEnEdicion === (nuevaSel ? nuevaSel.uid : `det:${detSel?.id}`) ? "default" : "secondary"}
+                  disabled={!puedeEditar || formaBloqueada}
+                  onClick={alternarEdicionDeForma}
+                >
+                  {zonaEnEdicion && zonaEnEdicion === (nuevaSel ? nuevaSel.uid : `det:${detSel?.id}`) ? "Listo" : "Modificar área"}
+                </Button>
+                <Button
+                  size="sm"
+                  className="px-1.5 text-[0.6875rem]"
+                  variant="secondary"
+                  disabled={!puedeEditar}
+                  onClick={() => setCambiarTipoOpen(true)}
+                >
+                  Cambiar tipo
+                </Button>
+                <Button
+                  size="sm"
+                  className="px-1.5 text-[0.6875rem]"
+                  variant="outline"
+                  disabled={!puedeEditar}
+                  onClick={() => setEliminarSelOpen(true)}
+                >
+                  Eliminar
+                </Button>
+              </div>
+              {formaBloqueada && (
+                <p className="text-[0.69rem] leading-relaxed text-muted-foreground">
+                  Este polígono agrupa varios tipos superpuestos. Puedes cambiarle el tipo o eliminarlo; para
+                  redibujarlo, elimínalo y dibuja una zona nueva.
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Lista vertical de dos líneas por zona, no una tabla de columnas.
               En una columna de ~20rem no caben seis columnas, pero lo que hace
               comparable a una tabla se conserva igual: el volumen, que es la
@@ -2755,8 +3190,40 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                 <Skeleton key={i} className="h-11 w-full rounded-md" />
               ))}
             </div>
-          ) : displayDetections.length > 0 ? (
+          ) : displayDetections.length > 0 || zonasManuales.length > 0 ? (
             <>
+              {/* Las zonas que se acaban de dibujar van arriba, aparte de lo medido:
+                  todavía no están en el análisis. */}
+              {zonasManuales.length > 0 && (
+                <ul className="mb-1.5 space-y-0.5">
+                  {zonasManuales.map((z) => {
+                    const elegida = seleccion?.tipo === "nueva" && seleccion.uid === z.uid;
+                    return (
+                      <li
+                        key={z.uid}
+                        id={`fila-nueva-${z.uid}`}
+                        onClick={() => elegirDeLista({ tipo: "nueva", uid: z.uid }, cajaDePuntos(z.pts))}
+                        className={`cursor-pointer rounded-md border border-dashed px-1.5 py-1.5 transition-colors ${
+                          elegida
+                            ? "border-primary bg-primary/10"
+                            : "border-success/50 bg-success/5 hover:bg-success/10"
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <span className="h-2.5 w-2.5 flex-shrink-0 rounded-sm" style={{ background: classColor(z.clase) }} />
+                          <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">{z.clase}</span>
+                          <span className="flex-shrink-0 rounded bg-success/15 px-1.5 py-0.5 text-[0.625rem] font-semibold text-success-strong">
+                            Nueva
+                          </span>
+                        </div>
+                        <p className="mt-0.5 pl-4 text-[0.6875rem] text-muted-foreground">
+                          Aún no contemplada en el análisis.
+                        </p>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
               <ul
                 key={animKey}
                 className="space-y-0.5 animate-in fade-in slide-in-from-bottom-2 duration-300"
@@ -2764,6 +3231,7 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                 {detectionRows.map((d, i) => {
                   const enabled = enabledIds.has(d.id);
                   const desplegada = expandedIds.has(d.id);
+                  const elegida = seleccion?.tipo === "det" && seleccion.id === d.id;
                   const fusionada = d.classes.length > 1;
                   const hasData = d.volume_m3 != null || d.area_m2 != null;
                   const share =
@@ -2774,14 +3242,19 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                   return (
                     <li
                       key={d.id}
+                      id={`fila-det-${d.id}`}
+                      onClick={() => elegirDeLista({ tipo: "det", id: d.id }, d.bbox)}
                       style={{ animationDelay: `${Math.min(i, 8) * 30}ms` }}
-                      className={`animate-in fade-in duration-300 fill-mode-both rounded-md px-1.5 py-1.5 transition-all duration-200 hover:bg-muted/40 ${
-                        enabled ? "" : "opacity-40"
-                      }`}
+                      className={`animate-in fade-in duration-300 fill-mode-both cursor-pointer rounded-md px-1.5 py-1.5 transition-all duration-200 ${
+                        elegida ? "bg-primary/10 ring-1 ring-primary/60" : "hover:bg-muted/40"
+                      } ${enabled ? "" : "opacity-40"}`}
                     >
                       <div className="flex items-center gap-1.5">
                         <button
-                          onClick={() => toggleDetection(d.id)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleDetection(d.id);
+                          }}
                           className="flex-shrink-0 cursor-pointer rounded p-0.5 transition-all duration-150 hover:bg-muted/60 active:scale-90"
                           title={enabled ? "Desactivar zona" : "Activar zona"}
                         >
@@ -2795,7 +3268,10 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                             nombres queden alineados en columna. */}
                         {fusionada ? (
                           <button
-                            onClick={() => toggleExpanded(d.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleExpanded(d.id);
+                            }}
                             aria-expanded={desplegada}
                             className="flex h-4 w-4 flex-shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
                             title={desplegada ? "Ocultar desglose" : "Ver desglose por tipo"}
@@ -2813,12 +3289,18 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                         <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
                           {d.class}
                           {d.manual && <span className="ml-1 text-[0.6875rem] font-normal text-muted-foreground">(manual)</span>}
+                          {editadas.has(d.id) && (
+                            <span className="ml-1 text-[0.6875rem] font-semibold text-warning-strong">sin medir</span>
+                          )}
                         </span>
                         {/* Una zona dibujada se puede quitar del vuelo. Las que entrega
                             el modelo no: esas solo se desactivan con el ojo. */}
                         {d.manual && !readOnly && status !== "running" && (
                           <button
-                            onClick={() => quitarZonaDibujada(d)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              quitarZonaDibujada(d);
+                            }}
                             className="flex-shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive-strong"
                             title="Quitar esta zona dibujada del análisis"
                             aria-label="Quitar esta zona dibujada del análisis"
@@ -2894,6 +3376,12 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                 })}
               </ul>
 
+              {detectionRows.length === 0 && visibleDetections.length > 0 && (
+                <p className="py-3 text-center text-xs text-muted-foreground">
+                  Ninguna zona coincide con este filtro.
+                </p>
+              )}
+
               {/* HDU13: detecciones que el área relevante descartó. */}
               {status === "done" && analysisArea && (
                 <div className="mt-2 border-t border-border/60 pt-2">
@@ -2926,25 +3414,6 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                 </div>
               )}
 
-              {/* Totales al pie de la columna: son los mismos de "Métricas" en
-                  el panel izquierdo, y tenerlos junto al detalle es lo que
-                  permite reconciliar uno con otro al activar o desactivar
-                  zonas. */}
-              {status === "done" && (
-                <div className="mt-2 border-t border-border/60 pt-2">
-                  <div className="flex items-center gap-2">
-                    <span className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">
-                      Total ({enabledIds.size} de {visibleDetections.length} activas)
-                    </span>
-                    <span className="mono flex-shrink-0 text-xs font-semibold tabular-nums text-foreground">
-                      {volumen(activeSummary.totalVolumeM3)} m³
-                    </span>
-                  </div>
-                  <p className="mono mt-0.5 text-[0.6875rem] tabular-nums text-muted-foreground">
-                    {area(activeSummary.totalAreaM2)} m² · {peso(activeSummary.totalWeightKg)} kg
-                  </p>
-                </div>
-              )}
             </>
           ) : (
             <div className="py-3 text-center text-xs text-muted-foreground">
@@ -3030,6 +3499,23 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
             </div>
           )}
           </div>
+          {/* Totales FUERA de la region que se desplaza: tienen que verse siempre,
+              con la lista corta o larga. */}
+          {status === "done" && displayDetections.length > 0 && (
+            <div className="mt-2 flex-shrink-0 border-t border-border/60 pt-2">
+              <div className="flex items-center gap-2">
+                <span className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">
+                  Total ({enabledIds.size} de {visibleDetections.length} activas)
+                </span>
+                <span className="mono flex-shrink-0 text-xs font-semibold tabular-nums text-foreground">
+                  {volumen(activeSummary.totalVolumeM3)} m³
+                </span>
+              </div>
+              <p className="mono mt-0.5 text-[0.6875rem] tabular-nums text-muted-foreground">
+                {area(activeSummary.totalAreaM2)} m² · {peso(activeSummary.totalWeightKg)} kg
+              </p>
+            </div>
+          )}
         </aside>
       </main>
 

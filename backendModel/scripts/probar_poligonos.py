@@ -243,6 +243,32 @@ with tempfile.TemporaryDirectory() as carpeta:
     salida = volumeCalc.enrich(ruta, ortho, ndsm, ruta)
     comprobar(len(salida["detections"]) == 1, "el análisis siguiente no mide ninguna zona dibujada")
 
+    # Detecciones del modelo: quitar, cambiar de tipo, y volver al origen.
+    with open(ruta) as f:
+        base = json.load(f)
+    original_clase = base["detections"][0]["class"]
+    original_poly = base["detections"][0]["polygon"]
+    idm = base["detections"][0]["id"]
+    r = zonas_manuales.aplicar_ediciones_del_modelo(ruta, [idm], [{"id": idm, "class": "Madera", "polygon": cuadrado}])
+    with open(ruta) as f:
+        datos = json.load(f)
+    d0 = datos["detections"][0]
+    comprobar(r == {"quitadas": 0, "editadas": 1} and d0["class"] == "Madera", "se aplica el cambio de tipo")
+    comprobar(d0["polygon"] != original_poly and "_original" in d0, "el contorno cambia y se guarda el origen")
+    r = zonas_manuales.aplicar_ediciones_del_modelo(ruta, [], [])
+    with open(ruta) as f:
+        datos = json.load(f)
+    d0 = datos["detections"][0]
+    comprobar(r["quitadas"] == 1 and d0.get("quitada") is True, "una deteccion que la vista ya no muestra queda quitada")
+    salida = volumeCalc.enrich(ruta, ortho, ndsm, ruta)
+    comprobar(salida["detections"][0].get("volume_m3") is None or salida["detections"][0].get("quitada"), "una quitada no se mide")
+    r = zonas_manuales.aplicar_ediciones_del_modelo(ruta, [idm], [])
+    with open(ruta) as f:
+        datos = json.load(f)
+    d0 = datos["detections"][0]
+    comprobar(d0["class"] == original_clase and d0["polygon"] == original_poly and not d0.get("quitada"), "sin cambios recibidos vuelve a su origen")
+    comprobar("_original" not in d0, "ya no queda el rastro del cambio")
+
 print("análisis guardado con la máscara comprimida")
 try:
     import analyses  # noqa: E402

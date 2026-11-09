@@ -29,6 +29,80 @@ def _clase_yolo_de(nombre_es: str) -> str:
     return "Manual"
 
 
+def aplicar_ediciones_del_modelo(ruta_json: str, conservar_ids: list[int] | None, ediciones: list[dict]) -> dict:
+    """Deja las detecciones del MODELO como las muestra la vista.
+
+    La vista es la fuente de verdad (igual que con las zonas dibujadas): cada
+    análisis recibe qué detecciones siguen y cuáles cambiaron, y el archivo
+    queda así, sin importar qué dejó un análisis anterior.
+
+    Nada se destruye. Una detección quitada se marca `quitada` en vez de
+    borrarse, y una editada guarda sus valores de origen en `_original`. Al
+    empezar, todo se devuelve a ese origen y recién entonces se aplican los
+    cambios recibidos; así reabrir un análisis antiguo, que sí tenía lo que otro
+    análisis posterior quitó o modificó, vuelve a medirlo completo.
+
+    `conservar_ids`: ids de las detecciones del modelo que la vista muestra
+    (None = no tocar nada). `ediciones`: `{"id", "class"?, "polygon"?}`, con el
+    polígono en píxeles del PNG. Devuelve `{"quitadas": n, "editadas": n}`."""
+    with open(ruta_json, "r", encoding="utf-8") as f:
+        datos = json.load(f)
+    escala = float(datos.get("png_scale") or 1.0)
+    por_id = {e["id"]: e for e in ediciones}
+
+    quitadas = editadas = 0
+    for d in datos.get("detections", []):
+        if d.get("manual"):
+            continue
+        original = d.pop("_original", None)
+        if original:
+            d.update(original)
+        d.pop("quitada", None)
+
+        if conservar_ids is not None and d.get("id") not in conservar_ids:
+            d["quitada"] = True
+            quitadas += 1
+            continue
+
+        e = por_id.get(d.get("id"))
+        if not e:
+            continue
+        nombre = e.get("class")
+        puntos = e.get("polygon") or []
+        cambia_clase = bool(nombre) and clase_valida(nombre) and nombre != d.get("class")
+        cambia_forma = len(puntos) >= 3
+        if not cambia_clase and not cambia_forma:
+            continue
+        d["_original"] = {
+            k: d[k]
+            for k in ("class", "yolo_class", "color", "density_kg_m3", "bbox", "polygon")
+            if k in d
+        }
+        if cambia_clase:
+            d["class"] = nombre
+            d["yolo_class"] = _clase_yolo_de(nombre)
+            d["color"] = color_de(nombre)
+            d["density_kg_m3"] = densidad_de(nombre)
+        if cambia_forma:
+            xs = [p[0] for p in puntos]
+            ys = [p[1] for p in puntos]
+            anillo = []
+            for x, y in puntos:
+                anillo += [round(x / escala, 1), round(y / escala, 1)]
+            d["polygon"] = [anillo]
+            d["bbox"] = {
+                "minx": round(min(xs)),
+                "miny": round(min(ys)),
+                "maxx": round(max(xs)),
+                "maxy": round(max(ys)),
+            }
+        editadas += 1
+
+    with open(ruta_json, "w", encoding="utf-8") as f:
+        json.dump(datos, f, indent=2)
+    return {"quitadas": quitadas, "editadas": editadas}
+
+
 def reemplazar_zonas_manuales(ruta_json: str, zonas: list[dict]) -> int:
     """Deja en el JSON exactamente las zonas dibujadas que se envían.
 

@@ -823,7 +823,12 @@ def liberar_archivos_de_vuelos_previos(conservar_task_id: str) -> None:
         pass
 
 
-def run_analysis(task_id: str, zonas_manuales: list[dict] | None = None):
+def run_analysis(
+    task_id: str,
+    zonas_manuales: list[dict] | None = None,
+    conservar_ids: list[int] | None = None,
+    ediciones: list[dict] | None = None,
+):
     """Calcula volumen por detección usando el nDSM del vuelo de esta tarea.
 
     Recalcula siempre, incluso si ya se había analizado antes: cada llamada es
@@ -881,6 +886,13 @@ def run_analysis(task_id: str, zonas_manuales: list[dict] | None = None):
                     "solo se puede consultar, no volver a medir."
                 )
 
+        # Las detecciones del modelo quedan como la vista las muestra: las que
+        # el trabajador quitó o cambió de tipo o de contorno. Sin `conservar_ids`
+        # (un cliente que no lo manda) el archivo no se toca.
+        if conservar_ids is not None:
+            r = zonas_manuales_mod.aplicar_ediciones_del_modelo(detections_json, conservar_ids, ediciones or [])
+            print(f"Detecciones del modelo en el analisis: {r['quitadas']} quitada(s), {r['editadas']} editada(s)")
+
         if zonas_manuales is not None:
             quedaron = zonas_manuales_mod.reemplazar_zonas_manuales(detections_json, zonas_manuales)
             print(f"Zonas dibujadas en el analisis: {quedaron} de {len(zonas_manuales)}")
@@ -919,7 +931,24 @@ class ZonaManualIn(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class EdicionDeteccionIn(BaseModel):
+    """Cambio del trabajador sobre una detección del modelo."""
+
+    id: int
+    # Nombre en español de la clase nueva, si la cambió.
+    class_: str | None = Field(default=None, alias="class")
+    # Contorno nuevo en píxeles del PNG, si lo modificó.
+    polygon: list[list[float]] | None = None
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class AnalyzeRequest(BaseModel):
+    # Ids de las detecciones del MODELO que la vista muestra. Las que falten se
+    # dan por quitadas. Ausente = no tocar las del modelo.
+    keep_ids: list[int] | None = None
+    # Detecciones del modelo cuyo tipo o contorno cambió.
+    edits: list[EdicionDeteccionIn] | None = None
     # TODAS las zonas dibujadas que el análisis debe medir: las que la vista ya
     # mostraba (las antiguas) más las recién dibujadas (las nuevas). El archivo
     # de detecciones queda con exactamente esas. Vacío = ninguna zona dibujada.
@@ -969,8 +998,16 @@ async def start_analysis(task_id: str, body: AnalyzeRequest | None = None):
         if not zonas_manuales_mod.clase_valida(zona["class"]):
             return {"status": "error", "message": f"Tipo de basura desconocido: {zona['class']}"}
 
+    ediciones = [
+        {"id": e.id, "class": e.class_, "polygon": e.polygon} for e in (body.edits or [])
+    ] if body else []
+    for e in ediciones:
+        if e["class"] and not zonas_manuales_mod.clase_valida(e["class"]):
+            return {"status": "error", "message": f"Tipo de basura desconocido: {e['class']}"}
+    conservar = body.keep_ids if body else None
+
     print(f"Analisis solicitado, zonas dibujadas: {'sin cambios' if zonas is None else len(zonas)}")
-    thread = threading.Thread(target=run_analysis, args=(task_id, zonas), daemon=True)
+    thread = threading.Thread(target=run_analysis, args=(task_id, zonas, conservar, ediciones), daemon=True)
     thread.start()
     return {"status": "running"}
 

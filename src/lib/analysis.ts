@@ -20,6 +20,10 @@ export interface EnrichedDetection {
   rings?: number[][];
   // Zona de basura dibujada a mano por el trabajador (HDU12).
   manual?: boolean;
+  // El trabajador la quitó de la vista. El servidor la conserva marcada (para
+  // poder volver a medirla si se reabre un análisis que sí la tenía), pero no
+  // se muestra ni se cuenta.
+  quitada?: boolean;
   // Coordenadas reales (en el CRS proyectado del ortomosaico, ver `crs` en
   // AnalyzeSuccess) — volumeCalc.py ya las calcula (backendModel/detecting/
   // volumeCalc.py:104) a partir del geotransform del .tif, HDU5 las usa para
@@ -61,6 +65,21 @@ export interface AnalyzeSuccess {
   pngScale: number;
 }
 
+/** Cambio del trabajador sobre una detección del MODELO: otro tipo, otro
+ *  contorno (vértices en píxeles del PNG), o los dos. */
+export interface EdicionDeModelo {
+  id: number;
+  class?: string;
+  polygon?: [number, number][];
+}
+
+/** Lo que la vista hizo con las detecciones del modelo. `keepIds` son las que
+ *  siguen en pantalla; las demás se dan por quitadas. */
+export interface CambiosDeModelo {
+  keepIds: number[];
+  edits: EdicionDeModelo[];
+}
+
 /** Una zona de basura dibujada a mano (HDU12): su tipo y sus vértices en
  *  píxeles del PNG del mapa. */
 export interface ZonaManual {
@@ -99,11 +118,15 @@ const SESION_CAIDA =
 export async function startVolumeAnalysis(
   taskId: string,
   zonas: ZonaManual[] = [],
+  modelo?: CambiosDeModelo,
 ): Promise<{ status: string; message?: string }> {
   const res = await fetch(`${BACKEND_URL}/analyze/${taskId}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ zones: zonas }),
+    body: JSON.stringify({
+      zones: zonas,
+      ...(modelo ? { keep_ids: modelo.keepIds, edits: modelo.edits } : {}),
+    }),
     // **Sin esto la petición sale sin la cookie de sesión.** Toda la API exige
     // sesión con una dependencia global, así que en producción (donde el
     // backend es otro origen) el backend respondía 401 y el análisis no
@@ -169,7 +192,9 @@ export async function pollVolumeAnalysis(
         };
       }
       const jsonData = await jsonRes.json();
-      const detections: EnrichedDetection[] = jsonData.detections ?? [];
+      const detections: EnrichedDetection[] = (jsonData.detections ?? []).filter(
+        (d: EnrichedDetection) => !d.quitada,
+      );
 
       if (detections.length === 0) {
         return { status: "empty", message: "No hay basura detectada en el área" };

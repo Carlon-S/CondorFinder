@@ -470,10 +470,22 @@ async def _reconciliar_vigencia(zone_id: str) -> None:
     sucesor = max(vigente, key=lambda a: _momento(a.get("savedAt"), None))
     sucesor_id = str(sucesor["_id"])
 
-    await get_db().analyses.update_many(
-        {"_id": {"$in": [a["_id"] for a in vigente]}},
+    # **El actual es UN análisis, el más reciente de la versión vigente.** Una
+    # medición nueva del mismo vuelo (otro polígono dibujado, uno quitado, solo
+    # un área delimitada) reemplaza a la anterior como lectura vigente de la
+    # zona: Vista Principal y Rutas, que filtran por `historical`, tienen que
+    # mostrar esa y no dos filas del mismo terreno. Las anteriores no se
+    # borran: quedan como historial y siguen en el gráfico de evolución.
+    await get_db().analyses.update_one(
+        {"_id": sucesor["_id"]},
         {"$set": {"historical": False, "supersededBy": None}},
     )
+    previas_del_vuelo = [a["_id"] for a in vigente if a["_id"] != sucesor["_id"]]
+    if previas_del_vuelo:
+        await get_db().analyses.update_many(
+            {"_id": {"$in": previas_del_vuelo}},
+            {"$set": {"historical": True, "supersededBy": sucesor_id}},
+        )
 
     anteriores = [a["_id"] for v in ordenadas[:-1] for a in v]
     if anteriores:
@@ -619,6 +631,20 @@ def _enabled_ids(detections: list[dict]) -> set:
     return {d.get("id") for d in detections if d.get("enabled", True)}
 
 
+def _huella_de_poligonos(detections: list[dict]) -> list:
+    """Lo que identifica la medición de cada detección activa: clase, volumen y
+    área redondeados. Si el trabajador cambia el contorno o el tipo de un
+    polígono y vuelve a medir, esta huella cambia aunque los ids sean los mismos."""
+    def redondo(v):
+        return None if v is None else round(float(v), 2)
+
+    return sorted(
+        (str(d.get("class")), redondo(d.get("volume_m3")), redondo(d.get("area_m2")))
+        for d in detections
+        if d.get("enabled", True)
+    )
+
+
 def _describe_change(nuevo: dict, anterior: dict | None) -> str:
     """Qué cambió entre este análisis y el anterior de la misma versión.
 
@@ -634,6 +660,11 @@ def _describe_change(nuevo: dict, anterior: dict | None) -> str:
         return "algoritmo"
     if _enabled_ids(nuevo.get("detections", [])) != _enabled_ids(anterior.get("detections", [])):
         return "seleccion"
+    # Mismas detecciones activas pero otra geometria, otro tipo o polígonos
+    # nuevos con el mismo conjunto de ids: el trabajador edito los poligonos y
+    # volvio a medir. Es una medicion distinta y tiene que verse en el grafico.
+    if _huella_de_poligonos(nuevo.get("detections", [])) != _huella_de_poligonos(anterior.get("detections", [])):
+        return "poligonos"
     return "sin-cambios"
 
 

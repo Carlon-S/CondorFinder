@@ -162,6 +162,13 @@ def enrich(
     for det in data["detections"]:
         result = dict(det)
 
+        # Una detección que el trabajador quitó no se mide: sigue en el archivo
+        # (marcada) para poder volver si se reabre un análisis que sí la tenía,
+        # pero no aporta volumen ni se dibuja.
+        if det.get("quitada"):
+            enriched.append(result)
+            continue
+
         geometria = geometria_de_deteccion(det, png_scale, transform)
 
         if geometria is None or geometria.is_empty or geometria.area == 0:
