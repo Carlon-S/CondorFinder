@@ -68,6 +68,12 @@ export function reportFilename(): string {
 /** Paleta del documento, en el mismo azul del encabezado de las tablas. */
 const AZUL: [number, number, number] = [15, 34, 68];
 const GRIS_LINEA: [number, number, number] = [210, 214, 222];
+/** Los colores de la marca en el sistema: el azul casi negro de la barra lateral,
+ *  el amarillo de los botones principales y el fondo claro de las tablas. */
+const NAVY: [number, number, number] = [7, 11, 20];
+const AMARILLO: [number, number, number] = [255, 197, 61];
+const GRIS_FONDO: [number, number, number] = [245, 246, 249];
+const TEXTO: [number, number, number] = [30, 35, 50];
 const GRIS_TEXTO = 110;
 
 /** Escala "linda" para el eje: el menor 1/2/5 x 10^n que cubre el máximo. */
@@ -243,24 +249,94 @@ async function renderReport(selections: ReportSelection[]) {
     0,
   );
 
-  // ── encabezado ──
-  doc.setFontSize(18);
-  doc.text("Informe de volumen de residuos", margin, y);
-  y += 20;
-  doc.setFontSize(10);
-  doc.setTextColor(110);
+  const anchoPagina = doc.internal.pageSize.getWidth();
+  const anchoUtil = anchoPagina - margin * 2;
+  const totalPeso = selections.reduce(
+    (s, sel) => s + sel.analyses.reduce((t, a) => t + zoneTotals(a).weightKg, 0),
+    0,
+  );
+
+  /** Título de sección: una marca amarilla a la izquierda y el texto en el azul
+   *  de la marca, igual que los encabezados del sistema. */
+  const titulo = (texto: string) => {
+    doc.setFillColor(...AMARILLO);
+    doc.rect(margin, y - 10, 3, 13, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.setTextColor(...NAVY);
+    doc.text(texto, margin + 10, y);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(0);
+    y += 12;
+  };
+
+  /** Tabla con el estilo del documento: encabezado azul, filas alternadas y las
+   *  columnas de cifras alineadas a la derecha (también su encabezado). */
+  const tabla = (opts: Parameters<typeof autoTable>[1], numericas: number[]) =>
+    autoTable(doc, {
+      margin: { left: margin, right: margin, bottom: 50 },
+      styles: { fontSize: 8, cellPadding: 5, textColor: TEXTO, lineWidth: 0 },
+      headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold" },
+      alternateRowStyles: { fillColor: GRIS_FONDO },
+      didParseCell: (d) => {
+        if (numericas.includes(d.column.index)) d.cell.styles.halign = "right";
+      },
+      ...opts,
+    });
+
+  // ── encabezado: banda azul con el acento amarillo de la marca ──
+  doc.setFillColor(...NAVY);
+  doc.rect(0, 0, anchoPagina, 84, "F");
+  doc.setFillColor(...AMARILLO);
+  doc.rect(0, 84, anchoPagina, 3, "F");
+  doc.setTextColor(255);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(19);
+  doc.text("Informe de volumen de residuos", margin, 42);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(190, 196, 210);
   doc.text(
     `CondorFinder · Emitido el ${new Date().toLocaleDateString("es-CL")} · ` +
       `${selections.length} zona(s), ${totalAnalisis} análisis`,
     margin,
-    y,
+    62,
   );
-  y += 26;
-
   doc.setTextColor(0);
-  doc.setFontSize(13);
-  doc.text(`Volumen total: ${num(totalVolumen)} m³`, margin, y);
-  y += 18;
+  y = 112;
+
+  // ── cifras principales, en recuadros rectos como las tarjetas del sistema ──
+  const resumen: [string, string][] = [
+    ["ZONAS", String(selections.length)],
+    ["ANÁLISIS", String(totalAnalisis)],
+    ["VOLUMEN TOTAL", `${num(totalVolumen)} m³`],
+    ["PESO TOTAL", `${totalPeso.toLocaleString("es-CL", { maximumFractionDigits: 0 })} kg`],
+  ];
+  const hueco = 10;
+  const anchoRecuadro = (anchoUtil - hueco * (resumen.length - 1)) / resumen.length;
+  resumen.forEach(([rotulo, valor], i) => {
+    const rx = margin + i * (anchoRecuadro + hueco);
+    doc.setFillColor(255, 255, 255);
+    doc.setDrawColor(...GRIS_LINEA);
+    doc.setLineWidth(0.8);
+    doc.rect(rx, y, anchoRecuadro, 50, "FD");
+    doc.setFillColor(...AMARILLO);
+    doc.rect(rx, y, 3, 50, "F");
+    doc.setFontSize(7);
+    doc.setTextColor(GRIS_TEXTO);
+    doc.text(rotulo, rx + 12, y + 17);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(14);
+    doc.setTextColor(...NAVY);
+    doc.text(valor, rx + 12, y + 38);
+    doc.setFont("helvetica", "normal");
+  });
+  doc.setTextColor(0);
+  doc.setLineWidth(0.2);
+  y += 50 + 30;
+
+  titulo("Detalle por zona y análisis");
+  y += 6;
 
   // ── tabla por zona y análisis ──
   // Cada fila es un análisis con SU fecha: es lo que convierte al informe en
@@ -284,14 +360,14 @@ async function renderReport(selections: ReportSelection[]) {
     }
   }
 
-  autoTable(doc, {
-    startY: y,
-    head: [["Zona", "Captura", "Análisis", "Volumen m³", "Peso kg", "Área m²", "Detecciones"]],
-    body: filas,
-    margin: { left: margin, right: margin },
-    styles: { fontSize: 8, cellPadding: 4 },
-    headStyles: { fillColor: [15, 34, 68], textColor: 255 },
-  });
+  tabla(
+    {
+      startY: y,
+      head: [["Zona", "Captura", "Análisis", "Volumen m³", "Peso kg", "Área m²", "Detecciones"]],
+      body: filas,
+    },
+    [3, 4, 5, 6],
+  );
 
   y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 26;
 
@@ -309,9 +385,8 @@ async function renderReport(selections: ReportSelection[]) {
   }
 
   if (porTipo.size > 0) {
-    doc.setFontSize(13);
-    doc.text("Volumen por tipo de residuo", margin, y);
-    y += 10;
+    titulo("Volumen por tipo de residuo");
+    y += 6;
 
     const ordenado = [...porTipo.entries()].sort((a, b) => b[1] - a[1]);
 
@@ -321,14 +396,14 @@ async function renderReport(selections: ReportSelection[]) {
       totalVolumen > 0 ? `${((valor / totalVolumen) * 100).toFixed(1)} %` : "0 %",
     ]);
 
-    autoTable(doc, {
-      startY: y,
-      head: [["Tipo de residuo", "Volumen m³", "Participación"]],
-      body: filasTipo,
-      margin: { left: margin, right: margin },
-      styles: { fontSize: 8, cellPadding: 4 },
-      headStyles: { fillColor: [15, 34, 68], textColor: 255 },
-    });
+    tabla(
+      {
+        startY: y,
+        head: [["Tipo de residuo", "Volumen m³", "Participación"]],
+        body: filasTipo,
+      },
+      [1, 2],
+    );
 
     y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 20;
 
@@ -371,9 +446,8 @@ async function renderReport(selections: ReportSelection[]) {
       y = margin;
     }
 
-    doc.setFontSize(13);
-    doc.text(`Evolución de ${sel.zone.name}`, margin, y);
-    y += 10;
+    titulo(`Evolución de ${sel.zone.name}`);
+    y += 6;
 
     const filasComparacion: string[][] = [];
     const puntos: { etiqueta: string; valor: number }[] = [];
@@ -411,16 +485,16 @@ async function renderReport(selections: ReportSelection[]) {
       anterior = punto.volumeM3;
     }
 
-    autoTable(doc, {
-      startY: y,
-      // "Registro" y no "Captura": desde que la tabla mezcla vuelos y retiros,
-      // la columna ya no nombra solo capturas.
-      head: [["Registro", "Análisis", "Volumen m³", "Variación"]],
-      body: filasComparacion,
-      margin: { left: margin, right: margin },
-      styles: { fontSize: 8, cellPadding: 4 },
-      headStyles: { fillColor: [15, 34, 68], textColor: 255 },
-    });
+    tabla(
+      {
+        startY: y,
+        // "Registro" y no "Captura": desde que la tabla mezcla vuelos y retiros,
+        // la columna ya no nombra solo capturas.
+        head: [["Registro", "Análisis", "Volumen m³", "Variación"]],
+        body: filasComparacion,
+      },
+      [1, 2, 3],
+    );
 
     y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 20;
 
@@ -435,6 +509,21 @@ async function renderReport(selections: ReportSelection[]) {
     const dibujado = dibujarLinea(doc, puntos, margin, y, 515, ALTO_LINEA);
     if (dibujado > 0) y += dibujado + 14;
   }
+
+  // ── pie de cada página: línea fina, nombre del sistema y numeración ──
+  const paginas = doc.getNumberOfPages();
+  const altoPagina = doc.internal.pageSize.getHeight();
+  for (let i = 1; i <= paginas; i++) {
+    doc.setPage(i);
+    doc.setDrawColor(...GRIS_LINEA);
+    doc.setLineWidth(0.6);
+    doc.line(margin, altoPagina - 36, anchoPagina - margin, altoPagina - 36);
+    doc.setFontSize(7.5);
+    doc.setTextColor(GRIS_TEXTO);
+    doc.text("CondorFinder · Detección de basurales con imágenes de dron", margin, altoPagina - 22);
+    doc.text(`Página ${i} de ${paginas}`, anchoPagina - margin, altoPagina - 22, { align: "right" });
+  }
+  doc.setTextColor(0);
 
   return doc;
 }

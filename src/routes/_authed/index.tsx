@@ -1121,6 +1121,31 @@ function MainPage() {
    *  Tamaño, relleno y color son los del historial de rutas: es la tabla que
    *  sirve de referencia. Presionar un encabezado mientras carga es inofensivo,
    *  fija el orden y se aplica cuando llegan las filas. */
+  /** Anchos de columna FIJOS (tabla con `table-fixed`).
+   *
+   *  Con el ancho automático del navegador, el reparto de las columnas dependía
+   *  del contenido de la página: una fila con un nombre largo o sin cifras
+   *  movía todo, y al reordenar la tabla cambiaba de forma. Con anchos fijos la
+   *  tabla se ve igual sea cual sea el orden o la página; la columna de la zona
+   *  es la que toma el espacio que sobra. Las columnas que se ocultan por
+   *  breakpoint (dirección, barrio y tipo) también se ocultan aquí. */
+  const colgrupo = (
+    <colgroup>
+      <col className="w-[7.5rem]" />
+      <col />
+      <col className="w-[7.5rem]" />
+      <col className="hidden w-[15rem] lg:table-column" />
+      <col className="hidden w-[6rem] xl:table-column" />
+      <col className="hidden w-[7rem] xl:table-column" />
+      <col className="w-[7rem]" />
+      <col className="w-[7rem]" />
+      <col className="w-[7rem]" />
+      <col className="w-[7rem]" />
+      <col className="w-[26.5rem]" />
+      <col className="w-[5.25rem]" />
+    </colgroup>
+  );
+
   const cabecera = (
     <TableHeader>
       <TableRow className="border-b border-border/60 bg-muted/40 hover:bg-muted/40">
@@ -1353,7 +1378,8 @@ function MainPage() {
             {loading ? (
               <div className="flex-1 overflow-y-auto px-5 pb-5" role="status" aria-live="polite">
                 <span className="sr-only">Cargando zonas...</span>
-                <Table>
+                <Table className="table-fixed">
+                  {colgrupo}
                   {cabecera}
                   <TableBody>
                     {[0, 1, 2].map((i) => (
@@ -1403,7 +1429,8 @@ function MainPage() {
               // `pb-2` y no `pb-5`: la barra de paginación ya aporta su propio
               // espacio, y con los dos quedaba un hueco doble antes del pie.
               <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-2 animate-in fade-in duration-300">
-                <Table>
+                <Table className="table-fixed">
+                  {colgrupo}
                   {cabecera}
                   <TableBody>
                     {pageRows.map((z) => {
