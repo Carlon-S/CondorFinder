@@ -367,6 +367,12 @@ function computeIoU(
   return inter / (areaA + areaB - inter);
 }
 
+/** Si se juntan las detecciones cuyos recuadros se superponen (IoU >= 0.5) en un
+ *  solo polígono. Se apagó el 09-11-2026 por pedido del equipo: cada detección
+ *  del modelo es su propio polígono, seleccionable y editable. Los análisis ya
+ *  guardados con grupos se siguen mostrando como grupos. */
+const FUSIONAR_SUPERPUESTAS = false;
+
 function mergeOverlapping(
   detections: EnrichedDetection[],
   pngScale = 1,
@@ -379,7 +385,7 @@ function mergeOverlapping(
   for (let i = 0; i < detections.length; i++) {
     for (let j = i + 1; j < detections.length; j++) {
       // Una zona dibujada a mano es una decisión del trabajador y no se fusiona.
-      if (detections[i].manual || detections[j].manual) continue;
+      if (!FUSIONAR_SUPERPUESTAS || detections[i].manual || detections[j].manual) continue;
       if (computeIoU(detections[i].bbox, detections[j].bbox) >= iouThreshold) {
         adj[i].push(j);
         adj[j].push(i);
@@ -582,6 +588,12 @@ function AnalysisPage() {
   // Contorno original de lo que se está editando, para "Restaurar contorno".
   const contornoBase = useRef<Map<string, AreaPoint[]>>(new Map());
   const nivelSimplificacion = useRef(0);
+  // Deshacer / rehacer de la edición de contornos: cada entrada es el contorno
+  // completo de ANTES de una acción (arrastre, vértice nuevo o quitado,
+  // simplificación, restauración).
+  const pilaDeshacer = useRef<{ id: string; pts: AreaPoint[] }[]>([]);
+  const pilaRehacer = useRef<{ id: string; pts: AreaPoint[] }[]>([]);
+  const cambioDeArrastre = useRef<{ empujado: boolean; movido: boolean }>({ empujado: false, movido: false });
   // Factor con que el PNG se redujo respecto del ortomosaico (1 = sin reducir).
   const [pngScale, setPngScale]                   = useState(1);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -1233,6 +1245,7 @@ function AnalysisPage() {
     const diag = Math.hypot(c.maxx - c.minx, c.maxy - c.miny);
     nivelSimplificacion.current += 1;
     const tol = diag * 0.006 * Math.pow(1.5, nivelSimplificacion.current);
+    guardarParaDeshacer(zonaEnEdicion);
     cambiarPuntos(zonaEnEdicion, (p) => simplificarContorno(p, tol));
   };
 
@@ -1242,6 +1255,7 @@ function AnalysisPage() {
     const base = contornoBase.current.get(zonaEnEdicion);
     if (!base) return;
     nivelSimplificacion.current = 0;
+    guardarParaDeshacer(zonaEnEdicion);
     cambiarPuntos(zonaEnEdicion, () => base);
   };
 
@@ -1334,16 +1348,55 @@ function AnalysisPage() {
     else setZonasManuales((prev) => prev.map((z) => (z.uid === id ? { ...z, pts: fn(z.pts) } : z)));
   };
 
+  /** Contorno actual de una zona en edición ("pendiente", "det:<id>" o uid). */
+  const puntosDe = (id: string): AreaPoint[] | null => {
+    if (id === "pendiente") return zonaPendiente;
+    if (id.startsWith("det:")) {
+      const d = displayDetections.find((x) => x.id === Number(id.slice(4)));
+      return d ? anilloComoPares(d.rings?.[0]) : null;
+    }
+    return zonasManuales.find((z) => z.uid === id)?.pts ?? null;
+  };
+
+  /** Guarda el contorno de ahora para poder volver a él con Ctrl+Z. */
+  const guardarParaDeshacer = (id: string) => {
+    const pts = puntosDe(id);
+    if (!pts) return;
+    pilaDeshacer.current.push({ id, pts: pts.map((p) => [p[0], p[1]] as AreaPoint) });
+    if (pilaDeshacer.current.length > 100) pilaDeshacer.current.shift();
+    pilaRehacer.current = [];
+  };
+
+  const deshacerContorno = () => {
+    const ultimo = pilaDeshacer.current.pop();
+    if (!ultimo) return;
+    const actual = puntosDe(ultimo.id);
+    if (actual) pilaRehacer.current.push({ id: ultimo.id, pts: actual });
+    cambiarPuntos(ultimo.id, () => ultimo.pts);
+  };
+
+  const rehacerContorno = () => {
+    const siguiente = pilaRehacer.current.pop();
+    if (!siguiente) return;
+    const actual = puntosDe(siguiente.id);
+    if (actual) pilaDeshacer.current.push({ id: siguiente.id, pts: actual });
+    cambiarPuntos(siguiente.id, () => siguiente.pts);
+  };
+
   const iniciarArrastre = (e: React.PointerEvent<SVGCircleElement>, id: string, i: number) => {
     // Sin esto el contenedor del visor lo toma como el inicio de un paneo.
     e.stopPropagation();
     e.currentTarget.setPointerCapture(e.pointerId);
+    guardarParaDeshacer(id);
+    cambioDeArrastre.current = { empujado: true, movido: false };
     arrastreVertice.current = { id, i };
   };
 
   const insertarVertice = (e: React.PointerEvent<SVGCircleElement>, id: string, i: number, x: number, y: number) => {
     e.stopPropagation();
     e.currentTarget.setPointerCapture(e.pointerId);
+    guardarParaDeshacer(id);
+    cambioDeArrastre.current = { empujado: false, movido: true };
     cambiarPuntos(id, (pts) => [...pts.slice(0, i + 1), [x, y] as AreaPoint, ...pts.slice(i + 1)]);
     arrastreVertice.current = { id, i: i + 1 };
   };
@@ -1354,12 +1407,16 @@ function AnalysisPage() {
     e.stopPropagation();
     const punto = puntoDeEvento(e.clientX, e.clientY);
     if (!punto) return;
+    cambioDeArrastre.current.movido = true;
     cambiarPuntos(a.id, (pts) => pts.map((q, k) => (k === a.i ? punto : q)));
   };
 
   const terminarArrastre = (e: React.PointerEvent<SVGCircleElement>) => {
     e.stopPropagation();
     arrastreVertice.current = null;
+    // Un clic sin mover no cambió nada: no deja un paso vacío en el historial.
+    if (cambioDeArrastre.current.empujado && !cambioDeArrastre.current.movido) pilaDeshacer.current.pop();
+    cambioDeArrastre.current = { empujado: false, movido: false };
     try {
       e.currentTarget.releasePointerCapture(e.pointerId);
     } catch {
@@ -1465,6 +1522,32 @@ useEffect(() => {
   /** Cambios que todavía no entraron a una medición: las zonas nuevas y los
    *  polígonos editados. Mientras haya alguno, lo que se ve no es lo medido. */
   const cambiosSinAnalizar = zonasManuales.length + editadas.size;
+
+  // Ctrl+Z deshace y Ctrl+Y (o Ctrl+Shift+Z) rehace mientras se edita un contorno.
+  // El historial es de UNA edición: al cambiar de polígono se descarta.
+  useEffect(() => {
+    pilaDeshacer.current = [];
+    pilaRehacer.current = [];
+  }, [zonaEnEdicion]);
+  useEffect(() => {
+    if (!zonaEnEdicion) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement | null)?.closest("input, textarea")) return;
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const k = e.key.toLowerCase();
+      if (k === "z" && !e.shiftKey) {
+        e.preventDefault();
+        deshacerContorno();
+      } else if (k === "y" || (k === "z" && e.shiftKey)) {
+        e.preventDefault();
+        rehacerContorno();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // deshacer/rehacer leen estado vigente en cada render
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  });
 
   // Al elegir un polígono en el mapa, su fila aparece en la lista.
   useEffect(() => {
@@ -3111,7 +3194,9 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                                       onPointerDown={(e) => iniciarArrastre(e, id, i)}
                                       onDoubleClick={(e) => {
                                         e.stopPropagation();
-                                        cambiarPuntos(id, (p) => (p.length > 3 ? p.filter((_, k) => k !== i) : p));
+                                        if ((puntosDe(id)?.length ?? 0) <= 3) return;
+                                        guardarParaDeshacer(id);
+                                        cambiarPuntos(id, (p) => p.filter((_, k) => k !== i));
                                       }}
                                       onPointerMove={moverArrastre}
                                       onPointerUp={terminarArrastre}
@@ -3398,6 +3483,12 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                     un punto para quitarlo.
                   </p>
                   <div className="grid grid-cols-2 gap-1.5">
+                    <Button size="sm" variant="secondary" className="h-7 px-2 text-[0.6875rem]" onClick={deshacerContorno} title="Ctrl+Z">
+                      Deshacer
+                    </Button>
+                    <Button size="sm" variant="secondary" className="h-7 px-2 text-[0.6875rem]" onClick={rehacerContorno} title="Ctrl+Y">
+                      Rehacer
+                    </Button>
                     <Button size="sm" variant="secondary" className="h-7 px-2 text-[0.6875rem]" onClick={simplificarEdicion}>
                       Menos puntos
                     </Button>
