@@ -218,6 +218,67 @@ function anilloMayor(rings: number[][]): number[] | undefined {
   return mejor;
 }
 
+/** Columnas de la lista de polígonos: ojo, tipo y tres cifras alineadas. */
+const COLS_LISTA = "grid grid-cols-[1.5rem_minmax(0,1fr)_4.25rem_4.25rem_4.75rem]";
+
+/** Área de un polígono (fórmula del zapato), para ordenar los apilados. */
+function areaDeAnillos(rings: number[][]): number {
+  let total = 0;
+  for (const r of rings) {
+    const p = anilloComoPares(r);
+    let s = 0;
+    for (let i = 0, j = p.length - 1; i < p.length; j = i++) s += (p[j][0] + p[i][0]) * (p[j][1] - p[i][1]);
+    total += Math.abs(s / 2);
+  }
+  return total;
+}
+
+function distanciaASegmento(p: AreaPoint, a: AreaPoint, b: AreaPoint): number {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const l2 = dx * dx + dy * dy;
+  if (l2 === 0) return Math.hypot(p[0] - a[0], p[1] - a[1]);
+  const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2));
+  return Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy));
+}
+
+function douglasPeucker(pts: AreaPoint[], tol: number): AreaPoint[] {
+  if (pts.length < 3) return pts;
+  let max = -1;
+  let idx = 0;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const d = distanciaASegmento(pts[i], pts[0], pts[pts.length - 1]);
+    if (d > max) {
+      max = d;
+      idx = i;
+    }
+  }
+  if (max <= tol) return [pts[0], pts[pts.length - 1]];
+  const izq = douglasPeucker(pts.slice(0, idx + 1), tol);
+  const der = douglasPeucker(pts.slice(idx), tol);
+  return [...izq.slice(0, -1), ...der];
+}
+
+/** Simplifica un contorno cerrado quitando los puntos que se desvían menos que
+ *  `tol` (en píxeles de imagen). Sin esto, el "serrucho" de la detección deja
+ *  cientos de vértices que habría que mover uno por uno. */
+function simplificarContorno(pts: AreaPoint[], tol: number): AreaPoint[] {
+  if (pts.length <= 4) return pts;
+  let lejos = 1;
+  let dmax = -1;
+  for (let i = 1; i < pts.length; i++) {
+    const d = Math.hypot(pts[i][0] - pts[0][0], pts[i][1] - pts[0][1]);
+    if (d > dmax) {
+      dmax = d;
+      lejos = i;
+    }
+  }
+  const a = douglasPeucker(pts.slice(0, lejos + 1), tol);
+  const b = douglasPeucker([...pts.slice(lejos), pts[0]], tol);
+  const res = [...a.slice(0, -1), ...b.slice(0, -1)];
+  return res.length >= 3 ? res : pts;
+}
+
 /** Qué polígono está seleccionado: una detección de la lista o una zona nueva. */
 type Seleccion = { tipo: "det"; id: number } | { tipo: "nueva"; uid: string } | null;
 
@@ -514,6 +575,13 @@ function AnalysisPage() {
   const [filtroLista, setFiltroLista]             = useState<FiltroLista>("todas");
   const [cambiarTipoOpen, setCambiarTipoOpen]     = useState(false);
   const [eliminarSelOpen, setEliminarSelOpen]     = useState(false);
+  const [tipoFiltro, setTipoFiltro]               = useState("todos");
+  // Polígonos bajo el último punto tocado, del más chico al más grande.
+  const [apilados, setApilados]                   = useState<Exclude<Seleccion, null>[]>([]);
+  const ultimoToque = useRef<{ x: number; y: number; clave: string; elegido: string } | null>(null);
+  // Contorno original de lo que se está editando, para "Restaurar contorno".
+  const contornoBase = useRef<Map<string, AreaPoint[]>>(new Map());
+  const nivelSimplificacion = useRef(0);
   // Factor con que el PNG se redujo respecto del ortomosaico (1 = sin reducir).
   const [pngScale, setPngScale]                   = useState(1);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -1035,21 +1103,45 @@ function AnalysisPage() {
       sel: Exclude<Seleccion, null>,
       anillos: AreaPoint[][],
       caja: { minx: number; miny: number; maxx: number; maxy: number },
+      superficie?: number,
     ) => {
       const dentro =
         anillos.length > 0
           ? anillos.some((a) => a.length >= 3 && pointInPolygon(p.x, p.y, a))
           : p.x >= caja.minx && p.x <= caja.maxx && p.y >= caja.miny && p.y <= caja.maxy;
-      if (dentro) hallados.push({ sel, extension: (caja.maxx - caja.minx) * (caja.maxy - caja.miny) });
+      if (dentro) {
+        hallados.push({ sel, extension: superficie ?? (caja.maxx - caja.minx) * (caja.maxy - caja.miny) });
+      }
     };
-    zonasManuales.forEach((z) => probar({ tipo: "nueva", uid: z.uid }, [z.pts], cajaDePuntos(z.pts)));
+    zonasManuales.forEach((z) =>
+      probar({ tipo: "nueva", uid: z.uid }, [z.pts], cajaDePuntos(z.pts), areaDeAnillos([anilloDePares(z.pts)])),
+    );
     visibleDetections.forEach((d) => {
       if (!enabledIds.has(d.id)) return;
       const rings = d.rings ?? escalarAnillos(d.polygon, pngScale);
-      probar({ tipo: "det", id: d.id }, rings.map(anilloComoPares), d.bbox);
+      probar({ tipo: "det", id: d.id }, rings.map(anilloComoPares), d.bbox, rings.length ? areaDeAnillos(rings) : undefined);
     });
     hallados.sort((a, b) => a.extension - b.extension);
-    setSeleccion(hallados[0]?.sel ?? null);
+    const clave = (s: Exclude<Seleccion, null>) => (s.tipo === "det" ? `d${s.id}` : `n${s.uid}`);
+    const claveGrupo = hallados.map((h) => clave(h.sel)).join("|");
+    let elegido = hallados[0];
+    // Tocar de nuevo el mismo punto pasa al siguiente polígono apilado.
+    const previo = ultimoToque.current;
+    if (
+      elegido &&
+      hallados.length > 1 &&
+      previo &&
+      previo.clave === claveGrupo &&
+      Math.hypot(clientX - previo.x, clientY - previo.y) < 8
+    ) {
+      const i = hallados.findIndex((h) => clave(h.sel) === previo.elegido);
+      elegido = hallados[(i + 1) % hallados.length];
+    }
+    ultimoToque.current = elegido
+      ? { x: clientX, y: clientY, clave: claveGrupo, elegido: clave(elegido.sel) }
+      : null;
+    setApilados(hallados.map((h) => h.sel));
+    setSeleccion(elegido?.sel ?? null);
     return hallados.length > 0;
   };
 
@@ -1071,6 +1163,8 @@ function AnalysisPage() {
     caja: { minx: number; miny: number; maxx: number; maxy: number },
   ) => {
     setSeleccion(sel);
+    setApilados([]);
+    ultimoToque.current = null;
     setZonaEnEdicion(null);
     centrarEn(caja);
   };
@@ -1080,18 +1174,23 @@ function AnalysisPage() {
   const nuevaSel =
     seleccion?.tipo === "nueva" ? (zonasManuales.find((z) => z.uid === seleccion.uid) ?? null) : null;
   const puedeEditar = !readOnly && status !== "running";
-  // Un polígono que agrupa varios tipos es varias detecciones del modelo
-  // superpuestas: se puede cambiar de tipo o eliminar entero, pero su contorno
-  // no es de nadie en particular.
-  const formaBloqueada = Boolean(detSel && !detSel.manual && detSel.ids.length > 1);
+  const claveEdicion = nuevaSel ? nuevaSel.uid : detSel ? `det:${detSel.id}` : null;
+  const editandoEste = zonaEnEdicion !== null && zonaEnEdicion === claveEdicion;
+  /** Puntos del contorno que se está editando, o null. */
+  const puntosEnEdicion: AreaPoint[] | null = !editandoEste
+    ? null
+    : nuevaSel
+      ? nuevaSel.pts
+      : anilloComoPares(detSel?.rings?.[0]);
 
   /** Activa o termina la edición del contorno del polígono seleccionado. */
   const alternarEdicionDeForma = () => {
     if (nuevaSel) {
+      nivelSimplificacion.current = 0;
       setZonaEnEdicion((c) => (c === nuevaSel.uid ? null : nuevaSel.uid));
       return;
     }
-    if (!detSel || formaBloqueada) return;
+    if (!detSel) return;
     const clave = `det:${detSel.id}`;
     if (zonaEnEdicion === clave) {
       setZonaEnEdicion(null);
@@ -1101,12 +1200,67 @@ function AnalysisPage() {
     const rings = detSel.rings ?? escalarAnillos(detSel.polygon, pngScale);
     const b = detSel.bbox;
     const anillo = anilloMayor(rings) ?? [b.minx, b.miny, b.maxx, b.miny, b.maxx, b.maxy, b.minx, b.maxy];
-    setDisplayDetections((prev) => prev.map((d) => (d.id === detSel.id ? { ...d, rings: [anillo] } : d)));
-    if (rings.length > 1) {
+    // Un contorno de sierra tiene cientos de vértices: se simplifica al abrir
+    // para que quede algo manejable, y "Restaurar contorno" lo devuelve.
+    let pts = anilloComoPares(anillo);
+    contornoBase.current.set(clave, pts);
+    nivelSimplificacion.current = 0;
+    if (pts.length > 80) {
+      const c = cajaDePuntos(pts);
+      const diag = Math.hypot(c.maxx - c.minx, c.maxy - c.miny);
+      let tol = diag * 0.004;
+      while (pts.length > 60 && nivelSimplificacion.current < 10) {
+        pts = simplificarContorno(anilloComoPares(anillo), tol);
+        tol *= 1.5;
+        nivelSimplificacion.current += 1;
+      }
+    }
+    const nuevoAnillo = anilloDePares(pts);
+    setDisplayDetections((prev) =>
+      prev.map((d) => (d.id === detSel.id ? { ...d, rings: [nuevoAnillo], bbox: cajaDePuntos(pts) } : d)),
+    );
+    if (rings.length > 1 || pts.length !== anilloComoPares(anillo).length) {
       setEditadas((prev) => new Map(prev).set(detSel.id, { ...prev.get(detSel.id), forma: true }));
     }
     setZonaEnEdicion(clave);
   };
+
+  /** Quita puntos del contorno en edición, cada vez un poco más. */
+  const simplificarEdicion = () => {
+    if (!zonaEnEdicion || !puntosEnEdicion) return;
+    if (!contornoBase.current.has(zonaEnEdicion)) contornoBase.current.set(zonaEnEdicion, puntosEnEdicion);
+    const c = cajaDePuntos(puntosEnEdicion);
+    const diag = Math.hypot(c.maxx - c.minx, c.maxy - c.miny);
+    nivelSimplificacion.current += 1;
+    const tol = diag * 0.006 * Math.pow(1.5, nivelSimplificacion.current);
+    cambiarPuntos(zonaEnEdicion, (p) => simplificarContorno(p, tol));
+  };
+
+  /** Devuelve el contorno al que tenía al empezar a editarlo. */
+  const restaurarContorno = () => {
+    if (!zonaEnEdicion) return;
+    const base = contornoBase.current.get(zonaEnEdicion);
+    if (!base) return;
+    nivelSimplificacion.current = 0;
+    cambiarPuntos(zonaEnEdicion, () => base);
+  };
+
+  /** Encabezado ordenable de la lista de polígonos. */
+  const cabeceraLista = (etiqueta: string, clave: OrdenLista, derecha = true) => (
+    <button
+      type="button"
+      onClick={() => setOrdenLista(clave)}
+      className={`flex cursor-pointer items-center gap-0.5 transition-colors hover:text-foreground ${
+        derecha ? "justify-end" : ""
+      } ${ordenLista === clave ? "text-foreground" : ""}`}
+      title="Ordenar por esta columna"
+    >
+      {etiqueta}
+      <span className={`text-[0.5rem] ${ordenLista === clave ? "opacity-100" : "opacity-30"}`}>
+        {clave === "nombre" ? "▲" : "▼"}
+      </span>
+    </button>
+  );
 
   /** Cambia el tipo de basura del polígono seleccionado. El volumen no cambia
    *  (es geometría) pero el peso sí, porque cada tipo tiene su densidad: queda
@@ -1264,8 +1418,18 @@ useEffect(() => {
    *  conviene atacar el retiro. Se ordena una copia y no `displayDetections`,
    *  porque ese arreglo es el que se guarda y su orden es el que produjo el
    *  backend. */
+  /** Tipos presentes en la lista, con cuántos polígonos tiene cada uno. */
+  const tiposPresentes = useMemo(() => {
+    const cuenta = new Map<string, number>();
+    for (const d of visibleDetections) for (const c of d.classes) cuenta.set(c, (cuenta.get(c) ?? 0) + 1);
+    return [...cuenta.entries()].sort((a, b) => b[1] - a[1]);
+  }, [visibleDetections]);
+  // Si el tipo elegido ya no existe (se eliminó el último), vuelve a "todos".
+  const tipoActivo = tiposPresentes.some(([c]) => c === tipoFiltro) ? tipoFiltro : "todos";
+
   const detectionRows = useMemo(() => {
     const pasa = (d: DisplayDetection) => {
+      if (tipoActivo !== "todos" && !d.classes.includes(tipoActivo)) return false;
       switch (filtroLista) {
         case "nuevas":
           return Boolean(d.manual);
@@ -1284,7 +1448,7 @@ useEffect(() => {
     return visibleDetections.filter(pasa).sort((a, b) =>
       ordenLista === "nombre" ? a.class.localeCompare(b.class, "es") : valor(b) - valor(a),
     );
-  }, [visibleDetections, filtroLista, ordenLista, editadas, enabledIds]);
+  }, [visibleDetections, filtroLista, tipoActivo, ordenLista, editadas, enabledIds]);
 
   /** Conteo de cada opción del filtro, con las mismas reglas que `detectionRows`. */
   const conteoFiltro = useMemo(
@@ -1772,14 +1936,22 @@ useEffect(() => {
       const cambiosDeModelo = detectionsLoading
         ? undefined
         : {
-            keepIds: delModelo.flatMap((d) => d.ids ?? [d.id]),
+            // Un grupo cuyo contorno se rehízo queda como UN polígono: se conserva
+            // el primero de sus ids y los demás se dan por quitados.
+            keepIds: delModelo.flatMap((d) => {
+              const ids = d.ids ?? [d.id];
+              return editadas.get(d.id)?.forma ? ids.slice(0, 1) : ids;
+            }),
             edits: delModelo.flatMap((d): EdicionDeModelo[] => {
               const e = editadas.get(d.id);
               if (!e) return [];
+              const ids = d.ids ?? [d.id];
               const contorno = anilloComoPares(d.rings?.[0]);
-              const forma = e.forma && (d.ids ?? [d.id]).length === 1 && contorno.length >= 3 ? contorno : undefined;
-              return (d.ids ?? [d.id]).map((id) => ({
+              const forma = e.forma && contorno.length >= 3 ? contorno : undefined;
+              return (forma ? ids.slice(0, 1) : ids).map((id) => ({
                 id,
+                // Un grupo de varios tipos que solo cambió de forma conserva el
+                // tipo de su detección principal.
                 ...(e.clase ? { class: d.class } : {}),
                 ...(forma ? { polygon: forma } : {}),
               }));
@@ -2030,7 +2202,7 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
           inservible, así que ahí la lista pasa a ocupar una fila propia debajo
           (col-span-2), que es la única disposición razonable en pantallas
           angostas. */}
-      <main className="grid flex-1 min-h-0 grid-cols-[clamp(15rem,22vw,22.5rem)_1fr] grid-rows-[minmax(0,1fr)_auto] xl:grid-cols-[clamp(15rem,19vw,19rem)_1fr_clamp(17rem,23vw,25rem)] xl:grid-rows-1">
+      <main className="grid flex-1 min-h-0 grid-cols-[clamp(15rem,22vw,22.5rem)_1fr] grid-rows-[minmax(0,1fr)_auto] xl:grid-cols-[clamp(15rem,19vw,19rem)_1fr_clamp(21rem,29vw,31rem)] xl:grid-rows-1">
 
         {/* ── panel lateral ── */}
         {/* Los dos paneles laterales van sobre superficie de tarjeta y el
@@ -2937,6 +3109,10 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                                       strokeWidth={1.5 / ppu}
                                       style={{ pointerEvents: "all", cursor: "grab" }}
                                       onPointerDown={(e) => iniciarArrastre(e, id, i)}
+                                      onDoubleClick={(e) => {
+                                        e.stopPropagation();
+                                        cambiarPuntos(id, (p) => (p.length > 3 ? p.filter((_, k) => k !== i) : p));
+                                      }}
                                       onPointerMove={moverArrastre}
                                       onPointerUp={terminarArrastre}
                                       onPointerCancel={terminarArrastre}
@@ -3040,7 +3216,7 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
             </div>
           )}
 
-          {/* Orden y filtro de la lista. */}
+          {/* Filtros de la lista. El orden se cambia desde los encabezados de columna. */}
           {displayDetections.length > 0 && (
             <div className="mb-2 flex flex-shrink-0 flex-wrap items-center gap-1.5">
               <FiltroDropdown<FiltroLista>
@@ -3055,15 +3231,13 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                   { valor: "desactivadas", etiqueta: "Desactivadas", conteo: conteoFiltro.desactivadas },
                 ]}
               />
-              <FiltroDropdown<OrdenLista>
-                etiqueta="Ordenar"
-                valor={ordenLista}
-                onCambio={setOrdenLista}
+              <FiltroDropdown<string>
+                etiqueta="Tipo"
+                valor={tipoActivo}
+                onCambio={setTipoFiltro}
                 opciones={[
-                  { valor: "volumen", etiqueta: "Volumen" },
-                  { valor: "peso", etiqueta: "Peso" },
-                  { valor: "area", etiqueta: "Área" },
-                  { valor: "nombre", etiqueta: "Tipo (A-Z)" },
+                  { valor: "todos", etiqueta: "Todos", conteo: visibleDetections.length },
+                  ...tiposPresentes.map(([clase, n]) => ({ valor: clase, etiqueta: clase, conteo: n })),
                 ]}
               />
             </div>
@@ -3072,70 +3246,130 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
           {/* Detalle del polígono elegido. Fuera de la región que se desplaza,
               para que las acciones estén a la mano con la lista larga. */}
           {(detSel || nuevaSel) && (
-            <div className="mb-2 flex-shrink-0 space-y-2 rounded-md border border-primary/40 bg-primary/5 p-2.5 animate-in fade-in duration-200">
-              <div className="flex items-center gap-1.5">
+            <div className="mb-2 flex-shrink-0 space-y-2.5 rounded-lg border border-primary/40 bg-primary/5 p-3 shadow-sm animate-in fade-in duration-200">
+              <div className="flex items-center gap-2">
                 <span
-                  className="h-2.5 w-2.5 flex-shrink-0 rounded-sm"
+                  className="h-3 w-3 flex-shrink-0 rounded-sm"
                   style={{ background: classColor(detSel?.class ?? nuevaSel?.clase ?? "") }}
                 />
-                <span className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">
+                <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">
                   {detSel?.class ?? nuevaSel?.clase}
                 </span>
-                {nuevaSel && (
-                  <span className="flex-shrink-0 rounded bg-success/15 px-1.5 py-0.5 text-[0.625rem] font-semibold text-success-strong">
-                    Nueva
-                  </span>
-                )}
-                {detSel?.manual && (
-                  <span className="flex-shrink-0 rounded bg-muted px-1.5 py-0.5 text-[0.625rem] font-semibold text-muted-foreground">
-                    Dibujada
-                  </span>
-                )}
-                {detSel && editadas.has(detSel.id) && (
-                  <span className="flex-shrink-0 rounded bg-warning/15 px-1.5 py-0.5 text-[0.625rem] font-semibold text-warning-strong">
-                    Sin medir
-                  </span>
-                )}
+                {nuevaSel && <EtiquetaPoligono tono="verde">Nueva</EtiquetaPoligono>}
+                {detSel?.manual && <EtiquetaPoligono tono="gris">Dibujada</EtiquetaPoligono>}
+                {detSel && editadas.has(detSel.id) && <EtiquetaPoligono tono="ambar">Sin medir</EtiquetaPoligono>}
                 <button
                   type="button"
                   onClick={() => {
                     setSeleccion(null);
+                    setApilados([]);
                     setZonaEnEdicion(null);
                   }}
                   className="flex-shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
                   aria-label="Cerrar el detalle"
                 >
-                  <X className="h-3.5 w-3.5" />
+                  <X className="h-4 w-4" />
                 </button>
               </div>
-              <p className="mono text-[0.6875rem] tabular-nums text-muted-foreground">
-                {nuevaSel
-                  ? "Aún no contemplada en el análisis."
-                  : detSel && editadas.has(detSel.id)
-                    ? "Cifras de antes del cambio: vuelve a analizar."
-                    : detSel
-                      ? `${volumen(detSel.volume_m3 ?? 0)} m³ · ${area(detSel.area_m2 ?? 0)} m² · ${peso(detSel.weight_kg ?? 0)} kg`
-                      : ""}
-              </p>
-              {zonaEnEdicion && (
-                <p className="text-[0.69rem] leading-relaxed text-muted-foreground">
-                  Arrastra los puntos blancos del contorno para modificar el área. Un punto intermedio de un
-                  lado agrega un vértice nuevo.
+
+              {/* Las tres medidas, con la misma tipografía y la unidad junto al rótulo. */}
+              <dl className="grid grid-cols-3 gap-2 rounded-md bg-background/70 px-2.5 py-2">
+                {[
+                  ["Volumen", "m³", detSel ? volumen(detSel.volume_m3 ?? 0) : null],
+                  ["Área", "m²", detSel ? area(detSel.area_m2 ?? 0) : null],
+                  ["Peso", "kg", detSel ? peso(detSel.weight_kg ?? 0) : null],
+                ].map(([rotulo, unidad, valor]) => (
+                  <div key={rotulo} className="min-w-0">
+                    <dt className="text-[0.6875rem] text-muted-foreground">
+                      {rotulo} ({unidad})
+                    </dt>
+                    <dd
+                      className={`mono text-xs font-semibold tabular-nums ${
+                        valor == null || (detSel && editadas.has(detSel.id))
+                          ? "text-muted-foreground"
+                          : "text-foreground"
+                      }`}
+                    >
+                      {valor ?? "-"}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+              {nuevaSel && (
+                <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
+                  Aún no contemplada en el análisis: se mide al presionar Analizar volumen.
                 </p>
               )}
-              <div className="grid grid-cols-3 gap-1.5">
+              {detSel && editadas.has(detSel.id) && (
+                <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
+                  Las cifras son de antes del cambio. Vuelve a analizar para actualizarlas.
+                </p>
+              )}
+              {detSel && !detSel.manual && detSel.ids.length > 1 && (
+                <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
+                  Agrupa {detSel.ids.length} detecciones del modelo que se superponen. Se miden como una sola (el
+                  volumen es el promedio del grupo, no la suma) para no contar dos veces la misma basura. Al
+                  modificar su área quedan reemplazadas por un único polígono.
+                </p>
+              )}
+
+              {/* Varios polígonos bajo el mismo punto: se elige entre ellos. */}
+              {apilados.length > 1 && (
+                <div className="space-y-1">
+                  <p className="text-[0.6875rem] font-medium text-foreground">
+                    {apilados.length} polígonos superpuestos en este punto
+                  </p>
+                  <div className="flex flex-wrap gap-1">
+                    {apilados.map((s, k) => {
+                      const claseDe =
+                        s.tipo === "det"
+                          ? (displayDetections.find((d) => d.id === s.id)?.class ?? "")
+                          : (zonasManuales.find((z) => z.uid === s.uid)?.clase ?? "");
+                      const activo =
+                        seleccion && (s.tipo === "det"
+                          ? seleccion.tipo === "det" && seleccion.id === s.id
+                          : seleccion.tipo === "nueva" && seleccion.uid === s.uid);
+                      return (
+                        <button
+                          key={k}
+                          type="button"
+                          onClick={() => {
+                            setSeleccion(s);
+                            setZonaEnEdicion(null);
+                          }}
+                          className={`flex cursor-pointer items-center gap-1 rounded-md border px-1.5 py-0.5 text-[0.6875rem] transition-colors ${
+                            activo
+                              ? "border-primary bg-primary/15 font-semibold text-foreground"
+                              : "border-border/60 text-muted-foreground hover:border-primary/60 hover:text-foreground"
+                          }`}
+                        >
+                          <span className="h-2 w-2 rounded-sm" style={{ background: classColor(claseDe) }} />
+                          {k + 1}. {claseDe}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[0.625rem] text-muted-foreground">
+                    Tocar de nuevo el mismo punto del mapa pasa al siguiente.
+                  </p>
+                </div>
+              )}
+
+              {/* Acciones: una principal (amarilla), una secundaria y la destructiva. */}
+              <div className="grid grid-cols-3 gap-2">
                 <Button
                   size="sm"
-                  className="px-1.5 text-[0.6875rem]"
-                  variant={zonaEnEdicion && zonaEnEdicion === (nuevaSel ? nuevaSel.uid : `det:${detSel?.id}`) ? "default" : "secondary"}
-                  disabled={!puedeEditar || formaBloqueada}
+                  className="h-8 gap-1 px-2 text-xs font-semibold"
+                  variant={editandoEste ? "secondary" : "default"}
+                  disabled={!puedeEditar}
                   onClick={alternarEdicionDeForma}
                 >
-                  {zonaEnEdicion && zonaEnEdicion === (nuevaSel ? nuevaSel.uid : `det:${detSel?.id}`) ? "Listo" : "Modificar área"}
+                  <Pencil className="h-3.5 w-3.5" />
+                  {editandoEste ? "Listo" : "Modificar área"}
                 </Button>
                 <Button
                   size="sm"
-                  className="px-1.5 text-[0.6875rem]"
+                  className="h-8 px-2 text-xs font-semibold"
                   variant="secondary"
                   disabled={!puedeEditar}
                   onClick={() => setCambiarTipoOpen(true)}
@@ -3144,19 +3378,40 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                 </Button>
                 <Button
                   size="sm"
-                  className="px-1.5 text-[0.6875rem]"
+                  className="h-8 gap-1 border-destructive/40 px-2 text-xs font-semibold text-destructive-strong hover:bg-destructive/10"
                   variant="outline"
                   disabled={!puedeEditar}
                   onClick={() => setEliminarSelOpen(true)}
                 >
+                  <Trash2 className="h-3.5 w-3.5" />
                   Eliminar
                 </Button>
               </div>
-              {formaBloqueada && (
-                <p className="text-[0.69rem] leading-relaxed text-muted-foreground">
-                  Este polígono agrupa varios tipos superpuestos. Puedes cambiarle el tipo o eliminarlo; para
-                  redibujarlo, elimínalo y dibuja una zona nueva.
-                </p>
+
+              {/* Herramientas del contorno: un contorno de sierra tiene cientos de
+                  puntos y moverlos uno a uno no es práctico. */}
+              {editandoEste && puntosEnEdicion && (
+                <div className="space-y-1.5 rounded-md border border-border/60 bg-background/60 p-2">
+                  <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
+                    Contorno de <span className="mono font-semibold text-foreground">{puntosEnEdicion.length}</span>{" "}
+                    puntos. Arrástralos, toca el punto intermedio de un lado para agregar uno, o haz doble clic en
+                    un punto para quitarlo.
+                  </p>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <Button size="sm" variant="secondary" className="h-7 px-2 text-[0.6875rem]" onClick={simplificarEdicion}>
+                      Menos puntos
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 px-2 text-[0.6875rem]"
+                      onClick={restaurarContorno}
+                      disabled={!zonaEnEdicion || !contornoBase.current.has(zonaEnEdicion)}
+                    >
+                      Restaurar contorno
+                    </Button>
+                  </div>
+                </div>
               )}
             </div>
           )}
@@ -3224,32 +3479,43 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                   })}
                 </ul>
               )}
-              <ul
-                key={animKey}
-                className="space-y-0.5 animate-in fade-in slide-in-from-bottom-2 duration-300"
-              >
-                {detectionRows.map((d, i) => {
+              {/* Encabezado con las unidades: las cifras van sin ellas, alineadas en
+                  columna y con una sola tipografía. Pegado arriba al desplazar. */}
+              <div className={`sticky top-0 z-10 ${COLS_LISTA} items-center gap-x-1 border-b border-border/60 bg-card px-1.5 py-1.5 text-[0.6875rem] font-medium text-muted-foreground`}>
+                <span />
+                {cabeceraLista("Tipo", "nombre", false)}
+                {cabeceraLista("Vol. (m³)", "volumen")}
+                {cabeceraLista("Área (m²)", "area")}
+                {cabeceraLista("Peso (kg)", "peso")}
+              </div>
+              <ul key={animKey} className="animate-in fade-in duration-300">
+                {detectionRows.map((d) => {
                   const enabled = enabledIds.has(d.id);
                   const desplegada = expandedIds.has(d.id);
                   const elegida = seleccion?.tipo === "det" && seleccion.id === d.id;
                   const fusionada = d.classes.length > 1;
-                  const hasData = d.volume_m3 != null || d.area_m2 != null;
+                  const sinMedir = editadas.has(d.id);
+                  const hasData = status === "done" && (d.volume_m3 != null || d.area_m2 != null);
                   const share =
                     enabled && activeSummary.totalVolumeM3 > 0
                       ? ((d.volume_m3 ?? 0) / activeSummary.totalVolumeM3) * 100
                       : null;
+                  const cifra = (v: number | null | undefined, f: (n: number) => string) =>
+                    hasData && v != null ? f(v) : "-";
+                  const clsCifra = `mono text-right text-xs tabular-nums ${
+                    sinMedir ? "text-muted-foreground" : "text-foreground"
+                  }`;
 
                   return (
                     <li
                       key={d.id}
                       id={`fila-det-${d.id}`}
                       onClick={() => elegirDeLista({ tipo: "det", id: d.id }, d.bbox)}
-                      style={{ animationDelay: `${Math.min(i, 8) * 30}ms` }}
-                      className={`animate-in fade-in duration-300 fill-mode-both cursor-pointer rounded-md px-1.5 py-1.5 transition-all duration-200 ${
-                        elegida ? "bg-primary/10 ring-1 ring-primary/60" : "hover:bg-muted/40"
+                      className={`cursor-pointer border-b border-border/30 px-1.5 py-2 transition-colors ${
+                        elegida ? "rounded-md bg-primary/10 ring-1 ring-primary/60" : "hover:bg-muted/40"
                       } ${enabled ? "" : "opacity-40"}`}
                     >
-                      <div className="flex items-center gap-1.5">
+                      <div className={`${COLS_LISTA} items-center gap-x-1`}>
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -3258,115 +3524,77 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                           className="flex-shrink-0 cursor-pointer rounded p-0.5 transition-all duration-150 hover:bg-muted/60 active:scale-90"
                           title={enabled ? "Desactivar zona" : "Activar zona"}
                         >
-                          {enabled
-                            ? <Eye    className="h-3.5 w-3.5 text-primary" />
-                            : <EyeOff className="h-3.5 w-3.5 text-muted-foreground" />}
+                          {enabled ? (
+                            <Eye className="h-3.5 w-3.5 text-primary" />
+                          ) : (
+                            <EyeOff className="h-3.5 w-3.5 text-muted-foreground" />
+                          )}
                         </button>
 
-                        {/* El triángulo solo existe donde hay algo que abrir, y
-                            ocupa su ancho igual en las demás para que los
-                            nombres queden alineados en columna. */}
-                        {fusionada ? (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              toggleExpanded(d.id);
-                            }}
-                            aria-expanded={desplegada}
-                            className="flex h-4 w-4 flex-shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
-                            title={desplegada ? "Ocultar desglose" : "Ver desglose por tipo"}
-                          >
-                            <Triangulo abierta={desplegada} />
-                          </button>
-                        ) : (
-                          <span className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
-                        )}
+                        <div className="flex min-w-0 items-center gap-1.5">
+                          {fusionada && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleExpanded(d.id);
+                              }}
+                              aria-expanded={desplegada}
+                              className="flex h-4 w-4 flex-shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+                              title={desplegada ? "Ocultar desglose" : "Ver desglose por tipo"}
+                            >
+                              <Triangulo abierta={desplegada} />
+                            </button>
+                          )}
+                          <span
+                            className="h-2.5 w-2.5 flex-shrink-0 rounded-sm"
+                            style={{ background: classColor(d.class) }}
+                          />
+                          <span className="min-w-0 truncate text-xs font-medium text-foreground">{d.class}</span>
+                          {d.ids.length > 1 && !fusionada && (
+                            <span
+                              className="mono flex-shrink-0 text-[0.625rem] text-muted-foreground"
+                              title={`Agrupa ${d.ids.length} detecciones superpuestas`}
+                            >
+                              ×{d.ids.length}
+                            </span>
+                          )}
+                          {d.manual && <EtiquetaPoligono tono="gris">M</EtiquetaPoligono>}
+                          {sinMedir && <EtiquetaPoligono tono="ambar">Sin medir</EtiquetaPoligono>}
+                        </div>
 
                         <span
-                          className="h-2.5 w-2.5 flex-shrink-0 rounded-sm"
-                          style={{ background: classColor(d.class) }}
-                        />
-                        <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
-                          {d.class}
-                          {d.manual && <span className="ml-1 text-[0.6875rem] font-normal text-muted-foreground">(manual)</span>}
-                          {editadas.has(d.id) && (
-                            <span className="ml-1 text-[0.6875rem] font-semibold text-warning-strong">sin medir</span>
-                          )}
+                          className={`${clsCifra} font-semibold`}
+                          title={share != null ? `${share.toFixed(0)} % del volumen activo` : undefined}
+                        >
+                          {cifra(d.volume_m3, volumen)}
                         </span>
-                        {/* Una zona dibujada se puede quitar del vuelo. Las que entrega
-                            el modelo no: esas solo se desactivan con el ojo. */}
-                        {d.manual && !readOnly && status !== "running" && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              quitarZonaDibujada(d);
-                            }}
-                            className="flex-shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive-strong"
-                            title="Quitar esta zona dibujada del análisis"
-                            aria-label="Quitar esta zona dibujada del análisis"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        )}
-                        <span className="mono flex-shrink-0 text-xs font-semibold tabular-nums text-foreground">
-                          {status === "done" && hasData
-                            ? `${volumen(d.volume_m3 ?? 0)} m³`
-                            : "-"}
-                        </span>
+                        <span className={clsCifra}>{cifra(d.area_m2, area)}</span>
+                        <span className={clsCifra}>{cifra(d.weight_kg, peso)}</span>
                       </div>
 
-                      {/* pl-[3.4rem] alinea esta línea con el nombre de arriba,
-                          saltando el ojo, el triángulo y el cuadro de color. */}
-                      <div className="mt-0.5 flex items-baseline gap-2 pl-[3.4rem] text-[0.6875rem] text-muted-foreground">
-                        {status === "done" && hasData ? (
-                          <>
-                            <span className="mono min-w-0 flex-1 truncate tabular-nums">
-                              {area(d.area_m2 ?? 0)} m² · {peso(d.weight_kg ?? 0)} kg
-                            </span>
-                            {/* Que la cifra de una zona fusionada sea el
-                                promedio (o el máximo) del grupo y no la suma es
-                                lo que impide contar dos veces la misma basura,
-                                así que se dice en la fila y no solo en el
-                                código. */}
-                            {fusionada && (
-                              <span className="flex-shrink-0">{d.classes.length} tipos, prom.</span>
-                            )}
-                            <span className="mono flex-shrink-0 tabular-nums">
-                              {share != null ? `${share.toFixed(0)} %` : "-"}
-                            </span>
-                          </>
-                        ) : (
-                          <span>
-                            {status === "done" ? "Sin datos de volumen" : "Pendiente de análisis"}
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Desglose por tipo, colapsado por omisión: en una zona
-                          fusionada sus cifras son casi idénticas entre sí (salen
-                          del mismo grupo), así que desplegadas siempre eran
-                          ruido que tapaba las zonas que sí se comparan entre
-                          sí. Quien necesita auditar el dato lo abre. */}
+                      {/* Desglose por tipo de una zona fusionada, con las mismas
+                          columnas que las filas de arriba. */}
                       {desplegada && (
-                        <ul className="mt-1.5 space-y-1 border-l border-border/60 pl-2 ml-[1.9rem]">
+                        <ul className="mt-1.5 space-y-1">
                           {d.breakdown.map((b) => (
-                            <li key={b.class} className="text-[0.6875rem]">
-                              <div className="flex items-center gap-1.5">
+                            <li key={b.class} className={`${COLS_LISTA} items-center gap-x-1`}>
+                              <span />
+                              <div className="flex min-w-0 items-center gap-1.5 pl-5">
                                 <span
                                   className="h-2 w-2 flex-shrink-0 rounded-sm"
                                   style={{ background: classColor(b.class) }}
                                 />
-                                <span className="min-w-0 flex-1 truncate text-foreground">
-                                  {b.class}
-                                </span>
-                                <span className="mono flex-shrink-0 tabular-nums text-foreground">
-                                  {b.volume_m3 != null ? `${volumen(b.volume_m3)} m³` : "-"}
-                                </span>
+                                <span className="min-w-0 truncate text-xs text-muted-foreground">{b.class}</span>
                               </div>
-                              <p className="mono pl-3.5 tabular-nums text-muted-foreground">
-                                {b.area_m2 != null ? `${area(b.area_m2)} m²` : "-"} ·{" "}
-                                {b.weight_kg != null ? `${peso(b.weight_kg)} kg` : "-"}
-                              </p>
+                              <span className="mono text-right text-xs tabular-nums text-muted-foreground">
+                                {b.volume_m3 != null ? volumen(b.volume_m3) : "-"}
+                              </span>
+                              <span className="mono text-right text-xs tabular-nums text-muted-foreground">
+                                {b.area_m2 != null ? area(b.area_m2) : "-"}
+                              </span>
+                              <span className="mono text-right text-xs tabular-nums text-muted-foreground">
+                                {b.weight_kg != null ? peso(b.weight_kg) : "-"}
+                              </span>
                             </li>
                           ))}
                         </ul>
@@ -3842,6 +4070,26 @@ function AvisoAmbar({ children, accion }: { children: React.ReactNode; accion?: 
 }
 
 /** Triángulo de despliegue, mismo gesto que el panel de capas de Figma. */
+/** Etiqueta chica junto al nombre de un polígono. */
+function EtiquetaPoligono({
+  tono,
+  children,
+}: {
+  tono: "verde" | "ambar" | "gris";
+  children: React.ReactNode;
+}) {
+  const clases = {
+    verde: "bg-success/15 text-success-strong",
+    ambar: "bg-warning/15 text-warning-strong",
+    gris: "bg-muted text-muted-foreground",
+  }[tono];
+  return (
+    <span className={`flex-shrink-0 rounded px-1.5 py-0.5 text-[0.625rem] font-semibold leading-none ${clases}`}>
+      {children}
+    </span>
+  );
+}
+
 function Triangulo({ abierta }: { abierta: boolean }) {
   return (
     <svg
