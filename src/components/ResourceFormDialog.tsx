@@ -262,7 +262,7 @@ export function ResourceFormDialog({
                   ocupaba más alto que la propia foto. Las acciones van DENTRO
                   de la imagen (la papelera) y justo debajo (adjuntar), no en un
                   bloque aparte. */}
-                  <div className="detect-frame relative aspect-[16/10] w-full overflow-hidden rounded-lg border border-border bg-muted">
+                  <div className="detect-frame relative aspect-[16/10] w-full overflow-hidden rounded-none border border-border bg-muted">
                     <span className="detect-corners" aria-hidden="true" />
                     {form.foto ? (
                       <img
@@ -318,7 +318,7 @@ export function ResourceFormDialog({
                     {form.foto ? "Cambiar imagen" : "Adjuntar imagen"}
                   </Button>
 
-                  <div className="flex items-center justify-between rounded-lg bg-background/40 p-3">
+                  <div className="flex items-center justify-between rounded-none bg-background/40 p-3">
                     <div>
                       <p className="text-xs font-medium text-foreground">Disponible</p>
                       <p className="text-[0.6875rem] text-muted-foreground">

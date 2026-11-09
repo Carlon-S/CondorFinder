@@ -482,7 +482,7 @@ function HistorialPage() {
         {/* **La advertencia del criterio.** En ámbar y no en gris: lo que dice
             cambia lo que se puede esperar de la pantalla. Acá nada actúa sobre
             la jornada de hoy, es lectura de lo que ya se planificó. */}
-        <p className="flex items-start gap-2 rounded-lg border border-warning-strong/40 bg-warning/10 px-3 py-2 text-[0.6875rem] leading-relaxed text-warning-strong">
+        <p className="flex items-start gap-2 rounded-none border border-warning-strong/40 bg-warning/10 px-3 py-2 text-[0.6875rem] leading-relaxed text-warning-strong">
           <TriangleAlert className="mt-px h-3.5 w-3.5 flex-shrink-0" />
           <span>
             Estás viendo un <strong>historial</strong>. Son planes ya generados, no la jornada en
@@ -1385,7 +1385,7 @@ function DetalleRuta({ ruta, onVolver }: { ruta: RutaGuardadaCompleta; onVolver:
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 px-6 py-4">
-        <p className="flex flex-shrink-0 items-start gap-2 rounded-lg border border-warning-strong/40 bg-warning/10 px-3 py-1.5 text-[0.6875rem] leading-relaxed text-warning-strong">
+        <p className="flex flex-shrink-0 items-start gap-2 rounded-none border border-warning-strong/40 bg-warning/10 px-3 py-1.5 text-[0.6875rem] leading-relaxed text-warning-strong">
           <TriangleAlert className="mt-px h-3.5 w-3.5 flex-shrink-0" />
           <span>
             Plan generado el {fechaLarga(diaDe(ruta.fecha))} a las {horaDe(ruta.fecha)}. Las horas
@@ -1451,7 +1451,7 @@ function DetalleRuta({ ruta, onVolver }: { ruta: RutaGuardadaCompleta; onVolver:
 
         {!plan || segmentos.length === 0 || !seg ? (
           <>
-            <p className="rounded-lg border border-dashed border-border/60 px-4 py-8 text-center text-xs text-muted-foreground">
+            <p className="rounded-none border border-dashed border-border/60 px-4 py-8 text-center text-xs text-muted-foreground">
               Este registro no tiene el detalle del recorrido.
             </p>
             <section className="panel space-y-2 p-4">

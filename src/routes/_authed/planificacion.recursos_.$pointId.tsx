@@ -578,13 +578,13 @@ function RecursosDelPuntoPage() {
             recursos uno por uno y la ruta sigue sin considerarlos, porque el
             ruteo descarta el punto entero antes de mirar sus unidades. */}
         {punto && !punto.active && punto.resource_count > 0 && (
-          <p className="mb-4 rounded-lg border border-warning/40 bg-warning/10 px-4 py-2.5 text-xs leading-relaxed">
+          <p className="mb-4 rounded-none border border-warning/40 bg-warning/10 px-4 py-2.5 text-xs leading-relaxed">
             El punto está inactivo, así que sus recursos no participan de ninguna ruta aunque estén
             disponibles.
           </p>
         )}
 
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-card">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-none border border-border bg-card">
           <div className="flex flex-wrap items-center gap-3 border-b border-border px-5 py-4">
             {/* El título con el mismo tratamiento que "Puntos" y "Listado de
                 zonas": las tres tablas se presentan igual. */}
@@ -1034,7 +1034,7 @@ function RecursosDelPuntoPage() {
                       setEnEdicion(null);
                       setTipoNuevo(t.tipo);
                     }}
-                    className="group cursor-pointer overflow-hidden rounded-lg border border-border/60 bg-background/60 text-left transition-all hover:border-primary hover:bg-primary/5"
+                    className="group cursor-pointer overflow-hidden rounded-none border border-border/60 bg-background/60 text-left transition-all hover:border-primary hover:bg-primary/5"
                   >
                     <span className="block aspect-[4/3] w-full overflow-hidden bg-muted">
                       {foto ? (
@@ -1119,7 +1119,7 @@ function RecursosDelPuntoPage() {
                 onClick={() => enDetalle.foto && setFotoAmpliada(enDetalle.foto)}
                 disabled={!enDetalle.foto}
                 title={enDetalle.foto ? "Ver la foto en grande" : "Sin imagen todavía"}
-                className={`detect-frame relative block aspect-[16/10] w-full self-start overflow-hidden rounded-lg border border-border bg-muted ${
+                className={`detect-frame relative block aspect-[16/10] w-full self-start overflow-hidden rounded-none border border-border bg-muted ${
                   enDetalle.foto ? "cursor-zoom-in" : "cursor-default"
                 }`}
               >

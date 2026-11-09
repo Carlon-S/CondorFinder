@@ -603,7 +603,7 @@ function OpcionClase({
     <button
       type="button"
       onClick={onClick}
-      className="flex cursor-pointer flex-col gap-1.5 rounded-lg border border-border p-4 text-left transition-colors hover:border-cta hover:bg-accent"
+      className="flex cursor-pointer flex-col gap-1.5 rounded-none border border-border p-4 text-left transition-colors hover:border-cta hover:bg-accent"
     >
       <Construction className="h-5 w-5 text-primary" />
       <span className="text-sm font-medium text-foreground">{titulo}</span>

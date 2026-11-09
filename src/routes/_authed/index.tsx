@@ -38,6 +38,7 @@ import {
   FolderOpen,
   Layers,
   Loader2,
+  Clock,
   Pencil,
   Plus,
   Scale,
@@ -1513,7 +1514,17 @@ function MainPage() {
                             )}
                           </TableCell>
                           <TableCell className="px-3 py-3 text-center">
-                            <InsigniaEstado tono={estado.tono} title={estado.title}>
+                            <InsigniaEstado
+                              tono={estado.tono}
+                              title={estado.title}
+                              icono={
+                                estado.texto === "En progreso" ? (
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                ) : estado.texto === "Histórico" || estado.texto === "Sin vuelo" ? (
+                                  <Clock className="h-3 w-3" />
+                                ) : undefined
+                              }
+                            >
                               {estado.texto}
                             </InsigniaEstado>
                           </TableCell>
@@ -1839,7 +1850,7 @@ function MainPage() {
                         return next;
                       })
                     }
-                    className={`flex w-full cursor-pointer items-center gap-3 rounded-lg border p-2.5 text-left transition-all duration-200 ${
+                    className={`flex w-full cursor-pointer items-center gap-3 rounded-none border p-2.5 text-left transition-all duration-200 ${
                       marcada
                         ? "border-primary bg-primary/5"
                         : "border-border/60 hover:border-border hover:bg-muted/40"
@@ -1913,7 +1924,7 @@ function MainPage() {
 
           {/* Qué va a salir en el documento, antes de generarlo. */}
           {reportZoneIds.size > 0 && (
-            <div className="rounded-lg border border-border/60 bg-muted/30 p-3">
+            <div className="rounded-none border border-border/60 bg-muted/30 p-3">
               <p className="text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground">
                 El informe incluirá
               </p>
@@ -2137,7 +2148,7 @@ function MainPage() {
 
           {/* Qué capturas hay en juego, para no borrar a ciegas. */}
           {capturasDelObjetivo.length > 1 && (
-            <ul className="space-y-1 rounded-lg border border-border/60 bg-muted/30 p-2">
+            <ul className="space-y-1 rounded-none border border-border/60 bg-muted/30 p-2">
               {capturasDelObjetivo.map((a) => {
                 const esLaSeleccionada = a.id === deleteTargetDisplay?.recordId;
                 return (

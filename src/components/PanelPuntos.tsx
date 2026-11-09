@@ -654,7 +654,7 @@ export function PanelPuntos({
                 <Input value={selectedPoint.name} disabled className="disabled:cursor-default" />
               </div>
 
-              <div className="flex items-center justify-between rounded-lg bg-background/40 p-3">
+              <div className="flex items-center justify-between rounded-none bg-background/40 p-3">
                 <span className="text-xs font-medium text-foreground">Punto activo</span>
                 <Switch
                   checked={selectedPoint.active}
@@ -703,7 +703,7 @@ export function PanelPuntos({
                     el mapa y recién ahí aparecía el formulario. Acá se dice qué
                     falta, en vez de esconder el formulario hasta que no falte. */}
             <div
-              className={`flex items-start gap-2.5 rounded-lg border p-3 ${
+              className={`flex items-start gap-2.5 rounded-none border p-3 ${
                 pendingPoint ? "border-border bg-background/40" : "border-primary/30 bg-primary/5"
               }`}
             >
@@ -746,7 +746,7 @@ export function PanelPuntos({
               />
             </div>
 
-            <div className="flex items-center justify-between rounded-lg bg-background/40 p-3">
+            <div className="flex items-center justify-between rounded-none bg-background/40 p-3">
               <div>
                 <label htmlFor="point-active" className="text-xs font-medium text-foreground">
                   Punto activo

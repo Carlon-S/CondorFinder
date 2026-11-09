@@ -44,7 +44,7 @@ const ESTILO_POR_TEXTO: Record<(typeof TRAMOS)[number]["texto"], TipoTramo> = {
 
 export function RouteLegend({ color }: { color?: string | null }) {
   return (
-    <div className="pointer-events-none absolute bottom-4 left-4 z-[550] rounded-lg border border-border/60 bg-background/90 px-3 py-2.5 shadow-md backdrop-blur">
+    <div className="pointer-events-none absolute bottom-4 left-4 z-[550] rounded-none border border-border/60 bg-background/90 px-3 py-2.5 shadow-md backdrop-blur">
       <p className="mb-1.5 text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">
         Tramos
       </p>

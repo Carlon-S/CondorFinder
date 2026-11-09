@@ -28,6 +28,7 @@ import type { SavedAnalysisRecord } from "@/lib/analysisStore";
 import type { ZoneVersion } from "@/lib/volumeReport";
 import { versionLabel, zoneTotals } from "@/lib/volumeReport";
 import { volumen } from "@/lib/formato";
+import { ESTILO_INSIGNIA, FORMA_INSIGNIA } from "@/components/insignia-estilos";
 
 // Ver versionLabel() en volumeReport.ts: la etiqueta de una captura se arma en
 // un solo lugar, compartida con el grafico de evolucion y el informe.
@@ -165,7 +166,7 @@ export function VersionBar({
                         onClick={() => onSelect(rec)}
                         aria-current={activa ? "true" : undefined}
                         title={rec.name}
-                        className={`flex w-[10rem] flex-col gap-1.5 rounded-lg border p-2 text-left transition-all duration-200 hover:-translate-y-0.5 ${
+                        className={`flex w-[10rem] flex-col gap-1.5 rounded-none border p-2 text-left transition-all duration-200 hover:-translate-y-0.5 ${
                           activa
                             ? "border-primary bg-primary/5 shadow-sm"
                             : "border-border/60 hover:border-border hover:bg-muted/50"
@@ -186,9 +187,9 @@ export function VersionBar({
                             {versionLabel(version.captureDate, version.uploadedAt)}
                           </span>
                           {vigente ? (
-                            <span className="text-[0.63rem] text-success-strong">vigente</span>
+                            <span className={`${FORMA_INSIGNIA} ${ESTILO_INSIGNIA.exito} !px-1.5 !py-0.5 !text-[0.625rem]`}>vigente</span>
                           ) : (
-                            <span className="text-[0.63rem] text-muted-foreground">consulta</span>
+                            <span className={`${FORMA_INSIGNIA} ${ESTILO_INSIGNIA.neutro} !px-1.5 !py-0.5 !text-[0.625rem]`}>consulta</span>
                           )}
                         </div>
 

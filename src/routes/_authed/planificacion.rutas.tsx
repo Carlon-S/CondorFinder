@@ -2370,7 +2370,7 @@ function RutasPage() {
               Solo cuando el plan permite separar los trazos: si se dibujara
               todo, un selector prometería algo que el mapa no hace. */}
           {dibujo && routeSegments && indiceDibujado !== null && (
-            <div className="absolute left-4 top-4 z-[550] max-w-[min(26rem,60%)] rounded-lg border border-border/60 bg-background/90 px-3 py-2 shadow-md backdrop-blur">
+            <div className="absolute left-4 top-4 z-[550] max-w-[min(26rem,60%)] rounded-none border border-border/60 bg-background/90 px-3 py-2 shadow-md backdrop-blur">
               <p className="flex items-center gap-1.5 text-[0.6875rem] text-foreground">
                 <span
                   aria-hidden="true"
@@ -2541,7 +2541,7 @@ function RutasPage() {
                   </div>
 
                   {routeError && (
-                    <div className="animate-in fade-in rounded-lg border border-warning/40 bg-warning/10 p-3 duration-300">
+                    <div className="animate-in fade-in rounded-none border border-warning/40 bg-warning/10 p-3 duration-300">
                       <TriangleAlert className="mb-1.5 h-4 w-4 text-warning-strong" />
                       <p className="text-xs font-semibold">No se pudo generar la ruta</p>
                       <p className="mt-1 text-[0.6875rem] leading-relaxed text-muted-foreground">
@@ -2568,7 +2568,7 @@ function RutasPage() {
                       nuevo. Lleva su salida: dejar de editar no descarga las
                       paradas, solo deja de reemplazar. */}
                   {editandoPlanId && (
-                    <div className="mb-2 flex items-start gap-2 rounded-lg border border-warning-strong/40 bg-warning/10 px-3 py-2 text-[0.6875rem] leading-relaxed text-warning-strong">
+                    <div className="mb-2 flex items-start gap-2 rounded-none border border-warning-strong/40 bg-warning/10 px-3 py-2 text-[0.6875rem] leading-relaxed text-warning-strong">
                       <TriangleAlert className="mt-px h-3.5 w-3.5 flex-shrink-0" />
                       <span className="min-w-0 flex-1">
                         Estás <strong>editando una ruta guardada</strong>. Al generar, este plan
@@ -2612,7 +2612,7 @@ function RutasPage() {
                       )}
                     </div>
                     {paradasCargadas === 0 ? (
-                      <p className="rounded-lg border border-dashed border-border/60 px-3 py-5 text-center text-[0.6875rem] leading-relaxed text-muted-foreground">
+                      <p className="rounded-none border border-dashed border-border/60 px-3 py-5 text-center text-[0.6875rem] leading-relaxed text-muted-foreground">
                         Ninguna parada cargada todavía. Una ruta se arma con las zonas y los retiros
                         del día que elijas.
                       </p>
@@ -2621,7 +2621,7 @@ function RutasPage() {
                         {zonasOrdenadas.map((a) => (
                           <li
                             key={a.id}
-                            className={`rounded-lg border bg-background/60 transition-colors hover:bg-primary/5 ${
+                            className={`rounded-none border bg-background/60 transition-colors hover:bg-primary/5 ${
                               prioritarias.has(a.id)
                                 ? /* El borde ámbar, además de la estrella: una
                                      fila marcada se reconoce desde el bloque
@@ -2829,7 +2829,7 @@ function RutasPage() {
                         {diariosCargados.map((pd) => (
                           <li
                             key={pd.id}
-                            className="rounded-lg border border-border/60 bg-background/60 transition-colors hover:border-primary/40 hover:bg-primary/5"
+                            className="rounded-none border border-border/60 bg-background/60 transition-colors hover:border-primary/40 hover:bg-primary/5"
                           >
                             <div className="flex items-center gap-2 px-3 py-2">
                               <Construction className="h-3.5 w-3.5 flex-shrink-0 text-warning-strong" />
@@ -2935,7 +2935,7 @@ function RutasPage() {
                       )}
                     </div>
                     {!routeSegments || routeSegments.length === 0 ? (
-                      <p className="rounded-lg border border-dashed border-border/60 px-3 py-5 text-center text-[0.6875rem] leading-relaxed text-muted-foreground">
+                      <p className="rounded-none border border-dashed border-border/60 px-3 py-5 text-center text-[0.6875rem] leading-relaxed text-muted-foreground">
                         Todavía no hay ningún recorrido. Se generan a partir de las zonas cargadas.
                       </p>
                     ) : (
@@ -2953,7 +2953,7 @@ function RutasPage() {
                                 quiere, así que el contenedor pasa a ser un div
                                 y cada acción tiene su propio botón. */}
                             <div
-                              className={`relative rounded-lg border bg-background/60 transition-colors hover:bg-primary/5 ${
+                              className={`relative rounded-none border bg-background/60 transition-colors hover:bg-primary/5 ${
                                 i === indiceDibujado
                                   ? ""
                                   : "border-border/60 hover:border-primary/40"
@@ -3098,7 +3098,7 @@ function RutasPage() {
                       manda el campo; una lista vacía se leería como "todas
                       entraron", y eso todavía no se puede afirmar. */}
                   {unassigned && unassigned.length > 0 && (
-                    <div className="max-h-40 flex-shrink-0 overflow-y-auto rounded-lg border border-warning/40 bg-warning/10 p-3">
+                    <div className="max-h-40 flex-shrink-0 overflow-y-auto rounded-none border border-warning/40 bg-warning/10 p-3">
                       <p className="flex items-center gap-1.5 text-xs font-semibold">
                         <TriangleAlert className="h-3.5 w-3.5 flex-shrink-0 text-warning-strong" />
                         {unassigned.length} zona{unassigned.length === 1 ? "" : "s"} sin asignar
@@ -3938,7 +3938,7 @@ function RutasPage() {
                 <img
                   src={resourcePhotoUrl(vehiculoEnFoto.foto)}
                   alt={`${vehiculoEnFoto.tipo} ${vehiculoEnFoto.patente}`}
-                  className="max-h-[22rem] w-full rounded-lg border border-border/60 object-contain"
+                  className="max-h-[22rem] w-full rounded-none border border-border/60 object-contain"
                 />
               )}
               {/* Los tres límites van en una fila de TRES, no en una grilla de
@@ -3989,7 +3989,7 @@ function RutasPage() {
                   nombre manda y el rol lo califica: en una sola línea separada
                   por comas había que leer la frase entera para contar cuántos
                   van. */}
-              <div className="rounded-lg border border-border/60 bg-background/40 p-3">
+              <div className="rounded-none border border-border/60 bg-background/40 p-3">
                 <p className="flex items-center gap-1.5 text-[0.625rem] uppercase tracking-wide text-muted-foreground">
                   <Users className="h-3 w-3" />
                   Dotación
@@ -4195,7 +4195,7 @@ function RutasPage() {
                 no se salen de la pantalla con la flota o la cuadrilla largas.
                 Debajo de `lg` se apilan y scrollea el cuerpo. */}
             <div className="grid min-h-0 grid-cols-1 gap-4 lg:h-[26rem] lg:grid-cols-3 lg:grid-rows-[minmax(0,1fr)]">
-              <section className="flex min-h-0 flex-col gap-3 rounded-lg border border-border/60 p-3">
+              <section className="flex min-h-0 flex-col gap-3 rounded-none border border-border/60 p-3">
                 {/* **Cuánto retirar de cada parada, obligatorio (AC4).**
                 Va PRIMERO, antes de los puntos activos y de la cuadrilla,
                 porque es la decisión que define el plan: sin estas cifras una
@@ -4342,7 +4342,7 @@ function RutasPage() {
                   </p>
                 )}
               </section>
-              <section className="flex min-h-0 flex-col gap-3 rounded-lg border border-border/60 p-3">
+              <section className="flex min-h-0 flex-col gap-3 rounded-none border border-border/60 p-3">
                 {/* **AC7: la disponibilidad de la flota se decide ACÁ, antes de
                 calcular.** Plegada por omisión y mostrando el resumen que el
                 backend ya calcula: 21 filas con foto abiertas de entrada tapan
@@ -4521,7 +4521,7 @@ function RutasPage() {
                   )}
                 </div>
               </section>
-              <section className="flex min-h-0 flex-col gap-3 rounded-lg border border-border/60 p-3">
+              <section className="flex min-h-0 flex-col gap-3 rounded-none border border-border/60 p-3">
                 {/* ── Personal disponible (AC1 y AC2 de HDU5.1) ──
                 Se declara acá y no en una pantalla de administración porque es
                 una decisión de ESTA jornada: la municipalidad describió su
@@ -4722,7 +4722,7 @@ function RutasPage() {
             {/* Los tres parámetros de la jornada, bajo las columnas y con su
                 mismo ancho, para que el diálogo se lea como una grilla. */}
             <div className="grid flex-shrink-0 grid-cols-1 gap-4 lg:grid-cols-3">
-              <div className="space-y-1.5 rounded-lg border border-border/60 p-3">
+              <div className="space-y-1.5 rounded-none border border-border/60 p-3">
                 <label htmlFor="available-hours" className="text-xs font-semibold text-foreground">
                   Horas disponibles
                 </label>
@@ -4759,7 +4759,7 @@ function RutasPage() {
                 (la flota real tiene 8 unidades de carga y 21 en total), y un campo
                 libre invita a escribir un 12 que el backend va a recortar sin que
                 nadie entienda por qué. */}
-              <div className="space-y-1.5 rounded-lg border border-border/60 p-3">
+              <div className="space-y-1.5 rounded-none border border-border/60 p-3">
                 <div className="flex items-baseline justify-between gap-2">
                   <label className="text-xs font-semibold text-foreground">
                     Convoyes por punto
@@ -4799,7 +4799,7 @@ function RutasPage() {
                 )}
               </div>
 
-              <div className="space-y-1.5 rounded-lg border border-border/60 p-3">
+              <div className="space-y-1.5 rounded-none border border-border/60 p-3">
                 <label className="text-xs font-semibold text-foreground">
                   Tipo de basura prioritario
                 </label>
@@ -4907,7 +4907,7 @@ function CifraPlan({
   valor: string;
 }) {
   return (
-    <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2.5">
+    <div className="rounded-none border border-border/60 bg-background/60 px-3 py-2.5">
       <p className="flex items-center gap-1.5 text-[0.625rem] uppercase tracking-wide text-muted-foreground">
         <span className="flex-shrink-0 opacity-70">{icono}</span>
         {etiqueta}

@@ -188,7 +188,7 @@ const entrarConClave = async (e: React.FormEvent) => {
             línea. El padding es generoso y uniforme porque las esquinas de
             `.detect-frame` ocupan de 10px a 36px desde el borde, así que con
             menos aire el primer elemento quedaría pisado por el trazo. */}
-        <div className="animate-in fade-in zoom-in-95 duration-500 fill-mode-both rounded-xl border border-border bg-card px-10 py-12 text-center shadow-2xl shadow-black/40">
+        <div className="animate-in fade-in zoom-in-95 duration-500 fill-mode-both rounded-none border border-border bg-card px-10 py-12 text-center shadow-2xl shadow-black/40">
           <img src={logoOscuro} alt="CondorFinder" className="mx-auto h-20 w-auto" />
 
           <h1 className="mt-8 font-rubik text-3xl font-semibold tracking-normal text-foreground">

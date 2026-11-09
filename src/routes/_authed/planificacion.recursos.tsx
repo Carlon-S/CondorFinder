@@ -335,7 +335,7 @@ function RecursosPage() {
             El mapa acompaña, no manda: acá se está configurando, y lo que se
             compara está en la tabla de abajo. */}
         <div className="grid min-h-[clamp(18rem,38vh,28rem)] gap-5 lg:grid-cols-[clamp(19rem,28vw,26rem)_1fr]">
-          <aside className="rounded-xl border border-border bg-card p-5">
+          <aside className="rounded-none border border-border bg-card p-5">
             <PanelPuntos
               onMapProps={setMapProps}
               onPuntosCambiaron={recargar}
@@ -372,7 +372,7 @@ function RecursosPage() {
 
         {/* El contenido de la vista. Un punto se compara con otro por sus cifras,
             y eso necesita filas, no marcadores. */}
-        <div className="overflow-hidden rounded-xl border border-border bg-card">
+        <div className="overflow-hidden rounded-none border border-border bg-card">
           {/* Título, buscador y filtro en UNA fila, como el listado de zonas de
               Vista Principal y la tabla de la flota.
 

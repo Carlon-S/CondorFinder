@@ -1166,7 +1166,7 @@ function Page() {
         // reparte ese espacio entre su propio contenido (la de mapa tiene
         // cabecera y fila de datos, esta no) y el resultado sigue midiendo
         // lo mismo por construcción, sin cuadrar números a mano.
-        <section className="flex h-[35.5rem] flex-col rounded-xl border border-border bg-card p-5 animate-in fade-in slide-in-from-top-2 duration-500 fill-mode-both">
+        <section className="flex h-[35.5rem] flex-col rounded-none border border-border bg-card p-5 animate-in fade-in slide-in-from-top-2 duration-500 fill-mode-both">
         {/* flex-1 con min-h-0: absorbe lo que sobre del alto de la tarjeta.
             El scroll interno de "Imágenes adjuntas" sigue funcionando porque
             min-h-0 está en toda la cadena. */}
@@ -1182,12 +1182,12 @@ function Page() {
               onDragLeave={() => setDragOver(false)}
               onDrop={onDrop}
               disabled={processing}
-              className={`upload-zone group relative flex w-full flex-col items-center justify-center rounded-lg border border-dashed px-6 py-10 text-center transition-all duration-300 flex-1 overflow-hidden ${
+              className={`upload-zone group relative flex w-full flex-col items-center justify-center rounded-none border border-dashed px-6 py-10 text-center transition-all duration-300 flex-1 overflow-hidden ${
                 processing ? "cursor-not-allowed opacity-50" :
                 dragOver ? "border-primary bg-primary/10 scale-[1.01]" : "border-border/60 bg-background/30 hover:border-primary/50 hover:bg-primary/5"
               }`}
             >
-              <div className="upload-icon flex h-14 w-14 items-center justify-center rounded-xl bg-primary/15 text-primary ring-1 ring-primary/30">
+              <div className="upload-icon flex h-14 w-14 items-center justify-center rounded-md bg-primary/15 text-primary ring-1 ring-primary/30">
                 <Upload className="h-7 w-7" />
               </div>
               <p className="mt-4 text-sm font-semibold">
@@ -1209,7 +1209,7 @@ function Page() {
 
             {/* Overlay de carga, cubre todo el bloque independientemente del scroll */}
             {uploading && (
-              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-xl bg-background/85 backdrop-blur-sm">
+              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-none bg-background/85 backdrop-blur-sm">
                 <div className="scan-line relative h-20 w-20 overflow-hidden rounded-md border border-primary/40 bg-primary/10">
                   <Loader2 className="absolute left-1/2 top-1/2 h-7 w-7 -translate-x-1/2 -translate-y-1/2 animate-spin text-primary" />
                 </div>
@@ -1247,7 +1247,7 @@ function Page() {
                 <ul className="grid grid-cols-3 gap-2 pb-1 pr-1 will-change-scroll">
                   {items.map((it) => (
                     <li key={it.id}
-                      className={`animate-in fade-in zoom-in-95 duration-200 fill-mode-both overflow-hidden rounded-lg border bg-background/40 transform-gpu ${
+                      className={`animate-in fade-in zoom-in-95 duration-200 fill-mode-both overflow-hidden rounded-none border bg-background/40 transform-gpu ${
                         it.status === "invalid" ? "border-destructive/40" : "border-border/60"
                       }`}
                     >
@@ -1272,7 +1272,7 @@ function Page() {
                 </ul>
               </div>
             ) : (
-              <div className="flex flex-1 min-h-0 items-center justify-center rounded-lg border border-dashed border-border/40 bg-background/20 text-center text-xs text-muted-foreground/60">
+              <div className="flex flex-1 min-h-0 items-center justify-center rounded-none border border-dashed border-border/40 bg-background/20 text-center text-xs text-muted-foreground/60">
                 Las imágenes seleccionadas aparecerán aquí
               </div>
             )}
@@ -1349,7 +1349,7 @@ function Page() {
         {/* ── Slice "Mapa unificado" ── */}
         {activeSlice === "mapa" && (
         // Mismo alto que la slice de carga, ver SLICE_H más arriba.
-        <section className="flex h-[35.5rem] flex-col rounded-xl border border-border bg-card p-5 animate-in fade-in slide-in-from-top-2 duration-500 fill-mode-both">
+        <section className="flex h-[35.5rem] flex-col rounded-none border border-border bg-card p-5 animate-in fade-in slide-in-from-top-2 duration-500 fill-mode-both">
 
           {/* Mapa unificado */}
           <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -1517,7 +1517,7 @@ function Page() {
             estado del proceso (fase + barra) y el detalle de pares en
             conflicto de solapamiento, cuando existen, se muestran justo
             debajo. */}
-        <section className="rounded-xl border border-border bg-card p-5 animate-in fade-in slide-in-from-top-2 duration-500 delay-100 fill-mode-both">
+        <section className="rounded-none border border-border bg-card p-5 animate-in fade-in slide-in-from-top-2 duration-500 delay-100 fill-mode-both">
           <Stepper
             steps={steps}
             progress={progress}
@@ -1528,7 +1528,7 @@ function Page() {
           />
 
           {overlapDetail.length > 0 && (
-            <div className="mt-4 rounded-lg border border-destructive/40 bg-destructive/10 p-3 space-y-2">
+            <div className="mt-4 rounded-none border border-destructive/40 bg-destructive/10 p-3 space-y-2">
               <p className="text-[0.625rem] font-semibold text-destructive">Pares en conflicto ({overlapDetail.length})</p>
               <ul className="space-y-1.5 max-h-[8.75rem] overflow-y-auto pr-1">
                 {overlapDetail.map((pair, i) => (
@@ -1563,9 +1563,9 @@ function Page() {
             <button
               type="button"
               onClick={() => { setShowModelDialog(false); generate(false); }}
-              className="group flex cursor-pointer flex-col items-center gap-3 rounded-xl border border-border bg-card p-6 text-center transition-[transform,box-shadow,border-color,background-color] duration-200 hover:-translate-y-0.5 hover:border-primary/50 hover:bg-primary/5 hover:shadow-md"
+              className="group flex cursor-pointer flex-col items-center gap-3 rounded-none border border-border bg-card p-6 text-center transition-[transform,box-shadow,border-color,background-color] duration-200 hover:-translate-y-0.5 hover:border-primary/50 hover:bg-primary/5 hover:shadow-md"
             >
-              <span className="flex h-16 w-16 items-center justify-center rounded-xl bg-primary/10 text-primary transition-colors group-hover:bg-primary/15">
+              <span className="flex h-16 w-16 items-center justify-center rounded-md bg-primary/10 text-primary transition-colors group-hover:bg-primary/15">
                 <Lightning className="h-7 w-7" />
               </span>
               <span className="text-sm font-semibold text-foreground">Óptimo</span>
@@ -1575,9 +1575,9 @@ function Page() {
             <button
               type="button"
               onClick={() => { setShowModelDialog(false); generate(true); }}
-              className="group flex cursor-pointer flex-col items-center gap-3 rounded-xl border border-border bg-card p-6 text-center transition-[transform,box-shadow,border-color,background-color] duration-200 hover:-translate-y-0.5 hover:border-primary/50 hover:bg-primary/5 hover:shadow-md"
+              className="group flex cursor-pointer flex-col items-center gap-3 rounded-none border border-border bg-card p-6 text-center transition-[transform,box-shadow,border-color,background-color] duration-200 hover:-translate-y-0.5 hover:border-primary/50 hover:bg-primary/5 hover:shadow-md"
             >
-              <span className="flex h-16 w-16 items-center justify-center rounded-xl bg-primary/10 text-primary transition-colors group-hover:bg-primary/15">
+              <span className="flex h-16 w-16 items-center justify-center rounded-md bg-primary/10 text-primary transition-colors group-hover:bg-primary/15">
                 <Crosshair className="h-7 w-7" />
               </span>
               <span className="text-sm font-semibold text-foreground">Preciso</span>
@@ -1640,7 +1640,7 @@ function FlowNav({
     { key: "mapa", label: "Mapa unificado" },
   ];
   return (
-    <div className="inline-flex w-fit items-center gap-1 self-start rounded-xl border border-border bg-card p-1">
+    <div className="inline-flex w-fit items-center gap-1 self-start rounded-md border border-border bg-card p-1">
       {items.map((item) => {
         const isActive = active === item.key;
         return (
@@ -1648,7 +1648,7 @@ function FlowNav({
             key={item.key}
             type="button"
             onClick={() => onNavigate(item.key)}
-            className={`cursor-pointer rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${
+            className={`cursor-pointer rounded-md px-4 py-2 text-sm font-semibold transition-colors ${
               isActive ? "bg-primary text-primary-foreground" : "text-foreground/60 hover:bg-accent hover:text-accent-foreground"
             }`}
           >

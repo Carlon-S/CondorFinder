@@ -127,7 +127,7 @@
    algún CTA), nunca como texto general sobre el body.
    ============================================================================= */
 :root {
-  --radius: 0.625rem;
+  --radius: 0.375rem;
 
   --background:         #EEF0F4;
   --foreground:         #1B2431;
@@ -423,7 +423,8 @@ html {
 .panel {
   background-color: var(--card);
   border: 1px solid var(--border);
-  border-radius: var(--radius-xl);
+  /* Superficie recta: ver la escala de radios en CLAUDE.md (Theming). */
+  border-radius: 0;
   box-shadow:
     0 1px 2px rgba(34, 22, 20, 0.04),
     0 8px 16px -4px rgba(34, 22, 20, 0.08),
@@ -454,7 +455,7 @@ html {
   position: relative;
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: var(--radius-xl);
+  border-radius: 0;
   box-shadow:
     0 1px 2px rgba(34, 22, 20, 0.04),
     0 8px 16px -4px rgba(34, 22, 20, 0.08),

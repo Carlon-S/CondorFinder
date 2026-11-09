@@ -27,6 +27,7 @@ import {
   X,
 } from "@/components/icons/Icons";
 import { FiltroDropdown } from "@/components/FiltroDropdown";
+import { ESTILO_INSIGNIA, FORMA_INSIGNIA } from "@/components/insignia-estilos";
 import { ConfirmarBorrado } from "@/components/ConfirmarBorrado";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -2577,7 +2578,7 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
             </div>
 
             {/* ── Bloque "Control": lo que el usuario opera ── */}
-            <div className="rounded-lg bg-background/40 p-3 animate-in fade-in slide-in-from-left-2 duration-500 fill-mode-both space-y-4">
+            <div className="rounded-none bg-background/40 p-3 animate-in fade-in slide-in-from-left-2 duration-500 fill-mode-both space-y-4">
               <Button
                 onClick={runAnalysis}
                 disabled={
@@ -2897,7 +2898,7 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
 
             {/* ── Bloque "Resultados": lo que el usuario revisa ── */}
             {(status === "empty" || status === "error") ? (
-              <div className="rounded-lg bg-background/40 p-3 animate-in fade-in slide-in-from-left-2 duration-500 delay-100 fill-mode-both">
+              <div className="rounded-none bg-background/40 p-3 animate-in fade-in slide-in-from-left-2 duration-500 delay-100 fill-mode-both">
                 <div className="flex flex-col items-center justify-center rounded-md border border-warning/40 bg-warning/10 p-5 text-center">
                   {status === "empty"
                     ? <Trash2        className="mb-3 h-8 w-8 text-warning" />
@@ -2918,7 +2919,7 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                 </div>
               </div>
             ) : (
-              <div className="rounded-lg bg-background/40 p-3 animate-in fade-in slide-in-from-left-2 duration-500 delay-100 fill-mode-both space-y-4">
+              <div className="rounded-none bg-background/40 p-3 animate-in fade-in slide-in-from-left-2 duration-500 delay-100 fill-mode-both space-y-4">
                 {/* métricas */}
                 <div>
                   <p className="text-xs font-semibold text-foreground mb-2.5">Métricas</p>
@@ -3597,7 +3598,7 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
               para que las acciones estén a la mano con la lista larga. */}
           {(detSel || nuevaSel) && (
             <div
-              className="mb-3 flex-shrink-0 space-y-3 rounded-lg border border-l-4 border-border bg-card p-3 shadow-sm animate-in fade-in duration-200"
+              className="mb-3 flex-shrink-0 space-y-3 rounded-none border border-l-4 border-border bg-card p-3 shadow-sm animate-in fade-in duration-200"
               style={{ borderLeftColor: classColor(detSel?.class ?? nuevaSel?.clase ?? "") }}
             >
               <div className="flex items-center gap-2">
@@ -4019,7 +4020,7 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
               se listan todos los candidatos con su porcentaje de superposición
               y se elige. */}
           {duplicateWarning && (
-            <div className="mt-3 animate-in fade-in slide-in-from-bottom-2 duration-300 rounded-lg border border-warning/40 bg-warning/10 p-3">
+            <div className="mt-3 animate-in fade-in slide-in-from-bottom-2 duration-300 rounded-none border border-warning/40 bg-warning/10 p-3">
               <div className="flex items-center gap-2">
                 <TriangleAlert className="h-4 w-4 flex-shrink-0 text-warning" />
                 <p className="text-sm font-semibold">¿Esta captura ya tiene zona?</p>
@@ -4318,7 +4319,7 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
           </AlertDialogHeader>
 
           {duplicateExisting && (
-            <div className="flex items-center gap-3 rounded-lg border border-border/60 bg-background/40 p-3">
+            <div className="flex items-center gap-3 rounded-none border border-border/60 bg-background/40 p-3">
               {/* Misma miniatura enmarcada que en la tabla de zonas. */}
               <div className="detect-frame detect-frame-sm h-16 w-16 flex-shrink-0 overflow-hidden rounded">
                 <span className="detect-corners" aria-hidden="true" />
@@ -4429,7 +4430,7 @@ const statusLabel: Record<AnalysisStatus, string> = {
 
 function Metric({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
   return (
-    <div className="min-w-0 rounded-lg bg-background/60 px-2.5 py-3">
+    <div className="min-w-0 rounded-none bg-background/60 px-2.5 py-3">
       <div className="mb-2 text-primary/65 [&_svg]:h-4 [&_svg]:w-4">{icon}</div>
       <p className="mb-1 whitespace-nowrap text-[0.625rem] leading-none text-muted-foreground">{label}</p>
       {/* Una sola linea y sin cortarse: con miles de detecciones las cifras
@@ -4464,12 +4465,12 @@ function EtiquetaPoligono({
   children: React.ReactNode;
 }) {
   const clases = {
-    verde: "bg-success/15 text-success-strong",
-    ambar: "bg-warning/15 text-warning-strong",
-    gris: "bg-muted text-muted-foreground",
+    verde: ESTILO_INSIGNIA.exito,
+    ambar: ESTILO_INSIGNIA.aviso,
+    gris: ESTILO_INSIGNIA.neutro,
   }[tono];
   return (
-    <span className={`flex-shrink-0 rounded px-1.5 py-0.5 text-[0.625rem] font-semibold leading-none ${clases}`}>
+    <span className={`${FORMA_INSIGNIA} flex-shrink-0 !px-1.5 !py-0.5 !text-[0.625rem] ${clases}`}>
       {children}
     </span>
   );

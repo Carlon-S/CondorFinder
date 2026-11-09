@@ -81,7 +81,7 @@ export function ZoneEvolution({
   // puntos permanentes, a los que nadie va a volarle el dron dos veces.
   if (versions.length <= 1 && points.length <= 1) {
     return (
-      <div className="rounded-lg border border-border/60 bg-muted/30 p-6 text-center">
+      <div className="rounded-none border border-border/60 bg-muted/30 p-6 text-center">
         <p className="text-sm font-medium text-foreground">Sin versiones anteriores</p>
         <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
           Esta zona tiene una sola captura, así que todavía no hay evolución que comparar. Cuando se
@@ -256,7 +256,7 @@ export function ZoneEvolution({
           return (
             <li
               key={version.sourceTaskId}
-              className="flex items-center gap-3 rounded-lg border border-border/60 bg-card p-2.5"
+              className="flex items-center gap-3 rounded-none border border-border/60 bg-card p-2.5"
             >
               {/* El mapa de cada versión: es lo que más interesa ver cambiar
                   al recorrer la zona en el tiempo. */}
@@ -335,7 +335,7 @@ function ResumenEvolucion({
         ? "text-success-strong"
         : "text-foreground";
   return (
-    <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
+    <div className="rounded-none border border-border/60 bg-muted/30 px-3 py-2">
       <p className="text-[0.6875rem] text-muted-foreground">{etiqueta}</p>
       <p className={`mono text-sm font-semibold tabular-nums ${color}`}>{valor}</p>
       {nota && <p className="mono text-[0.6875rem] tabular-nums text-muted-foreground">{nota}</p>}
