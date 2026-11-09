@@ -581,6 +581,9 @@ function AnalysisPage() {
   const [editadas, setEditadas]                   = useState<Map<number, CambioPendiente>>(new Map());
   const [ordenLista, setOrdenLista]               = useState<OrdenLista>("volumen");
   const [ordenAsc, setOrdenAsc]                   = useState(false);
+  // Cómo se pintan los polígonos: por prioridad (degradé verde a rojo según el
+  // volumen) o por tipo de basura (el color de cada clase).
+  const [colorPorPrioridad, setColorPorPrioridad] = useState(true);
   const [filtroLista, setFiltroLista]             = useState<FiltroLista>("todas");
   const [cambiarTipoOpen, setCambiarTipoOpen]     = useState(false);
   const [eliminarSelOpen, setEliminarSelOpen]     = useState(false);
@@ -1522,6 +1525,15 @@ useEffect(() => {
   }, [visibleDetections]);
   // Si el tipo elegido ya no existe (se eliminó el último), vuelve a "todos".
   const tipoActivo = tiposPresentes.some(([c]) => c === tipoFiltro) ? tipoFiltro : "todos";
+
+  /** Menor y mayor volumen entre los polígonos activos: los extremos del degradé. */
+  const rangoVolumen = useMemo(() => {
+    const vols = displayDetections
+      .filter((d) => enabledIds.has(d.id))
+      .map((d) => d.volume_m3 ?? 0)
+      .filter((v) => v > 0);
+    return vols.length > 0 ? { min: Math.min(...vols), max: Math.max(...vols) } : { min: 0, max: 0 };
+  }, [displayDetections, enabledIds]);
 
   const detectionRows = useMemo(() => {
     const pasa = (d: DisplayDetection) => {
@@ -2917,6 +2929,69 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                 </div>
               </div>
 
+              {/* Leyenda de colores: dice qué significa el relleno de los polígonos
+                  y permite pasar de prioridad (volumen) a color por tipo. */}
+              {status === "done" && displayDetections.length > 0 && (
+                <div className="absolute bottom-4 left-4 z-20 w-60 space-y-2 rounded-md border border-border bg-card/90 p-2.5 text-xs shadow-xl backdrop-blur">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold text-foreground">Color de los polígonos</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1 rounded-md bg-muted/50 p-0.5">
+                    {([
+                      [true, "Prioridad"],
+                      [false, "Por tipo"],
+                    ] as const).map(([valor, rotulo]) => (
+                      <button
+                        key={rotulo}
+                        type="button"
+                        onClick={() => setColorPorPrioridad(valor)}
+                        aria-pressed={colorPorPrioridad === valor}
+                        className={`cursor-pointer rounded px-2 py-1 text-[0.6875rem] font-semibold transition-colors ${
+                          colorPorPrioridad === valor
+                            ? "bg-card text-foreground shadow-sm"
+                            : "text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        {rotulo}
+                      </button>
+                    ))}
+                  </div>
+
+                  {colorPorPrioridad ? (
+                    <div className="space-y-1">
+                      <div
+                        className="h-2.5 w-full rounded-full"
+                        style={{
+                          background: "linear-gradient(to right, rgb(34,197,94), rgb(245,158,11), rgb(239,68,68))",
+                        }}
+                      />
+                      <div className="flex items-start justify-between gap-2 text-[0.6875rem] text-muted-foreground">
+                        <span>
+                          Menor volumen
+                          <span className="mono block tabular-nums text-foreground">{volumen(rangoVolumen.min)} m³</span>
+                        </span>
+                        <span className="text-right">
+                          Mayor volumen
+                          <span className="mono block tabular-nums text-foreground">{volumen(rangoVolumen.max)} m³</span>
+                        </span>
+                      </div>
+                      <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
+                        Del verde al rojo sube la prioridad de retiro: los polígonos rojos son los de más volumen.
+                      </p>
+                    </div>
+                  ) : (
+                    <ul className="max-h-32 space-y-1 overflow-y-auto pr-1">
+                      {tiposPresentes.map(([clase]) => (
+                        <li key={clase} className="flex items-center gap-1.5 text-[0.6875rem] text-foreground">
+                          <span className="h-2.5 w-2.5 flex-shrink-0 rounded-sm" style={{ background: classColor(clase) }} />
+                          <span className="min-w-0 truncate">{clase}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+
               {/* Girar y reiniciar van juntos arriba a la derecha: los tres
                   actúan sobre el encuadre y no sobre el análisis. Los de giro
                   son solo ícono porque son un par simétrico que se entiende por
@@ -3090,7 +3165,7 @@ const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
                           >
                             {enabledDets.map(d => {
                               const strokeColor = classColor(d.class);
-                              const fillColor = hasVolData && d.volume_m3 != null
+                              const fillColor = colorPorPrioridad && hasVolData && d.volume_m3 != null
                                 ? volumeToFillColor(d.volume_m3, minVol, maxVol)
                                 : strokeColor;
                               const bw   = d.bbox.maxx - d.bbox.minx;
