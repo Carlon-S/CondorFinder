@@ -286,9 +286,17 @@ function FlyToPoint({ target }: { target: [number, number] | null }) {
 function FitBounds({ points }: { points: [number, number][] | null | undefined }) {
   const map = useMap();
   useEffect(() => {
-    if (points && points.length > 1) {
-      map.flyToBounds(L.latLngBounds(points), { padding: [48, 48], duration: 0.8 });
-    }
+    if (!points || points.length < 2) return;
+    // Se espera un instante y se recalcula el tamaño del mapa: al cargar varias
+    // paradas el panel de al lado cambia de alto y el mapa se redimensiona, y
+    // un encuadre calculado con el tamaño anterior terminaba apuntando a
+    // cualquier parte. `maxZoom` evita acercarse encima de un tejado cuando las
+    // paradas están casi en el mismo lugar.
+    const t = setTimeout(() => {
+      map.invalidateSize();
+      map.flyToBounds(L.latLngBounds(points), { padding: [48, 48], duration: 0.8, maxZoom: 16 });
+    }, 200);
+    return () => clearTimeout(t);
   }, [points, map]);
   return null;
 }

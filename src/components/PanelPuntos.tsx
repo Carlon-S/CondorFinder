@@ -362,7 +362,11 @@ export function PanelPuntos({
       setGeocodeNotFound(false);
       try {
         const result = await forwardGeocode(`${form.address}, ${form.comuna || "Maipú"}, Chile`);
-        if (!result) {
+        // `preciso === false` es Google devolviendo el centroide de la comuna
+        // para una dirección que no existe: si se aceptara, el punto quedaría
+        // "ubicado" en la Plaza de Maipú y parecería correcto. Se trata igual
+        // que "no se encontró".
+        if (!result || result.preciso === false) {
           setGeocodeNotFound(true);
           // No hay nada más que reintentar hasta que el usuario vuelva a
           // tocar el campo (eso la re-marca dirty en el onChange), sin
@@ -816,8 +820,9 @@ export function PanelPuntos({
                 )}
               </div>
               {geocodeNotFound && (
-                <p className="text-[0.625rem] text-muted-foreground">
-                  No se encontró esta dirección en el mapa, el punto no se movió.
+                <p className="text-[0.6875rem] font-medium text-warning-strong">
+                  No se encontró esta dirección. El punto no se movió: corrígela o haz clic en el mapa para
+                  ubicarlo.
                 </p>
               )}
             </div>
