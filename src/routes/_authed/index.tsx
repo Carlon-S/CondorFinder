@@ -107,6 +107,7 @@ import { PaginacionTabla } from "@/components/PaginacionTabla";
 import {
   BTN_FILA,
   BTN_FILA_ICONO,
+  BTN_FILA_ICONO_NEUTRO,
   BTN_FILA_SECUNDARIO,
   CAB_ORDEN,
 } from "@/components/tabla-estilos";
@@ -1174,7 +1175,7 @@ function MainPage() {
         <TableHead className="px-3">
           <span className="sr-only">Acciones</span>
         </TableHead>
-        <TableHead className="w-[2.75rem] px-1" />
+        <TableHead className="w-[5.25rem] px-1" />
       </TableRow>
     </TableHeader>
   );
@@ -1460,40 +1461,13 @@ function MainPage() {
                               // completa (dirección, barrio, tipo, frecuencia,
                               // foto) y no solo el renombrado.
                               if (z.state === "no_flight" && z.zoneId) {
-                                const permanente = zoneRecords.find((r) => r.id === z.zoneId);
-                                return (
-                                  <span className="inline-flex items-center gap-1.5">
-                                    {z.name}
-                                    {permanente && (
-                                      <button
-                                        type="button"
-                                        onClick={() => setEditarPunto(permanente)}
-                                        title="Editar el punto"
-                                        aria-label={`Editar el punto ${z.name}`}
-                                        className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                                      >
-                                        <Pencil className="h-3 w-3" />
-                                      </button>
-                                    )}
-                                  </span>
-                                );
+                                return <span>{z.name}</span>;
                               }
                               const zona = zoneOf(z.recordId);
                               if (!zona) return z.name;
                               return (
                                 <>
-                                  <span className="inline-flex items-center gap-1.5">
-                                    {zona.name}
-                                    <button
-                                      type="button"
-                                      onClick={() => setEditarPunto(zona)}
-                                      title="Editar la zona"
-                                      aria-label={`Editar la zona ${zona.name}`}
-                                      className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                                    >
-                                      <Pencil className="h-3 w-3" />
-                                    </button>
-                                  </span>
+                                  <span>{zona.name}</span>
                                   {/* El nombre de la versión se renombra desde su
                                   propia vista, donde además se ve de qué captura
                                   se trata. Acá solo se nombra. */}
@@ -1703,16 +1677,40 @@ function MainPage() {
                                 <Loader2 className="h-3.5 w-3.5 animate-spin text-destructive/70" />
                               </div>
                             ) : (
-                              <Button
-                                size="icon"
-                                variant="outline"
-                                className={BTN_FILA_ICONO}
-                                onClick={() => setDeleteTarget(z)}
-                                title="Eliminar zona"
-                                aria-label="Eliminar zona"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
+                              <div className="flex items-center gap-1">
+                                {/* Editar va ANTES de eliminar, en la misma celda de
+                                    acciones: el lápiz estaba pegado al nombre, fuera
+                                    de la convención de botones de la fila. */}
+                                {(() => {
+                                  const editable =
+                                    z.state === "no_flight" && z.zoneId
+                                      ? zoneRecords.find((r) => r.id === z.zoneId)
+                                      : zoneOf(z.recordId);
+                                  if (!editable) return null;
+                                  return (
+                                    <Button
+                                      size="icon"
+                                      variant="outline"
+                                      className={BTN_FILA_ICONO_NEUTRO}
+                                      onClick={() => setEditarPunto(editable)}
+                                      title={z.state === "no_flight" ? "Editar el punto" : "Editar la zona"}
+                                      aria-label={`Editar ${editable.name}`}
+                                    >
+                                      <Pencil className="h-3.5 w-3.5" />
+                                    </Button>
+                                  );
+                                })()}
+                                <Button
+                                  size="icon"
+                                  variant="outline"
+                                  className={BTN_FILA_ICONO}
+                                  onClick={() => setDeleteTarget(z)}
+                                  title="Eliminar zona"
+                                  aria-label="Eliminar zona"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              </div>
                             )}
                           </TableCell>
                         </TableRow>
