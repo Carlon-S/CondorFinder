@@ -287,16 +287,28 @@ function FitBounds({ points }: { points: [number, number][] | null | undefined }
   const map = useMap();
   useEffect(() => {
     if (!points || points.length < 2) return;
-    // Se espera un instante y se recalcula el tamaño del mapa: al cargar varias
-    // paradas el panel de al lado cambia de alto y el mapa se redimensiona, y
-    // un encuadre calculado con el tamaño anterior terminaba apuntando a
-    // cualquier parte. `maxZoom` evita acercarse encima de un tejado cuando las
-    // paradas están casi en el mismo lugar.
-    const t = setTimeout(() => {
-      map.invalidateSize();
-      map.flyToBounds(L.latLngBounds(points), { padding: [48, 48], duration: 0.8, maxZoom: 16 });
-    }, 200);
-    return () => clearTimeout(t);
+    // **Sin animación y en dos pasadas.** Al cargar varias zonas se cierra el
+    // diálogo de carga, y Radix libera el bloqueo de scroll del cuerpo al
+    // terminar su animación: la página cambia de ancho y el mapa se
+    // redimensiona EN MEDIO de un `flyToBounds`. Leaflet cancela el vuelo cuando
+    // ajusta el tamaño, y el mapa se quedaba detenido a mitad de camino, en un
+    // lugar sin ninguna de las zonas. Con una sola zona no se notaba porque el
+    // vuelo es corto. Aquí se espera a que el diálogo termine, se recalcula el
+    // tamaño y se coloca la vista de una vez; la segunda pasada corrige
+    // cualquier ajuste tardío. `maxZoom` evita acercarse encima de un tejado
+    // cuando las paradas están casi en el mismo lugar.
+    const encuadrar = () => {
+      map.invalidateSize({ animate: false });
+      const caja = L.latLngBounds(points);
+      const zoom = Math.min(map.getBoundsZoom(caja, false, L.point(48, 48)), 16);
+      map.setView(caja.getCenter(), zoom, { animate: false });
+    };
+    const t1 = setTimeout(encuadrar, 350);
+    const t2 = setTimeout(encuadrar, 800);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
   }, [points, map]);
   return null;
 }

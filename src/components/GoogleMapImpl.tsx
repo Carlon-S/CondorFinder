@@ -359,15 +359,23 @@ function Encuadre({ points }: { points: [number, number][] | null | undefined })
     // Se espera a que el mapa tenga su tamaño final (al cargar varias paradas el
     // panel de al lado cambia y el mapa se redimensiona) y se limita el zoom
     // para no acercarse encima de un tejado si las paradas están juntas.
-    const t = setTimeout(() => {
+    // Dos pasadas, después de que el diálogo de carga termine de cerrarse: el
+    // mapa cambia de tamaño al liberarse el bloqueo de scroll del cuerpo y un
+    // encuadre hecho antes quedaba apuntando a un lugar vacío.
+    const encuadrar = () => {
       const caja = new maps.LatLngBounds();
       points.forEach((p) => caja.extend(aLatLng(p)));
       map.fitBounds(caja, 48);
       maps.event.addListenerOnce(map, "idle", () => {
         if ((map.getZoom() ?? 0) > 16) map.setZoom(16);
       });
-    }, 200);
-    return () => clearTimeout(t);
+    };
+    const t1 = setTimeout(encuadrar, 350);
+    const t2 = setTimeout(encuadrar, 800);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
   }, [map, maps, points]);
 
   return null;
