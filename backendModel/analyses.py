@@ -325,11 +325,24 @@ def _object_id(analysis_id: str) -> ObjectId:
         raise HTTPException(status_code=404, detail="Análisis no encontrado")
 
 
+def _utc(dt):
+    """Un datetime de Mongo con zona UTC explícita.
+
+    El cliente de Mongo no usa `tz_aware`, así que los datetime vuelven SIN zona
+    y se serializan como "2026-11-09T21:19:00", sin sufijo. Un navegador lee esa
+    cadena como hora LOCAL, no como UTC, y todas las horas de pantalla salían
+    corridas por la diferencia con Chile (3 o 4 horas). Se guardan siempre en
+    UTC, así que basta marcarlos como tales al devolverlos."""
+    if isinstance(dt, datetime) and dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 def _to_out(doc: dict) -> SavedAnalysisOut:
     return SavedAnalysisOut(
         id=str(doc["_id"]),
         owner=doc["owner"],
-        savedAt=doc["savedAt"],
+        savedAt=_utc(doc["savedAt"]),
         name=doc["name"],
         mapUrl=doc["mapUrl"],
         thumbnailUrl=doc.get("thumbnailUrl"),
@@ -350,7 +363,7 @@ def _to_out(doc: dict) -> SavedAnalysisOut:
         zoneId=doc.get("zoneId"),
         captureDate=doc.get("captureDate"),
         captureDateEstimated=doc.get("captureDateEstimated", False),
-        uploadedAt=doc.get("uploadedAt"),
+        uploadedAt=_utc(doc.get("uploadedAt")),
         algorithmVersion=doc.get("algorithmVersion"),
         changeKind=doc.get("changeKind"),
     )
@@ -833,7 +846,7 @@ def _zone_out(doc: dict, resumen: dict | None = None) -> ZoneOut:
         id=str(doc["_id"]),
         owner=doc["owner"],
         name=doc["name"],
-        createdAt=doc["createdAt"],
+        createdAt=_utc(doc["createdAt"]),
         kind=doc.get("kind") or KIND_BASURAL,
         address=doc.get("address"),
         comuna=doc.get("comuna"),

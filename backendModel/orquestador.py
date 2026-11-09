@@ -1030,11 +1030,16 @@ async def list_pending_tasks():
     tasks = await task_store.list_pending_tasks()
     result = []
     for task in tasks:
+        creada = task.get("created_at")
+        # Mongo devuelve los datetime sin zona; se marcan UTC para que el
+        # navegador no los lea como hora local (ver analyses._utc).
+        if creada is not None and getattr(creada, "tzinfo", None) is None:
+            creada = creada.replace(tzinfo=timezone.utc)
         entry = {
             "task_id": task["_id"],
             "status": task["status"],
             "message": task["message"],
-            "created_at": task.get("created_at"),
+            "created_at": creada,
         }
         if task["status"] == "done" and task.get("result_filename"):
             entry["result_url"] = f"{PUBLIC_BASE_URL}/result/{task['result_filename']}"

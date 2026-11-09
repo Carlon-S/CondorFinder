@@ -1554,12 +1554,13 @@ function MainPage() {
                           fecha tiene que verse completa en una línea. */}
                           <TableCell className="whitespace-nowrap px-3 py-3">
                             <span className="mono block text-xs font-semibold tabular-nums text-foreground">
-                              {new Date(z.savedAt).toLocaleDateString("es-CL")}
+                              {new Date(z.savedAt).toLocaleDateString("es-CL", { timeZone: "America/Santiago" })}
                             </span>
                             <span className="mono block text-[0.625rem] tabular-nums text-muted-foreground">
                               {new Date(z.savedAt).toLocaleTimeString("es-CL", {
                                 hour: "2-digit",
                                 minute: "2-digit",
+                                timeZone: "America/Santiago",
                               })}
                             </span>
                           </TableCell>
