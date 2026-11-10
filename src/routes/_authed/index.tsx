@@ -1131,34 +1131,34 @@ function MainPage() {
    *  breakpoint (dirección, barrio y tipo) también se ocultan aquí. */
   const colgrupo = (
     <colgroup>
-      <col className="w-[7.5rem]" />
+      <col className="w-[6.5rem]" />
       <col />
-      <col className="w-[7.5rem]" />
-      <col className="hidden w-[15rem] lg:table-column" />
-      <col className="hidden w-[6rem] xl:table-column" />
-      <col className="hidden w-[7rem] xl:table-column" />
       <col className="w-[7rem]" />
-      <col className="w-[7rem]" />
-      <col className="w-[7rem]" />
-      <col className="w-[7rem]" />
-      <col className="w-[26.5rem]" />
-      <col className="w-[5.25rem]" />
+      <col className="hidden w-[11rem] min-[1700px]:table-column" />
+      <col className="hidden w-[5rem] min-[2300px]:table-column" />
+      <col className="hidden w-[6.5rem] 2xl:table-column" />
+      <col className="w-[6.5rem]" />
+      <col className="w-[6rem]" />
+      <col className="w-[6rem]" />
+      <col className="w-[6rem]" />
+      <col className="w-[24rem]" />
+      <col className="w-[4.75rem]" />
     </colgroup>
   );
 
   const cabecera = (
     <TableHeader>
       <TableRow className="border-b border-border/60 bg-muted/40 hover:bg-muted/40">
-        <TableHead className="w-[7.5rem] px-3" />
+        <TableHead className="w-[6.5rem] px-3" />
         <TableHead className="px-3 text-[0.6875rem]">Zona</TableHead>
-        <TableHead className="w-[7.5rem] px-3 text-center text-[0.6875rem]">Estado</TableHead>
+        <TableHead className="w-[7rem] px-3 text-center text-[0.6875rem]">Estado</TableHead>
         {/* La dirección es como el trabajador reconoce el lugar en la calle; el
             nombre es como lo llama el sistema. */}
-        <TableHead className="hidden px-3 text-[0.6875rem] lg:table-cell">Dirección</TableHead>
+        <TableHead className="hidden px-3 text-[0.6875rem] min-[1700px]:table-cell">Dirección</TableHead>
         {/* Barrio y Tipo son los campos con que la municipalidad agrupa y
             clasifica sus lugares. */}
-        <TableHead className="hidden px-3 text-[0.6875rem] xl:table-cell">Barrio</TableHead>
-        <TableHead className="hidden px-3 text-[0.6875rem] xl:table-cell">Tipo</TableHead>
+        <TableHead className="hidden px-3 text-[0.6875rem] min-[2300px]:table-cell">Barrio</TableHead>
+        <TableHead className="hidden px-3 text-[0.6875rem] 2xl:table-cell">Tipo</TableHead>
         <SortableHead
           field="fecha"
           label="Fecha"
@@ -1171,7 +1171,7 @@ function MainPage() {
           field="volumen"
           label="Volumen"
           unit="m³"
-          className={`w-[7rem] ${CAB_ORDEN}`}
+          className={`w-[6rem] ${CAB_ORDEN}`}
           sortBy={sortBy}
           sortDir={sortDir}
           onSort={toggleSort}
@@ -1181,7 +1181,7 @@ function MainPage() {
           field="peso"
           label="Peso"
           unit="kg"
-          className={`w-[7rem] ${CAB_ORDEN}`}
+          className={`w-[6rem] ${CAB_ORDEN}`}
           sortBy={sortBy}
           sortDir={sortDir}
           onSort={toggleSort}
@@ -1191,7 +1191,7 @@ function MainPage() {
           field="area"
           label="Área"
           unit="m²"
-          className={`w-[7rem] ${CAB_ORDEN}`}
+          className={`w-[6rem] ${CAB_ORDEN}`}
           sortBy={sortBy}
           sortDir={sortDir}
           onSort={toggleSort}
@@ -1200,7 +1200,7 @@ function MainPage() {
         <TableHead className="px-3">
           <span className="sr-only">Acciones</span>
         </TableHead>
-        <TableHead className="w-[5.25rem] px-1" />
+        <TableHead className="w-[4.75rem] px-1" />
       </TableRow>
     </TableHeader>
   );
@@ -1378,14 +1378,14 @@ function MainPage() {
             {loading ? (
               <div className="flex-1 overflow-y-auto px-5 pb-5" role="status" aria-live="polite">
                 <span className="sr-only">Cargando zonas...</span>
-                <Table className="table-fixed">
+                <Table className="table-fixed min-w-[80rem] 2xl:min-w-[86.5rem] min-[1700px]:min-w-[91rem] min-[2300px]:min-w-[96rem]">
                   {colgrupo}
                   {cabecera}
                   <TableBody>
                     {[0, 1, 2].map((i) => (
                       <TableRow key={i} className="border-b border-border/40 hover:bg-transparent">
                         <TableCell className="px-3 py-3">
-                          <Skeleton className="h-16 w-24" />
+                          <Skeleton className="h-14 w-20" />
                         </TableCell>
                         <TableCell className="px-3 py-3">
                           <Skeleton className="h-4 w-32" />
@@ -1393,13 +1393,13 @@ function MainPage() {
                         <TableCell className="px-3 py-3 text-center">
                           <Skeleton className="mx-auto h-5 w-20 rounded-full" />
                         </TableCell>
-                        <TableCell className="hidden px-3 py-3 lg:table-cell">
+                        <TableCell className="hidden px-3 py-3 min-[1700px]:table-cell">
                           <Skeleton className="h-4 w-40" />
                         </TableCell>
-                        <TableCell className="hidden px-3 py-3 xl:table-cell">
+                        <TableCell className="hidden px-3 py-3 min-[2300px]:table-cell">
                           <Skeleton className="h-4 w-20" />
                         </TableCell>
-                        <TableCell className="hidden px-3 py-3 xl:table-cell">
+                        <TableCell className="hidden px-3 py-3 2xl:table-cell">
                           <Skeleton className="h-4 w-24" />
                         </TableCell>
                         <TableCell className="px-3 py-3">
@@ -1429,7 +1429,7 @@ function MainPage() {
               // `pb-2` y no `pb-5`: la barra de paginación ya aporta su propio
               // espacio, y con los dos quedaba un hueco doble antes del pie.
               <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-2 animate-in fade-in duration-300">
-                <Table className="table-fixed">
+                <Table className="table-fixed min-w-[80rem] 2xl:min-w-[86.5rem] min-[1700px]:min-w-[91rem] min-[2300px]:min-w-[96rem]">
                   {colgrupo}
                   {cabecera}
                   <TableBody>
@@ -1445,7 +1445,7 @@ function MainPage() {
                             {z.mapUrl ? (
                               // detect-frame-sm: variante chica de las esquinas, la
                               // de 26px se comería una miniatura de 96x64.
-                              <div className="detect-frame detect-frame-sm h-16 w-24 overflow-hidden rounded-md bg-muted">
+                              <div className="detect-frame detect-frame-sm h-14 w-20 overflow-hidden rounded-md bg-muted">
                                 <span className="detect-corners" aria-hidden="true" />
                                 <img
                                   src={z.thumbnailUrl ?? z.mapUrl}
@@ -1458,16 +1458,16 @@ function MainPage() {
                               // conecta la fila con la identidad de detección aérea del
                               // resto de la página, y el ícono deja inequívoco que está
                               // cargando (el barrido solo no era suficientemente claro).
-                              <div className="scan-line relative flex h-16 w-24 items-center justify-center overflow-hidden rounded-md border border-dashed border-primary/30 bg-background/30">
+                              <div className="scan-line relative flex h-14 w-20 items-center justify-center overflow-hidden rounded-md border border-dashed border-primary/30 bg-background/30">
                                 <Loader2 className="h-4 w-4 animate-spin text-primary/70" />
                               </div>
                             ) : (
-                              <div className="flex h-16 w-24 items-center justify-center rounded-md border border-dashed border-border/40 bg-background/30">
+                              <div className="flex h-14 w-20 items-center justify-center rounded-md border border-dashed border-border/40 bg-background/30">
                                 <ArrowRightCircle className="h-4 w-4 text-warning/70" />
                               </div>
                             )}
                           </TableCell>
-                          <TableCell className="px-3 py-3 text-xs font-medium text-foreground">
+                          <TableCell className="min-w-0 break-words px-3 py-3 text-xs font-medium text-foreground">
                             {/* El nombre de la ZONA arriba y el de la versión
                             debajo. Una fila es un análisis, pero lo que se lee
                             en esta columna es "qué terreno es", y mostrando solo
@@ -1529,7 +1529,7 @@ function MainPage() {
                               {estado.texto}
                             </InsigniaEstado>
                           </TableCell>
-                          <TableCell className="hidden max-w-[16rem] px-3 py-3 lg:table-cell">
+                          <TableCell className="hidden max-w-[16rem] px-3 py-3 min-[1700px]:table-cell">
                             {z.address ? (
                               <span className="line-clamp-2 text-xs text-muted-foreground">
                                 {z.address}
@@ -1538,12 +1538,12 @@ function MainPage() {
                               <span className="text-xs text-muted-foreground/60">-</span>
                             )}
                           </TableCell>
-                          <TableCell className="hidden px-3 py-3 xl:table-cell">
+                          <TableCell className="hidden px-3 py-3 min-[2300px]:table-cell">
                             <span className="text-xs text-muted-foreground">
                               {z.barrio || <span className="text-muted-foreground/60">-</span>}
                             </span>
                           </TableCell>
-                          <TableCell className="hidden px-3 py-3 xl:table-cell">
+                          <TableCell className="hidden px-3 py-3 2xl:table-cell">
                             <span className="text-xs text-muted-foreground">
                               {z.tipo || <span className="text-muted-foreground/60">-</span>}
                             </span>
